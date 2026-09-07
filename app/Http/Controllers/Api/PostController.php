@@ -58,6 +58,9 @@ class PostController extends Controller
                 $post->makeHidden(['attachment_path', 'attachment_url', 'attachment_name', 'attachment_mime']);
             }
 
+            // Cover stays public (same image as downloadable attachment when it is an image).
+            $post->makeVisible(['cover_url']);
+
             return $post;
         });
 
@@ -81,6 +84,8 @@ class PostController extends Controller
         if (! $canAccessAttachment) {
             $post->makeHidden(['attachment_path', 'attachment_url', 'attachment_name', 'attachment_mime']);
         }
+
+        $post->makeVisible(['cover_url']);
 
         return response()->json([
             'post' => $post,

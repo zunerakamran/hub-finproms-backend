@@ -24,6 +24,7 @@ class Post extends Model
 
     protected $appends = [
         'attachment_url',
+        'cover_url',
         'last_updated',
     ];
 
@@ -43,6 +44,28 @@ class Post extends Model
         }
 
         return Storage::disk('public')->url($this->attachment_path);
+    }
+
+    public function getCoverUrlAttribute(): ?string
+    {
+        if (! $this->attachment_path || ! $this->isImageAttachment()) {
+            return null;
+        }
+
+        return Storage::disk('public')->url($this->attachment_path);
+    }
+
+    public function isImageAttachment(): bool
+    {
+        $mime = strtolower((string) $this->attachment_mime);
+
+        if (str_starts_with($mime, 'image/')) {
+            return true;
+        }
+
+        $extension = strtolower(pathinfo((string) $this->attachment_name, PATHINFO_EXTENSION));
+
+        return in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'webp'], true);
     }
 
     public function getLastUpdatedAttribute(): string
