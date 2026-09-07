@@ -78,4 +78,28 @@ class User extends Authenticatable
     {
         return $this->purchases()->where('post_id', $post->id)->exists();
     }
+
+    public function hasActiveSubscription(): bool
+    {
+        return $this->subscriptions()
+            ->where('status', 'active')
+            ->where(function ($query) {
+                $query->whereNull('ends_at')
+                    ->orWhere('ends_at', '>', now());
+            })
+            ->exists();
+    }
+
+    /**
+     * Users with credits or an active subscription can browse post content.
+     * Admins always can. Guests and zero-credit unsubscribed users cannot.
+     */
+    public function canViewCatalog(): bool
+    {
+        if ($this->isAdmin()) {
+            return true;
+        }
+
+        return $this->credits > 0 || $this->hasActiveSubscription();
+    }
 }

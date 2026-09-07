@@ -15,6 +15,17 @@ class TagController extends Controller
     {
         $tags = Tag::query()->orderBy('name')->get(['id', 'name']);
 
+        $tags = $tags->map(function (Tag $tag) {
+            return [
+                'id' => $tag->id,
+                'name' => $tag->name,
+                'posts_count' => Post::query()
+                    ->where('is_active', true)
+                    ->whereJsonContains('tags', $tag->name)
+                    ->count(),
+            ];
+        })->values();
+
         return response()->json([
             'tags' => $tags,
         ]);

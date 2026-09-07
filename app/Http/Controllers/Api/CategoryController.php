@@ -13,10 +13,25 @@ class CategoryController extends Controller
 {
     public function index(): JsonResponse
     {
-        $categories = Category::query()->orderBy('name')->get(['id', 'name']);
+        $counts = Post::query()
+            ->where('is_active', true)
+            ->selectRaw('category, COUNT(*) as posts_count')
+            ->groupBy('category')
+            ->pluck('posts_count', 'category');
+
+        $categories = Category::query()
+            ->orderBy('name')
+            ->get(['id', 'name'])
+            ->map(fn (Category $category) => [
+                'id' => $category->id,
+                'name' => $category->name,
+                'posts_count' => (int) ($counts[$category->name] ?? 0),
+            ])
+            ->values();
 
         return response()->json([
             'categories' => $categories,
+            'total_posts' => Post::query()->where('is_active', true)->count(),
         ]);
     }
 

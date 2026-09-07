@@ -53,21 +53,17 @@ class PostController extends Controller
         }
 
         $isAdmin = $user?->isAdmin() ?? false;
+        $canViewCatalog = $user?->canViewCatalog() ?? false;
 
-        $posts->getCollection()->transform(function (Post $post) use ($purchasedIds, $isAdmin) {
+        $posts->getCollection()->transform(function (Post $post) use ($purchasedIds, $isAdmin, $canViewCatalog) {
             $purchased = in_array($post->id, $purchasedIds, true);
-            $post->setAttribute('is_purchased', $purchased);
-            if (! $purchased && ! $isAdmin) {
-                $post->makeHidden(['attachment_path', 'attachment_url', 'attachment_name', 'attachment_mime']);
-            }
 
-            // Cover stays public (same image as downloadable attachment when it is an image).
-            $post->makeVisible(['cover_url']);
-
-            return $post;
+            return $this->applyPostVisibility($post, $purchased, $isAdmin, $canViewCatalog);
         });
 
-        return response()->json($posts);
+        return response()->json(array_merge($posts->toArray(), [
+            'can_view_catalog' => $canViewCatalog,
+        ]));
     }
 
     public function show(Request $request, Post $post): JsonResponse
@@ -80,18 +76,14 @@ class PostController extends Controller
 
         $post->load('creator:id,name');
         $isPurchased = $user ? $user->hasPurchased($post) : false;
-        $canAccessAttachment = $isPurchased || ($user?->isAdmin() ?? false);
+        $isAdmin = $user?->isAdmin() ?? false;
+        $canViewCatalog = $user?->canViewCatalog() ?? false;
 
-        $post->setAttribute('is_purchased', $isPurchased);
-
-        if (! $canAccessAttachment) {
-            $post->makeHidden(['attachment_path', 'attachment_url', 'attachment_name', 'attachment_mime']);
-        }
-
-        $post->makeVisible(['cover_url']);
+        $this->applyPostVisibility($post, $isPurchased, $isAdmin, $canViewCatalog);
 
         return response()->json([
             'post' => $post,
+            'can_view_catalog' => $canViewCatalog,
         ]);
     }
 
@@ -278,5 +270,42 @@ class PostController extends Controller
     private function optionalUser(Request $request): ?User
     {
         return $request->user() ?? Auth::guard('sanctum')->user();
+    }
+
+    private function applyPostVisibility(
+        Post $post,
+        bool $purchased,
+        bool $isAdmin,
+        bool $canViewCatalog
+    ): Post {
+        $contentVisible = $purchased || $isAdmin || $canViewCatalog;
+        $canAccessAttachment = $purchased || $isAdmin;
+
+        $post->setAttribute('is_purchased', $purchased);
+        $post->setAttribute('is_locked', ! $contentVisible);
+        $post->setAttribute('content_visible', $contentVisible);
+
+        if (! $canAccessAttachment) {
+            $post->makeHidden(['attachment_path', 'attachment_url', 'attachment_name', 'attachment_mime']);
+        }
+
+        if (! $contentVisible) {
+            $post->makeHidden([
+                'description',
+                'tags',
+                'attachment_path',
+                'attachment_url',
+                'attachment_name',
+                'attachment_mime',
+                'cover_url',
+            ]);
+            $post->setAttribute('description', null);
+            $post->setAttribute('tags', []);
+            $post->setAttribute('cover_url', null);
+        } else {
+            $post->makeVisible(['cover_url']);
+        }
+
+        return $post;
     }
 }
