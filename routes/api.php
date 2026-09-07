@@ -50,5 +50,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/tags', [TagController::class, 'store']);
         Route::put('/tags/{tag}', [TagController::class, 'update']);
         Route::delete('/tags/{tag}', [TagController::class, 'destroy']);
+
+        Route::get('/subscription-plans', [SubscriptionController::class, 'adminPlans']);
+        Route::post('/subscription-plans', [SubscriptionController::class, 'storePlan']);
+        Route::put('/subscription-plans/{plan}', [SubscriptionController::class, 'updatePlan']);
+        Route::delete('/subscription-plans/{plan}', [SubscriptionController::class, 'destroyPlan']);
     });
 });

@@ -27,6 +27,82 @@ class SubscriptionController extends Controller
         ]);
     }
 
+    public function adminPlans(): JsonResponse
+    {
+        $plans = SubscriptionPlan::query()
+            ->orderBy('price')
+            ->get();
+
+        return response()->json([
+            'plans' => $plans,
+        ]);
+    }
+
+    public function storePlan(Request $request): JsonResponse
+    {
+        $validated = $this->validatePlan($request);
+
+        $plan = SubscriptionPlan::create($validated);
+
+        return response()->json([
+            'message' => 'Subscription plan created successfully.',
+            'plan' => $plan,
+        ], 201);
+    }
+
+    public function updatePlan(Request $request, SubscriptionPlan $plan): JsonResponse
+    {
+        $validated = $this->validatePlan($request, updating: true);
+
+        $plan->fill($validated);
+        $plan->save();
+
+        return response()->json([
+            'message' => 'Subscription plan updated successfully.',
+            'plan' => $plan->fresh(),
+        ]);
+    }
+
+    public function destroyPlan(SubscriptionPlan $plan): JsonResponse
+    {
+        if ($plan->subscriptions()->exists()) {
+            return response()->json([
+                'message' => 'Cannot delete a plan that has subscriptions. Deactivate it instead.',
+            ], 422);
+        }
+
+        $plan->delete();
+
+        return response()->json([
+            'message' => 'Subscription plan deleted successfully.',
+        ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function validatePlan(Request $request, bool $updating = false): array
+    {
+        $required = $updating ? 'sometimes' : 'required';
+
+        $validated = $request->validate([
+            'name' => [$required, 'string', 'max:255'],
+            'description' => ['nullable', 'string'],
+            'price' => [$required, 'numeric', 'min:0.01'],
+            'credits' => [$required, 'integer', 'min:1'],
+            'duration_days' => [$required, 'integer', 'min:1'],
+            'is_active' => ['sometimes', 'boolean'],
+        ]);
+
+        if ($request->has('is_active')) {
+            $validated['is_active'] = filter_var($request->input('is_active'), FILTER_VALIDATE_BOOLEAN);
+        } elseif (! $updating) {
+            $validated['is_active'] = true;
+        }
+
+        return $validated;
+    }
+
     public function checkout(Request $request, SubscriptionPlan $plan): JsonResponse
     {
         if (! $plan->is_active) {
