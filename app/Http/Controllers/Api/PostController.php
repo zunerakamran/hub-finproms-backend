@@ -3,12 +3,15 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Category;
 use App\Models\Post;
+use App\Models\Tag;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 
 class PostController extends Controller
 {
@@ -164,6 +167,14 @@ class PostController extends Controller
 
     public function categories(): JsonResponse
     {
+        $managed = Category::query()->orderBy('name')->pluck('name');
+
+        if ($managed->isNotEmpty()) {
+            return response()->json([
+                'categories' => $managed,
+            ]);
+        }
+
         $categories = Post::query()
             ->where('is_active', true)
             ->distinct()
@@ -185,7 +196,7 @@ class PostController extends Controller
         $rules = [
             'title' => [$required, 'string', 'max:255'],
             'description' => ['nullable', 'string'],
-            'category' => [$required, 'string', 'max:100'],
+            'category' => [$required, 'string', 'max:100', Rule::exists('categories', 'name')],
             'tags' => ['nullable'],
             'credits_cost' => [$required, 'integer', 'min:1'],
             'is_active' => ['sometimes', 'boolean'],
@@ -198,6 +209,20 @@ class PostController extends Controller
         ];
 
         $validated = $request->validate($rules);
+
+        if (array_key_exists('tags', $validated) || $request->has('tags')) {
+            $normalizedTags = $this->normalizeTags($validated['tags'] ?? $request->input('tags'));
+            $allowedTags = Tag::query()->pluck('name')->all();
+            $invalid = array_values(array_diff($normalizedTags, $allowedTags));
+
+            if ($invalid !== []) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'tags' => ['One or more tags are invalid: '.implode(', ', $invalid)],
+                ]);
+            }
+
+            $validated['tags'] = $normalizedTags;
+        }
 
         if ($request->has('is_active')) {
             $validated['is_active'] = filter_var($request->input('is_active'), FILTER_VALIDATE_BOOLEAN);
