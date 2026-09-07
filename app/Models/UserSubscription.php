@@ -16,6 +16,8 @@ class UserSubscription extends Model
         'stripe_session_id',
         'stripe_payment_intent',
         'payment_status',
+        'payment_method',
+        'payment_reference',
         'starts_at',
         'ends_at',
     ];

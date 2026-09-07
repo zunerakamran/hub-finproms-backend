@@ -11,13 +11,21 @@ use Stripe\Stripe;
 
 class StripeSubscriptionService
 {
-    public function __construct()
+    private bool $apiKeySet = false;
+
+    private function ensureApiKey(): void
     {
+        if ($this->apiKeySet) {
+            return;
+        }
+
         Stripe::setApiKey(config('services.stripe.secret'));
+        $this->apiKeySet = true;
     }
 
     public function createCheckoutSession(User $user, SubscriptionPlan $plan): Session
     {
+        $this->ensureApiKey();
         $frontendUrl = rtrim(config('app.frontend_url', env('FRONTEND_URL', 'http://localhost:5173')), '/');
 
         $session = Session::create([
@@ -50,6 +58,7 @@ class StripeSubscriptionService
             'amount_paid' => $plan->price,
             'status' => 'pending',
             'payment_status' => 'pending',
+            'payment_method' => 'stripe',
             'stripe_session_id' => $session->id,
             'starts_at' => now(),
             'ends_at' => now()->addDays($plan->duration_days),
@@ -60,6 +69,7 @@ class StripeSubscriptionService
 
     public function fulfillCheckoutSession(string $sessionId): ?UserSubscription
     {
+        $this->ensureApiKey();
         $session = Session::retrieve($sessionId);
 
         if ($session->payment_status !== 'paid') {
@@ -97,6 +107,7 @@ class StripeSubscriptionService
                     'amount_paid' => $plan->price,
                     'status' => 'pending',
                     'payment_status' => 'pending',
+                    'payment_method' => 'stripe',
                     'stripe_session_id' => $session->id,
                     'starts_at' => now(),
                     'ends_at' => now()->addDays($plan->duration_days),

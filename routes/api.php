@@ -55,5 +55,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/subscription-plans', [SubscriptionController::class, 'storePlan']);
         Route::put('/subscription-plans/{plan}', [SubscriptionController::class, 'updatePlan']);
         Route::delete('/subscription-plans/{plan}', [SubscriptionController::class, 'destroyPlan']);
+
+        // TEMPORARY: bank transfer admin — remove with BANK_TRANSFER_ENABLED
+        Route::get('/bank-transfers/pending', [SubscriptionController::class, 'pendingBankTransfers']);
+        Route::post('/bank-transfers/{subscription}/confirm', [SubscriptionController::class, 'confirmBankTransfer']);
     });
 });
