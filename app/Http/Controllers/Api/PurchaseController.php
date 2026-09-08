@@ -5,12 +5,17 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Post;
 use App\Models\PostPurchase;
+use App\Services\InvoiceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class PurchaseController extends Controller
 {
+    public function __construct(
+        private readonly InvoiceService $invoices
+    ) {}
+
     public function purchasePost(Request $request, Post $post): JsonResponse
     {
         if (! $post->is_active) {
@@ -30,13 +35,13 @@ class PurchaseController extends Controller
 
         if ($user->credits < $post->credits_cost) {
             return response()->json([
-                'message' => 'Insufficient credits. Please buy a subscription to get more credits.',
+                'message' => 'Insufficient credits. Buy a plan or top up — 1 credit = £1.',
                 'credits' => $user->credits,
                 'required' => $post->credits_cost,
             ], 422);
         }
 
-        $purchase = DB::transaction(function () use ($user, $post) {
+        [$purchase, $invoice] = DB::transaction(function () use ($user, $post) {
             $user->decrement('credits', $post->credits_cost);
 
             $purchase = PostPurchase::create([
@@ -48,7 +53,9 @@ class PurchaseController extends Controller
 
             $post->increment('buy_count');
 
-            return $purchase;
+            $invoice = $this->invoices->createForPostPurchase($purchase);
+
+            return [$purchase, $invoice];
         });
 
         $user->refresh();
@@ -59,6 +66,7 @@ class PurchaseController extends Controller
         return response()->json([
             'message' => 'Post purchased successfully.',
             'purchase' => $purchase,
+            'invoice' => $invoice,
             'post' => $post,
             'user' => $user,
         ], 201);

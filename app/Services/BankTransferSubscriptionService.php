@@ -14,6 +14,10 @@ use Illuminate\Support\Str;
  */
 class BankTransferSubscriptionService
 {
+    public function __construct(
+        private readonly InvoiceService $invoices
+    ) {}
+
     public function isEnabled(): bool
     {
         return (bool) config('payments.methods.bank_transfer.enabled', false);
@@ -83,6 +87,8 @@ class BankTransferSubscriptionService
             }
 
             if ($locked->payment_status === 'paid') {
+                $this->invoices->createForSubscription($locked);
+
                 return $locked->load('plan', 'user');
             }
 
@@ -99,7 +105,10 @@ class BankTransferSubscriptionService
             $user = User::query()->whereKey($locked->user_id)->lockForUpdate()->first();
             $user?->increment('credits', $locked->credits_granted);
 
-            return $locked->fresh()->load('plan', 'user');
+            $locked = $locked->fresh()->load('plan', 'user');
+            $this->invoices->createForSubscription($locked);
+
+            return $locked;
         });
     }
 

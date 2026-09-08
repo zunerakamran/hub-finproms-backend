@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\SubscriptionPlan;
 use App\Models\UserSubscription;
 use App\Services\BankTransferSubscriptionService;
+use App\Services\InvoiceService;
 use App\Services\StripeSubscriptionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -15,7 +16,8 @@ class SubscriptionController extends Controller
 {
     public function __construct(
         private readonly StripeSubscriptionService $stripeSubscriptions,
-        private readonly BankTransferSubscriptionService $bankTransferSubscriptions
+        private readonly BankTransferSubscriptionService $bankTransferSubscriptions,
+        private readonly InvoiceService $invoices
     ) {}
 
     public function plans(): JsonResponse
@@ -162,6 +164,9 @@ class SubscriptionController extends Controller
         );
 
         $autoConfirmed = $subscription->payment_status === 'paid';
+        $invoice = $autoConfirmed
+            ? $this->invoices->createForSubscription($subscription)
+            : null;
 
         return response()->json([
             'payment_method' => 'bank_transfer',
@@ -170,6 +175,7 @@ class SubscriptionController extends Controller
                 ? 'Test bank transfer completed. Credits have been added.'
                 : 'Bank transfer order created. Use the reference below when paying.',
             'subscription' => $subscription->load('plan'),
+            'invoice' => $invoice,
             'bank_details' => $this->bankTransferSubscriptions->bankDetails(),
             'payment_reference' => $subscription->payment_reference,
             'amount' => (string) $subscription->amount_paid,
@@ -202,9 +208,12 @@ class SubscriptionController extends Controller
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
 
+        $invoice = $this->invoices->createForSubscription($subscription);
+
         return response()->json([
             'message' => 'Subscription activated. Credits have been added.',
             'subscription' => $subscription->load('plan'),
+            'invoice' => $invoice,
             'user' => $request->user()->fresh(),
         ]);
     }
@@ -275,9 +284,12 @@ class SubscriptionController extends Controller
             ], 422);
         }
 
+        $invoice = $this->invoices->createForSubscription($subscription);
+
         return response()->json([
             'message' => 'Bank transfer confirmed. Credits have been added.',
             'subscription' => $subscription,
+            'invoice' => $invoice,
         ]);
     }
 

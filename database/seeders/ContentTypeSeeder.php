@@ -2,7 +2,7 @@
 
 namespace Database\Seeders;
 
-use App\Models\Category;
+use App\Models\ContentType;
 use Illuminate\Database\Seeder;
 
 class ContentTypeSeeder extends Seeder
@@ -15,7 +15,7 @@ class ContentTypeSeeder extends Seeder
         ];
 
         foreach ($types as $type) {
-            Category::updateOrCreate(
+            ContentType::updateOrCreate(
                 ['slug' => $type['slug']],
                 ['name' => $type['name']]
             );

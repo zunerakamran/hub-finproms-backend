@@ -17,6 +17,9 @@ class User extends Authenticatable
     /** Hub operator who manages content, types, plans, settings. */
     public const ROLE_CLIENT_ADMIN = 'client_admin';
 
+    /** Platform developer control plane (white-label checklist, hubs). */
+    public const ROLE_POWER_ADMIN = 'power_admin';
+
     public const ROLE_USER = 'user';
 
     /**
@@ -66,6 +69,11 @@ class User extends Authenticatable
         return in_array($this->role, [self::ROLE_CLIENT_ADMIN, 'admin'], true);
     }
 
+    public function isPowerAdmin(): bool
+    {
+        return $this->role === self::ROLE_POWER_ADMIN;
+    }
+
     /**
      * @deprecated Use isClientAdmin()
      */
@@ -89,6 +97,11 @@ class User extends Authenticatable
         return $this->hasMany(PostPurchase::class);
     }
 
+    public function invoices(): HasMany
+    {
+        return $this->hasMany(Invoice::class);
+    }
+
     public function hasPurchased(Post $post): bool
     {
         return $this->purchases()->where('post_id', $post->id)->exists();
@@ -106,15 +119,11 @@ class User extends Authenticatable
     }
 
     /**
-     * Users with credits or an active subscription can browse post content.
-     * Client admins always can. Guests and zero-credit unsubscribed users cannot.
+     * Any authenticated member can browse the catalog. Guests cannot.
+     * Subscription is not required — non-subscribers can buy posts with credits (1 credit = £1).
      */
     public function canViewCatalog(): bool
     {
-        if ($this->isClientAdmin()) {
-            return true;
-        }
-
-        return $this->credits > 0 || $this->hasActiveSubscription();
+        return true;
     }
 }

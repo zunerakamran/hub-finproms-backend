@@ -13,6 +13,7 @@ class DatabaseSeeder extends Seeder
     {
         $this->call([
             AdminUserSeeder::class,
+            PowerAdminUserSeeder::class,
             SubscriptionPlanSeeder::class,
             ContentTypeSeeder::class,
             SettingsSeeder::class,

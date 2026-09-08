@@ -31,4 +31,9 @@ class PostPurchase extends Model
     {
         return $this->belongsTo(Post::class);
     }
+
+    public function invoice(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(Invoice::class);
+    }
 }

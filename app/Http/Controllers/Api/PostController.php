@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Category;
+use App\Models\ContentType;
 use App\Models\Post;
 use App\Models\Setting;
 use App\Models\Tag;
@@ -31,16 +32,16 @@ class PostController extends Controller
 
         if ($request->filled('type')) {
             $type = $request->string('type')->toString();
-            $typeNames = Category::query()
+            $typeNames = ContentType::query()
                 ->where(function ($builder) use ($type) {
                     $builder->where('slug', $type)->orWhere('name', $type);
                 })
                 ->pluck('name');
 
             if ($typeNames->isNotEmpty()) {
-                $query->whereIn('category', $typeNames);
+                $query->whereIn('type', $typeNames);
             } else {
-                $query->where('category', $type);
+                $query->where('type', $type);
             }
         }
 
@@ -69,12 +70,13 @@ class PostController extends Controller
         }
 
         $isClientAdmin = $user?->isClientAdmin() ?? false;
-        $canViewCatalog = $user?->canViewCatalog() ?? false;
+        $isAuthenticated = $user !== null;
+        $canViewCatalog = $isAuthenticated;
 
-        $posts->getCollection()->transform(function (Post $post) use ($purchasedIds, $isClientAdmin, $canViewCatalog) {
+        $posts->getCollection()->transform(function (Post $post) use ($purchasedIds, $isClientAdmin, $isAuthenticated) {
             $purchased = in_array($post->id, $purchasedIds, true);
 
-            return $this->applyPostVisibility($post, $purchased, $isClientAdmin, $canViewCatalog);
+            return $this->applyPostVisibility($post, $purchased, $isClientAdmin, $isAuthenticated);
         });
 
         return response()->json(array_merge($posts->toArray(), [
@@ -96,9 +98,10 @@ class PostController extends Controller
         $post->load('creator:id,name');
         $isPurchased = $user ? $user->hasPurchased($post) : false;
         $isClientAdmin = $user?->isClientAdmin() ?? false;
-        $canViewCatalog = $user?->canViewCatalog() ?? false;
+        $isAuthenticated = $user !== null;
+        $canViewCatalog = $isAuthenticated;
 
-        $this->applyPostVisibility($post, $isPurchased, $isClientAdmin, $canViewCatalog);
+        $this->applyPostVisibility($post, $isPurchased, $isClientAdmin, $isAuthenticated);
 
         return response()->json([
             'post' => $post,
@@ -117,6 +120,7 @@ class PostController extends Controller
             'created_by' => $request->user()->id,
             'title' => $validated['title'],
             'description' => $validated['description'] ?? null,
+            'type' => $validated['type'],
             'category' => $validated['category'],
             'tags' => $this->normalizeTags($validated['tags'] ?? []),
             'credits_cost' => $validated['credits_cost'],
@@ -150,6 +154,7 @@ class PostController extends Controller
         $post->fill([
             'title' => $validated['title'] ?? $post->title,
             'description' => array_key_exists('description', $validated) ? $validated['description'] : $post->description,
+            'type' => $validated['type'] ?? $post->type,
             'category' => $validated['category'] ?? $post->category,
             'tags' => array_key_exists('tags', $validated) ? $this->normalizeTags($validated['tags']) : $post->tags,
             'credits_cost' => $validated['credits_cost'] ?? $post->credits_cost,
@@ -179,12 +184,11 @@ class PostController extends Controller
 
     public function categories(): JsonResponse
     {
-        $managed = Category::query()->orderBy('name')->get(['name', 'slug']);
+        $managed = Category::query()->orderBy('name')->pluck('name');
 
         if ($managed->isNotEmpty()) {
             return response()->json([
-                'categories' => $managed->pluck('name'),
-                'types' => $managed,
+                'categories' => $managed,
             ]);
         }
 
@@ -196,10 +200,6 @@ class PostController extends Controller
 
         return response()->json([
             'categories' => $categories,
-            'types' => $categories->map(fn ($name) => [
-                'name' => $name,
-                'slug' => str($name)->slug()->toString(),
-            ]),
         ]);
     }
 
@@ -213,6 +213,7 @@ class PostController extends Controller
         $rules = [
             'title' => [$required, 'string', 'max:255'],
             'description' => ['nullable', 'string'],
+            'type' => [$required, 'string', 'max:100', Rule::exists('content_types', 'name')],
             'category' => [$required, 'string', 'max:100', Rule::exists('categories', 'name')],
             'tags' => ['nullable'],
             'credits_cost' => [$required, 'integer', 'min:1'],
@@ -310,13 +311,14 @@ class PostController extends Controller
         Post $post,
         bool $purchased,
         bool $isClientAdmin,
-        bool $canViewCatalog
+        bool $isAuthenticated
     ): Post {
-        $contentVisible = $purchased || $isClientAdmin || $canViewCatalog;
+        // Locked only for guests. Logged-in users (subscribed or not) can browse and buy.
+        $contentVisible = $purchased || $isClientAdmin || $isAuthenticated;
         $canAccessAttachment = $purchased || $isClientAdmin;
 
         $post->setAttribute('is_purchased', $purchased);
-        $post->setAttribute('is_locked', ! $contentVisible);
+        $post->setAttribute('is_locked', ! $isAuthenticated && ! $isClientAdmin);
         $post->setAttribute('content_visible', $contentVisible);
 
         if (! $canAccessAttachment) {

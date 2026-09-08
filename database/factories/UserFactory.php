@@ -56,4 +56,11 @@ class UserFactory extends Factory
             'role' => User::ROLE_CLIENT_ADMIN,
         ]);
     }
+
+    public function powerAdmin(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'role' => User::ROLE_POWER_ADMIN,
+        ]);
+    }
 }

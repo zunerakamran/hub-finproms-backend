@@ -13,6 +13,10 @@ class StripeSubscriptionService
 {
     private bool $apiKeySet = false;
 
+    public function __construct(
+        private readonly InvoiceService $invoices
+    ) {}
+
     private function ensureApiKey(): void
     {
         if ($this->apiKeySet) {
@@ -115,7 +119,9 @@ class StripeSubscriptionService
             }
 
             if ($subscription->payment_status === 'paid') {
-                return $subscription->load('plan');
+                $this->invoices->createForSubscription($subscription);
+
+                return $subscription->load('plan', 'user');
             }
 
             $plan = $subscription->plan ?? SubscriptionPlan::find($subscription->subscription_plan_id);
@@ -134,7 +140,10 @@ class StripeSubscriptionService
             $user = User::query()->whereKey($subscription->user_id)->lockForUpdate()->first();
             $user?->increment('credits', $subscription->credits_granted);
 
-            return $subscription->fresh()->load('plan', 'user');
+            $subscription = $subscription->fresh()->load('plan', 'user');
+            $this->invoices->createForSubscription($subscription);
+
+            return $subscription;
         });
     }
 }

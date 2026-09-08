@@ -14,6 +14,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'client_admin' => \App\Http\Middleware\EnsureUserIsClientAdmin::class,
+            'power_admin' => \App\Http\Middleware\EnsureUserIsPowerAdmin::class,
             'admin' => \App\Http\Middleware\EnsureUserIsClientAdmin::class,
         ]);
     })

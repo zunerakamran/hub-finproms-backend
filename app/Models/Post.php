@@ -10,12 +10,13 @@ use Illuminate\Support\Facades\Storage;
 class Post extends Model
 {
     /** @var array<string, string>|null */
-    protected static ?array $categorySlugMap = null;
+    protected static ?array $typeSlugMap = null;
 
     protected $fillable = [
         'created_by',
         'title',
         'description',
+        'type',
         'category',
         'tags',
         'credits_cost',
@@ -99,33 +100,39 @@ class Post extends Model
     }
 
     /**
-     * Category name/slug is the content type (post, reel, etc.).
+     * Slug for the content TYPE (post, reel, …) — separate from category.
      */
     public function getContentTypeAttribute(): string
     {
-        $map = static::categorySlugMap();
+        $map = static::typeSlugMap();
 
-        if (isset($map[$this->category]) && $map[$this->category] !== '') {
-            return $map[$this->category];
+        if (isset($map[$this->type]) && $map[$this->type] !== '') {
+            return $map[$this->type];
         }
 
-        return str($this->category)->slug()->toString() ?: 'post';
+        return str((string) $this->type)->slug()->toString() ?: 'post';
     }
 
     /**
      * @return array<string, string>
      */
-    protected static function categorySlugMap(): array
+    protected static function typeSlugMap(): array
     {
-        return static::$categorySlugMap ??= Category::query()
+        return static::$typeSlugMap ??= ContentType::query()
             ->pluck('slug', 'name')
             ->map(fn ($slug) => (string) $slug)
             ->all();
     }
 
+    public static function clearTypeSlugMap(): void
+    {
+        static::$typeSlugMap = null;
+    }
+
+    /** @deprecated Use clearTypeSlugMap */
     public static function clearCategorySlugMap(): void
     {
-        static::$categorySlugMap = null;
+        static::clearTypeSlugMap();
     }
 
     public function getIsReelAttribute(): bool
@@ -161,9 +168,6 @@ class Post extends Model
         return $this->hasMany(PostReach::class);
     }
 
-    /**
-     * Record a view; reach increases once per unique viewer_key.
-     */
     public function recordView(string $viewerKey): void
     {
         $this->increment('views_count');

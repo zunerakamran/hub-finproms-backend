@@ -33,10 +33,11 @@ IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
 2. SHARED HUB — STEP 1 CORE FEATURES
 --------------------------------------------------------------------------------
 
-2.1 Content types (category = type)
-- Content category IS the type: e.g. post, reel, etc.
-- Types are managed (like categories) and used to classify every item.
-- Listing and filters work by type (post / reel / …).
+2.1 Content classification (THREE separate fields)
+- TYPE — what the item is: post, reel, etc. (managed list; drives reel play button).
+- CATEGORY — topical/grouping category (separate from type; e.g. product themes).
+- TAGS — free labels for filtering (separate from type and category).
+- Every content item has type + category + tags. Do NOT treat category as type.
 
 2.2 Content browsing & listing UX
 - Users browse posts, reels, and other types.
@@ -67,13 +68,20 @@ IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
   a) Subscriptions
   b) Individual post/reel purchases
 
-2.7 Roles & client_admin dashboard
+2.7 Roles & separate admin dashboards
 - Role rename: former "admin" → "client_admin".
-- client_admin has a SEPARATE dashboard from which they can manage everything
-  for their hub (posts/reels, types, tags, plans, bank transfers, settings
-  such as NEW-banner duration, etc.).
-- Regular users use the member-facing UI (browse, subscribe, buy, download).
-- power_admin (platform developers) is separate — see section 6.
+- client_admin and power_admin dashboards are SEPARATE from the member
+  application (catalog / plans / purchases).
+  - Own routes and layout shells (not the member topbar/nav).
+  - Logging in as client_admin or power_admin lands in their dashboard by default.
+  - Both client_admin and power_admin can also open/visit the main website
+    (member hub) from their dashboard, and return to their dashboard from the site.
+  - Member users never see admin navigation.
+- client_admin dashboard: manage everything for their hub (posts/reels,
+  types, categories, tags, plans, bank transfers, settings such as NEW-banner
+  duration).
+- power_admin dashboard: separate control plane (see section 6).
+- Regular users use the member-facing UI only (browse, subscribe, buy, download).
 
 
 --------------------------------------------------------------------------------
@@ -151,7 +159,8 @@ IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
 6. POWER ADMIN (SHARED HUB)
 --------------------------------------------------------------------------------
 - Role: power_admin (platform developers / us).
-- Dashboard exists on the SHARED hub.
+- Dashboard is SEPARATE from the member application and from client_admin
+  (own shell/routes, e.g. /power-admin).
 - From this dashboard, power_admin can manage the checklist
   (permissions, rights, functionality) for EACH white-labelled hub.
 - This is the central control plane for tenant behaviour.
@@ -162,6 +171,9 @@ IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
 7. ARCHITECTURE PRINCIPLES (DERIVED FROM REQUIREMENTS)
 --------------------------------------------------------------------------------
 - Single codebase for shared + all white-labelled hubs.
+- Member app, client_admin app shell, and power_admin app shell are separated
+  in the frontend (different layouts/entry routes), even though they share
+  the same codebase and API.
 - Tenant/hub configuration stored in database (branding, flags, rights).
 - Feature flags / rights checklist must drive behaviour, not hard-coded forks.
 - Shared hub acts as content + configuration source of truth for white labels.
@@ -176,21 +188,24 @@ IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
 
 STEP 1 — Shared hub core
 [x] Shared hub content browsing (posts) — basic exists
-[x] Content type = category (post, reel, etc.)
+[x] Content type (post, reel, etc.) — separate from category
+[x] Category — separate from type and tags
+[x] Tags — separate from type and category
 [x] Reel play button on listing page
 [x] NEW banner (duration from database)
 [x] Views, reach, buy count on content
 [x] Role rename: admin → client_admin
 [x] Separate client_admin dashboard (manage everything)
+[x] client_admin / power_admin shells separated from member app
 [x] Subscriptions + credits (basic exists)
 [x] Credit spend + download (basic exists)
-[ ] Non-subscriber one-off purchase (1 credit = £1)
-[ ] Invoices for subscriptions and purchases
+[x] Non-subscriber one-off purchase (1 credit = £1)
+[x] Invoices for subscriptions and purchases
 
 LATER / WHITE-LABEL
 [ ] Tenant/hub DB-driven branding (colours, logo)
 [ ] Rights/permissions checklist model
-[ ] power_admin dashboard to manage per-hub checklist
+[ ] power_admin dashboard to manage per-hub checklist (shell scaffolded)
 [ ] White-labelled private advisor import (Excel)
 [ ] Unlimited credits for white-labelled advisors
 [ ] Subscriber-count pricing tiers (managed by shared hub)
