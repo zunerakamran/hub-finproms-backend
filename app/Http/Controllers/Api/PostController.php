@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Category;
 use App\Models\Post;
+use App\Models\Setting;
 use App\Models\Tag;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
@@ -26,6 +27,21 @@ class PostController extends Controller
 
         if ($request->filled('category')) {
             $query->where('category', $request->string('category'));
+        }
+
+        if ($request->filled('type')) {
+            $type = $request->string('type')->toString();
+            $typeNames = Category::query()
+                ->where(function ($builder) use ($type) {
+                    $builder->where('slug', $type)->orWhere('name', $type);
+                })
+                ->pluck('name');
+
+            if ($typeNames->isNotEmpty()) {
+                $query->whereIn('category', $typeNames);
+            } else {
+                $query->where('category', $type);
+            }
         }
 
         if ($request->filled('tag')) {
@@ -52,17 +68,18 @@ class PostController extends Controller
                 ->all();
         }
 
-        $isAdmin = $user?->isAdmin() ?? false;
+        $isClientAdmin = $user?->isClientAdmin() ?? false;
         $canViewCatalog = $user?->canViewCatalog() ?? false;
 
-        $posts->getCollection()->transform(function (Post $post) use ($purchasedIds, $isAdmin, $canViewCatalog) {
+        $posts->getCollection()->transform(function (Post $post) use ($purchasedIds, $isClientAdmin, $canViewCatalog) {
             $purchased = in_array($post->id, $purchasedIds, true);
 
-            return $this->applyPostVisibility($post, $purchased, $isAdmin, $canViewCatalog);
+            return $this->applyPostVisibility($post, $purchased, $isClientAdmin, $canViewCatalog);
         });
 
         return response()->json(array_merge($posts->toArray(), [
             'can_view_catalog' => $canViewCatalog,
+            'new_banner_days' => Setting::newBannerDays(),
         ]));
     }
 
@@ -70,20 +87,23 @@ class PostController extends Controller
     {
         $user = $this->optionalUser($request);
 
-        if (! $post->is_active && ! $user?->isAdmin()) {
+        if (! $post->is_active && ! $user?->isClientAdmin()) {
             return response()->json(['message' => 'Post not found.'], 404);
         }
 
+        $post->recordView($this->viewerKey($request, $user));
+
         $post->load('creator:id,name');
         $isPurchased = $user ? $user->hasPurchased($post) : false;
-        $isAdmin = $user?->isAdmin() ?? false;
+        $isClientAdmin = $user?->isClientAdmin() ?? false;
         $canViewCatalog = $user?->canViewCatalog() ?? false;
 
-        $this->applyPostVisibility($post, $isPurchased, $isAdmin, $canViewCatalog);
+        $this->applyPostVisibility($post, $isPurchased, $isClientAdmin, $canViewCatalog);
 
         return response()->json([
             'post' => $post,
             'can_view_catalog' => $canViewCatalog,
+            'new_banner_days' => Setting::newBannerDays(),
         ]);
     }
 
@@ -159,11 +179,12 @@ class PostController extends Controller
 
     public function categories(): JsonResponse
     {
-        $managed = Category::query()->orderBy('name')->pluck('name');
+        $managed = Category::query()->orderBy('name')->get(['name', 'slug']);
 
         if ($managed->isNotEmpty()) {
             return response()->json([
-                'categories' => $managed,
+                'categories' => $managed->pluck('name'),
+                'types' => $managed,
             ]);
         }
 
@@ -175,6 +196,10 @@ class PostController extends Controller
 
         return response()->json([
             'categories' => $categories,
+            'types' => $categories->map(fn ($name) => [
+                'name' => $name,
+                'slug' => str($name)->slug()->toString(),
+            ]),
         ]);
     }
 
@@ -272,14 +297,23 @@ class PostController extends Controller
         return $request->user() ?? Auth::guard('sanctum')->user();
     }
 
+    private function viewerKey(Request $request, ?User $user): string
+    {
+        if ($user) {
+            return 'user:'.$user->id;
+        }
+
+        return 'ip:'.sha1((string) $request->ip());
+    }
+
     private function applyPostVisibility(
         Post $post,
         bool $purchased,
-        bool $isAdmin,
+        bool $isClientAdmin,
         bool $canViewCatalog
     ): Post {
-        $contentVisible = $purchased || $isAdmin || $canViewCatalog;
-        $canAccessAttachment = $purchased || $isAdmin;
+        $contentVisible = $purchased || $isClientAdmin || $canViewCatalog;
+        $canAccessAttachment = $purchased || $isClientAdmin;
 
         $post->setAttribute('is_purchased', $purchased);
         $post->setAttribute('is_locked', ! $contentVisible);

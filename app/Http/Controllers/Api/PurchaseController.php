@@ -39,15 +39,20 @@ class PurchaseController extends Controller
         $purchase = DB::transaction(function () use ($user, $post) {
             $user->decrement('credits', $post->credits_cost);
 
-            return PostPurchase::create([
+            $purchase = PostPurchase::create([
                 'user_id' => $user->id,
                 'post_id' => $post->id,
                 'credits_spent' => $post->credits_cost,
                 'purchased_at' => now(),
             ]);
+
+            $post->increment('buy_count');
+
+            return $purchase;
         });
 
         $user->refresh();
+        $post->refresh();
         $post->load('creator:id,name');
         $post->setAttribute('is_purchased', true);
 

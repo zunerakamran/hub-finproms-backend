@@ -7,6 +7,7 @@ use App\Models\Category;
 use App\Models\Post;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class CategoryController extends Controller
@@ -21,16 +22,19 @@ class CategoryController extends Controller
 
         $categories = Category::query()
             ->orderBy('name')
-            ->get(['id', 'name'])
+            ->get(['id', 'name', 'slug'])
             ->map(fn (Category $category) => [
                 'id' => $category->id,
                 'name' => $category->name,
+                'slug' => $category->slug,
                 'posts_count' => (int) ($counts[$category->name] ?? 0),
             ])
             ->values();
 
         return response()->json([
             'categories' => $categories,
+            // Alias: category = content type
+            'types' => $categories,
             'total_posts' => Post::query()->where('is_active', true)->count(),
         ]);
     }
@@ -39,14 +43,21 @@ class CategoryController extends Controller
     {
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:100', 'unique:categories,name'],
+            'slug' => ['nullable', 'string', 'max:100', 'unique:categories,slug'],
         ]);
+
+        $name = trim($validated['name']);
+        $slug = trim((string) ($validated['slug'] ?? '')) ?: Str::slug($name);
 
         $category = Category::create([
-            'name' => trim($validated['name']),
+            'name' => $name,
+            'slug' => $slug,
         ]);
 
+        Post::clearCategorySlugMap();
+
         return response()->json([
-            'message' => 'Category created successfully.',
+            'message' => 'Content type created successfully.',
             'category' => $category,
         ], 201);
     }
@@ -60,12 +71,24 @@ class CategoryController extends Controller
                 'max:100',
                 Rule::unique('categories', 'name')->ignore($category->id),
             ],
+            'slug' => [
+                'nullable',
+                'string',
+                'max:100',
+                Rule::unique('categories', 'slug')->ignore($category->id),
+            ],
         ]);
 
         $oldName = $category->name;
         $newName = trim($validated['name']);
+        $slug = array_key_exists('slug', $validated) && filled($validated['slug'])
+            ? trim($validated['slug'])
+            : Str::slug($newName);
 
-        $category->update(['name' => $newName]);
+        $category->update([
+            'name' => $newName,
+            'slug' => $slug,
+        ]);
 
         if ($oldName !== $newName) {
             Post::query()
@@ -73,8 +96,10 @@ class CategoryController extends Controller
                 ->update(['category' => $newName]);
         }
 
+        Post::clearCategorySlugMap();
+
         return response()->json([
-            'message' => 'Category updated successfully.',
+            'message' => 'Content type updated successfully.',
             'category' => $category->fresh(),
         ]);
     }
@@ -85,14 +110,15 @@ class CategoryController extends Controller
 
         if ($inUse) {
             return response()->json([
-                'message' => 'Cannot delete a category that is used by posts.',
+                'message' => 'Cannot delete a content type that is used by posts.',
             ], 422);
         }
 
         $category->delete();
+        Post::clearCategorySlugMap();
 
         return response()->json([
-            'message' => 'Category deleted successfully.',
+            'message' => 'Content type deleted successfully.',
         ]);
     }
 }

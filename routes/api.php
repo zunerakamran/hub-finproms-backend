@@ -4,10 +4,11 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\PostController;
 use App\Http\Controllers\Api\PurchaseController;
+use App\Http\Controllers\Api\SettingController;
 use App\Http\Controllers\Api\StripeWebhookController;
 use App\Http\Controllers\Api\SubscriptionController;
 use App\Http\Controllers\Api\TagController;
-use App\Http\Middleware\EnsureUserIsAdmin;
+use App\Http\Middleware\EnsureUserIsClientAdmin;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->group(function () {
@@ -25,6 +26,7 @@ Route::post('/stripe/webhook', StripeWebhookController::class);
 Route::get('/subscription-plans', [SubscriptionController::class, 'plans']);
 Route::get('/categories', [CategoryController::class, 'index']);
 Route::get('/tags', [TagController::class, 'index']);
+Route::get('/settings', [SettingController::class, 'publicIndex']);
 Route::get('/posts/categories', [PostController::class, 'categories']);
 Route::get('/posts', [PostController::class, 'index']);
 Route::get('/posts/{post}', [PostController::class, 'show']);
@@ -37,7 +39,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/posts/{post}/purchase', [PurchaseController::class, 'purchasePost']);
     Route::get('/my-purchases', [PurchaseController::class, 'myPurchases']);
 
-    Route::middleware(EnsureUserIsAdmin::class)->prefix('admin')->group(function () {
+    // client_admin management API (also aliased under /admin for older clients)
+    $clientAdminRoutes = function () {
         Route::post('/posts', [PostController::class, 'store']);
         Route::post('/posts/{post}', [PostController::class, 'update']);
         Route::put('/posts/{post}', [PostController::class, 'update']);
@@ -56,8 +59,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/subscription-plans/{plan}', [SubscriptionController::class, 'updatePlan']);
         Route::delete('/subscription-plans/{plan}', [SubscriptionController::class, 'destroyPlan']);
 
+        Route::get('/settings', [SettingController::class, 'index']);
+        Route::put('/settings', [SettingController::class, 'update']);
+
         // TEMPORARY: bank transfer admin — remove with BANK_TRANSFER_ENABLED
         Route::get('/bank-transfers/pending', [SubscriptionController::class, 'pendingBankTransfers']);
         Route::post('/bank-transfers/{subscription}/confirm', [SubscriptionController::class, 'confirmBankTransfer']);
-    });
+    };
+
+    Route::middleware(EnsureUserIsClientAdmin::class)->prefix('client-admin')->group($clientAdminRoutes);
+    Route::middleware(EnsureUserIsClientAdmin::class)->prefix('admin')->group($clientAdminRoutes);
 });

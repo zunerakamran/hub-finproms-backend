@@ -16,9 +16,9 @@ class AdminUserSeeder extends Seeder
         User::updateOrCreate(
             ['email' => 'admin@hubfinproms.com'],
             [
-                'name' => 'Admin',
+                'name' => 'Client Admin',
                 'password' => Hash::make('password'),
-                'role' => User::ROLE_ADMIN,
+                'role' => User::ROLE_CLIENT_ADMIN,
                 'credits' => 0,
             ]
         );

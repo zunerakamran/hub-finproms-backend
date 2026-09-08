@@ -14,8 +14,15 @@ class User extends Authenticatable
     /** @use HasFactory<UserFactory> */
     use HasApiTokens, HasFactory, Notifiable;
 
-    public const ROLE_ADMIN = 'admin';
+    /** Hub operator who manages content, types, plans, settings. */
+    public const ROLE_CLIENT_ADMIN = 'client_admin';
+
     public const ROLE_USER = 'user';
+
+    /**
+     * @deprecated Use ROLE_CLIENT_ADMIN
+     */
+    public const ROLE_ADMIN = self::ROLE_CLIENT_ADMIN;
 
     /**
      * The attributes that are mass assignable.
@@ -43,7 +50,7 @@ class User extends Authenticatable
     /**
      * Get the attributes that should be cast.
      *
-     * @return array<string, string>
+     * @return array<string, mixed>
      */
     protected function casts(): array
     {
@@ -54,9 +61,17 @@ class User extends Authenticatable
         ];
     }
 
+    public function isClientAdmin(): bool
+    {
+        return in_array($this->role, [self::ROLE_CLIENT_ADMIN, 'admin'], true);
+    }
+
+    /**
+     * @deprecated Use isClientAdmin()
+     */
     public function isAdmin(): bool
     {
-        return $this->role === self::ROLE_ADMIN;
+        return $this->isClientAdmin();
     }
 
     public function subscriptions(): HasMany
@@ -92,11 +107,11 @@ class User extends Authenticatable
 
     /**
      * Users with credits or an active subscription can browse post content.
-     * Admins always can. Guests and zero-credit unsubscribed users cannot.
+     * Client admins always can. Guests and zero-credit unsubscribed users cannot.
      */
     public function canViewCatalog(): bool
     {
-        if ($this->isAdmin()) {
+        if ($this->isClientAdmin()) {
             return true;
         }
 
