@@ -19,7 +19,7 @@ class AdvisorController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $this->assertImportEnabled();
+        $this->assertImportEnabled($request);
 
         $advisors = User::query()
             ->where('is_advisor', true)
@@ -31,7 +31,7 @@ class AdvisorController extends Controller
 
     public function import(Request $request): JsonResponse
     {
-        $this->assertImportEnabled();
+        $this->assertImportEnabled($request);
 
         $validated = $request->validate([
             'file' => ['required', 'file', 'max:5120'],
@@ -60,9 +60,9 @@ class AdvisorController extends Controller
         ]);
     }
 
-    public function template(): StreamedResponse
+    public function template(Request $request): StreamedResponse
     {
-        $this->assertImportEnabled();
+        $this->assertImportEnabled($request);
 
         $csv = $this->importService->templateCsv();
 
@@ -73,11 +73,18 @@ class AdvisorController extends Controller
         ]);
     }
 
-    private function assertImportEnabled(): void
+    private function assertImportEnabled(Request $request): void
     {
-        if (! $this->hubs->can('advisor_excel_import')) {
+        $hub = $this->hubs->current();
+        $user = $request->user();
+
+        $allowed = $user
+            ? app(\App\Services\CapabilitiesMatrixService::class)->roleCan($hub, (string) $user->role, 'advisor_excel_import')
+            : $hub->can('advisor_excel_import');
+
+        if (! $allowed) {
             abort(response()->json([
-                'message' => 'Advisor Excel import is disabled for this hub. Enable it in the Power Admin checklist.',
+                'message' => 'Advisor Excel import is disabled for your role on this hub. Enable it in Power Admin → Capabilities.',
             ], 403));
         }
     }

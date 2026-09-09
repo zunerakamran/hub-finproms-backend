@@ -16,6 +16,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'client_admin' => \App\Http\Middleware\EnsureUserIsClientAdmin::class,
             'power_admin' => \App\Http\Middleware\EnsureUserIsPowerAdmin::class,
             'admin' => \App\Http\Middleware\EnsureUserIsClientAdmin::class,
+            'hub_can' => \App\Http\Middleware\EnsureHubCapability::class,
+            'pa_can' => \App\Http\Middleware\EnsurePowerAdminCapability::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

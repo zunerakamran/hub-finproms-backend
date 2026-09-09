@@ -10,6 +10,40 @@ class Hub extends Model
 
     public const TYPE_WHITE_LABEL = 'white_label';
 
+    public const GROUP_BEHAVIOUR = 'behaviour';
+
+    public const GROUP_MEMBER = 'member';
+
+    public const GROUP_DASHBOARD = 'dashboard';
+
+    /**
+     * @var array<string, string>
+     */
+    public const CHECKLIST_GROUPS = [
+        self::GROUP_BEHAVIOUR => 'Functionalities',
+        self::GROUP_MEMBER => 'Member capabilities',
+        self::GROUP_DASHBOARD => 'Hub-admin dashboard',
+    ];
+
+    /**
+     * Groups edited on the Hub checklist screen (Functionalities only).
+     *
+     * @var list<string>
+     */
+    public const FUNCTIONALITY_GROUPS = [
+        self::GROUP_BEHAVIOUR,
+    ];
+
+    /**
+     * Groups edited on the Capabilities matrix (user / role capabilities).
+     *
+     * @var list<string>
+     */
+    public const CAPABILITY_GROUPS = [
+        self::GROUP_MEMBER,
+        self::GROUP_DASHBOARD,
+    ];
+
     /**
      * Mutually exclusive checklist pairs.
      * Checking one automatically unchecks its opposite.
@@ -24,70 +58,182 @@ class Hub extends Model
     ];
 
     /**
-     * Known checklist keys and human labels for Power Admin UI.
-     * Values are booleans unless noted.
+     * Known checklist keys (Functionalities + member + dashboard capabilities).
      *
-     * @var array<string, array{label: string, description: string, default_shared: bool, default_white_label: bool}>
+     * @var array<string, array{label: string, description: string, group: string, default_shared: bool, default_white_label: bool}>
      */
     public const CHECKLIST_DEFINITIONS = [
+        // --- Functionalities (hub checklist) ---
         'public_subscribe' => [
             'label' => 'Public subscribe / self-registration',
             'description' => 'Anyone can register and subscribe.',
+            'group' => self::GROUP_BEHAVIOUR,
             'default_shared' => true,
             'default_white_label' => false,
         ],
         'private_invite_only' => [
             'label' => 'Private invite-only access',
             'description' => 'Only invited advisors (e.g. Excel import) can access.',
+            'group' => self::GROUP_BEHAVIOUR,
             'default_shared' => false,
             'default_white_label' => true,
         ],
         'paid_credits' => [
             'label' => 'Paid credits',
             'description' => 'Users buy/earn credits via subscription or packs.',
+            'group' => self::GROUP_BEHAVIOUR,
             'default_shared' => true,
             'default_white_label' => false,
         ],
         'unlimited_credits' => [
             'label' => 'Unlimited credits',
             'description' => 'Advisors have unlimited credits to buy content.',
+            'group' => self::GROUP_BEHAVIOUR,
             'default_shared' => false,
             'default_white_label' => true,
         ],
         'one_off_purchase' => [
             'label' => 'One-off purchase (non-subscribers)',
             'description' => 'Non-subscribers can buy individual posts/reels (1 credit = £1).',
+            'group' => self::GROUP_BEHAVIOUR,
             'default_shared' => true,
             'default_white_label' => false,
-        ],
-        'advisor_excel_import' => [
-            'label' => 'Advisor Excel import',
-            'description' => 'Client can import advisors from an Excel sheet.',
-            'default_shared' => false,
-            'default_white_label' => true,
         ],
         'receive_content_from_shared' => [
             'label' => 'Receive content from shared hub',
             'description' => 'Shared hub can push/select posts onto this hub.',
+            'group' => self::GROUP_BEHAVIOUR,
             'default_shared' => false,
             'default_white_label' => true,
-        ],
-        'ai_content_generation' => [
-            'label' => 'AI content generation',
-            'description' => 'Generate posts/reels with AI (future).',
-            'default_shared' => false,
-            'default_white_label' => false,
-        ],
-        'in_app_post_editing' => [
-            'label' => 'In-app post editing',
-            'description' => 'Buyers can edit purchased posts in-app (future).',
-            'default_shared' => false,
-            'default_white_label' => false,
         ],
         'compliance_check' => [
             'label' => 'Compliance check',
             'description' => 'Posts can go through a compliance flow (future).',
+            'group' => self::GROUP_BEHAVIOUR,
             'default_shared' => false,
+            'default_white_label' => false,
+        ],
+
+        // --- Member capabilities ---
+        'member_browse_catalog' => [
+            'label' => 'Browse catalog (posts / reels)',
+            'description' => 'Members can browse the content catalog.',
+            'group' => self::GROUP_MEMBER,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'member_view_plans' => [
+            'label' => 'View plans / subscribe',
+            'description' => 'Members can open the plans page and self-serve subscribe (when behaviour allows).',
+            'group' => self::GROUP_MEMBER,
+            'default_shared' => true,
+            'default_white_label' => false,
+        ],
+        'member_purchase_content' => [
+            'label' => 'Purchase / spend credits on content',
+            'description' => 'Members can buy posts/reels with credits.',
+            'group' => self::GROUP_MEMBER,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'member_download_content' => [
+            'label' => 'Download purchased content',
+            'description' => 'Members can download content they have purchased.',
+            'group' => self::GROUP_MEMBER,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'member_view_purchases' => [
+            'label' => 'View purchase history',
+            'description' => 'Members can open My Purchases.',
+            'group' => self::GROUP_MEMBER,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'member_view_invoices' => [
+            'label' => 'View invoices',
+            'description' => 'Members can open invoices.',
+            'group' => self::GROUP_MEMBER,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'member_in_app_edit' => [
+            'label' => 'In-app post editing',
+            'description' => 'Buyers can edit purchased posts in-app (future).',
+            'group' => self::GROUP_MEMBER,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+
+        // --- Hub-admin dashboard capabilities ---
+        'dashboard_manage_posts' => [
+            'label' => 'Manage posts / reels',
+            'description' => 'Hub admin can create and edit posts/reels.',
+            'group' => self::GROUP_DASHBOARD,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'dashboard_manage_types' => [
+            'label' => 'Manage types',
+            'description' => 'Hub admin can manage content types.',
+            'group' => self::GROUP_DASHBOARD,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'dashboard_manage_categories' => [
+            'label' => 'Manage categories',
+            'description' => 'Hub admin can manage categories.',
+            'group' => self::GROUP_DASHBOARD,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'dashboard_manage_tags' => [
+            'label' => 'Manage tags',
+            'description' => 'Hub admin can manage tags.',
+            'group' => self::GROUP_DASHBOARD,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'dashboard_manage_plans' => [
+            'label' => 'Manage subscription plans',
+            'description' => 'Hub admin can manage subscription plans.',
+            'group' => self::GROUP_DASHBOARD,
+            'default_shared' => true,
+            'default_white_label' => false,
+        ],
+        'dashboard_manage_settings' => [
+            'label' => 'Manage settings',
+            'description' => 'Hub admin can manage hub settings (e.g. NEW banner).',
+            'group' => self::GROUP_DASHBOARD,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'dashboard_bank_transfers' => [
+            'label' => 'Confirm bank transfers',
+            'description' => 'Hub admin can confirm pending bank transfers.',
+            'group' => self::GROUP_DASHBOARD,
+            'default_shared' => true,
+            'default_white_label' => false,
+        ],
+        'advisor_excel_import' => [
+            'label' => 'Import advisors (Excel/CSV)',
+            'description' => 'Hub admin and Power Admin (when enabled) can import advisors from an Excel/CSV sheet.',
+            'group' => self::GROUP_DASHBOARD,
+            'default_shared' => false,
+            'default_white_label' => true,
+        ],
+        'dashboard_ai_content' => [
+            'label' => 'AI content generation',
+            'description' => 'Hub admin (typically FinProms admin on shared) can generate AI posts (future).',
+            'group' => self::GROUP_DASHBOARD,
+            'default_shared' => true,
+            'default_white_label' => false,
+        ],
+        'dashboard_push_content' => [
+            'label' => 'Push content to white-label hubs',
+            'description' => 'Shared hub admin can select white-label hubs to receive posts (future).',
+            'group' => self::GROUP_DASHBOARD,
+            'default_shared' => true,
             'default_white_label' => false,
         ],
     ];
@@ -101,6 +247,7 @@ class Hub extends Model
         'secondary_color',
         'logo_url',
         'checklist',
+        'role_capabilities',
     ];
 
     protected function casts(): array
@@ -108,6 +255,7 @@ class Hub extends Model
         return [
             'is_active' => 'boolean',
             'checklist' => 'array',
+            'role_capabilities' => 'array',
         ];
     }
 
@@ -132,8 +280,6 @@ class Hub extends Model
     }
 
     /**
-     * Merged checklist (stored overrides + defaults for missing keys).
-     *
      * @return array<string, bool>
      */
     public function resolvedChecklist(): array
@@ -158,10 +304,24 @@ class Hub extends Model
         return (bool) ($checklist[$flag] ?? false);
     }
 
+    public static function isFunctionalityKey(string $key): bool
+    {
+        $group = self::CHECKLIST_DEFINITIONS[$key]['group'] ?? null;
+
+        return in_array($group, self::FUNCTIONALITY_GROUPS, true);
+    }
+
+    public static function isCapabilityKey(string $key): bool
+    {
+        $group = self::CHECKLIST_DEFINITIONS[$key]['group'] ?? null;
+
+        return in_array($group, self::CAPABILITY_GROUPS, true);
+    }
+
     /**
-     * Checklist payload for Power Admin UI (flags + labels + current values).
+     * Admin hub-checklist payload: Functionalities only (not user capabilities).
      *
-     * @return list<array{key: string, label: string, description: string, enabled: bool}>
+     * @return list<array{key: string, label: string, description: string, group: string, group_label: string, enabled: bool, exclusive_with: ?string}>
      */
     public function checklistForAdmin(): array
     {
@@ -169,10 +329,16 @@ class Hub extends Model
         $items = [];
 
         foreach (self::CHECKLIST_DEFINITIONS as $key => $meta) {
+            $group = $meta['group'] ?? self::GROUP_BEHAVIOUR;
+            if (! in_array($group, self::FUNCTIONALITY_GROUPS, true)) {
+                continue;
+            }
             $items[] = [
                 'key' => $key,
                 'label' => $meta['label'],
                 'description' => $meta['description'],
+                'group' => $group,
+                'group_label' => self::CHECKLIST_GROUPS[$group] ?? $group,
                 'enabled' => (bool) ($resolved[$key] ?? false),
                 'exclusive_with' => self::CHECKLIST_OPPOSITES[$key] ?? null,
             ];
@@ -217,6 +383,10 @@ class Hub extends Model
                 'logo_url' => $this->logo_url,
             ],
             'checklist' => $this->checklistForAdmin(),
+            'checklist_groups' => array_intersect_key(
+                self::CHECKLIST_GROUPS,
+                array_flip(self::FUNCTIONALITY_GROUPS)
+            ),
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
         ];

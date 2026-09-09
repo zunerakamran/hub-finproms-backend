@@ -17,7 +17,7 @@ class EnsureUserIsClientAdmin
     {
         if (! $request->user() || ! $request->user()->isClientAdmin()) {
             return response()->json([
-                'message' => 'Client admin access required.',
+                'message' => 'Hub admin access required.',
             ], 403);
         }
 

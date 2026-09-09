@@ -28,6 +28,7 @@ class PowerAdminHubController extends Controller
         return response()->json([
             'hubs' => $hubs,
             'checklist_definitions' => $this->definitionsPayload(),
+            'checklist_groups' => $this->functionalityGroupsPayload(),
         ]);
     }
 
@@ -74,6 +75,7 @@ class PowerAdminHubController extends Controller
         return response()->json([
             'hub' => $hub->toAdminArray(),
             'checklist_definitions' => $this->definitionsPayload(),
+            'checklist_groups' => $this->functionalityGroupsPayload(),
         ]);
     }
 
@@ -132,6 +134,13 @@ class PowerAdminHubController extends Controller
             ], 422);
         }
 
+        // Hub checklist screen edits Functionalities only; ignore capability keys.
+        $input = array_filter(
+            $input,
+            fn ($key) => Hub::isFunctionalityKey((string) $key),
+            ARRAY_FILTER_USE_KEY
+        );
+
         $hub->checklist = $this->hubs->mergeChecklist($hub, $input);
         $hub->save();
 
@@ -170,16 +179,24 @@ class PowerAdminHubController extends Controller
     }
 
     /**
-     * @return list<array{key: string, label: string, description: string, default_shared: bool, default_white_label: bool}>
+     * Functionalities definitions only (hub checklist screen).
+     *
+     * @return list<array{key: string, label: string, description: string, group: string, group_label: string, default_shared: bool, default_white_label: bool, exclusive_with: ?string}>
      */
     private function definitionsPayload(): array
     {
         $items = [];
         foreach (Hub::CHECKLIST_DEFINITIONS as $key => $meta) {
+            $group = $meta['group'] ?? Hub::GROUP_BEHAVIOUR;
+            if (! in_array($group, Hub::FUNCTIONALITY_GROUPS, true)) {
+                continue;
+            }
             $items[] = [
                 'key' => $key,
                 'label' => $meta['label'],
                 'description' => $meta['description'],
+                'group' => $group,
+                'group_label' => Hub::CHECKLIST_GROUPS[$group] ?? 'Other',
                 'default_shared' => $meta['default_shared'],
                 'default_white_label' => $meta['default_white_label'],
                 'exclusive_with' => Hub::CHECKLIST_OPPOSITES[$key] ?? null,
@@ -187,5 +204,18 @@ class PowerAdminHubController extends Controller
         }
 
         return $items;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function functionalityGroupsPayload(): array
+    {
+        $groups = [];
+        foreach (Hub::FUNCTIONALITY_GROUPS as $group) {
+            $groups[$group] = Hub::CHECKLIST_GROUPS[$group] ?? $group;
+        }
+
+        return $groups;
     }
 }

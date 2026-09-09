@@ -65,9 +65,9 @@ class AdvisorImportService
 
                         $user->fill([
                             'name' => $name,
+                            'role' => User::ROLE_ADVISOR,
                             'is_advisor' => true,
                             'has_unlimited_credits' => true,
-                            'role' => User::ROLE_USER,
                         ]);
                         $user->save();
                         $this->ensureAdvisorSubscription($user);
@@ -87,7 +87,7 @@ class AdvisorImportService
                         'name' => $name,
                         'email' => $email,
                         'password' => $password,
-                        'role' => User::ROLE_USER,
+                        'role' => User::ROLE_ADVISOR,
                         'credits' => 0,
                         'is_advisor' => true,
                         'has_unlimited_credits' => true,

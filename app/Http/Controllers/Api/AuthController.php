@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\HubService;
+use App\Services\PowerAdminCapabilitiesService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -14,7 +15,8 @@ use Illuminate\Validation\ValidationException;
 class AuthController extends Controller
 {
     public function __construct(
-        private readonly HubService $hubs
+        private readonly HubService $hubs,
+        private readonly PowerAdminCapabilitiesService $powerCapabilities
     ) {}
 
     public function register(Request $request): JsonResponse
@@ -83,8 +85,17 @@ class AuthController extends Controller
 
     public function me(Request $request): JsonResponse
     {
-        return response()->json([
-            'user' => $request->user(),
-        ]);
+        /** @var User $user */
+        $user = $request->user();
+
+        $payload = [
+            'user' => $user,
+        ];
+
+        if ($user->isPowerAdmin()) {
+            $payload['power_admin_capabilities'] = $this->powerCapabilities->resolved();
+        }
+
+        return response()->json($payload);
     }
 }

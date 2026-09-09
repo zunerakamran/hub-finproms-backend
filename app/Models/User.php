@@ -14,12 +14,25 @@ class User extends Authenticatable
     /** @use HasFactory<UserFactory> */
     use HasApiTokens, HasFactory, Notifiable;
 
-    /** Hub operator who manages content, types, plans, settings. */
-    public const ROLE_CLIENT_ADMIN = 'client_admin';
-
-    /** Platform developer control plane (white-label checklist, hubs). */
+    /** Platform developers / us — shared hub Power Admin control plane. */
     public const ROLE_POWER_ADMIN = 'power_admin';
 
+    /** Shared hub operator (FinProms). */
+    public const ROLE_FINPROMS_ADMIN = 'finproms_admin';
+
+    /** White-labelled hub operator. */
+    public const ROLE_CLIENT_ADMIN = 'client_admin';
+
+    /** Mid-level hub staff. */
+    public const ROLE_MANAGER = 'manager';
+
+    /** Compliance / content approver. */
+    public const ROLE_APPROVER = 'approver';
+
+    /** White-label advisor (subscriber, typically unlimited credits). */
+    public const ROLE_ADVISOR = 'advisor';
+
+    /** General member. */
     public const ROLE_USER = 'user';
 
     /**
@@ -28,10 +41,30 @@ class User extends Authenticatable
     public const ROLE_ADMIN = self::ROLE_CLIENT_ADMIN;
 
     /**
-     * The attributes that are mass assignable.
+     * Roles that may use the hub-admin shell (client-admin routes), subject to hub checklist.
      *
      * @var list<string>
      */
+    public const HUB_ADMIN_ROLES = [
+        self::ROLE_FINPROMS_ADMIN,
+        self::ROLE_CLIENT_ADMIN,
+        self::ROLE_MANAGER,
+        'admin', // legacy
+    ];
+
+    /**
+     * @var array<string, string>
+     */
+    public const ROLE_LABELS = [
+        self::ROLE_POWER_ADMIN => 'Power Admin',
+        self::ROLE_FINPROMS_ADMIN => 'FinProms Admin',
+        self::ROLE_CLIENT_ADMIN => 'Client Admin',
+        self::ROLE_MANAGER => 'Manager',
+        self::ROLE_APPROVER => 'Approver',
+        self::ROLE_ADVISOR => 'Advisor',
+        self::ROLE_USER => 'Member',
+    ];
+
     protected $fillable = [
         'name',
         'email',
@@ -42,21 +75,15 @@ class User extends Authenticatable
         'has_unlimited_credits',
     ];
 
-    /**
-     * The attributes that should be hidden for serialization.
-     *
-     * @var list<string>
-     */
     protected $hidden = [
         'password',
         'remember_token',
     ];
 
-    /**
-     * Get the attributes that should be cast.
-     *
-     * @return array<string, mixed>
-     */
+    protected $appends = [
+        'role_label',
+    ];
+
     protected function casts(): array
     {
         return [
@@ -68,9 +95,9 @@ class User extends Authenticatable
         ];
     }
 
-    public function isClientAdmin(): bool
+    public function getRoleLabelAttribute(): string
     {
-        return in_array($this->role, [self::ROLE_CLIENT_ADMIN, 'admin'], true);
+        return self::ROLE_LABELS[$this->role] ?? (string) $this->role;
     }
 
     public function isPowerAdmin(): bool
@@ -78,9 +105,43 @@ class User extends Authenticatable
         return $this->role === self::ROLE_POWER_ADMIN;
     }
 
+    public function isFinpromsAdmin(): bool
+    {
+        return $this->role === self::ROLE_FINPROMS_ADMIN;
+    }
+
+    public function isClientAdmin(): bool
+    {
+        // Hub-admin shell access (FinProms admin, WL client admin, manager, legacy admin).
+        return in_array($this->role, self::HUB_ADMIN_ROLES, true);
+    }
+
+    public function isWhiteLabelClientAdmin(): bool
+    {
+        return $this->role === self::ROLE_CLIENT_ADMIN || $this->role === 'admin';
+    }
+
+    public function isManager(): bool
+    {
+        return $this->role === self::ROLE_MANAGER;
+    }
+
+    public function isApprover(): bool
+    {
+        return $this->role === self::ROLE_APPROVER;
+    }
+
     public function isAdvisor(): bool
     {
-        return (bool) $this->is_advisor;
+        return $this->role === self::ROLE_ADVISOR || (bool) $this->is_advisor;
+    }
+
+    /**
+     * @deprecated Use isClientAdmin()
+     */
+    public function isAdmin(): bool
+    {
+        return $this->isClientAdmin();
     }
 
     /**
@@ -92,15 +153,7 @@ class User extends Authenticatable
             return true;
         }
 
-        return $hubAllowsUnlimited && $this->is_advisor;
-    }
-
-    /**
-     * @deprecated Use isClientAdmin()
-     */
-    public function isAdmin(): bool
-    {
-        return $this->isClientAdmin();
+        return $hubAllowsUnlimited && $this->isAdvisor();
     }
 
     public function subscriptions(): HasMany
@@ -139,10 +192,6 @@ class User extends Authenticatable
             ->exists();
     }
 
-    /**
-     * Any authenticated member can browse the catalog. Guests cannot.
-     * Subscription is not required — non-subscribers can buy posts with credits (1 credit = £1).
-     */
     public function canViewCatalog(): bool
     {
         return true;
