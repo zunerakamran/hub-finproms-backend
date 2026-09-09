@@ -17,6 +17,7 @@ class DatabaseSeeder extends Seeder
             SubscriptionPlanSeeder::class,
             ContentTypeSeeder::class,
             SettingsSeeder::class,
+            HubSeeder::class,
         ]);
     }
 }

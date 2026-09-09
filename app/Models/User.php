@@ -38,6 +38,8 @@ class User extends Authenticatable
         'password',
         'role',
         'credits',
+        'is_advisor',
+        'has_unlimited_credits',
     ];
 
     /**
@@ -61,6 +63,8 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'credits' => 'integer',
+            'is_advisor' => 'boolean',
+            'has_unlimited_credits' => 'boolean',
         ];
     }
 
@@ -72,6 +76,23 @@ class User extends Authenticatable
     public function isPowerAdmin(): bool
     {
         return $this->role === self::ROLE_POWER_ADMIN;
+    }
+
+    public function isAdvisor(): bool
+    {
+        return (bool) $this->is_advisor;
+    }
+
+    /**
+     * Per-user unlimited credits (white-label advisors), optionally combined with hub checklist.
+     */
+    public function hasUnlimitedCredits(bool $hubAllowsUnlimited = true): bool
+    {
+        if ($this->has_unlimited_credits) {
+            return true;
+        }
+
+        return $hubAllowsUnlimited && $this->is_advisor;
     }
 
     /**

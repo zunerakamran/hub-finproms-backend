@@ -10,17 +10,18 @@ use Illuminate\Support\Str;
 
 /**
  * TEMPORARY payment path for testing until Stripe keys are configured.
- * To remove later: set BANK_TRANSFER_ENABLED=false and delete this class + related UI.
+ * Enable/disable from Power Admin → Payment methods (or BANK_TRANSFER_ENABLED fallback).
  */
 class BankTransferSubscriptionService
 {
     public function __construct(
-        private readonly InvoiceService $invoices
+        private readonly InvoiceService $invoices,
+        private readonly PaymentSettingsService $paymentSettings
     ) {}
 
     public function isEnabled(): bool
     {
-        return (bool) config('payments.methods.bank_transfer.enabled', false);
+        return $this->paymentSettings->isBankTransferEnabled();
     }
 
     /**
@@ -28,7 +29,7 @@ class BankTransferSubscriptionService
      */
     public function autoConfirm(): bool
     {
-        return (bool) config('payments.methods.bank_transfer.auto_confirm', true);
+        return $this->paymentSettings->isBankTransferAutoConfirm();
     }
 
     /**

@@ -1,0 +1,300 @@
+<?php
+
+namespace App\Services;
+
+use App\Models\User;
+use App\Models\UserSubscription;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use RuntimeException;
+
+class AdvisorImportService
+{
+    /**
+     * @return array{
+     *   created: list<array{name: string, email: string, temporary_password: string}>,
+     *   updated: list<array{name: string, email: string}>,
+     *   skipped: list<array{row: int, email: ?string, reason: string}>,
+     *   summary: array{total_rows: int, created: int, updated: int, skipped: int}
+     * }
+     */
+    public function import(UploadedFile $file): array
+    {
+        $rows = $this->parseFile($file);
+
+        $created = [];
+        $updated = [];
+        $skipped = [];
+
+        foreach ($rows as $index => $row) {
+            $rowNumber = $index + 2; // header is row 1
+            $name = trim((string) ($row['name'] ?? ''));
+            $email = strtolower(trim((string) ($row['email'] ?? '')));
+            $password = trim((string) ($row['password'] ?? ''));
+
+            if ($email === '' && $name === '') {
+                continue;
+            }
+
+            if ($email === '' || ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $skipped[] = [
+                    'row' => $rowNumber,
+                    'email' => $email !== '' ? $email : null,
+                    'reason' => 'Valid email is required.',
+                ];
+                continue;
+            }
+
+            if ($name === '') {
+                $name = Str::before($email, '@');
+            }
+
+            try {
+                $result = DB::transaction(function () use ($name, $email, $password) {
+                    $user = User::query()->where('email', $email)->first();
+                    $temporaryPassword = null;
+
+                    if ($user) {
+                        if ($user->isClientAdmin() || $user->isPowerAdmin()) {
+                            return [
+                                'status' => 'skipped',
+                                'reason' => 'Email belongs to an admin account.',
+                            ];
+                        }
+
+                        $user->fill([
+                            'name' => $name,
+                            'is_advisor' => true,
+                            'has_unlimited_credits' => true,
+                            'role' => User::ROLE_USER,
+                        ]);
+                        $user->save();
+                        $this->ensureAdvisorSubscription($user);
+
+                        return [
+                            'status' => 'updated',
+                            'user' => $user,
+                        ];
+                    }
+
+                    if ($password === '') {
+                        $temporaryPassword = Str::password(12);
+                        $password = $temporaryPassword;
+                    }
+
+                    $user = User::query()->create([
+                        'name' => $name,
+                        'email' => $email,
+                        'password' => $password,
+                        'role' => User::ROLE_USER,
+                        'credits' => 0,
+                        'is_advisor' => true,
+                        'has_unlimited_credits' => true,
+                    ]);
+
+                    $this->ensureAdvisorSubscription($user);
+
+                    return [
+                        'status' => 'created',
+                        'user' => $user,
+                        'temporary_password' => $temporaryPassword,
+                    ];
+                });
+            } catch (\Throwable $e) {
+                $skipped[] = [
+                    'row' => $rowNumber,
+                    'email' => $email,
+                    'reason' => $e->getMessage(),
+                ];
+                continue;
+            }
+
+            if (($result['status'] ?? null) === 'skipped') {
+                $skipped[] = [
+                    'row' => $rowNumber,
+                    'email' => $email,
+                    'reason' => $result['reason'] ?? 'Skipped.',
+                ];
+                continue;
+            }
+
+            if ($result['status'] === 'created') {
+                $created[] = [
+                    'name' => $result['user']->name,
+                    'email' => $result['user']->email,
+                    'temporary_password' => $result['temporary_password'],
+                ];
+            } else {
+                $updated[] = [
+                    'name' => $result['user']->name,
+                    'email' => $result['user']->email,
+                ];
+            }
+        }
+
+        return [
+            'created' => $created,
+            'updated' => $updated,
+            'skipped' => $skipped,
+            'summary' => [
+                'total_rows' => count($rows),
+                'created' => count($created),
+                'updated' => count($updated),
+                'skipped' => count($skipped),
+            ],
+        ];
+    }
+
+    public function ensureAdvisorSubscription(User $user): UserSubscription
+    {
+        $existing = $user->subscriptions()
+            ->where('status', 'active')
+            ->where('payment_method', 'advisor_import')
+            ->first();
+
+        if ($existing) {
+            return $existing;
+        }
+
+        return UserSubscription::query()->create([
+            'user_id' => $user->id,
+            'subscription_plan_id' => null,
+            'credits_granted' => 0,
+            'amount_paid' => 0,
+            'status' => 'active',
+            'payment_method' => 'advisor_import',
+            'payment_status' => 'paid',
+            'payment_reference' => 'ADV-'.Str::upper(Str::random(8)),
+            'starts_at' => now(),
+            'ends_at' => null,
+        ]);
+    }
+
+    /**
+     * @return list<array{name?: string, email?: string, password?: string}>
+     */
+    public function parseFile(UploadedFile $file): array
+    {
+        $extension = strtolower($file->getClientOriginalExtension() ?: '');
+        $path = $file->getRealPath();
+
+        if ($path === false) {
+            throw new RuntimeException('Unable to read uploaded file.');
+        }
+
+        if (in_array($extension, ['csv', 'txt', ''], true)) {
+            return $this->parseCsv($path);
+        }
+
+        if (in_array($extension, ['xlsx', 'xls'], true)) {
+            throw new RuntimeException(
+                'Direct Excel (.xlsx/.xls) upload needs PHP zip/gd extensions. Please save the sheet as CSV (Excel → Save As → CSV) and upload that file.'
+            );
+        }
+
+        throw new RuntimeException('Unsupported file type. Upload a CSV exported from Excel.');
+    }
+
+    /**
+     * @return list<array{name?: string, email?: string, password?: string}>
+     */
+    private function parseCsv(string $path): array
+    {
+        $handle = fopen($path, 'rb');
+        if ($handle === false) {
+            throw new RuntimeException('Unable to open CSV file.');
+        }
+
+        $header = null;
+        $rows = [];
+
+        try {
+            while (($data = fgetcsv($handle)) !== false) {
+                if ($data === [null] || $data === false) {
+                    continue;
+                }
+
+                // Strip UTF-8 BOM from first cell
+                if ($header === null && isset($data[0])) {
+                    $data[0] = preg_replace('/^\xEF\xBB\xBF/', '', (string) $data[0]) ?? (string) $data[0];
+                }
+
+                if ($header === null) {
+                    $header = array_map(fn ($h) => $this->normalizeHeader((string) $h), $data);
+                    continue;
+                }
+
+                if ($this->rowIsEmpty($data)) {
+                    continue;
+                }
+
+                $assoc = [];
+                foreach ($header as $i => $key) {
+                    if ($key === null || $key === '') {
+                        continue;
+                    }
+                    $assoc[$key] = isset($data[$i]) ? trim((string) $data[$i]) : '';
+                }
+
+                // Map common aliases
+                $row = [
+                    'name' => $assoc['name'] ?? $assoc['full_name'] ?? $assoc['advisor_name'] ?? '',
+                    'email' => $assoc['email'] ?? $assoc['email_address'] ?? '',
+                    'password' => $assoc['password'] ?? $assoc['temporary_password'] ?? '',
+                ];
+
+                $rows[] = $row;
+            }
+        } finally {
+            fclose($handle);
+        }
+
+        if ($header === null) {
+            throw new RuntimeException('CSV file is empty. Include a header row: name,email');
+        }
+
+        if (! in_array('email', $header, true) && ! in_array('email_address', $header, true)) {
+            // Allow headerless single-column? No — require email header.
+            // If headers were wrong keys, still try positional fallback for 2+ columns.
+            if (count($rows) === 0) {
+                throw new RuntimeException('CSV must include an email column. Expected headers: name,email');
+            }
+        }
+
+        return $rows;
+    }
+
+    private function normalizeHeader(string $header): string
+    {
+        $header = strtolower(trim($header));
+        $header = str_replace([' ', '-'], '_', $header);
+
+        return $header;
+    }
+
+    /**
+     * @param  list<null|string>  $data
+     */
+    private function rowIsEmpty(array $data): bool
+    {
+        foreach ($data as $cell) {
+            if (trim((string) $cell) !== '') {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public function templateCsv(): string
+    {
+        $lines = [
+            'name,email,password',
+            'Jane Advisor,jane@example.com,',
+            'John Advisor,john@example.com,OptionalPassword123',
+        ];
+
+        return implode("\n", $lines)."\n";
+    }
+}

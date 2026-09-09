@@ -1,10 +1,14 @@
 <?php
 
+use App\Http\Controllers\Api\AdvisorController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\ContentTypeController;
+use App\Http\Controllers\Api\HubController;
 use App\Http\Controllers\Api\InvoiceController;
 use App\Http\Controllers\Api\PostController;
+use App\Http\Controllers\Api\PowerAdminHubController;
+use App\Http\Controllers\Api\PowerAdminPaymentMethodController;
 use App\Http\Controllers\Api\PurchaseController;
 use App\Http\Controllers\Api\SettingController;
 use App\Http\Controllers\Api\StripeWebhookController;
@@ -26,6 +30,7 @@ Route::prefix('auth')->group(function () {
 
 Route::post('/stripe/webhook', StripeWebhookController::class);
 
+Route::get('/hub', [HubController::class, 'current']);
 Route::get('/subscription-plans', [SubscriptionController::class, 'plans']);
 Route::get('/categories', [CategoryController::class, 'index']);
 Route::get('/types', [ContentTypeController::class, 'index']);
@@ -72,6 +77,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/settings', [SettingController::class, 'index']);
         Route::put('/settings', [SettingController::class, 'update']);
 
+        Route::get('/advisors', [AdvisorController::class, 'index']);
+        Route::post('/advisors/import', [AdvisorController::class, 'import']);
+        Route::get('/advisors/template', [AdvisorController::class, 'template']);
+
         // TEMPORARY: bank transfer admin — remove with BANK_TRANSFER_ENABLED
         Route::get('/bank-transfers/pending', [SubscriptionController::class, 'pendingBankTransfers']);
         Route::post('/bank-transfers/{subscription}/confirm', [SubscriptionController::class, 'confirmBankTransfer']);
@@ -80,11 +89,20 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware(EnsureUserIsClientAdmin::class)->prefix('client-admin')->group($clientAdminRoutes);
     Route::middleware(EnsureUserIsClientAdmin::class)->prefix('admin')->group($clientAdminRoutes);
 
-    // power_admin control plane (hubs / checklist endpoints land here later)
+    // power_admin control plane (hubs / checklist / platform settings)
     Route::middleware(EnsureUserIsPowerAdmin::class)->prefix('power-admin')->group(function () {
         Route::get('/ping', fn () => response()->json([
             'ok' => true,
             'role' => 'power_admin',
         ]));
+
+        Route::get('/payment-methods', [PowerAdminPaymentMethodController::class, 'index']);
+        Route::put('/payment-methods', [PowerAdminPaymentMethodController::class, 'update']);
+
+        Route::get('/hubs', [PowerAdminHubController::class, 'index']);
+        Route::post('/hubs', [PowerAdminHubController::class, 'store']);
+        Route::get('/hubs/{hub}', [PowerAdminHubController::class, 'show']);
+        Route::put('/hubs/{hub}', [PowerAdminHubController::class, 'update']);
+        Route::put('/hubs/{hub}/checklist', [PowerAdminHubController::class, 'updateChecklist']);
     });
 });

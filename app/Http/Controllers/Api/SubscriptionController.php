@@ -6,7 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Models\SubscriptionPlan;
 use App\Models\UserSubscription;
 use App\Services\BankTransferSubscriptionService;
+use App\Services\HubService;
 use App\Services\InvoiceService;
+use App\Services\PaymentSettingsService;
 use App\Services\StripeSubscriptionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -17,7 +19,9 @@ class SubscriptionController extends Controller
     public function __construct(
         private readonly StripeSubscriptionService $stripeSubscriptions,
         private readonly BankTransferSubscriptionService $bankTransferSubscriptions,
-        private readonly InvoiceService $invoices
+        private readonly InvoiceService $invoices,
+        private readonly PaymentSettingsService $paymentSettings,
+        private readonly HubService $hubs
     ) {}
 
     public function plans(): JsonResponse
@@ -111,6 +115,12 @@ class SubscriptionController extends Controller
 
     public function checkout(Request $request, SubscriptionPlan $plan): JsonResponse
     {
+        if (! $this->hubs->can('public_subscribe') && ! $this->hubs->can('paid_credits')) {
+            return response()->json([
+                'message' => 'Self-serve subscriptions are disabled for this hub.',
+            ], 403);
+        }
+
         if (! $plan->is_active) {
             return response()->json([
                 'message' => 'This subscription plan is not available.',
@@ -298,31 +308,8 @@ class SubscriptionController extends Controller
      */
     private function availablePaymentMethods(): array
     {
-        $methods = [];
-
-        $stripeEnabled = (bool) config('payments.methods.stripe.enabled', true);
-        $stripeConfigured = filled(config('services.stripe.secret'));
-        $methods[] = [
-            'id' => 'stripe',
-            'label' => config('payments.methods.stripe.label', 'Card (Stripe)'),
-            'available' => $stripeEnabled && $stripeConfigured,
-            'unavailable_reason' => ! $stripeEnabled
-                ? 'Stripe payments are disabled.'
-                : (! $stripeConfigured
-                    ? 'Stripe is not configured yet. Use bank transfer or add STRIPE_SECRET.'
-                    : null),
-        ];
-
-        // TEMPORARY method — hide by setting BANK_TRANSFER_ENABLED=false
-        $bankEnabled = $this->bankTransferSubscriptions->isEnabled();
-        $methods[] = [
-            'id' => 'bank_transfer',
-            'label' => config('payments.methods.bank_transfer.label', 'Bank transfer'),
-            'available' => $bankEnabled,
-            'unavailable_reason' => $bankEnabled ? null : 'Bank transfer is disabled.',
-            'bank_details' => $bankEnabled ? $this->bankTransferSubscriptions->bankDetails() : null,
-        ];
-
-        return $methods;
+        return $this->paymentSettings->publicMethods(
+            fn () => $this->bankTransferSubscriptions->bankDetails()
+        );
     }
 }

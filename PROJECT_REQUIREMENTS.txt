@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-09-08
+Last updated: 2026-09-09
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -200,14 +200,14 @@ STEP 1 — Shared hub core
 [x] Subscriptions + credits (basic exists)
 [x] Credit spend + download (basic exists)
 [x] Non-subscriber one-off purchase (1 credit = £1)
-[x] Invoices for subscriptions and purchases
-
-LATER / WHITE-LABEL
-[ ] Tenant/hub DB-driven branding (colours, logo)
-[ ] Rights/permissions checklist model
-[ ] power_admin dashboard to manage per-hub checklist (shell scaffolded)
-[ ] White-labelled private advisor import (Excel)
-[ ] Unlimited credits for white-labelled advisors
+[x] power_admin can manage payment methods (Stripe / bank transfer)
+[x] Hub model + rights/permissions checklist (DB-driven)
+[x] power_admin can list/create hubs and edit checklist per hub
+[x] Public GET /hub returns current hub branding + checklist
+[x] Checklist gates: public register, self-serve subscribe, one-off purchase, unlimited credits
+[x] Frontend: power_admin hubs + checklist UI
+[x] White-labelled private advisor import (Excel/CSV)
+[x] Unlimited credits for white-labelled advisors (role/flag per user; checklist wired)
 [ ] Subscriber-count pricing tiers (managed by shared hub)
 [ ] Push/select posts from shared hub to white-labelled hubs
 [ ] AI post/reel generation (later)

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Post;
 use App\Models\PostPurchase;
+use App\Services\HubService;
 use App\Services\InvoiceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -13,7 +14,8 @@ use Illuminate\Support\Facades\DB;
 class PurchaseController extends Controller
 {
     public function __construct(
-        private readonly InvoiceService $invoices
+        private readonly InvoiceService $invoices,
+        private readonly HubService $hubs
     ) {}
 
     public function purchasePost(Request $request, Post $post): JsonResponse
@@ -33,7 +35,17 @@ class PurchaseController extends Controller
             ], 422);
         }
 
-        if ($user->credits < $post->credits_cost) {
+        $hubUnlimited = $this->hubs->can('unlimited_credits');
+        $unlimited = $user->hasUnlimitedCredits($hubUnlimited);
+        $hasSubscription = $user->hasActiveSubscription();
+
+        if (! $hasSubscription && ! $unlimited && ! $this->hubs->can('one_off_purchase')) {
+            return response()->json([
+                'message' => 'One-off purchases are disabled for this hub. An active subscription is required.',
+            ], 403);
+        }
+
+        if (! $unlimited && $user->credits < $post->credits_cost) {
             return response()->json([
                 'message' => 'Insufficient credits. Buy a plan or top up — 1 credit = £1.',
                 'credits' => $user->credits,
@@ -41,13 +53,17 @@ class PurchaseController extends Controller
             ], 422);
         }
 
-        [$purchase, $invoice] = DB::transaction(function () use ($user, $post) {
-            $user->decrement('credits', $post->credits_cost);
+        $creditsToSpend = $unlimited ? 0 : $post->credits_cost;
+
+        [$purchase, $invoice] = DB::transaction(function () use ($user, $post, $creditsToSpend, $unlimited) {
+            if (! $unlimited && $creditsToSpend > 0) {
+                $user->decrement('credits', $creditsToSpend);
+            }
 
             $purchase = PostPurchase::create([
                 'user_id' => $user->id,
                 'post_id' => $post->id,
-                'credits_spent' => $post->credits_cost,
+                'credits_spent' => $creditsToSpend,
                 'purchased_at' => now(),
             ]);
 
