@@ -1,12 +1,15 @@
 <?php
 
+use App\Http\Controllers\Api\AdvisorBillingController;
 use App\Http\Controllers\Api\AdvisorController;
+use App\Http\Controllers\Api\AdvisorPaymentCardController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\ContentTypeController;
 use App\Http\Controllers\Api\HubController;
 use App\Http\Controllers\Api\InvoiceController;
 use App\Http\Controllers\Api\PostController;
+use App\Http\Controllers\Api\PowerAdminAdvisorPricingController;
 use App\Http\Controllers\Api\PowerAdminCapabilityController;
 use App\Http\Controllers\Api\PowerAdminHubController;
 use App\Http\Controllers\Api\PowerAdminPaymentMethodController;
@@ -64,8 +67,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::middleware('hub_can:member_view_invoices')->group(function () {
         Route::get('/my-invoices', [InvoiceController::class, 'index']);
-        Route::get('/invoices/{invoice}', [InvoiceController::class, 'show']);
     });
+
+    Route::get('/invoices/{invoice}', [InvoiceController::class, 'show']);
 
     // client_admin management API (also aliased under /admin for older clients)
     $clientAdminRoutes = function () {
@@ -110,12 +114,38 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/advisors', [AdvisorController::class, 'index']);
             Route::post('/advisors/import', [AdvisorController::class, 'import']);
             Route::get('/advisors/template', [AdvisorController::class, 'template']);
+            Route::get('/advisor-billings/{billing}', [AdvisorBillingController::class, 'show']);
+            Route::post('/advisor-billings/{billing}/checkout', [AdvisorBillingController::class, 'checkout']);
+            Route::post('/advisor-billings/confirm', [AdvisorBillingController::class, 'confirm']);
+            Route::post('/advisor-billings/{billing}/confirm-bank-transfer', [AdvisorBillingController::class, 'confirmBankTransfer']);
+        });
+
+        Route::middleware('hub_can:dashboard_view_advisor_invoices')->group(function () {
+            Route::get('/advisor-invoices', [AdvisorBillingController::class, 'invoices']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_advisor_renewal')->group(function () {
+            Route::get('/advisor-billing-renewal', [AdvisorBillingController::class, 'renewalSettings']);
+            Route::put('/advisor-billing-renewal', [AdvisorBillingController::class, 'updateRenewalSettings']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_advisor_pricing')->group(function () {
+            Route::get('/advisor-pricing', [PowerAdminAdvisorPricingController::class, 'index']);
+            Route::post('/advisor-pricing', [PowerAdminAdvisorPricingController::class, 'store']);
+            Route::put('/advisor-pricing/{tier}', [PowerAdminAdvisorPricingController::class, 'update']);
+            Route::delete('/advisor-pricing/{tier}', [PowerAdminAdvisorPricingController::class, 'destroy']);
         });
 
         Route::middleware('hub_can:dashboard_bank_transfers')->group(function () {
             Route::get('/bank-transfers/pending', [SubscriptionController::class, 'pendingBankTransfers']);
             Route::post('/bank-transfers/{subscription}/confirm', [SubscriptionController::class, 'confirmBankTransfer']);
         });
+
+        // Card settings — always available to hub admins when advisor billing is on
+        // (not gated by the capabilities matrix).
+        Route::get('/payment-card', [AdvisorPaymentCardController::class, 'show']);
+        Route::post('/payment-card/setup', [AdvisorPaymentCardController::class, 'setup']);
+        Route::post('/payment-card/confirm', [AdvisorPaymentCardController::class, 'confirm']);
     };
 
     Route::middleware(EnsureUserIsClientAdmin::class)->prefix('client-admin')->group($clientAdminRoutes);
@@ -157,11 +187,31 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::put('/hubs/{hub}/checklist', [PowerAdminHubController::class, 'updateChecklist']);
         });
 
-        // Advisor import when enabled for power_admin on the current hub
+        // Advisor import / billing when enabled for power_admin on the current hub
         Route::middleware('hub_can:advisor_excel_import')->group(function () {
             Route::get('/advisors', [AdvisorController::class, 'index']);
             Route::post('/advisors/import', [AdvisorController::class, 'import']);
             Route::get('/advisors/template', [AdvisorController::class, 'template']);
+            Route::get('/advisor-billings/{billing}', [AdvisorBillingController::class, 'show']);
+            Route::post('/advisor-billings/{billing}/checkout', [AdvisorBillingController::class, 'checkout']);
+            Route::post('/advisor-billings/confirm', [AdvisorBillingController::class, 'confirm']);
+            Route::post('/advisor-billings/{billing}/confirm-bank-transfer', [AdvisorBillingController::class, 'confirmBankTransfer']);
+        });
+
+        Route::middleware('hub_can:dashboard_view_advisor_invoices')->group(function () {
+            Route::get('/advisor-invoices', [AdvisorBillingController::class, 'invoices']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_advisor_renewal')->group(function () {
+            Route::get('/advisor-billing-renewal', [AdvisorBillingController::class, 'renewalSettings']);
+            Route::put('/advisor-billing-renewal', [AdvisorBillingController::class, 'updateRenewalSettings']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_advisor_pricing')->group(function () {
+            Route::get('/advisor-pricing', [PowerAdminAdvisorPricingController::class, 'index']);
+            Route::post('/advisor-pricing', [PowerAdminAdvisorPricingController::class, 'store']);
+            Route::put('/advisor-pricing/{tier}', [PowerAdminAdvisorPricingController::class, 'update']);
+            Route::delete('/advisor-pricing/{tier}', [PowerAdminAdvisorPricingController::class, 'destroy']);
         });
     });
 });

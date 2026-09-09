@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\HubAdvisorBilling;
 use App\Models\Invoice;
 use App\Models\PostPurchase;
 use App\Models\User;
@@ -42,6 +43,44 @@ class InvoiceService
                 'quantity' => 1,
                 'unit_amount' => $amount,
                 'total' => $amount,
+            ]],
+        ]);
+    }
+
+    public function createForAdvisorBilling(HubAdvisorBilling $billing): Invoice
+    {
+        $existing = Invoice::query()
+            ->where('hub_advisor_billing_id', $billing->id)
+            ->first();
+
+        if ($existing) {
+            return $existing->loadMissing(['advisorBilling', 'user']);
+        }
+
+        $billing->loadMissing(['billedUser', 'hub']);
+        $user = $billing->billedUser ?? User::findOrFail($billing->billed_user_id);
+        $amount = (float) $billing->amount;
+        $count = (int) $billing->advisor_count;
+        $rate = (float) $billing->rate_per_advisor;
+        $hubName = $billing->hub?->name ?? 'Hub';
+
+        return $this->createInvoice([
+            'user_id' => $user->id,
+            'type' => Invoice::TYPE_ADVISOR_BILLING,
+            'user_subscription_id' => null,
+            'post_purchase_id' => null,
+            'hub_advisor_billing_id' => $billing->id,
+            'description' => "Advisor billing — {$hubName} ({$count} advisors)",
+            'amount' => $amount,
+            'credits' => 0,
+            'billing_name' => $user->name,
+            'billing_email' => $user->email,
+            'line_items' => [[
+                'label' => sprintf('Advisor subscription (%d advisors × £%s)', $count, number_format($rate, 2)),
+                'quantity' => $count,
+                'unit_amount' => $rate,
+                'total' => $amount,
+                'note' => $billing->auto_renew ? 'Stripe auto-renew (monthly)' : null,
             ]],
         ]);
     }
@@ -99,7 +138,7 @@ class InvoiceService
                         'issued_at' => now(),
                     ]);
 
-                    return $invoice->fresh()->load(['subscription.plan', 'postPurchase.post', 'user']);
+                    return $invoice->fresh()->load(['subscription.plan', 'postPurchase.post', 'advisorBilling', 'user']);
                 } catch (\Illuminate\Database\UniqueConstraintViolationException $e) {
                     if ($attempt === 4) {
                         throw $e;

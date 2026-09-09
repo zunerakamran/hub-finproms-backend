@@ -73,11 +73,14 @@ class User extends Authenticatable
         'credits',
         'is_advisor',
         'has_unlimited_credits',
+        'stripe_customer_id',
+        'stripe_payment_method_id',
     ];
 
     protected $hidden = [
         'password',
         'remember_token',
+        'stripe_payment_method_id',
     ];
 
     protected $appends = [
@@ -134,6 +137,18 @@ class User extends Authenticatable
     public function isAdvisor(): bool
     {
         return $this->role === self::ROLE_ADVISOR || (bool) $this->is_advisor;
+    }
+
+    /**
+     * Staff and Excel-invited advisors may sign in when the hub is invite-only.
+     * General members (self-registered users) may not.
+     */
+    public function mayLoginOnInviteOnlyHub(): bool
+    {
+        return $this->isPowerAdmin()
+            || $this->isClientAdmin()
+            || $this->isApprover()
+            || $this->isAdvisor();
     }
 
     /**

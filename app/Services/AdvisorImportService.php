@@ -23,6 +23,12 @@ class AdvisorImportService
     {
         $rows = $this->parseFile($file);
 
+        if ($rows === []) {
+            throw new RuntimeException(
+                'No advisor rows were found. Make sure the first non-empty row contains headers like name, email, password.'
+            );
+        }
+
         $created = [];
         $updated = [];
         $skipped = [];
@@ -187,13 +193,17 @@ class AdvisorImportService
             return $this->parseCsv($path);
         }
 
-        if (in_array($extension, ['xlsx', 'xls'], true)) {
+        if ($extension === 'xlsx') {
+            return $this->parseXlsx($path);
+        }
+
+        if ($extension === 'xls') {
             throw new RuntimeException(
-                'Direct Excel (.xlsx/.xls) upload needs PHP zip/gd extensions. Please save the sheet as CSV (Excel → Save As → CSV) and upload that file.'
+                'Legacy Excel (.xls) is not supported yet. Please save the sheet as .xlsx or CSV and upload that file.'
             );
         }
 
-        throw new RuntimeException('Unsupported file type. Upload a CSV exported from Excel.');
+        throw new RuntimeException('Unsupported file type. Upload a CSV or Excel (.xlsx) file.');
     }
 
     /**
@@ -212,6 +222,10 @@ class AdvisorImportService
         try {
             while (($data = fgetcsv($handle)) !== false) {
                 if ($data === [null] || $data === false) {
+                    continue;
+                }
+
+                if ($header === null && $this->rowIsEmpty($data)) {
                     continue;
                 }
 
@@ -259,6 +273,80 @@ class AdvisorImportService
             // If headers were wrong keys, still try positional fallback for 2+ columns.
             if (count($rows) === 0) {
                 throw new RuntimeException('CSV must include an email column. Expected headers: name,email');
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @return list<array{name?: string, email?: string, password?: string}>
+     */
+    private function parseXlsx(string $path): array
+    {
+        $libraryPath = base_path('vendor/shuchkin/simplexlsx/src/SimpleXLSX.php');
+        if (! class_exists(\Shuchkin\SimpleXLSX::class)) {
+            if (! is_file($libraryPath)) {
+                throw new RuntimeException('Excel import library is missing. Please install the XLSX parser package.');
+            }
+            require_once $libraryPath;
+        }
+
+        $xlsx = \Shuchkin\SimpleXLSX::parse($path);
+        if (! $xlsx) {
+            $error = method_exists(\Shuchkin\SimpleXLSX::class, 'parseError')
+                ? \Shuchkin\SimpleXLSX::parseError()
+                : 'Unable to parse Excel file.';
+            throw new RuntimeException((string) $error);
+        }
+
+        $sheetRows = $xlsx->rows();
+        if ($sheetRows === []) {
+            throw new RuntimeException('Excel file is empty. Include a header row: name, email, password');
+        }
+
+        $headerRow = null;
+        while ($sheetRows !== []) {
+            $candidate = array_shift($sheetRows) ?: [];
+            if (! $this->rowIsEmpty($candidate)) {
+                $headerRow = $candidate;
+                break;
+            }
+        }
+
+        if ($headerRow === null) {
+            throw new RuntimeException('Excel file is empty. Include a header row: name, email, password');
+        }
+
+        $header = array_map(
+            fn ($h) => $this->normalizeHeader((string) $h),
+            $headerRow
+        );
+
+        $rows = [];
+        foreach ($sheetRows as $data) {
+            if ($this->rowIsEmpty($data)) {
+                continue;
+            }
+
+            $assoc = [];
+            foreach ($header as $i => $key) {
+                if ($key === null || $key === '') {
+                    continue;
+                }
+                $assoc[$key] = isset($data[$i]) ? trim((string) $data[$i]) : '';
+            }
+
+            $rows[] = [
+                'name' => $assoc['name'] ?? $assoc['full_name'] ?? $assoc['advisor_name'] ?? '',
+                'email' => $assoc['email'] ?? $assoc['email_address'] ?? '',
+                'password' => $assoc['password'] ?? $assoc['temporary_password'] ?? '',
+            ];
+        }
+
+        if (! in_array('email', $header, true) && ! in_array('email_address', $header, true)) {
+            if (count($rows) === 0) {
+                throw new RuntimeException('Excel sheet must include an email column. Expected headers: name, email');
             }
         }
 

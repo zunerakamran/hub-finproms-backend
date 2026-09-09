@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\AdvisorBillingService;
 use App\Services\AdvisorImportService;
 use App\Services\HubService;
 use Illuminate\Http\JsonResponse;
@@ -14,6 +15,7 @@ class AdvisorController extends Controller
 {
     public function __construct(
         private readonly AdvisorImportService $importService,
+        private readonly AdvisorBillingService $billingService,
         private readonly HubService $hubs
     ) {}
 
@@ -41,13 +43,45 @@ class AdvisorController extends Controller
         $file = $validated['file'];
         $extension = strtolower($file->getClientOriginalExtension() ?: '');
 
-        if (! in_array($extension, ['csv', 'txt'], true)) {
+        if (! in_array($extension, ['csv', 'txt', 'xlsx', 'xls'], true)) {
             return response()->json([
-                'message' => 'Please upload a CSV file exported from Excel (Save As → CSV).',
+                'message' => 'Please upload a CSV or Excel file (.xlsx).',
             ], 422);
         }
 
         $result = $this->importService->import($file);
+
+        $billing = null;
+        $quote = null;
+        try {
+            $billing = $this->billingService->createPendingAfterImport(
+                $request->user(),
+                $result['summary'] ?? []
+            );
+            $quote = $this->billingService->quotePayload($billing, $request->user());
+
+            if (! $billing && $this->billingService->billingEnabled()) {
+                $created = (int) ($result['summary']['created'] ?? 0);
+                $updated = (int) ($result['summary']['updated'] ?? 0);
+                if ($created === 0 && $updated === 0) {
+                    $quote['payment_required'] = false;
+                    $quote['message'] = 'No new advisors were imported, so no payment is due.';
+                } else {
+                    $quote['payment_required'] = true;
+                    $quote['error'] = $quote['error']
+                        ?? 'Billing quote could not be created. Check advisor pricing tiers.';
+                }
+            } elseif ($billing) {
+                $quote['payment_required'] = true;
+            }
+        } catch (\Throwable $e) {
+            $quote = [
+                'billing_enabled' => $this->billingService->billingEnabled(),
+                'payment_required' => $this->billingService->billingEnabled(),
+                'error' => $e->getMessage(),
+                'payment_methods' => [],
+            ];
+        }
 
         return response()->json([
             'message' => sprintf(
@@ -57,6 +91,8 @@ class AdvisorController extends Controller
                 $result['summary']['skipped']
             ),
             ...$result,
+            'billing' => $billing,
+            'quote' => $quote,
         ]);
     }
 

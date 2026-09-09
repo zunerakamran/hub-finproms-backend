@@ -15,6 +15,15 @@ class Setting extends Model
 
     public const KEY_PAYMENT_BANK_TRANSFER_AUTO_CONFIRM = 'payment_bank_transfer_auto_confirm';
 
+    /** Platform-wide Stripe credentials (fallback when hub has none). */
+    public const KEY_STRIPE_KEY = 'stripe_key';
+
+    public const KEY_STRIPE_SECRET = 'stripe_secret';
+
+    public const KEY_STRIPE_WEBHOOK_SECRET = 'stripe_webhook_secret';
+
+    public const KEY_STRIPE_CURRENCY = 'stripe_currency';
+
     protected $fillable = [
         'key',
         'value',

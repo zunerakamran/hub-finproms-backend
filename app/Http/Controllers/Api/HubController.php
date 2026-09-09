@@ -25,7 +25,15 @@ class HubController extends Controller
         $hub = $this->hubs->current();
         $payload = $hub->toPublicArray();
 
-        $user = $request->user('sanctum') ?? Auth::guard('sanctum')->user();
+        // Optional Sanctum auth on this public route (Bearer token).
+        $user = $request->user('sanctum');
+        if (! $user) {
+            $bearer = $request->bearerToken();
+            if ($bearer) {
+                $user = Auth::guard('sanctum')->user();
+            }
+        }
+
         if ($user) {
             $effective = [];
             foreach (array_keys($payload['checklist']) as $flag) {

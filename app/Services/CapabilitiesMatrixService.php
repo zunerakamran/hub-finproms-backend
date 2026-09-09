@@ -52,9 +52,22 @@ class CapabilitiesMatrixService
                 User::ROLE_MANAGER,
             ];
 
-            // Power Admin may also import advisors when enabled for the hub.
-            if ($key === 'advisor_excel_import') {
+            // Power Admin may also import advisors / view invoices / set pricing / renew day.
+            if (in_array($key, [
+                'advisor_excel_import',
+                'dashboard_view_advisor_invoices',
+                'dashboard_manage_advisor_pricing',
+                'dashboard_manage_advisor_renewal',
+            ], true)) {
                 $roles[] = User::ROLE_POWER_ADMIN;
+            }
+
+            // Auto-renew date is primarily Power Admin + FinProms admin.
+            if ($key === 'dashboard_manage_advisor_renewal') {
+                return [
+                    User::ROLE_POWER_ADMIN,
+                    User::ROLE_FINPROMS_ADMIN,
+                ];
             }
 
             return $roles;
@@ -334,12 +347,23 @@ class CapabilitiesMatrixService
                 return (bool) ($roleCaps[User::ROLE_POWER_ADMIN][$flag] ?? false);
             }
 
+            // Functionalities are hub-level for everyone (including power_admin).
+            if ($applicable === [] && Hub::isFunctionalityKey($flag)) {
+                return $hub->can($flag);
+            }
+
             return false;
         }
 
-        if ($applicable === [] || ! in_array($role, $applicable, true)) {
-            // Fall back to hub checklist for unknown combinations
+        // Functionalities / unknown non-role keys → hub checklist.
+        if ($applicable === []) {
             return $hub->can($flag);
+        }
+
+        // Capability applies to other roles only — do NOT fall back to the
+        // hub-wide OR checklist (that leaked unchecked client_admin cells).
+        if (! in_array($role, $applicable, true)) {
+            return false;
         }
 
         $roleCaps = $this->resolvedRoleCapabilities($hub);

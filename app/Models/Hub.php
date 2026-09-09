@@ -113,6 +113,13 @@ class Hub extends Model
             'default_shared' => false,
             'default_white_label' => false,
         ],
+        'advisor_subscriber_billing' => [
+            'label' => 'Advisor subscriber billing (rate × advisors)',
+            'description' => 'After Excel advisor import, bill rate × advisor count. Stripe auto-renews monthly.',
+            'group' => self::GROUP_BEHAVIOUR,
+            'default_shared' => false,
+            'default_white_label' => true,
+        ],
 
         // --- Member capabilities ---
         'member_browse_catalog' => [
@@ -152,7 +159,7 @@ class Hub extends Model
         ],
         'member_view_invoices' => [
             'label' => 'View invoices',
-            'description' => 'Members can open invoices.',
+            'description' => 'Members can open their personal invoices.',
             'group' => self::GROUP_MEMBER,
             'default_shared' => true,
             'default_white_label' => true,
@@ -222,6 +229,27 @@ class Hub extends Model
             'default_shared' => false,
             'default_white_label' => true,
         ],
+        'dashboard_view_advisor_invoices' => [
+            'label' => 'View advisor billing invoices',
+            'description' => 'See invoices for private hub advisor subscriber billing (rate × advisors).',
+            'group' => self::GROUP_DASHBOARD,
+            'default_shared' => false,
+            'default_white_label' => true,
+        ],
+        'dashboard_manage_advisor_pricing' => [
+            'label' => 'Set advisor billing rates / quotas',
+            'description' => 'Configure pricing tiers (rate per advisor) used for private hub billing (rate × advisors).',
+            'group' => self::GROUP_DASHBOARD,
+            'default_shared' => false,
+            'default_white_label' => true,
+        ],
+        'dashboard_manage_advisor_renewal' => [
+            'label' => 'Set advisor billing auto-renew date',
+            'description' => 'Choose the monthly auto-renew day for private hub advisor billing (Power Admin / FinProms admin).',
+            'group' => self::GROUP_DASHBOARD,
+            'default_shared' => false,
+            'default_white_label' => true,
+        ],
         'dashboard_ai_content' => [
             'label' => 'AI content generation',
             'description' => 'Hub admin (typically FinProms admin on shared) can generate AI posts (future).',
@@ -248,6 +276,17 @@ class Hub extends Model
         'logo_url',
         'checklist',
         'role_capabilities',
+        'advisor_billing_renew_day',
+        'advisor_stripe_subscription_id',
+        'stripe_key',
+        'stripe_secret',
+        'stripe_webhook_secret',
+        'stripe_currency',
+    ];
+
+    protected $hidden = [
+        'stripe_secret',
+        'stripe_webhook_secret',
     ];
 
     protected function casts(): array
@@ -256,6 +295,36 @@ class Hub extends Model
             'is_active' => 'boolean',
             'checklist' => 'array',
             'role_capabilities' => 'array',
+            'advisor_billing_renew_day' => 'integer',
+            'stripe_secret' => 'encrypted',
+            'stripe_webhook_secret' => 'encrypted',
+        ];
+    }
+
+    public function advisorBillingRenewDay(): int
+    {
+        $day = (int) ($this->advisor_billing_renew_day ?: 1);
+
+        return max(1, min(28, $day));
+    }
+
+    public function hasStripeSecret(): bool
+    {
+        return filled($this->stripe_secret);
+    }
+
+    /**
+     * Safe Stripe config for Power Admin UI (secrets masked).
+     *
+     * @return array<string, mixed>
+     */
+    public function stripeConfigForAdmin(): array
+    {
+        return [
+            'key' => $this->stripe_key,
+            'secret_set' => filled($this->stripe_secret),
+            'webhook_secret_set' => filled($this->stripe_webhook_secret),
+            'currency' => $this->stripe_currency ?: null,
         ];
     }
 
@@ -352,6 +421,10 @@ class Hub extends Model
      */
     public function toPublicArray(): array
     {
+        $checklist = $this->resolvedChecklist();
+        $registrationEnabled = (bool) ($checklist['public_subscribe'] ?? false)
+            && ! (bool) ($checklist['private_invite_only'] ?? false);
+
         return [
             'id' => $this->id,
             'name' => $this->name,
@@ -362,7 +435,12 @@ class Hub extends Model
                 'secondary_color' => $this->secondary_color,
                 'logo_url' => $this->logo_url,
             ],
-            'checklist' => $this->resolvedChecklist(),
+            'checklist' => $checklist,
+            // Frontend should hide Sign up when registration_enabled is false.
+            'auth' => [
+                'registration_enabled' => $registrationEnabled,
+                'invite_only' => (bool) ($checklist['private_invite_only'] ?? false),
+            ],
         ];
     }
 
@@ -382,6 +460,7 @@ class Hub extends Model
                 'secondary_color' => $this->secondary_color,
                 'logo_url' => $this->logo_url,
             ],
+            'stripe' => $this->stripeConfigForAdmin(),
             'checklist' => $this->checklistForAdmin(),
             'checklist_groups' => array_intersect_key(
                 self::CHECKLIST_GROUPS,

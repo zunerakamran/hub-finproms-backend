@@ -18,6 +18,7 @@ class DatabaseSeeder extends Seeder
             ContentTypeSeeder::class,
             SettingsSeeder::class,
             HubSeeder::class,
+            AdvisorPricingSeeder::class,
         ]);
     }
 }

@@ -21,9 +21,11 @@ class AuthController extends Controller
 
     public function register(Request $request): JsonResponse
     {
-        if (! $this->hubs->can('public_subscribe')) {
+        if ($this->hubs->can('private_invite_only') || ! $this->hubs->can('public_subscribe')) {
             return response()->json([
                 'message' => 'Public registration is disabled for this hub. Access is invite-only.',
+                'registration_enabled' => false,
+                'invite_only' => true,
             ], 403);
         }
 
@@ -65,6 +67,17 @@ class AuthController extends Controller
 
         /** @var User $user */
         $user = Auth::user();
+
+        if ($this->hubs->can('private_invite_only') && ! $user->mayLoginOnInviteOnlyHub()) {
+            Auth::logout();
+
+            return response()->json([
+                'message' => 'This hub is invite-only. Only advisors imported from the invite list can sign in.',
+                'registration_enabled' => false,
+                'invite_only' => true,
+            ], 403);
+        }
+
         $token = $user->createToken('auth_token')->plainTextToken;
 
         return response()->json([

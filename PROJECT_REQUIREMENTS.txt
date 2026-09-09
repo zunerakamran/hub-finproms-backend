@@ -315,9 +315,17 @@ STEP 1 — Shared hub core
 [x] Frontend: power_admin hubs + checklist UI
 [x] White-labelled private advisor import (Excel/CSV)
 [x] Unlimited credits for white-labelled advisors (role/flag per user; checklist wired)
+[x] Subscriber-count pricing tiers (rate × advisors; managed by Power Admin)
+[x] Post-import advisor billing + Stripe auto-renew / bank transfer + invoices
+[x] Capability: dashboard_view_advisor_invoices (role matrix)
+[x] Capability: dashboard_manage_advisor_pricing — who can set billing rates/quotas
+[x] Capability: dashboard_manage_advisor_renewal — auto-renew day (Power Admin / FinProms admin)
+[x] Client admin saved card + charge on each advisor import + invoice + Stripe auto-renew
+[x] Client admin Payment card dashboard (card entrance; not a capabilities-matrix flag)
+[x] Stripe import checkout charges card on file when client admin already saved a card
 [x] Hub Functionalities checklist (section 5.1) — Power Admin Functionalities screen only
 [x] User capabilities matrix (section 5.2) — roles × member/dashboard caps (no Functionalities duplication)
-[x] Wire hub-admin dashboard menus/actions to capability checklist
+[x] Wire hub-admin dashboard menus/actions to capability checklist (per-role; no hub-wide OR leak)
 [x] Wire member nav/actions to member capability checklist
 [x] Roles documented: power_admin, finproms_admin, client_admin, manager,
     approver, advisor, user
@@ -327,7 +335,6 @@ STEP 1 — Shared hub core
 [x] Split UI: Functionalities vs Capabilities (no overlapping checklist items)
 [ ] Approver / manager dedicated UIs (compliance & ops flows)
 [ ] Power Admin user-role assignment UI (pa_manage_users_roles)
-[ ] Subscriber-count pricing tiers (managed by shared hub)
 [ ] Push/select posts from shared hub to white-labelled hubs
 [ ] AI post/reel generation by FinProms admin (later)
 [ ] In-app post editing for buyers (later)

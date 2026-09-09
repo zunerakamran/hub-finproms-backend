@@ -7,14 +7,14 @@ use App\Models\User;
 use App\Models\UserSubscription;
 use Illuminate\Support\Facades\DB;
 use Stripe\Checkout\Session;
-use Stripe\Stripe;
 
 class StripeSubscriptionService
 {
     private bool $apiKeySet = false;
 
     public function __construct(
-        private readonly InvoiceService $invoices
+        private readonly InvoiceService $invoices,
+        private readonly PaymentSettingsService $paymentSettings
     ) {}
 
     private function ensureApiKey(): void
@@ -23,7 +23,7 @@ class StripeSubscriptionService
             return;
         }
 
-        Stripe::setApiKey(config('services.stripe.secret'));
+        $this->paymentSettings->applyStripeApiKey();
         $this->apiKeySet = true;
     }
 
@@ -38,7 +38,7 @@ class StripeSubscriptionService
             'customer_email' => $user->email,
             'line_items' => [[
                 'price_data' => [
-                    'currency' => config('services.stripe.currency', 'usd'),
+                    'currency' => $this->paymentSettings->stripeCurrency(),
                     'product_data' => [
                         'name' => $plan->name.' Plan',
                         'description' => $plan->description ?: ($plan->credits.' credits'),

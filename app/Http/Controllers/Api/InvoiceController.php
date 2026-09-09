@@ -25,13 +25,27 @@ class InvoiceController extends Controller
 
     public function show(Request $request, Invoice $invoice): JsonResponse
     {
-        if ($invoice->user_id !== $request->user()->id && ! $request->user()->isClientAdmin()) {
+        $user = $request->user();
+        $hub = app(\App\Services\HubService::class)->current();
+        $matrix = app(\App\Services\CapabilitiesMatrixService::class);
+
+        $isOwner = $invoice->user_id === $user->id;
+        $canMemberInvoices = $matrix->roleCan($hub, (string) $user->role, 'member_view_invoices');
+        $canAdvisorInvoices = $matrix->roleCan($hub, (string) $user->role, 'dashboard_view_advisor_invoices');
+
+        // Staff must have the matching invoice capability — role alone is not enough.
+        $allowed = $invoice->type === Invoice::TYPE_ADVISOR_BILLING
+            ? ($isOwner || $canAdvisorInvoices)
+            : (($isOwner && $canMemberInvoices) || ($user->isClientAdmin() && $canMemberInvoices));
+
+        if (! $allowed) {
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
 
         $invoice->load([
             'subscription.plan',
             'postPurchase.post',
+            'advisorBilling',
             'user:id,name,email',
         ]);
 
