@@ -106,17 +106,24 @@ ROLES (canonical list):
      - Reviews/approves content (ties to compliance check flow, section 3.3).
      - Not a full hub admin by default; approval UI to be built later.
 
-  6) ADVISOR (advisor) — white-label subscriber
-     - Invited advisor (Excel/CSV import). Treated as subscribed with unlimited
-       credits when hub behaviour allows. Uses member UI.
+  6) ADVISOR (advisor) — subscriber (public plan OR white-label import)
+     - Public hub: when a member (role=user) successfully pays for a
+       subscription plan (Stripe or bank transfer), role is upgraded to advisor.
+       Paid credits only — does NOT set is_advisor / has_unlimited_credits.
+     - White-label: invited advisor (Excel/CSV import). Sets role=advisor plus
+       is_advisor and has_unlimited_credits when hub behaviour allows.
+     - Uses member UI.
 
-  7) USER / MEMBER (user) — general member
+  7) USER / MEMBER (user) — general member (pre-subscribe)
      - Browse / subscribe / buy / download as member capability checklist allows.
+     - After a paid public-hub plan subscription, role becomes advisor (see above).
 
 Notes:
 - Former "admin" → client_admin. Shared hub operator should use finproms_admin
   going forward (existing client_admin on shared may be migrated).
+- Seeded shared-hub FinProms admin: finproms@hubfinproms.com (role=finproms_admin).
 - Advisor import sets role=advisor (and is_advisor / unlimited flags).
+- Public plan subscribe upgrades role user → advisor (role only; no Excel flags).
 - Role alone does not unlock every screen — Power Admin checklists still gate
   member UI, hub-admin UI, and power_admin UI.
 
@@ -358,6 +365,8 @@ STEP 1 — Shared hub core
 [x] Separate client_admin dashboard (manage everything)
 [x] client_admin / power_admin shells separated from member app
 [x] Subscriptions + credits (basic exists)
+[x] Public hub plan subscribe upgrades role user → advisor
+[x] Seeded finproms_admin user (finproms@hubfinproms.com)
 [x] Credit spend + download (basic exists)
 [x] Non-subscriber one-off purchase (1 credit = £1)
 [x] power_admin can manage payment methods (Stripe / bank transfer)
