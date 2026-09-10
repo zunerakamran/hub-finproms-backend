@@ -50,6 +50,7 @@ Route::middleware('hub_can:member_browse_catalog')->group(function () {
 
 Route::middleware('hub_can:member_view_plans')->group(function () {
     Route::get('/subscription-plans', [SubscriptionController::class, 'plans']);
+    Route::get('/subscription-plans/{plan}', [SubscriptionController::class, 'showPlan']);
 });
 
 Route::middleware('auth:sanctum')->group(function () {

@@ -38,6 +38,18 @@ class SubscriptionController extends Controller
         ]);
     }
 
+    public function showPlan(SubscriptionPlan $plan): JsonResponse
+    {
+        if (! $plan->is_active) {
+            return response()->json(['message' => 'Subscription plan not found.'], 404);
+        }
+
+        return response()->json([
+            'plan' => $plan,
+            'payment_methods' => $this->availablePaymentMethods(),
+        ]);
+    }
+
     public function adminPlans(): JsonResponse
     {
         $plans = SubscriptionPlan::query()
