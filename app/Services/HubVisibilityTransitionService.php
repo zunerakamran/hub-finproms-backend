@@ -138,7 +138,7 @@ class HubVisibilityTransitionService
 
             foreach ($advisors as $advisor) {
                 $advisor->is_suspended = false;
-                $advisor->role = User::ROLE_ADVISOR;
+                $advisor->role = User::ROLE_USER;
                 $advisor->has_unlimited_credits = true;
                 $advisor->save();
 

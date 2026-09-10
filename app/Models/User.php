@@ -164,19 +164,6 @@ class User extends Authenticatable
     }
 
     /**
-     * After a paid public-hub plan subscription, promote a general member to advisor.
-     * Does not set is_advisor / has_unlimited_credits (those are Excel-import only).
-     */
-    public function promoteToAdvisorAfterPlanSubscribe(): void
-    {
-        if ($this->role !== self::ROLE_USER) {
-            return;
-        }
-
-        $this->forceFill(['role' => self::ROLE_ADVISOR])->save();
-    }
-
-    /**
      * Staff and Excel-invited advisors may sign in when the hub is invite-only.
      * General members (self-registered users) may not. Suspended / discontinued advisors may not.
      */

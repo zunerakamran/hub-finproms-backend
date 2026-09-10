@@ -12,6 +12,7 @@ use App\Services\PaymentSettingsService;
 use App\Services\StripeSubscriptionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Stripe\Exception\ApiErrorException;
 
 class SubscriptionController extends Controller
@@ -52,6 +53,10 @@ class SubscriptionController extends Controller
     {
         $validated = $this->validatePlan($request);
 
+        if ($path = $this->storePlanImage($request)) {
+            $validated['image_path'] = $path;
+        }
+
         $plan = SubscriptionPlan::create($validated);
 
         return response()->json([
@@ -63,6 +68,13 @@ class SubscriptionController extends Controller
     public function updatePlan(Request $request, SubscriptionPlan $plan): JsonResponse
     {
         $validated = $this->validatePlan($request, updating: true);
+
+        if ($request->hasFile('image')) {
+            if ($plan->image_path) {
+                Storage::disk('public')->delete($plan->image_path);
+            }
+            $validated['image_path'] = $this->storePlanImage($request);
+        }
 
         $plan->fill($validated);
         $plan->save();
@@ -95,14 +107,47 @@ class SubscriptionController extends Controller
     {
         $required = $updating ? 'sometimes' : 'required';
 
+        foreach (['features', 'benefits'] as $listField) {
+            if (! $request->has($listField)) {
+                continue;
+            }
+
+            $value = $request->input($listField);
+            if (is_string($value)) {
+                $decoded = json_decode($value, true);
+                if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                    $request->merge([$listField => $decoded]);
+                } else {
+                    $lines = array_values(array_filter(array_map(
+                        static fn (string $line): string => trim($line),
+                        preg_split('/\r\n|\r|\n/', $value) ?: []
+                    ), static fn (string $line): bool => $line !== ''));
+                    $request->merge([$listField => $lines]);
+                }
+            }
+        }
+
         $validated = $request->validate([
             'name' => [$required, 'string', 'max:255'],
             'description' => ['nullable', 'string'],
+            'overview' => ['nullable', 'string'],
+            'features' => ['nullable', 'array'],
+            'features.*' => ['string', 'max:500'],
+            'benefits' => ['nullable', 'array'],
+            'benefits.*' => ['string', 'max:500'],
             'price' => [$required, 'numeric', 'min:0.01'],
             'credits' => [$required, 'integer', 'min:1'],
             'duration_days' => [$required, 'integer', 'min:1'],
             'is_active' => ['sometimes', 'boolean'],
+            'image' => [
+                $updating ? 'sometimes' : 'nullable',
+                'image',
+                'max:5120',
+                'mimes:jpg,jpeg,png,gif,webp',
+            ],
         ]);
+
+        unset($validated['image']);
 
         if ($request->has('is_active')) {
             $validated['is_active'] = filter_var($request->input('is_active'), FILTER_VALIDATE_BOOLEAN);
@@ -111,6 +156,15 @@ class SubscriptionController extends Controller
         }
 
         return $validated;
+    }
+
+    private function storePlanImage(Request $request): ?string
+    {
+        if (! $request->hasFile('image')) {
+            return null;
+        }
+
+        return $request->file('image')->store('subscription-plans', 'public');
     }
 
     public function checkout(Request $request, SubscriptionPlan $plan): JsonResponse

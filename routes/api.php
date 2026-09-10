@@ -102,6 +102,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:dashboard_manage_plans')->group(function () {
             Route::get('/subscription-plans', [SubscriptionController::class, 'adminPlans']);
             Route::post('/subscription-plans', [SubscriptionController::class, 'storePlan']);
+            Route::post('/subscription-plans/{plan}', [SubscriptionController::class, 'updatePlan']);
             Route::put('/subscription-plans/{plan}', [SubscriptionController::class, 'updatePlan']);
             Route::delete('/subscription-plans/{plan}', [SubscriptionController::class, 'destroyPlan']);
         });
@@ -233,6 +234,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:dashboard_manage_plans')->group(function () {
             Route::get('/subscription-plans', [SubscriptionController::class, 'adminPlans']);
             Route::post('/subscription-plans', [SubscriptionController::class, 'storePlan']);
+            Route::post('/subscription-plans/{plan}', [SubscriptionController::class, 'updatePlan']);
             Route::put('/subscription-plans/{plan}', [SubscriptionController::class, 'updatePlan']);
             Route::delete('/subscription-plans/{plan}', [SubscriptionController::class, 'destroyPlan']);
         });

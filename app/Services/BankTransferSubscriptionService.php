@@ -106,7 +106,6 @@ class BankTransferSubscriptionService
             $user = User::query()->whereKey($locked->user_id)->lockForUpdate()->first();
             if ($user) {
                 $user->increment('credits', $locked->credits_granted);
-                $user->promoteToAdvisorAfterPlanSubscribe();
             }
 
             $locked = $locked->fresh()->load('plan', 'user');

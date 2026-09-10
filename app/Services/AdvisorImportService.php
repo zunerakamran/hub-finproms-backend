@@ -74,7 +74,7 @@ class AdvisorImportService
 
                         $user->fill([
                             'name' => $name,
-                            'role' => User::ROLE_ADVISOR,
+                            'role' => User::ROLE_USER,
                             'is_advisor' => true,
                             'has_unlimited_credits' => true,
                             'is_suspended' => false,
@@ -99,7 +99,7 @@ class AdvisorImportService
                         'name' => $name,
                         'email' => $email,
                         'password' => $password,
-                        'role' => User::ROLE_ADVISOR,
+                        'role' => User::ROLE_USER,
                         'credits' => 0,
                         'is_advisor' => true,
                         'has_unlimited_credits' => true,

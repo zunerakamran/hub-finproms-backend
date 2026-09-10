@@ -140,7 +140,6 @@ class StripeSubscriptionService
             $user = User::query()->whereKey($subscription->user_id)->lockForUpdate()->first();
             if ($user) {
                 $user->increment('credits', $subscription->credits_granted);
-                $user->promoteToAdvisorAfterPlanSubscribe();
             }
 
             $subscription = $subscription->fresh()->load('plan', 'user');
