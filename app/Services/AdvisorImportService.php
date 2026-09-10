@@ -31,6 +31,7 @@ class AdvisorImportService
 
         $created = [];
         $updated = [];
+        $reactivated = [];
         $skipped = [];
 
         foreach ($rows as $index => $row) {
@@ -69,18 +70,22 @@ class AdvisorImportService
                             ];
                         }
 
+                        $wasInactive = $user->isDiscontinued() || $user->isSuspended();
+
                         $user->fill([
                             'name' => $name,
                             'role' => User::ROLE_ADVISOR,
                             'is_advisor' => true,
                             'has_unlimited_credits' => true,
                             'is_suspended' => false,
+                            'is_discontinued' => false,
+                            'discontinued_at' => null,
                         ]);
                         $user->save();
                         $this->ensureAdvisorSubscription($user);
 
                         return [
-                            'status' => 'updated',
+                            'status' => $wasInactive ? 'reactivated' : 'updated',
                             'user' => $user,
                         ];
                     }
@@ -99,6 +104,7 @@ class AdvisorImportService
                         'is_advisor' => true,
                         'has_unlimited_credits' => true,
                         'is_suspended' => false,
+                        'is_discontinued' => false,
                     ]);
 
                     $this->ensureAdvisorSubscription($user);
@@ -133,6 +139,11 @@ class AdvisorImportService
                     'email' => $result['user']->email,
                     'temporary_password' => $result['temporary_password'],
                 ];
+            } elseif ($result['status'] === 'reactivated') {
+                $reactivated[] = [
+                    'name' => $result['user']->name,
+                    'email' => $result['user']->email,
+                ];
             } else {
                 $updated[] = [
                     'name' => $result['user']->name,
@@ -144,12 +155,15 @@ class AdvisorImportService
         return [
             'created' => $created,
             'updated' => $updated,
+            'reactivated' => $reactivated,
             'skipped' => $skipped,
             'summary' => [
                 'total_rows' => count($rows),
                 'created' => count($created),
                 'updated' => count($updated),
+                'reactivated' => count($reactivated),
                 'skipped' => count($skipped),
+                'billable_batch' => count($created) + count($reactivated),
             ],
         ];
     }
@@ -157,7 +171,7 @@ class AdvisorImportService
     public function ensureAdvisorSubscription(User $user): UserSubscription
     {
         $existing = $user->subscriptions()
-            ->whereIn('status', ['active', 'suspended'])
+            ->whereIn('status', ['active', 'suspended', 'discontinued'])
             ->where('payment_method', 'advisor_import')
             ->orderByDesc('id')
             ->first();
@@ -183,6 +197,41 @@ class AdvisorImportService
             'starts_at' => now(),
             'ends_at' => null,
         ]);
+    }
+
+    /**
+     * Permanently end an imported advisor (WP FPSUB_Subscribers::end equivalent).
+     * Blocks login/access immediately. Does not delete the user.
+     * Re-importing the same email can restore them.
+     */
+    public function discontinue(User $advisor): User
+    {
+        if (! $advisor->isAdvisor()) {
+            throw new RuntimeException('Only imported advisors can be discontinued.');
+        }
+
+        if ($advisor->isDiscontinued()) {
+            return $advisor;
+        }
+
+        return DB::transaction(function () use ($advisor) {
+            $advisor->is_discontinued = true;
+            $advisor->discontinued_at = now();
+            $advisor->has_unlimited_credits = false;
+            $advisor->save();
+            $advisor->tokens()->delete();
+
+            UserSubscription::query()
+                ->where('user_id', $advisor->id)
+                ->where('payment_method', 'advisor_import')
+                ->whereIn('status', ['active', 'suspended'])
+                ->update([
+                    'status' => 'discontinued',
+                    'ends_at' => now(),
+                ]);
+
+            return $advisor->fresh();
+        });
     }
 
     /**

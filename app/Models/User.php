@@ -74,6 +74,8 @@ class User extends Authenticatable
         'is_advisor',
         'has_unlimited_credits',
         'is_suspended',
+        'is_discontinued',
+        'discontinued_at',
         'stripe_customer_id',
         'stripe_payment_method_id',
     ];
@@ -97,12 +99,27 @@ class User extends Authenticatable
             'is_advisor' => 'boolean',
             'has_unlimited_credits' => 'boolean',
             'is_suspended' => 'boolean',
+            'is_discontinued' => 'boolean',
+            'discontinued_at' => 'datetime',
         ];
     }
 
     public function isSuspended(): bool
     {
         return (bool) $this->is_suspended;
+    }
+
+    public function isDiscontinued(): bool
+    {
+        return (bool) $this->is_discontinued;
+    }
+
+    /**
+     * Active Excel advisors (not hub-suspended, not permanently discontinued).
+     */
+    public function isActiveAdvisor(): bool
+    {
+        return $this->isAdvisor() && ! $this->isSuspended() && ! $this->isDiscontinued();
     }
 
     public function getRoleLabelAttribute(): string
@@ -148,11 +165,11 @@ class User extends Authenticatable
 
     /**
      * Staff and Excel-invited advisors may sign in when the hub is invite-only.
-     * General members (self-registered users) may not. Suspended advisors may not.
+     * General members (self-registered users) may not. Suspended / discontinued advisors may not.
      */
     public function mayLoginOnInviteOnlyHub(): bool
     {
-        if ($this->isSuspended()) {
+        if ($this->isSuspended() || $this->isDiscontinued()) {
             return false;
         }
 
@@ -172,11 +189,11 @@ class User extends Authenticatable
 
     /**
      * Per-user unlimited credits (white-label advisors), optionally combined with hub checklist.
-     * Suspended advisors (e.g. after private→public) never receive unlimited credits.
+     * Suspended / discontinued advisors never receive unlimited credits.
      */
     public function hasUnlimitedCredits(bool $hubAllowsUnlimited = true): bool
     {
-        if ($this->isSuspended()) {
+        if ($this->isSuspended() || $this->isDiscontinued()) {
             return false;
         }
 
@@ -214,7 +231,7 @@ class User extends Authenticatable
 
     public function hasActiveSubscription(): bool
     {
-        if ($this->isSuspended()) {
+        if ($this->isSuspended() || $this->isDiscontinued()) {
             return false;
         }
 

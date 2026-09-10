@@ -257,7 +257,8 @@ class AdvisorBillingService
     }
 
     /**
-     * Create a pending billing quote after advisor import (rate × advisor count).
+     * Create a pending billing quote after advisor import.
+     * WP-style: rate from TOTAL active advisors, charge only this import batch.
      *
      * @param  array<string, mixed>  $importSummary
      */
@@ -270,22 +271,17 @@ class AdvisorBillingService
         }
 
         $created = (int) ($importSummary['created'] ?? 0);
-        $updated = (int) ($importSummary['updated'] ?? 0);
-        $advisorCount = $this->pricing->currentAdvisorCount();
+        $reactivated = (int) ($importSummary['reactivated'] ?? 0);
+        $batchCount = (int) ($importSummary['billable_batch'] ?? ($created + $reactivated));
+        $totalAdvisors = $this->pricing->currentAdvisorCount();
 
-        // Still quote when advisors exist on the hub (e.g. re-import / update).
-        if ($advisorCount < 1) {
-            return null;
-        }
-
-        // Bill whenever this import added/updated advisors, or headcount changed.
-        if ($created === 0 && $updated === 0) {
+        if ($batchCount < 1 || $totalAdvisors < 1) {
             return null;
         }
 
         $this->pricing->seedDefaultsIfEmpty();
         $this->pricing->assertHasTiers();
-        $quote = $this->pricing->quote($advisorCount);
+        $quote = $this->pricing->quoteBatch($totalAdvisors, $batchCount);
 
         if ($quote['amount'] <= 0) {
             throw new RuntimeException(
@@ -305,7 +301,7 @@ class AdvisorBillingService
         return HubAdvisorBilling::query()->create([
             'hub_id' => $hub->id,
             'billed_user_id' => $payer->id,
-            'advisor_count' => $quote['advisor_count'],
+            'advisor_count' => $quote['batch_count'],
             'rate_per_advisor' => $quote['rate_per_advisor'],
             'amount' => $quote['amount'],
             'currency' => $quote['currency'],
@@ -317,7 +313,10 @@ class AdvisorBillingService
             'meta' => [
                 'import_summary' => $importSummary,
                 'tier' => $quote['tier'],
-                'formula' => 'rate_per_advisor × advisor_count',
+                'formula' => $quote['formula'],
+                'batch_count' => $quote['batch_count'],
+                'total_advisors' => $quote['total_advisors'],
+                'renewal_quantity' => $quote['total_advisors'],
                 'payer_role' => $payer->role,
                 'renew_day' => $hub->advisorBillingRenewDay(),
             ],
@@ -424,7 +423,8 @@ class AdvisorBillingService
     }
 
     /**
-     * Charge the client admin's saved card and keep / update the auto-renew subscription.
+     * Charge the client admin's saved card for this import batch only,
+     * then sync the Stripe subscription to full headcount for one monthly renew invoice.
      *
      * @return array<string, mixed>
      */
@@ -439,24 +439,6 @@ class AdvisorBillingService
             'billed_user_id' => $payer->id,
         ]);
 
-        // Prefer updating an existing hub subscription quantity; otherwise create one.
-        if (filled($hub->advisor_stripe_subscription_id)) {
-            try {
-                $this->updateStripeSubscriptionQuantity($hub, $billing, $payer);
-                $billing = $this->markPaid($billing->fresh());
-
-                return [
-                    'payment_method' => 'saved_card',
-                    'auto_renew' => true,
-                    'charged_saved_card' => true,
-                    'billing' => $billing,
-                    'invoice' => $billing->invoice,
-                ];
-            } catch (\Throwable $e) {
-                // Fall through to PaymentIntent charge + recreate subscription.
-            }
-        }
-
         $intent = PaymentIntent::create([
             'amount' => (int) round(((float) $billing->amount) * 100),
             'currency' => $billing->currency ?: $this->paymentSettings->stripeCurrency(),
@@ -465,14 +447,17 @@ class AdvisorBillingService
             'off_session' => true,
             'confirm' => true,
             'description' => sprintf(
-                'Advisor billing: %d × %s',
+                'Advisor import batch: %d × %s (total seats %d)',
                 $billing->advisor_count,
-                number_format((float) $billing->rate_per_advisor, 2)
+                number_format((float) $billing->rate_per_advisor, 2),
+                (int) ($billing->meta['total_advisors'] ?? $this->pricing->currentAdvisorCount())
             ),
             'metadata' => [
-                'type' => 'advisor_billing',
+                'type' => 'advisor_billing_batch',
                 'hub_advisor_billing_id' => (string) $billing->id,
                 'hub_id' => (string) $billing->hub_id,
+                'batch_count' => (string) $billing->advisor_count,
+                'total_advisors' => (string) ($billing->meta['total_advisors'] ?? ''),
             ],
         ]);
 
@@ -481,12 +466,12 @@ class AdvisorBillingService
         }
 
         try {
-            $subscription = $this->createOrReplaceSubscription($hub, $billing, $payer);
+            $subscription = $this->syncAutoRenewSubscription($hub, $billing, $payer);
             $billing->stripe_subscription_id = $subscription->id;
             $hub->advisor_stripe_subscription_id = $subscription->id;
             $hub->save();
         } catch (\Throwable $e) {
-            // Invoice still issued for the successful charge even if subscription recreate fails.
+            // Invoice still issued for the successful batch charge even if subscription sync fails.
         }
 
         $billing = $this->markPaid($billing->fresh());
@@ -500,37 +485,26 @@ class AdvisorBillingService
         ];
     }
 
-    private function updateStripeSubscriptionQuantity(Hub $hub, HubAdvisorBilling $billing, User $payer): void
+    /**
+     * Keep one Stripe subscription for the hub: current tier rate × total active advisors.
+     * Monthly renew creates a single invoice for the full headcount.
+     * Batch import charges are collected separately (PaymentIntent / Checkout payment).
+     */
+    private function syncAutoRenewSubscription(Hub $hub, HubAdvisorBilling $billing, User $payer): Subscription
     {
-        $this->ensureApiKey();
+        $totalQty = max(1, (int) ($billing->meta['renewal_quantity']
+            ?? $billing->meta['total_advisors']
+            ?? $this->pricing->currentAdvisorCount()));
 
-        $subscription = Subscription::retrieve($hub->advisor_stripe_subscription_id);
-        $itemId = $subscription->items->data[0]->id ?? null;
-        if (! $itemId) {
-            throw new RuntimeException('Stripe subscription has no items.');
-        }
-
-        // Quantity update invoices the prorated difference for new advisors.
-        Subscription::update($hub->advisor_stripe_subscription_id, [
-            'items' => [[
-                'id' => $itemId,
-                'quantity' => max(1, (int) $billing->advisor_count),
-            ]],
-            'proration_behavior' => 'always_invoice',
-            'default_payment_method' => $payer->stripe_payment_method_id,
-            'metadata' => [
-                'type' => 'advisor_billing',
-                'hub_id' => (string) $hub->id,
-                'hub_advisor_billing_id' => (string) $billing->id,
-            ],
-        ]);
-
-        $billing->stripe_subscription_id = $hub->advisor_stripe_subscription_id;
-        $billing->save();
+        return $this->createOrReplaceSubscription($hub, $billing, $payer, $totalQty);
     }
 
-    private function createOrReplaceSubscription(Hub $hub, HubAdvisorBilling $billing, User $payer): Subscription
-    {
+    private function createOrReplaceSubscription(
+        Hub $hub,
+        HubAdvisorBilling $billing,
+        User $payer,
+        ?int $renewalQuantity = null
+    ): Subscription {
         $this->ensureApiKey();
 
         if (filled($hub->advisor_stripe_subscription_id)) {
@@ -541,6 +515,9 @@ class AdvisorBillingService
                 // ignore — create a fresh subscription below
             }
         }
+
+        $quantity = max(1, $renewalQuantity
+            ?? (int) ($billing->meta['renewal_quantity'] ?? $billing->meta['total_advisors'] ?? $billing->advisor_count));
 
         $anchor = $this->nextRenewalAt($hub)->timestamp;
 
@@ -556,19 +533,25 @@ class AdvisorBillingService
                     'unit_amount' => (int) round(((float) $billing->rate_per_advisor) * 100),
                     'recurring' => ['interval' => 'month'],
                 ],
-                'quantity' => max(1, (int) $billing->advisor_count),
+                'quantity' => $quantity,
             ]],
+            'billing_cycle_anchor' => $anchor,
+            'proration_behavior' => 'none',
             'metadata' => [
                 'type' => 'advisor_billing',
                 'hub_id' => (string) $hub->id,
                 'hub_advisor_billing_id' => (string) $billing->id,
                 'renew_day' => (string) $hub->advisorBillingRenewDay(),
                 'next_renewal_hint' => (string) $anchor,
+                'renewal_quantity' => (string) $quantity,
             ],
         ]);
     }
 
     /**
+     * Stripe Checkout (payment mode) charges this import batch only, saves the card,
+     * then we attach a monthly subscription for the full headcount.
+     *
      * @return array<string, mixed>
      */
     private function checkoutStripe(HubAdvisorBilling $billing, User $payer): array
@@ -576,43 +559,43 @@ class AdvisorBillingService
         $this->ensureApiKey();
         $hub = $billing->hub ?? Hub::query()->findOrFail($billing->hub_id);
         $frontendUrl = rtrim(config('app.frontend_url', env('FRONTEND_URL', 'http://localhost:5173')), '/');
+        $totalAdvisors = (int) ($billing->meta['total_advisors'] ?? $this->pricing->currentAdvisorCount());
 
         $params = [
-            'mode' => 'subscription',
+            'mode' => 'payment',
             'payment_method_types' => ['card'],
             'line_items' => [[
                 'price_data' => [
                     'currency' => $billing->currency ?: $this->paymentSettings->stripeCurrency(),
                     'product_data' => [
-                        'name' => 'Advisor hub subscription',
+                        'name' => 'Advisor import batch',
                         'description' => sprintf(
-                            '%d advisors × %s / advisor / month (auto-renew day %d)',
+                            '%d new advisors × %s (tier from %d total seats). Auto-renew covers all seats monthly.',
                             $billing->advisor_count,
                             number_format((float) $billing->rate_per_advisor, 2),
-                            $hub->advisorBillingRenewDay()
+                            $totalAdvisors
                         ),
                     ],
                     'unit_amount' => (int) round(((float) $billing->rate_per_advisor) * 100),
-                    'recurring' => ['interval' => 'month'],
                 ],
                 'quantity' => max(1, (int) $billing->advisor_count),
             ]],
             'success_url' => $frontendUrl.'/client-admin/advisor-billing/success?session_id={CHECKOUT_SESSION_ID}',
             'cancel_url' => $frontendUrl.'/client-admin/advisors?billing_canceled=1',
             'client_reference_id' => (string) $payer->id,
+            'payment_intent_data' => [
+                'setup_future_usage' => 'off_session',
+                'metadata' => [
+                    'type' => 'advisor_billing_batch',
+                    'hub_advisor_billing_id' => (string) $billing->id,
+                    'hub_id' => (string) $billing->hub_id,
+                ],
+            ],
             'metadata' => [
                 'type' => 'advisor_billing',
                 'hub_advisor_billing_id' => (string) $billing->id,
                 'user_id' => (string) $payer->id,
                 'hub_id' => (string) $billing->hub_id,
-            ],
-            'subscription_data' => [
-                'metadata' => [
-                    'type' => 'advisor_billing',
-                    'hub_advisor_billing_id' => (string) $billing->id,
-                    'hub_id' => (string) $billing->hub_id,
-                    'renew_day' => (string) $hub->advisorBillingRenewDay(),
-                ],
             ],
         ];
 
@@ -685,7 +668,7 @@ class AdvisorBillingService
     {
         $this->ensureApiKey();
         $session = Session::retrieve($sessionId, [
-            'expand' => ['subscription', 'customer', 'setup_intent'],
+            'expand' => ['subscription', 'customer', 'payment_intent', 'setup_intent'],
         ]);
 
         $billing = HubAdvisorBilling::query()
@@ -758,8 +741,22 @@ class AdvisorBillingService
 
         $billing->auto_renew = true;
         $billing->payment_method = 'stripe';
+        $billing->save();
 
-        return $this->markPaid($billing);
+        // Payment Checkout charges the batch only — attach/replace monthly sub for full seats.
+        if ($payer && $hub && filled($payer->stripe_customer_id) && filled($payer->stripe_payment_method_id)) {
+            try {
+                $subscription = $this->syncAutoRenewSubscription($hub, $billing, $payer);
+                $billing->stripe_subscription_id = $subscription->id;
+                $hub->advisor_stripe_subscription_id = $subscription->id;
+                $hub->save();
+                $billing->save();
+            } catch (\Throwable $e) {
+                // Batch payment still succeeds even if renew subscription sync fails.
+            }
+        }
+
+        return $this->markPaid($billing->fresh());
     }
 
     private function extractDefaultPaymentMethod(object $session, string $customerId, ?string $subscriptionId): ?string
@@ -777,6 +774,24 @@ class AdvisorBillingService
             } catch (\Throwable $e) {
                 // continue
             }
+        }
+
+        try {
+            $pi = $session->payment_intent ?? null;
+            if (is_string($pi) && $pi !== '') {
+                $pi = \Stripe\PaymentIntent::retrieve($pi);
+            }
+            if (is_object($pi)) {
+                $pm = $pi->payment_method ?? null;
+                if (is_object($pm)) {
+                    return $pm->id ?? null;
+                }
+                if (is_string($pm) && $pm !== '') {
+                    return $pm;
+                }
+            }
+        } catch (\Throwable $e) {
+            // continue
         }
 
         try {
@@ -832,6 +847,7 @@ class AdvisorBillingService
             }
         }
 
+        // First subscription invoice may attach to the import batch billing already paid via Checkout.
         if ($parent->payment_status === 'paid' && empty($parent->stripe_invoice_id) && $stripeInvoiceId) {
             $parent->stripe_invoice_id = $stripeInvoiceId;
             $parent->save();
@@ -843,17 +859,20 @@ class AdvisorBillingService
         }
 
         $hub = $parent->hub ?? Hub::query()->find($parent->hub_id);
+        $totalAdvisors = $this->pricing->currentAdvisorCount();
+        $renewalQuote = $this->pricing->quote(max(1, $totalAdvisors));
+
         $amountPaid = isset($stripeInvoice->amount_paid)
             ? round(((int) $stripeInvoice->amount_paid) / 100, 2)
-            : (float) $parent->amount;
+            : (float) $renewalQuote['amount'];
 
         $renewal = HubAdvisorBilling::query()->create([
             'hub_id' => $parent->hub_id,
             'billed_user_id' => $parent->billed_user_id,
-            'advisor_count' => $parent->advisor_count,
-            'rate_per_advisor' => $parent->rate_per_advisor,
+            'advisor_count' => $renewalQuote['advisor_count'],
+            'rate_per_advisor' => $renewalQuote['rate_per_advisor'],
             'amount' => $amountPaid,
-            'currency' => $parent->currency,
+            'currency' => $parent->currency ?: $renewalQuote['currency'],
             'status' => HubAdvisorBilling::STATUS_PENDING,
             'payment_method' => 'stripe',
             'payment_status' => 'pending',
@@ -864,7 +883,10 @@ class AdvisorBillingService
             'period_ends_at' => $hub ? $this->nextRenewalAt($hub) : now()->addMonth(),
             'meta' => [
                 'renewal_of' => $parent->id,
-                'formula' => 'rate_per_advisor × advisor_count',
+                'formula' => 'amount = rate(total_advisors) × total_advisors',
+                'total_advisors' => $renewalQuote['advisor_count'],
+                'batch_count' => $renewalQuote['advisor_count'],
+                'tier' => $renewalQuote['tier'],
             ],
         ]);
 
@@ -914,9 +936,28 @@ class AdvisorBillingService
      */
     public function quotePayload(?HubAdvisorBilling $billing = null, ?User $viewer = null): array
     {
-        $advisorCount = $billing?->advisor_count ?? $this->pricing->currentAdvisorCount();
-        $quote = $this->pricing->quote((int) $advisorCount);
         $hub = $this->hubs->current();
+        $totalAdvisors = $this->pricing->currentAdvisorCount();
+
+        if ($billing) {
+            $batch = (int) ($billing->meta['batch_count'] ?? $billing->advisor_count);
+            $total = (int) ($billing->meta['total_advisors'] ?? $totalAdvisors);
+            $quote = [
+                'advisor_count' => $batch,
+                'batch_count' => $batch,
+                'total_advisors' => $total,
+                'rate_per_advisor' => (float) $billing->rate_per_advisor,
+                'amount' => (float) $billing->amount,
+                'currency' => $billing->currency ?: 'gbp',
+                'tier' => $billing->meta['tier'] ?? null,
+                'formula' => $billing->meta['formula'] ?? 'amount = rate(total_advisors) × batch_count',
+            ];
+            $renewalPreview = $this->pricing->quote(max(1, $total));
+        } else {
+            $quote = $this->pricing->quoteBatch($totalAdvisors, $totalAdvisors);
+            $renewalPreview = $this->pricing->quote(max(0, $totalAdvisors));
+        }
+
         $payer = $billing
             ? User::query()->find($billing->billed_user_id)
             : ($viewer ? $this->resolvePayer($viewer) : null);
@@ -933,7 +974,6 @@ class AdvisorBillingService
                 'unavailable_reason' => null,
             ]);
 
-            // Clarify Stripe path when a dashboard card is already on file.
             $methods = array_map(function (array $method) {
                 if (($method['id'] ?? null) === 'stripe') {
                     $method['label'] = 'Stripe (charge card on file)';
@@ -948,10 +988,16 @@ class AdvisorBillingService
             'billing_enabled' => $this->billingEnabled(),
             'billing' => $billing?->loadMissing(['invoice']),
             'payment_methods' => $methods,
-            'formula' => 'amount = rate_per_advisor × advisor_count',
             'auto_renew' => true,
             'renew_day' => $hub->advisorBillingRenewDay(),
             'next_renewal_at' => $this->nextRenewalAt($hub)->toIso8601String(),
+            'renewal_preview' => [
+                'advisor_count' => $renewalPreview['advisor_count'],
+                'rate_per_advisor' => $renewalPreview['rate_per_advisor'],
+                'amount' => $renewalPreview['amount'],
+                'currency' => $renewalPreview['currency'],
+                'formula' => 'monthly auto-renew = rate(total_advisors) × total_advisors (one invoice)',
+            ],
             'has_saved_card' => $payer ? $this->payerHasSavedCard($payer) : false,
             'payer' => $payer ? [
                 'id' => $payer->id,

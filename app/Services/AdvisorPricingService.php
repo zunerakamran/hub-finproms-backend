@@ -41,6 +41,46 @@ class AdvisorPricingService
         ];
     }
 
+    /**
+     * WP-style import quote: tier rate from TOTAL headcount, charge only the batch.
+     * amount = rate(total) × batch_count
+     *
+     * @return array{
+     *   advisor_count: int,
+     *   batch_count: int,
+     *   total_advisors: int,
+     *   rate_per_advisor: float,
+     *   amount: float,
+     *   currency: string,
+     *   tier: ?array{id: int, label: ?string, min_advisors: int, rate_per_advisor: float},
+     *   formula: string
+     * }
+     */
+    public function quoteBatch(int $totalAdvisors, int $batchCount): array
+    {
+        $total = max(0, $totalAdvisors);
+        $batch = max(0, $batchCount);
+        $tier = $this->resolveTier($total);
+        $rate = $tier ? (float) $tier->rate_per_advisor : 0.0;
+        $amount = round($rate * $batch, 2);
+
+        return [
+            'advisor_count' => $batch,
+            'batch_count' => $batch,
+            'total_advisors' => $total,
+            'rate_per_advisor' => $rate,
+            'amount' => $amount,
+            'currency' => 'gbp',
+            'tier' => $tier ? [
+                'id' => $tier->id,
+                'label' => $tier->label,
+                'min_advisors' => $tier->min_advisors,
+                'rate_per_advisor' => (float) $tier->rate_per_advisor,
+            ] : null,
+            'formula' => 'amount = rate(total_advisors) × batch_count',
+        ];
+    }
+
     public function resolveTier(int $advisorCount): ?AdvisorPricingTier
     {
         if ($advisorCount < 1) {
@@ -120,10 +160,12 @@ class AdvisorPricingService
             return;
         }
 
+        // Defaults copied from the WordPress FP Subscriptions plugin (fpsub_discount_tiers).
         $defaults = [
-            ['label' => 'Starter (1+)', 'min_advisors' => 1, 'rate_per_advisor' => 100.00, 'sort_order' => 1],
-            ['label' => 'Growth (100+)', 'min_advisors' => 100, 'rate_per_advisor' => 70.00, 'sort_order' => 2],
-            ['label' => 'Scale (150+)', 'min_advisors' => 150, 'rate_per_advisor' => 50.00, 'sort_order' => 3],
+            ['label' => '0–99 advisors', 'min_advisors' => 1, 'rate_per_advisor' => 25.00, 'sort_order' => 1],
+            ['label' => '100–249 advisors', 'min_advisors' => 100, 'rate_per_advisor' => 22.00, 'sort_order' => 2],
+            ['label' => '250–499 advisors', 'min_advisors' => 250, 'rate_per_advisor' => 20.00, 'sort_order' => 3],
+            ['label' => '500+ advisors', 'min_advisors' => 500, 'rate_per_advisor' => 15.00, 'sort_order' => 4],
         ];
 
         foreach ($defaults as $row) {
@@ -131,11 +173,36 @@ class AdvisorPricingService
         }
     }
 
+    /**
+     * Replace all tiers with the WordPress FP Subscriptions default schedule.
+     *
+     * @return list<AdvisorPricingTier>
+     */
+    public function syncWordPressDefaultTiers(): array
+    {
+        AdvisorPricingTier::query()->delete();
+
+        $defaults = [
+            ['label' => '0–99 advisors', 'min_advisors' => 1, 'rate_per_advisor' => 25.00, 'sort_order' => 1],
+            ['label' => '100–249 advisors', 'min_advisors' => 100, 'rate_per_advisor' => 22.00, 'sort_order' => 2],
+            ['label' => '250–499 advisors', 'min_advisors' => 250, 'rate_per_advisor' => 20.00, 'sort_order' => 3],
+            ['label' => '500+ advisors', 'min_advisors' => 500, 'rate_per_advisor' => 15.00, 'sort_order' => 4],
+        ];
+
+        $created = [];
+        foreach ($defaults as $row) {
+            $created[] = $this->createTier($row);
+        }
+
+        return $created;
+    }
+
     public function currentAdvisorCount(): int
     {
         return User::query()
             ->where('is_advisor', true)
             ->where('is_suspended', false)
+            ->where('is_discontinued', false)
             ->count();
     }
 

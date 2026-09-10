@@ -96,6 +96,7 @@ class HubVisibilityTransitionService
             $advisors = User::query()
                 ->where('is_advisor', true)
                 ->where('is_suspended', false)
+                ->where('is_discontinued', false)
                 ->get();
 
             foreach ($advisors as $advisor) {
@@ -132,6 +133,7 @@ class HubVisibilityTransitionService
             $advisors = User::query()
                 ->where('is_advisor', true)
                 ->where('is_suspended', true)
+                ->where('is_discontinued', false)
                 ->get();
 
             foreach ($advisors as $advisor) {
@@ -183,7 +185,7 @@ class HubVisibilityTransitionService
         $existing = UserSubscription::query()
             ->where('user_id', $user->id)
             ->where('payment_method', 'advisor_import')
-            ->whereIn('status', ['active', 'suspended'])
+            ->whereIn('status', ['active', 'suspended', 'discontinued'])
             ->orderByDesc('id')
             ->first();
 

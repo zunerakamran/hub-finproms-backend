@@ -161,6 +161,11 @@ Notes:
 - Client provides an Excel sheet of advisors.
 - Advisors from that sheet are added into the application.
 - Those advisors are subscribed and have UNLIMITED credits to buy posts.
+- Client admin (or Power Admin with import capability) can Discontinue an
+  individual advisor: permanent end of access (WP FPSUB end equivalent).
+  Discontinued advisors cannot log in, drop out of billing counts, and are
+  not restored when the hub flips private again. Re-importing the same email
+  restores them. Gated by Capabilities matrix key `advisor_discontinue`.
 - When Power Admin switches a hub from private → public (Functionalities):
   - All Excel-imported advisors are SUSPENDED (not deleted): cannot log in,
     lose unlimited/subscription access, excluded from advisor billing counts.
@@ -176,9 +181,17 @@ Notes:
 
 4.3 Pricing Tiers for White-labelled (Managed by Shared Hub)
 - Pricing depends on number of subscribers (advisors), e.g.:
-  - 100 subscribers → £70
-  - 150 subscribers → £50
-  - (Exact tiers to be configured; managed from shared hub)
+  - 0–99 subscribers → £25 / advisor / month
+  - 100–249 subscribers → £22
+  - 250–499 subscribers → £20
+  - 500+ subscribers → £15
+  - (Defaults copied from WordPress FP Subscriptions plugin; Power Admin can edit)
+- Import billing (WP-style): tier RATE is taken from TOTAL active advisors;
+  the invoice charges RATE × THIS IMPORT BATCH only (already-paid advisors
+  are not recharged). Example: 99 imported → £25×99; later +249 (total 348)
+  → £20×249 only.
+- Monthly auto-renew: ONE invoice for all active advisors =
+  rate(total) × total (single Stripe subscription per hub).
 - Shared hub manages these pricing rules.
 
 4.4 Content Distribution from Shared Hub → White-labelled
@@ -236,6 +249,8 @@ Notes:
   - Confirm bank transfers
   - Import advisors (Excel/CSV) — enableable for FinProms admin, client admin,
     manager, AND Power Admin (per hub in the Capabilities matrix)
+  - Discontinue advisors — separate capability; who can permanently end an
+    imported advisor’s access (FinProms admin, client admin, manager, Power Admin)
   - AI content generation / push content to white-labels (FinProms admin /
     shared-only where appropriate)
   - Any other admin dashboard screens/actions
@@ -328,6 +343,7 @@ STEP 1 — Shared hub core
 [x] White-labelled private advisor import (Excel/CSV)
 [x] Unlimited credits for white-labelled advisors (role/flag per user; checklist wired)
 [x] Subscriber-count pricing tiers (rate × advisors; managed by Power Admin)
+[x] Default advisor tiers copied from WP FP Subscriptions (£25/£22/£20/£15)
 [x] Post-import advisor billing + Stripe auto-renew / bank transfer + invoices
 [x] Capability: dashboard_view_advisor_invoices (role matrix)
 [x] Capability: dashboard_manage_advisor_pricing — who can set billing rates/quotas
@@ -336,6 +352,11 @@ STEP 1 — Shared hub core
 [x] Client admin Payment card dashboard (card entrance; not a capabilities-matrix flag)
 [x] Stripe import checkout charges card on file when client admin already saved a card
 [x] Private↔public hub transition: suspend/reactivate Excel advisors + stop auto-renew
+[x] Discontinue individual advisor (client/power admin; permanent end until re-import)
+[x] Capability: advisor_discontinue — who can end imported advisors (Capabilities matrix)
+[x] Private-only capabilities blurred/inactive on Capabilities matrix when hub is public
+[x] Public-only capabilities blurred/inactive on Capabilities matrix when hub is private
+[x] Power Admin can manage subscription plans when dashboard_manage_plans is enabled
 [x] Hub Functionalities checklist (section 5.1) — Power Admin Functionalities screen only
 [x] User capabilities matrix (section 5.2) — roles × member/dashboard caps (no Functionalities duplication)
 [x] Wire hub-admin dashboard menus/actions to capability checklist (per-role; no hub-wide OR leak)

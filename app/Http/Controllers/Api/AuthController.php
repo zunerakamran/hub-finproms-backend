@@ -76,6 +76,14 @@ class AuthController extends Controller
             ], 403);
         }
 
+        if ($user->isDiscontinued()) {
+            Auth::logout();
+
+            return response()->json([
+                'message' => 'This advisor account has been discontinued. Contact your hub administrator.',
+            ], 403);
+        }
+
         if ($this->hubs->can('private_invite_only') && ! $user->mayLoginOnInviteOnlyHub()) {
             Auth::logout();
 

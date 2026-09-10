@@ -58,6 +58,32 @@ class Hub extends Model
     ];
 
     /**
+     * Dashboard/member capabilities that only apply while the hub is private (invite-only).
+     * Shown blurred / inactive on the Capabilities matrix when public subscribe is on.
+     *
+     * @var list<string>
+     */
+    public const PRIVATE_CAPABILITY_KEYS = [
+        'advisor_excel_import',
+        'advisor_discontinue',
+        'dashboard_view_advisor_invoices',
+        'dashboard_manage_advisor_pricing',
+        'dashboard_manage_advisor_renewal',
+    ];
+
+    /**
+     * Capabilities that only apply while the hub is public (self-serve subscribe).
+     * Shown blurred / inactive on the Capabilities matrix when private invite-only is on.
+     *
+     * @var list<string>
+     */
+    public const PUBLIC_CAPABILITY_KEYS = [
+        'member_view_plans',
+        'dashboard_manage_plans',
+        'dashboard_bank_transfers',
+    ];
+
+    /**
      * Known checklist keys (Functionalities + member + dashboard capabilities).
      *
      * @var array<string, array{label: string, description: string, group: string, default_shared: bool, default_white_label: bool}>
@@ -203,7 +229,7 @@ class Hub extends Model
         ],
         'dashboard_manage_plans' => [
             'label' => 'Manage subscription plans',
-            'description' => 'Hub admin can manage subscription plans.',
+            'description' => 'Hub admin and Power Admin (when enabled) can manage subscription plans.',
             'group' => self::GROUP_DASHBOARD,
             'default_shared' => true,
             'default_white_label' => false,
@@ -225,6 +251,13 @@ class Hub extends Model
         'advisor_excel_import' => [
             'label' => 'Import advisors (Excel/CSV)',
             'description' => 'Hub admin and Power Admin (when enabled) can import advisors from an Excel/CSV sheet.',
+            'group' => self::GROUP_DASHBOARD,
+            'default_shared' => false,
+            'default_white_label' => true,
+        ],
+        'advisor_discontinue' => [
+            'label' => 'Discontinue advisors',
+            'description' => 'End an imported advisor\'s access permanently (until re-imported). Separate from Excel import.',
             'group' => self::GROUP_DASHBOARD,
             'default_shared' => false,
             'default_white_label' => true,
@@ -331,6 +364,29 @@ class Hub extends Model
     public function isShared(): bool
     {
         return $this->type === self::TYPE_SHARED;
+    }
+
+    public function isPrivateInviteOnly(): bool
+    {
+        return (bool) ($this->resolvedChecklist()['private_invite_only'] ?? false);
+    }
+
+    public function isPublicSubscribe(): bool
+    {
+        $checklist = $this->resolvedChecklist();
+
+        return (bool) ($checklist['public_subscribe'] ?? false)
+            && ! (bool) ($checklist['private_invite_only'] ?? false);
+    }
+
+    public static function isPrivateCapability(string $key): bool
+    {
+        return in_array($key, self::PRIVATE_CAPABILITY_KEYS, true);
+    }
+
+    public static function isPublicCapability(string $key): bool
+    {
+        return in_array($key, self::PUBLIC_CAPABILITY_KEYS, true);
     }
 
     /**

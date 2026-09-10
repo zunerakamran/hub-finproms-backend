@@ -52,9 +52,11 @@ class CapabilitiesMatrixService
                 User::ROLE_MANAGER,
             ];
 
-            // Power Admin may also import advisors / view invoices / set pricing / renew day.
+            // Power Admin may also manage plans / import / discontinue advisors / invoices / pricing / renew day.
             if (in_array($key, [
+                'dashboard_manage_plans',
                 'advisor_excel_import',
+                'advisor_discontinue',
                 'dashboard_view_advisor_invoices',
                 'dashboard_manage_advisor_pricing',
                 'dashboard_manage_advisor_renewal',
@@ -97,6 +99,8 @@ class CapabilitiesMatrixService
     {
         $power = $this->powerCapabilities->resolved();
         $roleCaps = $this->resolvedRoleCapabilities($hub);
+        $privateMode = $hub->isPrivateInviteOnly();
+        $publicMode = $hub->isPublicSubscribe();
 
         $roles = [];
         foreach (self::MATRIX_ROLES as $role) {
@@ -127,6 +131,8 @@ class CapabilitiesMatrixService
                 'description' => $meta['description'],
                 'group' => 'power_admin',
                 'group_label' => 'Power Admin (platform)',
+                'requires_private' => false,
+                'inactive' => false,
                 'cells' => $cells,
             ];
         }
@@ -138,6 +144,10 @@ class CapabilitiesMatrixService
                 continue;
             }
 
+            $requiresPrivate = Hub::isPrivateCapability($key);
+            $requiresPublic = Hub::isPublicCapability($key);
+            $inactive = ($requiresPrivate && $publicMode) || ($requiresPublic && $privateMode);
+
             $applicableRoles = $this->rolesForCapability($key);
             $cells = [];
             foreach (self::MATRIX_ROLES as $role) {
@@ -145,6 +155,10 @@ class CapabilitiesMatrixService
                 $enabled = false;
                 if ($applicable) {
                     $enabled = (bool) ($roleCaps[$role][$key] ?? false);
+                }
+                // Mode-locked caps are inactive (shown off / not editable).
+                if ($inactive) {
+                    $enabled = false;
                 }
                 $cells[$role] = [
                     'applicable' => $applicable,
@@ -158,6 +172,14 @@ class CapabilitiesMatrixService
                 'description' => $meta['description'],
                 'group' => $group,
                 'group_label' => Hub::CHECKLIST_GROUPS[$group] ?? $group,
+                'requires_private' => $requiresPrivate,
+                'requires_public' => $requiresPublic,
+                'inactive' => $inactive,
+                'inactive_reason' => $inactive
+                    ? ($requiresPrivate
+                        ? 'private_only'
+                        : 'public_only')
+                    : null,
                 'cells' => $cells,
             ];
         }
@@ -168,7 +190,11 @@ class CapabilitiesMatrixService
                 'name' => $hub->name,
                 'slug' => $hub->slug,
                 'type' => $hub->type,
+                'private_invite_only' => $privateMode,
+                'public_subscribe' => $publicMode,
             ],
+            'private_capability_keys' => Hub::PRIVATE_CAPABILITY_KEYS,
+            'public_capability_keys' => Hub::PUBLIC_CAPABILITY_KEYS,
             'roles' => $roles,
             'behaviour' => $behaviour,
             'rows' => $rows,
@@ -330,6 +356,16 @@ class CapabilitiesMatrixService
         // Platform-only Power Admin capabilities.
         if (str_starts_with($flag, 'pa_')) {
             return $this->powerCapabilities->can($flag);
+        }
+
+        // Private-hub tools are inactive while the hub is public.
+        if (Hub::isPrivateCapability($flag) && ! $hub->isPrivateInviteOnly()) {
+            return false;
+        }
+
+        // Public-hub tools are inactive while the hub is private invite-only.
+        if (Hub::isPublicCapability($flag) && $hub->isPrivateInviteOnly()) {
+            return false;
         }
 
         // Legacy admin → client_admin

@@ -110,14 +110,19 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::put('/settings', [SettingController::class, 'update']);
         });
 
+        Route::get('/advisors', [AdvisorController::class, 'index']);
+
         Route::middleware('hub_can:advisor_excel_import')->group(function () {
-            Route::get('/advisors', [AdvisorController::class, 'index']);
             Route::post('/advisors/import', [AdvisorController::class, 'import']);
             Route::get('/advisors/template', [AdvisorController::class, 'template']);
             Route::get('/advisor-billings/{billing}', [AdvisorBillingController::class, 'show']);
             Route::post('/advisor-billings/{billing}/checkout', [AdvisorBillingController::class, 'checkout']);
             Route::post('/advisor-billings/confirm', [AdvisorBillingController::class, 'confirm']);
             Route::post('/advisor-billings/{billing}/confirm-bank-transfer', [AdvisorBillingController::class, 'confirmBankTransfer']);
+        });
+
+        Route::middleware('hub_can:advisor_discontinue')->group(function () {
+            Route::post('/advisors/{advisor}/discontinue', [AdvisorController::class, 'discontinue']);
         });
 
         Route::middleware('hub_can:dashboard_view_advisor_invoices')->group(function () {
@@ -188,14 +193,19 @@ Route::middleware('auth:sanctum')->group(function () {
         });
 
         // Advisor import / billing when enabled for power_admin on the current hub
+        Route::get('/advisors', [AdvisorController::class, 'index']);
+
         Route::middleware('hub_can:advisor_excel_import')->group(function () {
-            Route::get('/advisors', [AdvisorController::class, 'index']);
             Route::post('/advisors/import', [AdvisorController::class, 'import']);
             Route::get('/advisors/template', [AdvisorController::class, 'template']);
             Route::get('/advisor-billings/{billing}', [AdvisorBillingController::class, 'show']);
             Route::post('/advisor-billings/{billing}/checkout', [AdvisorBillingController::class, 'checkout']);
             Route::post('/advisor-billings/confirm', [AdvisorBillingController::class, 'confirm']);
             Route::post('/advisor-billings/{billing}/confirm-bank-transfer', [AdvisorBillingController::class, 'confirmBankTransfer']);
+        });
+
+        Route::middleware('hub_can:advisor_discontinue')->group(function () {
+            Route::post('/advisors/{advisor}/discontinue', [AdvisorController::class, 'discontinue']);
         });
 
         Route::middleware('hub_can:dashboard_view_advisor_invoices')->group(function () {
@@ -212,6 +222,13 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/advisor-pricing', [PowerAdminAdvisorPricingController::class, 'store']);
             Route::put('/advisor-pricing/{tier}', [PowerAdminAdvisorPricingController::class, 'update']);
             Route::delete('/advisor-pricing/{tier}', [PowerAdminAdvisorPricingController::class, 'destroy']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_plans')->group(function () {
+            Route::get('/subscription-plans', [SubscriptionController::class, 'adminPlans']);
+            Route::post('/subscription-plans', [SubscriptionController::class, 'storePlan']);
+            Route::put('/subscription-plans/{plan}', [SubscriptionController::class, 'updatePlan']);
+            Route::delete('/subscription-plans/{plan}', [SubscriptionController::class, 'destroyPlan']);
         });
     });
 });
