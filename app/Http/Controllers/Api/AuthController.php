@@ -68,6 +68,14 @@ class AuthController extends Controller
         /** @var User $user */
         $user = Auth::user();
 
+        if ($user->isSuspended()) {
+            Auth::logout();
+
+            return response()->json([
+                'message' => 'This account is suspended. Contact your hub administrator.',
+            ], 403);
+        }
+
         if ($this->hubs->can('private_invite_only') && ! $user->mayLoginOnInviteOnlyHub()) {
             Auth::logout();
 

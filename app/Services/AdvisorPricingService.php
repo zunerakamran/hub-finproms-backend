@@ -133,7 +133,10 @@ class AdvisorPricingService
 
     public function currentAdvisorCount(): int
     {
-        return User::query()->where('is_advisor', true)->count();
+        return User::query()
+            ->where('is_advisor', true)
+            ->where('is_suspended', false)
+            ->count();
     }
 
     public function assertHasTiers(): void

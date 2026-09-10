@@ -25,6 +25,7 @@ class AdvisorController extends Controller
 
         $advisors = User::query()
             ->where('is_advisor', true)
+            ->where('is_suspended', false)
             ->orderBy('name')
             ->paginate((int) $request->integer('per_page', 50));
 
@@ -113,6 +114,12 @@ class AdvisorController extends Controller
     {
         $hub = $this->hubs->current();
         $user = $request->user();
+
+        if (! $hub->can('private_invite_only')) {
+            abort(response()->json([
+                'message' => 'Advisor import is only available while this hub is private (invite-only).',
+            ], 403));
+        }
 
         $allowed = $user
             ? app(\App\Services\CapabilitiesMatrixService::class)->roleCan($hub, (string) $user->role, 'advisor_excel_import')

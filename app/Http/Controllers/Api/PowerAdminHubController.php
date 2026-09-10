@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Hub;
 use App\Services\HubService;
+use App\Services\HubVisibilityTransitionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -13,7 +14,8 @@ use Illuminate\Validation\Rule;
 class PowerAdminHubController extends Controller
 {
     public function __construct(
-        private readonly HubService $hubs
+        private readonly HubService $hubs,
+        private readonly HubVisibilityTransitionService $visibilityTransitions
     ) {}
 
     public function index(): JsonResponse
@@ -141,14 +143,35 @@ class PowerAdminHubController extends Controller
             ARRAY_FILTER_USE_KEY
         );
 
-        $hub->checklist = $this->hubs->mergeChecklist($hub, $input);
+        $before = $hub->resolvedChecklist();
+        $merged = $this->hubs->mergeChecklist($hub, $input);
+        $transitionType = $this->visibilityTransitions->detectTransition($before, $merged);
+        $checklist = $this->visibilityTransitions->applyModeFlags($merged, $transitionType);
+
+        $hub->checklist = $checklist;
         $hub->save();
 
         $this->hubs->forgetCurrentCache();
 
+        $sideEffects = $this->visibilityTransitions->runSideEffects($hub->fresh(), $transitionType);
+
+        $message = 'Checklist updated successfully.';
+        if ($sideEffects['type'] === 'private_to_public') {
+            $message = sprintf(
+                'Hub switched to public. Suspended %d imported advisor(s) and stopped advisor auto-renew.',
+                $sideEffects['advisors_suspended']
+            );
+        } elseif ($sideEffects['type'] === 'public_to_private') {
+            $message = sprintf(
+                'Hub switched to private. Reactivated %d imported advisor(s).',
+                $sideEffects['advisors_reactivated']
+            );
+        }
+
         return response()->json([
-            'message' => 'Checklist updated successfully.',
+            'message' => $message,
             'hub' => $hub->fresh()->toAdminArray(),
+            'visibility_transition' => $sideEffects,
         ]);
     }
 

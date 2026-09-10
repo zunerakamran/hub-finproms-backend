@@ -74,6 +74,7 @@ class AdvisorImportService
                             'role' => User::ROLE_ADVISOR,
                             'is_advisor' => true,
                             'has_unlimited_credits' => true,
+                            'is_suspended' => false,
                         ]);
                         $user->save();
                         $this->ensureAdvisorSubscription($user);
@@ -97,6 +98,7 @@ class AdvisorImportService
                         'credits' => 0,
                         'is_advisor' => true,
                         'has_unlimited_credits' => true,
+                        'is_suspended' => false,
                     ]);
 
                     $this->ensureAdvisorSubscription($user);
@@ -155,11 +157,17 @@ class AdvisorImportService
     public function ensureAdvisorSubscription(User $user): UserSubscription
     {
         $existing = $user->subscriptions()
-            ->where('status', 'active')
+            ->whereIn('status', ['active', 'suspended'])
             ->where('payment_method', 'advisor_import')
+            ->orderByDesc('id')
             ->first();
 
         if ($existing) {
+            $existing->status = 'active';
+            $existing->payment_status = 'paid';
+            $existing->ends_at = null;
+            $existing->save();
+
             return $existing;
         }
 

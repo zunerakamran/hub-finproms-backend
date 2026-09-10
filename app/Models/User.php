@@ -73,6 +73,7 @@ class User extends Authenticatable
         'credits',
         'is_advisor',
         'has_unlimited_credits',
+        'is_suspended',
         'stripe_customer_id',
         'stripe_payment_method_id',
     ];
@@ -95,7 +96,13 @@ class User extends Authenticatable
             'credits' => 'integer',
             'is_advisor' => 'boolean',
             'has_unlimited_credits' => 'boolean',
+            'is_suspended' => 'boolean',
         ];
+    }
+
+    public function isSuspended(): bool
+    {
+        return (bool) $this->is_suspended;
     }
 
     public function getRoleLabelAttribute(): string
@@ -141,10 +148,14 @@ class User extends Authenticatable
 
     /**
      * Staff and Excel-invited advisors may sign in when the hub is invite-only.
-     * General members (self-registered users) may not.
+     * General members (self-registered users) may not. Suspended advisors may not.
      */
     public function mayLoginOnInviteOnlyHub(): bool
     {
+        if ($this->isSuspended()) {
+            return false;
+        }
+
         return $this->isPowerAdmin()
             || $this->isClientAdmin()
             || $this->isApprover()
@@ -161,9 +172,14 @@ class User extends Authenticatable
 
     /**
      * Per-user unlimited credits (white-label advisors), optionally combined with hub checklist.
+     * Suspended advisors (e.g. after private→public) never receive unlimited credits.
      */
     public function hasUnlimitedCredits(bool $hubAllowsUnlimited = true): bool
     {
+        if ($this->isSuspended()) {
+            return false;
+        }
+
         if ($this->has_unlimited_credits) {
             return true;
         }
@@ -198,6 +214,10 @@ class User extends Authenticatable
 
     public function hasActiveSubscription(): bool
     {
+        if ($this->isSuspended()) {
+            return false;
+        }
+
         return $this->subscriptions()
             ->where('status', 'active')
             ->where(function ($query) {

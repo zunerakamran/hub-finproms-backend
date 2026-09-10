@@ -186,6 +186,12 @@ class AdvisorBillingController extends Controller
         $hub = $this->hubs->current();
         $user = $request->user();
 
+        if (! $this->billing->billingEnabled($hub)) {
+            abort(response()->json([
+                'message' => 'Advisor auto-renew is only available while private advisor billing is enabled for this hub.',
+            ], 403));
+        }
+
         $allowed = $user
             ? $this->matrix->roleCan($hub, (string) $user->role, 'dashboard_manage_advisor_renewal')
             : false;

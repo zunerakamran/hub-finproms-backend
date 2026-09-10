@@ -161,6 +161,18 @@ Notes:
 - Client provides an Excel sheet of advisors.
 - Advisors from that sheet are added into the application.
 - Those advisors are subscribed and have UNLIMITED credits to buy posts.
+- When Power Admin switches a hub from private → public (Functionalities):
+  - All Excel-imported advisors are SUSPENDED (not deleted): cannot log in,
+    lose unlimited/subscription access, excluded from advisor billing counts.
+  - Advisor Stripe auto-renew is canceled; pending advisor billings are canceled.
+  - Private-related functionalities are turned off and public ones turned on
+    (paid credits, one-off purchase, public subscribe; unlimited credits and
+    advisor subscriber billing off).
+- When the hub is switched back public → private:
+  - Previously suspended imported advisors are REACTIVATED with unlimited
+    credits and advisor_import subscriptions restored.
+  - Auto-renew is NOT restarted automatically; client admin pays again after
+    import / billing flow if needed.
 
 4.3 Pricing Tiers for White-labelled (Managed by Shared Hub)
 - Pricing depends on number of subscribers (advisors), e.g.:
@@ -323,6 +335,7 @@ STEP 1 — Shared hub core
 [x] Client admin saved card + charge on each advisor import + invoice + Stripe auto-renew
 [x] Client admin Payment card dashboard (card entrance; not a capabilities-matrix flag)
 [x] Stripe import checkout charges card on file when client admin already saved a card
+[x] Private↔public hub transition: suspend/reactivate Excel advisors + stop auto-renew
 [x] Hub Functionalities checklist (section 5.1) — Power Admin Functionalities screen only
 [x] User capabilities matrix (section 5.2) — roles × member/dashboard caps (no Functionalities duplication)
 [x] Wire hub-admin dashboard menus/actions to capability checklist (per-role; no hub-wide OR leak)

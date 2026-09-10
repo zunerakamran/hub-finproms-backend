@@ -338,6 +338,39 @@ class AdvisorBillingService
     }
 
     /**
+     * Cancel Stripe advisor auto-renew and mark open billings so private billing stops
+     * when a hub is switched from private invite-only to public.
+     */
+    public function stopAutoRenewForHub(Hub $hub): void
+    {
+        if (filled($hub->advisor_stripe_subscription_id)) {
+            try {
+                $this->ensureApiKey();
+                Subscription::update($hub->advisor_stripe_subscription_id, ['cancel_at_period_end' => false]);
+                Subscription::retrieve($hub->advisor_stripe_subscription_id)->cancel();
+            } catch (\Throwable $e) {
+                // Subscription may already be gone; still clear local state below.
+            }
+
+            $hub->advisor_stripe_subscription_id = null;
+            $hub->save();
+        }
+
+        HubAdvisorBilling::query()
+            ->where('hub_id', $hub->id)
+            ->where('auto_renew', true)
+            ->update(['auto_renew' => false]);
+
+        HubAdvisorBilling::query()
+            ->where('hub_id', $hub->id)
+            ->where('status', HubAdvisorBilling::STATUS_PENDING)
+            ->update([
+                'status' => HubAdvisorBilling::STATUS_CANCELED,
+                'auto_renew' => false,
+            ]);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function checkout(HubAdvisorBilling $billing, User $user, string $paymentMethod): array
