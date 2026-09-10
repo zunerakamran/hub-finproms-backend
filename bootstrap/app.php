@@ -19,6 +19,11 @@ return Application::configure(basePath: dirname(__DIR__))
             'hub_can' => \App\Http\Middleware\EnsureHubCapability::class,
             'pa_can' => \App\Http\Middleware\EnsurePowerAdminCapability::class,
         ]);
+
+        // Record successful mutating API requests (posts, imports, settings, etc.).
+        $middleware->appendToGroup('api', [
+            \App\Http\Middleware\LogApiActivity::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

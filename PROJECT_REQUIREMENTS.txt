@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-09-09
+Last updated: 2026-09-10
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -251,6 +251,8 @@ Notes:
     manager, AND Power Admin (per hub in the Capabilities matrix)
   - Discontinue advisors — separate capability; who can permanently end an
     imported advisor’s access (FinProms admin, client admin, manager, Power Admin)
+  - View activity logs / report — who can open the audit trail and activity
+    report for the hub (FinProms admin, client admin, manager, Power Admin)
   - AI content generation / push content to white-labels (FinProms admin /
     shared-only where appropriate)
   - Any other admin dashboard screens/actions
@@ -295,6 +297,31 @@ Notes:
 - This is the central control plane for ALL tenant behaviour and UI capabilities.
 - Power Admin does NOT replace FinProms admin day-to-day content work; they
   configure rights so FinProms admin and client_admins operate within bounds.
+
+
+--------------------------------------------------------------------------------
+6A. ACTIVITY LOGS & ACTIVITY REPORT
+--------------------------------------------------------------------------------
+- Every meaningful user activity is recorded in an activity_logs audit trail
+  (per hub), including:
+  - Auth: register, login, logout, failed login, blocked login (suspended /
+    discontinued / invite-only)
+  - Successful mutating API actions (POST / PUT / PATCH / DELETE): content,
+    plans, settings, advisor import/discontinue, billing, capabilities, hubs,
+    purchases, subscriptions, etc.
+- Sensitive fields (passwords, secrets, card data) are NEVER stored; payloads
+  are redacted / truncated.
+- Activity report (aggregates): totals, unique users/actions, counts by action,
+  by user, and by day — filterable by user, action, date range, and text search.
+- WHO CAN SEE the logs and report is gated by Capabilities matrix key
+  `dashboard_view_activity_logs` (hub-admin dashboard group). Applicable roles:
+  finproms_admin, client_admin, manager, and power_admin (when enabled for that
+  hub). Power Admin toggles this per hub / role on the Capabilities screen.
+- APIs (hub_can:dashboard_view_activity_logs):
+  - GET /api/client-admin/activity-logs (+ /power-admin/…) — paginated feed
+  - GET /api/client-admin/activity-logs/report (+ /power-admin/…) — aggregates
+- Frontend: Activity logs page under hub-admin and Power Admin shells, shown
+  only when the viewer’s role has the capability.
 
 
 --------------------------------------------------------------------------------
@@ -354,6 +381,9 @@ STEP 1 — Shared hub core
 [x] Private↔public hub transition: suspend/reactivate Excel advisors + stop auto-renew
 [x] Discontinue individual advisor (client/power admin; permanent end until re-import)
 [x] Capability: advisor_discontinue — who can end imported advisors (Capabilities matrix)
+[x] Activity logs — audit trail of user changes/activity (auth + mutating API)
+[x] Activity logs report — aggregates by action / user / day; filterable
+[x] Capability: dashboard_view_activity_logs — who can view logs & report
 [x] Private-only capabilities blurred/inactive on Capabilities matrix when hub is public
 [x] Public-only capabilities blurred/inactive on Capabilities matrix when hub is private
 [x] Power Admin can manage subscription plans when dashboard_manage_plans is enabled

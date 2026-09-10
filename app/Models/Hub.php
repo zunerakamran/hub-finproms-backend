@@ -269,6 +269,13 @@ class Hub extends Model
             'default_shared' => false,
             'default_white_label' => true,
         ],
+        'dashboard_view_activity_logs' => [
+            'label' => 'View activity logs / report',
+            'description' => 'See the audit trail of user activity and the activity report for this hub. Who can open the report is controlled by this capability.',
+            'group' => self::GROUP_DASHBOARD,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
         'dashboard_manage_advisor_pricing' => [
             'label' => 'Set advisor billing rates / quotas',
             'description' => 'Configure pricing tiers (rate per advisor) used for private hub billing (rate × advisors).',

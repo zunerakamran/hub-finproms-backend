@@ -52,12 +52,14 @@ class CapabilitiesMatrixService
                 User::ROLE_MANAGER,
             ];
 
-            // Power Admin may also manage plans / import / discontinue advisors / invoices / pricing / renew day.
+            // Power Admin may also manage plans / import / discontinue advisors / invoices /
+            // activity logs / pricing / renew day.
             if (in_array($key, [
                 'dashboard_manage_plans',
                 'advisor_excel_import',
                 'advisor_discontinue',
                 'dashboard_view_advisor_invoices',
+                'dashboard_view_activity_logs',
                 'dashboard_manage_advisor_pricing',
                 'dashboard_manage_advisor_renewal',
             ], true)) {

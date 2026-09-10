@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\ActivityLogController;
 use App\Http\Controllers\Api\AdvisorBillingController;
 use App\Http\Controllers\Api\AdvisorController;
 use App\Http\Controllers\Api\AdvisorPaymentCardController;
@@ -146,6 +147,11 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/bank-transfers/{subscription}/confirm', [SubscriptionController::class, 'confirmBankTransfer']);
         });
 
+        Route::middleware('hub_can:dashboard_view_activity_logs')->group(function () {
+            Route::get('/activity-logs', [ActivityLogController::class, 'index']);
+            Route::get('/activity-logs/report', [ActivityLogController::class, 'report']);
+        });
+
         // Card settings — always available to hub admins when advisor billing is on
         // (not gated by the capabilities matrix).
         Route::get('/payment-card', [AdvisorPaymentCardController::class, 'show']);
@@ -229,6 +235,11 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/subscription-plans', [SubscriptionController::class, 'storePlan']);
             Route::put('/subscription-plans/{plan}', [SubscriptionController::class, 'updatePlan']);
             Route::delete('/subscription-plans/{plan}', [SubscriptionController::class, 'destroyPlan']);
+        });
+
+        Route::middleware('hub_can:dashboard_view_activity_logs')->group(function () {
+            Route::get('/activity-logs', [ActivityLogController::class, 'index']);
+            Route::get('/activity-logs/report', [ActivityLogController::class, 'report']);
         });
     });
 });
