@@ -279,7 +279,7 @@ Notes:
   - Manage hub Functionalities checklists
   - Manage payment methods
   - Manage Power Admin / user capabilities matrix (this list + 5.2)
-  - Manage users / roles (future)
+  - Manage users / roles (create, update, delete, assign roles)
 - Stored as platform settings (not per-hub).
 - Edited from Power Admin → Capabilities (Power Admin column).
 - Power Admin nav/actions and APIs must respect these flags.
@@ -406,7 +406,7 @@ STEP 1 — Shared hub core
 [x] Capabilities matrix UI — roles × user capabilities (incl. Power Admin) per hub
 [x] Split UI: Functionalities vs Capabilities (no overlapping checklist items)
 [ ] Approver / manager dedicated UIs (compliance & ops flows)
-[ ] Power Admin user-role assignment UI (pa_manage_users_roles)
+[x] Power Admin user management UI (pa_manage_users_roles — create/update/delete/roles)
 [ ] Push/select posts from shared hub to white-labelled hubs
 [ ] AI post/reel generation by FinProms admin (later)
 [ ] In-app post editing for buyers (later)

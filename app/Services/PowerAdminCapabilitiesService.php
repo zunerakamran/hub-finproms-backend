@@ -39,8 +39,8 @@ class PowerAdminCapabilitiesService
         ],
         'pa_manage_users_roles' => [
             'label' => 'Manage users & roles',
-            'description' => 'Assign roles (FinProms admin, client admin, manager, approver, advisor, etc.) — future.',
-            'default' => false,
+            'description' => 'Create, update, and delete users; assign roles from the Power Admin dashboard.',
+            'default' => true,
         ],
     ];
 

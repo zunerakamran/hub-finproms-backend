@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\PowerAdminAdvisorPricingController;
 use App\Http\Controllers\Api\PowerAdminCapabilityController;
 use App\Http\Controllers\Api\PowerAdminHubController;
 use App\Http\Controllers\Api\PowerAdminPaymentMethodController;
+use App\Http\Controllers\Api\PowerAdminUserController;
 use App\Http\Controllers\Api\PurchaseController;
 use App\Http\Controllers\Api\SettingController;
 use App\Http\Controllers\Api\StripeWebhookController;
@@ -184,6 +185,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('pa_can:pa_manage_payment_methods')->group(function () {
             Route::get('/payment-methods', [PowerAdminPaymentMethodController::class, 'index']);
             Route::put('/payment-methods', [PowerAdminPaymentMethodController::class, 'update']);
+        });
+
+        Route::middleware('pa_can:pa_manage_users_roles')->group(function () {
+            Route::get('/users', [PowerAdminUserController::class, 'index']);
+            Route::post('/users', [PowerAdminUserController::class, 'store']);
+            Route::get('/users/{user}', [PowerAdminUserController::class, 'show']);
+            Route::put('/users/{user}', [PowerAdminUserController::class, 'update']);
+            Route::delete('/users/{user}', [PowerAdminUserController::class, 'destroy']);
         });
 
         // Read hubs if managing hubs or checklists; writes split by capability
