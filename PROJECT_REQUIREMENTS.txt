@@ -41,7 +41,12 @@ IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
 
 2.2 Content browsing & listing UX
 - Users browse posts, reels, and other types.
-- For REELS: listing page shows a PLAY button on the card/item.
+- Listing page uses a 3-column grid (2 columns on tablet, 1 on mobile).
+- For REELS: admin can upload a video when type is Reel.
+- Reel video autoplays (muted, looping) on listing and detail pages.
+- A play/pause “Reel” control sits at the top of the video to mark it as a reel
+  and let the viewer pause/resume.
+- Reels without a video still show the legacy centered play indicator on listing.
 - "NEW" banner on new posts/reels:
   - Shown when the item is still within the "new" window.
   - Duration (e.g. number of days) is taken from the DATABASE (configurable
@@ -49,10 +54,21 @@ IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
 
 2.3 Content metrics
 - Each post/reel tracks:
-  - views
-  - reach
-  - buy count
-- Metrics are stored and shown (listing and/or detail / admin as appropriate).
+  - reach — unique impression when a user scrolls the listing and the post
+    enters their viewport (POST /api/posts/reach with post_ids)
+  - views — when a user opens the post detail page (GET /api/posts/{id})
+  - buy count — when a user purchases the post
+- Metrics are stored and shown on listing/detail for members according to their
+  active subscription plan’s visibility flags (Power Admin / hub-admin can
+  configure these on each plan):
+  - Basic (default): reach only
+  - Standard (default): reach + views
+  - Premium (default): reach + views + buys
+- Hub admins, Power Admin, and unlimited-credit advisors see all three metrics.
+- Non-subscribers do not see metric counts.
+- Plan fields: show_reach, show_views, show_buys (editable via subscription plan
+  CRUD under Power Admin and hub-admin when dashboard_manage_plans is enabled).
+- API responses include visible_metrics so the frontend knows what to render.
 
 2.4 Subscriptions & Credits
 - Users subscribe and receive credits.
@@ -358,8 +374,14 @@ STEP 1 — Shared hub core
 [x] Category — separate from type and tags
 [x] Tags — separate from type and category
 [x] Reel play button on listing page
+[x] Reel video upload (when type is Reel) + video_url / is_video API
+[x] Reel autoplay + top play/pause “Reel” control on listing & detail
+[x] Posts listing 3-column grid
 [x] NEW banner (duration from database)
 [x] Views, reach, buy count on content
+[x] Reach vs view separated (listing scroll reach vs detail view)
+[x] Plan-gated metric visibility (Basic=reach, Standard=+views, Premium=+buys)
+[x] Power Admin / hub-admin can toggle show_reach / show_views / show_buys on plans
 [x] Role rename: admin → client_admin
 [x] Separate client_admin dashboard (manage everything)
 [x] client_admin / power_admin shells separated from member app

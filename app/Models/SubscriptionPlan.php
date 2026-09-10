@@ -19,11 +19,15 @@ class SubscriptionPlan extends Model
         'credits',
         'duration_days',
         'is_active',
+        'show_reach',
+        'show_views',
+        'show_buys',
         'last_updated',
     ];
 
     protected $appends = [
         'image_url',
+        'visible_metrics',
     ];
 
     protected function casts(): array
@@ -33,9 +37,26 @@ class SubscriptionPlan extends Model
             'credits' => 'integer',
             'duration_days' => 'integer',
             'is_active' => 'boolean',
+            'show_reach' => 'boolean',
+            'show_views' => 'boolean',
+            'show_buys' => 'boolean',
             'features' => 'array',
             'benefits' => 'array',
             'last_updated' => 'datetime',
+        ];
+    }
+
+    /**
+     * Which post metrics subscribers on this plan may see.
+     *
+     * @return array{reach: bool, views: bool, buys: bool}
+     */
+    public function getVisibleMetricsAttribute(): array
+    {
+        return [
+            'reach' => (bool) $this->show_reach,
+            'views' => (bool) $this->show_views,
+            'buys' => (bool) $this->show_buys,
         ];
     }
 

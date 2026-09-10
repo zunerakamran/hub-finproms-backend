@@ -151,6 +151,9 @@ class SubscriptionController extends Controller
             'credits' => [$required, 'integer', 'min:1'],
             'duration_days' => [$required, 'integer', 'min:1'],
             'is_active' => ['sometimes', 'boolean'],
+            'show_reach' => ['sometimes', 'boolean'],
+            'show_views' => ['sometimes', 'boolean'],
+            'show_buys' => ['sometimes', 'boolean'],
             'image' => [
                 $updating ? 'sometimes' : 'nullable',
                 'image',
@@ -165,6 +168,19 @@ class SubscriptionController extends Controller
             $validated['is_active'] = filter_var($request->input('is_active'), FILTER_VALIDATE_BOOLEAN);
         } elseif (! $updating) {
             $validated['is_active'] = true;
+        }
+
+        foreach (['show_reach', 'show_views', 'show_buys'] as $metricFlag) {
+            if ($request->has($metricFlag)) {
+                $validated[$metricFlag] = filter_var($request->input($metricFlag), FILTER_VALIDATE_BOOLEAN);
+            }
+        }
+
+        // Sensible create defaults when flags are omitted (Basic-like: reach only).
+        if (! $updating) {
+            $validated['show_reach'] = $validated['show_reach'] ?? true;
+            $validated['show_views'] = $validated['show_views'] ?? false;
+            $validated['show_buys'] = $validated['show_buys'] ?? false;
         }
 
         return $validated;
@@ -305,6 +321,8 @@ class SubscriptionController extends Controller
         return response()->json([
             'subscriptions' => $subscriptions,
             'credits' => $request->user()->credits,
+            'visible_metrics' => $request->user()->contentMetricVisibility(),
+            'active_plan' => $request->user()->activePlan(),
         ]);
     }
 

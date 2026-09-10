@@ -20,6 +20,7 @@ class PostController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user = $this->optionalUser($request);
+        $metricVisibility = $this->metricVisibilityFor($user);
 
         $query = Post::query()
             ->with('creator:id,name')
@@ -73,27 +74,66 @@ class PostController extends Controller
         $isAuthenticated = $user !== null;
         $canViewCatalog = $isAuthenticated;
 
-        $posts->getCollection()->transform(function (Post $post) use ($purchasedIds, $isClientAdmin, $isAuthenticated) {
+        $posts->getCollection()->transform(function (Post $post) use ($purchasedIds, $isClientAdmin, $isAuthenticated, $metricVisibility) {
             $purchased = in_array($post->id, $purchasedIds, true);
 
-            return $this->applyPostVisibility($post, $purchased, $isClientAdmin, $isAuthenticated);
+            $this->applyPostVisibility($post, $purchased, $isClientAdmin, $isAuthenticated);
+            $this->applyMetricVisibility($post, $metricVisibility);
+
+            return $post;
         });
 
         return response()->json(array_merge($posts->toArray(), [
             'can_view_catalog' => $canViewCatalog,
             'new_banner_days' => Setting::newBannerDays(),
+            'visible_metrics' => $metricVisibility,
         ]));
+    }
+
+    /**
+     * Record reach when posts appear during listing scroll.
+     * Accepts one or many post IDs; each viewer is counted once per post.
+     */
+    public function recordReach(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'post_ids' => ['required', 'array', 'min:1', 'max:50'],
+            'post_ids.*' => ['integer', 'distinct', 'exists:posts,id'],
+        ]);
+
+        $user = $this->optionalUser($request);
+        $viewerKey = $this->viewerKey($request, $user);
+
+        $posts = Post::query()
+            ->whereIn('id', $validated['post_ids'])
+            ->where('is_active', true)
+            ->get();
+
+        $reached = [];
+        foreach ($posts as $post) {
+            if ($post->recordReach($viewerKey)) {
+                $reached[] = $post->id;
+            }
+        }
+
+        return response()->json([
+            'message' => 'Reach recorded.',
+            'reached_post_ids' => $reached,
+            'processed' => $posts->pluck('id')->values(),
+        ]);
     }
 
     public function show(Request $request, Post $post): JsonResponse
     {
         $user = $this->optionalUser($request);
+        $metricVisibility = $this->metricVisibilityFor($user);
 
         if (! $post->is_active && ! $user?->isClientAdmin()) {
             return response()->json(['message' => 'Post not found.'], 404);
         }
 
-        $post->recordView($this->viewerKey($request, $user));
+        $post->recordView();
+        $post->refresh();
 
         $post->load('creator:id,name');
         $isPurchased = $user ? $user->hasPurchased($post) : false;
@@ -102,11 +142,13 @@ class PostController extends Controller
         $canViewCatalog = $isAuthenticated;
 
         $this->applyPostVisibility($post, $isPurchased, $isClientAdmin, $isAuthenticated);
+        $this->applyMetricVisibility($post, $metricVisibility);
 
         return response()->json([
             'post' => $post,
             'can_view_catalog' => $canViewCatalog,
             'new_banner_days' => Setting::newBannerDays(),
+            'visible_metrics' => $metricVisibility,
         ]);
     }
 
@@ -221,8 +263,8 @@ class PostController extends Controller
             'attachment' => [
                 $updating ? 'sometimes' : 'nullable',
                 'file',
-                'max:20480',
-                'mimes:jpg,jpeg,png,gif,webp,pdf,doc,docx,mp4,mov,zip',
+                'max:102400',
+                'mimes:jpg,jpeg,png,gif,webp,pdf,doc,docx,mp4,mov,webm,zip',
             ],
         ];
 
@@ -307,6 +349,46 @@ class PostController extends Controller
         return 'ip:'.sha1((string) $request->ip());
     }
 
+    /**
+     * @return array{reach: bool, views: bool, buys: bool}
+     */
+    private function metricVisibilityFor(?User $user): array
+    {
+        if (! $user) {
+            return ['reach' => false, 'views' => false, 'buys' => false];
+        }
+
+        return $user->contentMetricVisibility();
+    }
+
+    /**
+     * @param  array{reach: bool, views: bool, buys: bool}  $visibility
+     */
+    private function applyMetricVisibility(Post $post, array $visibility): Post
+    {
+        $hidden = [];
+
+        if (! $visibility['reach']) {
+            $hidden[] = 'reach_count';
+        }
+
+        if (! $visibility['views']) {
+            $hidden[] = 'views_count';
+        }
+
+        if (! $visibility['buys']) {
+            $hidden[] = 'buy_count';
+        }
+
+        if ($hidden !== []) {
+            $post->makeHidden($hidden);
+        }
+
+        $post->setAttribute('visible_metrics', $visibility);
+
+        return $post;
+    }
+
     private function applyPostVisibility(
         Post $post,
         bool $purchased,
@@ -334,12 +416,15 @@ class PostController extends Controller
                 'attachment_name',
                 'attachment_mime',
                 'cover_url',
+                'video_url',
             ]);
             $post->setAttribute('description', null);
             $post->setAttribute('tags', []);
             $post->setAttribute('cover_url', null);
+            $post->setAttribute('video_url', null);
         } else {
-            $post->makeVisible(['cover_url']);
+            // Browse preview: image cover and reel video (download still gated above).
+            $post->makeVisible(['cover_url', 'video_url']);
         }
 
         return $post;

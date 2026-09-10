@@ -45,6 +45,7 @@ Route::middleware('hub_can:member_browse_catalog')->group(function () {
     Route::get('/tags', [TagController::class, 'index']);
     Route::get('/posts/categories', [PostController::class, 'categories']);
     Route::get('/posts', [PostController::class, 'index']);
+    Route::post('/posts/reach', [PostController::class, 'recordReach']);
     Route::get('/posts/{post}', [PostController::class, 'show']);
 });
 

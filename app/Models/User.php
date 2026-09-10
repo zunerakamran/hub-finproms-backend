@@ -231,17 +231,55 @@ class User extends Authenticatable
 
     public function hasActiveSubscription(): bool
     {
+        return $this->activeSubscription() !== null;
+    }
+
+    public function activeSubscription(): ?UserSubscription
+    {
         if ($this->isSuspended() || $this->isDiscontinued()) {
-            return false;
+            return null;
         }
 
         return $this->subscriptions()
+            ->with('plan')
             ->where('status', 'active')
             ->where(function ($query) {
                 $query->whereNull('ends_at')
                     ->orWhere('ends_at', '>', now());
             })
-            ->exists();
+            ->latest('starts_at')
+            ->first();
+    }
+
+    public function activePlan(): ?SubscriptionPlan
+    {
+        return $this->activeSubscription()?->plan;
+    }
+
+    /**
+     * Which content metrics this user is allowed to see.
+     * Hub/Power admins and unlimited-credit advisors see all three.
+     * Subscribers follow their plan flags (Basic/Standard/Premium defaults).
+     *
+     * @return array{reach: bool, views: bool, buys: bool}
+     */
+    public function contentMetricVisibility(): array
+    {
+        if ($this->isPowerAdmin() || $this->isClientAdmin()) {
+            return ['reach' => true, 'views' => true, 'buys' => true];
+        }
+
+        $plan = $this->activePlan();
+        if ($plan) {
+            return $plan->visible_metrics;
+        }
+
+        // Unlimited advisors without a named plan get full metrics (Premium-equivalent).
+        if ($this->hasUnlimitedCredits()) {
+            return ['reach' => true, 'views' => true, 'buys' => true];
+        }
+
+        return ['reach' => false, 'views' => false, 'buys' => false];
     }
 
     public function canViewCatalog(): bool

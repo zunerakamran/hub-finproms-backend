@@ -32,6 +32,8 @@ class Post extends Model
     protected $appends = [
         'attachment_url',
         'cover_url',
+        'video_url',
+        'is_video',
         'last_updated',
         'content_type',
         'is_reel',
@@ -66,6 +68,24 @@ class Post extends Model
         }
 
         return Storage::disk('public')->url($this->attachment_path);
+    }
+
+    /**
+     * Preview URL for video attachments (reels). Visible when browsing,
+     * same gating as cover_url — full download stays on attachment_url.
+     */
+    public function getVideoUrlAttribute(): ?string
+    {
+        if (! $this->attachment_path || ! $this->isVideoAttachment()) {
+            return null;
+        }
+
+        return Storage::disk('public')->url($this->attachment_path);
+    }
+
+    public function getIsVideoAttribute(): bool
+    {
+        return $this->isVideoAttachment();
     }
 
     public function isImageAttachment(): bool
@@ -168,10 +188,11 @@ class Post extends Model
         return $this->hasMany(PostReach::class);
     }
 
-    public function recordView(string $viewerKey): void
+    /**
+     * Reach: unique impression when the post appears during listing scroll.
+     */
+    public function recordReach(string $viewerKey): bool
     {
-        $this->increment('views_count');
-
         $created = PostReach::query()->firstOrCreate([
             'post_id' => $this->id,
             'viewer_key' => $viewerKey,
@@ -179,8 +200,18 @@ class Post extends Model
 
         if ($created->wasRecentlyCreated) {
             $this->increment('reach_count');
+
+            return true;
         }
 
-        $this->refresh();
+        return false;
+    }
+
+    /**
+     * View: user opened the post detail page.
+     */
+    public function recordView(): void
+    {
+        $this->increment('views_count');
     }
 }

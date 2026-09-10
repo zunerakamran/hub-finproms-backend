@@ -186,6 +186,8 @@ class AuthController extends Controller
 
         $payload = [
             'user' => $user,
+            'visible_metrics' => $user->contentMetricVisibility(),
+            'active_plan' => $user->activePlan(),
         ];
 
         if ($user->isPowerAdmin()) {

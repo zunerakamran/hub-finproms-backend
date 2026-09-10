@@ -27,6 +27,7 @@ class SubscriptionPlanSeeder extends Seeder
                     'Access to shared FinProms library',
                     'Download approved posts and reels',
                     'Email support',
+                    'See post reach metrics',
                 ],
                 'benefits' => [
                     'Affordable entry point for new advisors',
@@ -37,6 +38,9 @@ class SubscriptionPlanSeeder extends Seeder
                 'credits' => 90,
                 'duration_days' => 30,
                 'is_active' => true,
+                'show_reach' => true,
+                'show_views' => false,
+                'show_buys' => false,
             ],
             [
                 'name' => 'Standard',
@@ -48,6 +52,7 @@ class SubscriptionPlanSeeder extends Seeder
                     'Download approved posts and reels',
                     'Priority email support',
                     'Standard compliance-ready templates',
+                    'See post reach and view metrics',
                 ],
                 'benefits' => [
                     'Better value per credit than Basic',
@@ -58,6 +63,9 @@ class SubscriptionPlanSeeder extends Seeder
                 'credits' => 140,
                 'duration_days' => 30,
                 'is_active' => true,
+                'show_reach' => true,
+                'show_views' => true,
+                'show_buys' => false,
             ],
             [
                 'name' => 'Premium',
@@ -70,6 +78,7 @@ class SubscriptionPlanSeeder extends Seeder
                     'Priority support',
                     'Premium compliance-ready templates',
                     'Best credit value of all plans',
+                    'See reach, views, and buy metrics',
                 ],
                 'benefits' => [
                     'Highest monthly credit pool',
@@ -80,6 +89,9 @@ class SubscriptionPlanSeeder extends Seeder
                 'credits' => 190,
                 'duration_days' => 30,
                 'is_active' => true,
+                'show_reach' => true,
+                'show_views' => true,
+                'show_buys' => true,
             ],
         ];
 
