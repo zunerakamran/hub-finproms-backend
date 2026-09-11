@@ -39,7 +39,8 @@ class HubVisibilityTransitionService
     ];
 
     public function __construct(
-        private readonly AdvisorBillingService $advisorBilling
+        private readonly AdvisorBillingService $advisorBilling,
+        private readonly SubscriberCreditsService $subscriberCredits
     ) {}
 
     /**
@@ -129,7 +130,7 @@ class HubVisibilityTransitionService
     {
         $reactivated = 0;
 
-        DB::transaction(function () use (&$reactivated) {
+        DB::transaction(function () use ($hub, &$reactivated) {
             $advisors = User::query()
                 ->where('is_advisor', true)
                 ->where('is_suspended', true)
@@ -139,10 +140,10 @@ class HubVisibilityTransitionService
             foreach ($advisors as $advisor) {
                 $advisor->is_suspended = false;
                 $advisor->role = User::ROLE_USER;
-                $advisor->has_unlimited_credits = true;
                 $advisor->save();
 
                 $this->ensureAdvisorSubscription($advisor);
+                $this->subscriberCredits->applyToAdvisor($advisor->fresh(), $hub, true);
                 $reactivated++;
             }
         });

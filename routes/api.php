@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\ContentTypeController;
 use App\Http\Controllers\Api\HubController;
 use App\Http\Controllers\Api\InvoiceController;
+use App\Http\Controllers\Api\MyDashboardController;
 use App\Http\Controllers\Api\PostController;
 use App\Http\Controllers\Api\PowerAdminAdvisorPricingController;
 use App\Http\Controllers\Api\PowerAdminCapabilityController;
@@ -20,6 +21,7 @@ use App\Http\Controllers\Api\PurchaseController;
 use App\Http\Controllers\Api\SettingController;
 use App\Http\Controllers\Api\StripeWebhookController;
 use App\Http\Controllers\Api\SubscriptionController;
+use App\Http\Controllers\Api\SubscriberCreditsController;
 use App\Http\Controllers\Api\TagController;
 use App\Http\Middleware\EnsureUserIsClientAdmin;
 use App\Http\Middleware\EnsureUserIsPowerAdmin;
@@ -58,6 +60,8 @@ Route::middleware('hub_can:member_view_plans')->group(function () {
 });
 
 Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/my-dashboard', [MyDashboardController::class, 'show']);
+
     Route::middleware('hub_can:member_view_plans')->group(function () {
         Route::post('/subscription-plans/{plan}/checkout', [SubscriptionController::class, 'checkout']);
         Route::post('/subscriptions/confirm', [SubscriptionController::class, 'confirm']);
@@ -69,13 +73,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/bundles/{bundle}/purchase', [PurchaseController::class, 'purchaseBundle']);
     });
 
-    Route::middleware('hub_can:member_view_purchases')->group(function () {
-        Route::get('/my-purchases', [PurchaseController::class, 'myPurchases']);
-    });
-
-    Route::middleware('hub_can:member_view_invoices')->group(function () {
-        Route::get('/my-invoices', [InvoiceController::class, 'index']);
-    });
+    // Member list pages — also reachable from General options (dashboard).
+    Route::get('/my-purchases', [PurchaseController::class, 'myPurchases']);
+    Route::get('/my-invoices', [InvoiceController::class, 'index']);
 
     Route::get('/invoices/{invoice}', [InvoiceController::class, 'show']);
 
@@ -150,6 +150,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:dashboard_manage_advisor_renewal')->group(function () {
             Route::get('/advisor-billing-renewal', [AdvisorBillingController::class, 'renewalSettings']);
             Route::put('/advisor-billing-renewal', [AdvisorBillingController::class, 'updateRenewalSettings']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_subscriber_credits')->group(function () {
+            Route::get('/subscriber-credits', [SubscriberCreditsController::class, 'show']);
+            Route::put('/subscriber-credits', [SubscriberCreditsController::class, 'update']);
         });
 
         Route::middleware('hub_can:dashboard_manage_advisor_pricing')->group(function () {
@@ -248,6 +253,10 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::put('/advisor-billing-renewal', [AdvisorBillingController::class, 'updateRenewalSettings']);
         });
 
+        // Capability is checked in the controller against hub_id (may differ from current hub).
+        Route::get('/subscriber-credits', [SubscriberCreditsController::class, 'show']);
+        Route::put('/subscriber-credits', [SubscriberCreditsController::class, 'update']);
+
         Route::middleware('hub_can:dashboard_manage_advisor_pricing')->group(function () {
             Route::get('/advisor-pricing', [PowerAdminAdvisorPricingController::class, 'index']);
             Route::post('/advisor-pricing', [PowerAdminAdvisorPricingController::class, 'store']);
@@ -261,6 +270,40 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/subscription-plans/{plan}', [SubscriptionController::class, 'updatePlan']);
             Route::put('/subscription-plans/{plan}', [SubscriptionController::class, 'updatePlan']);
             Route::delete('/subscription-plans/{plan}', [SubscriptionController::class, 'destroyPlan']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_posts')->group(function () {
+            Route::post('/posts', [PostController::class, 'store']);
+            Route::post('/posts/{post}', [PostController::class, 'update']);
+            Route::put('/posts/{post}', [PostController::class, 'update']);
+            Route::delete('/posts/{post}', [PostController::class, 'destroy']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_bundles')->group(function () {
+            Route::get('/bundles', [BundleController::class, 'index']);
+            Route::get('/bundles/{bundle}', [BundleController::class, 'show']);
+            Route::post('/bundles', [BundleController::class, 'store']);
+            Route::post('/bundles/{bundle}', [BundleController::class, 'update']);
+            Route::put('/bundles/{bundle}', [BundleController::class, 'update']);
+            Route::delete('/bundles/{bundle}', [BundleController::class, 'destroy']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_categories')->group(function () {
+            Route::post('/categories', [CategoryController::class, 'store']);
+            Route::put('/categories/{category}', [CategoryController::class, 'update']);
+            Route::delete('/categories/{category}', [CategoryController::class, 'destroy']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_types')->group(function () {
+            Route::post('/types', [ContentTypeController::class, 'store']);
+            Route::put('/types/{contentType}', [ContentTypeController::class, 'update']);
+            Route::delete('/types/{contentType}', [ContentTypeController::class, 'destroy']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_tags')->group(function () {
+            Route::post('/tags', [TagController::class, 'store']);
+            Route::put('/tags/{tag}', [TagController::class, 'update']);
+            Route::delete('/tags/{tag}', [TagController::class, 'destroy']);
         });
 
         Route::middleware('hub_can:dashboard_view_activity_logs')->group(function () {

@@ -11,6 +11,11 @@ use RuntimeException;
 
 class AdvisorImportService
 {
+    public function __construct(
+        private readonly HubService $hubs,
+        private readonly SubscriberCreditsService $subscriberCredits
+    ) {}
+
     /**
      * @return array{
      *   created: list<array{name: string, email: string, temporary_password: string}>,
@@ -22,6 +27,7 @@ class AdvisorImportService
     public function import(UploadedFile $file): array
     {
         $rows = $this->parseFile($file);
+        $hub = $this->hubs->current();
 
         if ($rows === []) {
             throw new RuntimeException(
@@ -58,7 +64,7 @@ class AdvisorImportService
             }
 
             try {
-                $result = DB::transaction(function () use ($name, $email, $password) {
+                $result = DB::transaction(function () use ($name, $email, $password, $hub) {
                     $user = User::query()->where('email', $email)->first();
                     $temporaryPassword = null;
 
@@ -76,17 +82,20 @@ class AdvisorImportService
                             'name' => $name,
                             'role' => User::ROLE_USER,
                             'is_advisor' => true,
-                            'has_unlimited_credits' => true,
                             'is_suspended' => false,
                             'is_discontinued' => false,
                             'discontinued_at' => null,
                         ]);
                         $user->save();
                         $this->ensureAdvisorSubscription($user);
+                        // Fresh allotment only for new / reactivated; active advisors wait for autorenew.
+                        if ($wasInactive) {
+                            $this->subscriberCredits->applyToAdvisor($user->fresh(), $hub, true);
+                        }
 
                         return [
                             'status' => $wasInactive ? 'reactivated' : 'updated',
-                            'user' => $user,
+                            'user' => $user->fresh(),
                         ];
                     }
 
@@ -102,16 +111,17 @@ class AdvisorImportService
                         'role' => User::ROLE_USER,
                         'credits' => 0,
                         'is_advisor' => true,
-                        'has_unlimited_credits' => true,
+                        'has_unlimited_credits' => false,
                         'is_suspended' => false,
                         'is_discontinued' => false,
                     ]);
 
                     $this->ensureAdvisorSubscription($user);
+                    $this->subscriberCredits->applyToAdvisor($user->fresh(), $hub, true);
 
                     return [
                         'status' => 'created',
-                        'user' => $user,
+                        'user' => $user->fresh(),
                         'temporary_password' => $temporaryPassword,
                     ];
                 });

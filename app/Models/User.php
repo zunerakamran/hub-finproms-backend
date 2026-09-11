@@ -32,7 +32,7 @@ class User extends Authenticatable
     /** White-label advisor (subscriber, typically unlimited credits). */
     public const ROLE_ADVISOR = 'advisor';
 
-    /** General member. */
+    /** General user / subscriber. */
     public const ROLE_USER = 'user';
 
     /**
@@ -62,7 +62,7 @@ class User extends Authenticatable
         self::ROLE_MANAGER => 'Manager',
         self::ROLE_APPROVER => 'Approver',
         self::ROLE_ADVISOR => 'Advisor',
-        self::ROLE_USER => 'Member',
+        self::ROLE_USER => 'User',
     ];
 
     protected $fillable = [

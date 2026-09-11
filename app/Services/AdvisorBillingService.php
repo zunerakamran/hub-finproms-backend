@@ -25,7 +25,8 @@ class AdvisorBillingService
         private readonly InvoiceService $invoices,
         private readonly PaymentSettingsService $paymentSettings,
         private readonly BankTransferSubscriptionService $bankTransfer,
-        private readonly HubService $hubs
+        private readonly HubService $hubs,
+        private readonly SubscriberCreditsService $subscriberCredits
     ) {}
 
     public function billingEnabled(?Hub $hub = null): bool
@@ -117,8 +118,8 @@ class AdvisorBillingService
             'mode' => 'setup',
             'customer' => $customerId,
             'payment_method_types' => ['card'],
-            'success_url' => $frontendUrl.'/client-admin/payment-card/success?session_id={CHECKOUT_SESSION_ID}',
-            'cancel_url' => $frontendUrl.'/client-admin/payment-card?canceled=1',
+            'success_url' => $frontendUrl.'/my-dashboard/payment-card/success?session_id={CHECKOUT_SESSION_ID}',
+            'cancel_url' => $frontendUrl.'/my-dashboard/payment-card?canceled=1',
             'metadata' => [
                 'type' => 'client_admin_card_setup',
                 'user_id' => (string) $user->id,
@@ -580,8 +581,8 @@ class AdvisorBillingService
                 ],
                 'quantity' => max(1, (int) $billing->advisor_count),
             ]],
-            'success_url' => $frontendUrl.'/client-admin/advisor-billing/success?session_id={CHECKOUT_SESSION_ID}',
-            'cancel_url' => $frontendUrl.'/client-admin/advisors?billing_canceled=1',
+            'success_url' => $frontendUrl.'/my-dashboard/advisor-billing/success?session_id={CHECKOUT_SESSION_ID}',
+            'cancel_url' => $frontendUrl.'/my-dashboard/advisors?billing_canceled=1',
             'client_reference_id' => (string) $payer->id,
             'payment_intent_data' => [
                 'setup_future_usage' => 'off_session',
@@ -915,6 +916,18 @@ class AdvisorBillingService
                 'period_ends_at' => $locked->period_ends_at
                     ?? ($hub ? $this->nextRenewalAt($hub) : now()->addMonth()),
             ]);
+
+            // Monthly autorenew: re-apply the hub's current credit allotment to all active subscribers.
+            // Mid-period Power Admin changes take effect here (not immediately on save).
+            $isRenewal = ! empty(($locked->meta ?? [])['renewal_of']);
+            if ($isRenewal && $hub) {
+                $applied = $this->subscriberCredits->applyToAllActiveAdvisors($hub);
+                $meta = is_array($locked->meta) ? $locked->meta : [];
+                $meta['subscriber_credits_applied'] = $hub->subscriberCreditsConfig();
+                $meta['subscriber_credits_applied_count'] = $applied;
+                $locked->meta = $meta;
+                $locked->save();
+            }
 
             $this->invoices->createForAdvisorBilling($locked->fresh());
 

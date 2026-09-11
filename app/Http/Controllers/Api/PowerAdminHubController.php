@@ -4,18 +4,23 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Hub;
+use App\Services\CapabilitiesMatrixService;
 use App\Services\HubService;
 use App\Services\HubVisibilityTransitionService;
+use App\Services\SubscriberCreditsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class PowerAdminHubController extends Controller
 {
     public function __construct(
         private readonly HubService $hubs,
-        private readonly HubVisibilityTransitionService $visibilityTransitions
+        private readonly HubVisibilityTransitionService $visibilityTransitions,
+        private readonly SubscriberCreditsService $subscriberCredits,
+        private readonly CapabilitiesMatrixService $matrix
     ) {}
 
     public function index(): JsonResponse
@@ -96,6 +101,9 @@ class PowerAdminHubController extends Controller
             'secondary_color' => ['nullable', 'string', 'max:32'],
             'logo_url' => ['nullable', 'string', 'max:2048'],
             'is_active' => ['sometimes', 'boolean'],
+            // null / omitted unlimited flag + credits: Power Admin subscriber allotment
+            'subscriber_credits_unlimited' => ['sometimes', 'boolean'],
+            'subscriber_credits' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:1000000'],
         ]);
 
         // Shared hub slug/type stay stable.
@@ -109,8 +117,39 @@ class PowerAdminHubController extends Controller
             ], 422);
         }
 
+        $creditsPayload = array_intersect_key($validated, array_flip([
+            'subscriber_credits_unlimited',
+            'subscriber_credits',
+        ]));
+        unset($validated['subscriber_credits_unlimited'], $validated['subscriber_credits']);
+
         $hub->fill($validated);
         $hub->save();
+
+        if ($creditsPayload !== []) {
+            $user = $request->user();
+            if (! $user || ! $this->matrix->roleCan($hub, (string) $user->role, 'dashboard_manage_subscriber_credits')) {
+                return response()->json([
+                    'message' => 'Setting subscriber credits is disabled for your role. Enable it in Power Admin → Capabilities.',
+                ], 403);
+            }
+
+            $unlimited = array_key_exists('subscriber_credits_unlimited', $creditsPayload)
+                ? (bool) $creditsPayload['subscriber_credits_unlimited']
+                : $hub->givesUnlimitedSubscriberCredits();
+
+            if ($unlimited) {
+                $this->subscriberCredits->updateHubSetting($hub, null);
+            } else {
+                if (! array_key_exists('subscriber_credits', $creditsPayload)
+                    || $creditsPayload['subscriber_credits'] === null) {
+                    throw ValidationException::withMessages([
+                        'subscriber_credits' => 'Enter the number of credits per subscriber, or choose Unlimited.',
+                    ]);
+                }
+                $this->subscriberCredits->updateHubSetting($hub, (int) $creditsPayload['subscriber_credits']);
+            }
+        }
 
         $this->hubs->forgetCurrentCache();
 
@@ -147,6 +186,15 @@ class PowerAdminHubController extends Controller
         $merged = $this->hubs->mergeChecklist($hub, $input);
         $transitionType = $this->visibilityTransitions->detectTransition($before, $merged);
         $checklist = $this->visibilityTransitions->applyModeFlags($merged, $transitionType);
+
+        // Keep a previously configured fixed allotment when returning to private
+        // (PRIVATE_MODE_FLAGS defaults unlimited; do not wipe Power Admin setting).
+        if ($transitionType === 'public_to_private' && ! $hub->givesUnlimitedSubscriberCredits()) {
+            $checklist['unlimited_credits'] = false;
+            $checklist['paid_credits'] = true;
+        }
+
+        $this->subscriberCredits->syncFieldFromChecklist($hub, $checklist);
 
         $hub->checklist = $checklist;
         $hub->save();

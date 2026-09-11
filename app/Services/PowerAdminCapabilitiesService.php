@@ -34,7 +34,7 @@ class PowerAdminCapabilitiesService
         ],
         'pa_manage_power_capabilities' => [
             'label' => 'Manage capabilities matrix',
-            'description' => 'Edit user capabilities by role (member, hub-admin, Power Admin).',
+            'description' => 'Edit user capabilities by role (user, hub-admin, Power Admin).',
             'default' => true,
         ],
         'pa_manage_users_roles' => [

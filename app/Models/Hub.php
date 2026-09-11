@@ -14,6 +14,8 @@ class Hub extends Model
 
     public const GROUP_MEMBER = 'member';
 
+    public const GROUP_GENERAL = 'general';
+
     public const GROUP_DASHBOARD = 'dashboard';
 
     /**
@@ -21,7 +23,8 @@ class Hub extends Model
      */
     public const CHECKLIST_GROUPS = [
         self::GROUP_BEHAVIOUR => 'Functionalities',
-        self::GROUP_MEMBER => 'Member capabilities',
+        self::GROUP_MEMBER => 'User capabilities',
+        self::GROUP_GENERAL => 'General options (dashboard)',
         self::GROUP_DASHBOARD => 'Hub-admin dashboard',
     ];
 
@@ -41,7 +44,20 @@ class Hub extends Model
      */
     public const CAPABILITY_GROUPS = [
         self::GROUP_MEMBER,
+        self::GROUP_GENERAL,
         self::GROUP_DASHBOARD,
+    ];
+
+    /**
+     * Member personal-dashboard sections (General options).
+     *
+     * @var list<string>
+     */
+    public const GENERAL_DASHBOARD_KEYS = [
+        'general_show_subscription',
+        'general_show_credits',
+        'general_show_invoices',
+        'general_show_purchases',
     ];
 
     /**
@@ -69,6 +85,7 @@ class Hub extends Model
         'dashboard_view_advisor_invoices',
         'dashboard_manage_advisor_pricing',
         'dashboard_manage_advisor_renewal',
+        'dashboard_manage_subscriber_credits',
     ];
 
     /**
@@ -113,7 +130,7 @@ class Hub extends Model
         ],
         'unlimited_credits' => [
             'label' => 'Unlimited credits',
-            'description' => 'Advisors have unlimited credits to buy content.',
+            'description' => 'Private-hub subscribers get unlimited credits (or set a fixed allotment under Subscriber credits).',
             'group' => self::GROUP_BEHAVIOUR,
             'default_shared' => false,
             'default_white_label' => true,
@@ -150,7 +167,7 @@ class Hub extends Model
         // --- Member capabilities ---
         'member_browse_catalog' => [
             'label' => 'Browse catalog (posts / reels)',
-            'description' => 'Members can browse the content catalog.',
+            'description' => 'Can browse the content catalog. Configurable per role in the Capabilities matrix (all roles).',
             'group' => self::GROUP_MEMBER,
             'default_shared' => true,
             'default_white_label' => true,
@@ -196,6 +213,36 @@ class Hub extends Model
             'group' => self::GROUP_MEMBER,
             'default_shared' => false,
             'default_white_label' => false,
+        ],
+
+        // --- General options (member personal dashboard) ---
+        'general_show_subscription' => [
+            'label' => 'Show subscription',
+            'description' => 'Show the member’s active subscription / plan details on their dashboard.',
+            'group' => self::GROUP_GENERAL,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'general_show_credits' => [
+            'label' => 'Show remaining credits',
+            'description' => 'Show remaining (or unlimited) credits on the member dashboard.',
+            'group' => self::GROUP_GENERAL,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'general_show_invoices' => [
+            'label' => 'Show invoices',
+            'description' => 'Show recent personal invoices on the member dashboard.',
+            'group' => self::GROUP_GENERAL,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'general_show_purchases' => [
+            'label' => 'Show purchases',
+            'description' => 'Show recent content purchases on the member dashboard.',
+            'group' => self::GROUP_GENERAL,
+            'default_shared' => true,
+            'default_white_label' => true,
         ],
 
         // --- Hub-admin dashboard capabilities ---
@@ -297,6 +344,13 @@ class Hub extends Model
             'default_shared' => false,
             'default_white_label' => true,
         ],
+        'dashboard_manage_subscriber_credits' => [
+            'label' => 'Set subscriber credits (private hub)',
+            'description' => 'Set unlimited or a fixed credit allotment for Excel-imported private-hub subscribers (applied on import and autorenew). Private-hub only — inactive while the hub is public.',
+            'group' => self::GROUP_DASHBOARD,
+            'default_shared' => false,
+            'default_white_label' => true,
+        ],
         'dashboard_ai_content' => [
             'label' => 'AI content generation',
             'description' => 'Hub admin (typically FinProms admin on shared) can generate AI posts (future).',
@@ -324,6 +378,7 @@ class Hub extends Model
         'checklist',
         'role_capabilities',
         'advisor_billing_renew_day',
+        'subscriber_credits',
         'advisor_stripe_subscription_id',
         'stripe_key',
         'stripe_secret',
@@ -343,6 +398,7 @@ class Hub extends Model
             'checklist' => 'array',
             'role_capabilities' => 'array',
             'advisor_billing_renew_day' => 'integer',
+            'subscriber_credits' => 'integer',
             'stripe_secret' => 'encrypted',
             'stripe_webhook_secret' => 'encrypted',
         ];
@@ -353,6 +409,38 @@ class Hub extends Model
         $day = (int) ($this->advisor_billing_renew_day ?: 1);
 
         return max(1, min(28, $day));
+    }
+
+    /**
+     * Private-hub Excel subscribers: null subscriber_credits = unlimited.
+     */
+    public function givesUnlimitedSubscriberCredits(): bool
+    {
+        return $this->subscriber_credits === null;
+    }
+
+    /**
+     * Credits granted to each active advisor on import and each monthly autorenew.
+     * Null when unlimited.
+     */
+    public function subscriberCreditsPerPeriod(): ?int
+    {
+        if ($this->givesUnlimitedSubscriberCredits()) {
+            return null;
+        }
+
+        return max(0, (int) $this->subscriber_credits);
+    }
+
+    /**
+     * @return array{unlimited: bool, credits: ?int}
+     */
+    public function subscriberCreditsConfig(): array
+    {
+        return [
+            'unlimited' => $this->givesUnlimitedSubscriberCredits(),
+            'credits' => $this->subscriberCreditsPerPeriod(),
+        ];
     }
 
     public function hasStripeSecret(): bool
@@ -531,6 +619,7 @@ class Hub extends Model
                 'logo_url' => $this->logo_url,
             ],
             'stripe' => $this->stripeConfigForAdmin(),
+            'subscriber_credits' => $this->subscriberCreditsConfig(),
             'checklist' => $this->checklistForAdmin(),
             'checklist_groups' => array_intersect_key(
                 self::CHECKLIST_GROUPS,

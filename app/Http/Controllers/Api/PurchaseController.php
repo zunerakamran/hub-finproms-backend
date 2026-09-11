@@ -186,7 +186,19 @@ class PurchaseController extends Controller
 
     public function myPurchases(Request $request): JsonResponse
     {
-        $purchases = $request->user()
+        $user = $request->user();
+        $hub = app(\App\Services\HubService::class)->current();
+        $matrix = app(\App\Services\CapabilitiesMatrixService::class);
+        $role = (string) $user->role;
+
+        $allowed = $matrix->roleCan($hub, $role, 'member_view_purchases')
+            || $matrix->roleCan($hub, $role, 'general_show_purchases');
+
+        if (! $allowed) {
+            return response()->json(['message' => 'Unauthorized.'], 403);
+        }
+
+        $purchases = $user
             ->purchases()
             ->with(['post.creator:id,name'])
             ->latest('purchased_at')

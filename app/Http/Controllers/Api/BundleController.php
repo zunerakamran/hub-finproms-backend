@@ -179,6 +179,22 @@ class BundleController extends Controller
     {
         $required = $updating ? 'sometimes' : 'required';
 
+        // FormData sends JSON-encoded arrays as strings — normalize before validate.
+        if ($request->has('post_ids') && is_string($request->input('post_ids'))) {
+            $decoded = json_decode($request->input('post_ids'), true);
+            $request->merge([
+                'post_ids' => (json_last_error() === JSON_ERROR_NONE && is_array($decoded))
+                    ? array_values(array_map('intval', $decoded))
+                    : [],
+            ]);
+        }
+
+        if ($request->has('is_active') && ! is_bool($request->input('is_active'))) {
+            $request->merge([
+                'is_active' => filter_var($request->input('is_active'), FILTER_VALIDATE_BOOLEAN),
+            ]);
+        }
+
         $validated = $request->validate([
             'title' => [$required, 'string', 'max:255'],
             'description' => ['nullable', 'string'],
@@ -201,17 +217,6 @@ class BundleController extends Controller
                 'mimes:jpg,jpeg,png,gif,webp,pdf,doc,docx,mp4,mov,webm,zip',
             ],
         ]);
-
-        if ($request->has('is_active')) {
-            $validated['is_active'] = filter_var($request->input('is_active'), FILTER_VALIDATE_BOOLEAN);
-        }
-
-        if (array_key_exists('post_ids', $validated) && is_string($request->input('post_ids'))) {
-            $decoded = json_decode($request->input('post_ids'), true);
-            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
-                $validated['post_ids'] = array_map('intval', $decoded);
-            }
-        }
 
         return $validated;
     }

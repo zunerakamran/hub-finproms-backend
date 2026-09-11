@@ -46,27 +46,7 @@ class CapabilitiesMatrixService
         $group = $meta['group'] ?? null;
 
         if ($group === Hub::GROUP_DASHBOARD) {
-            $roles = [
-                User::ROLE_FINPROMS_ADMIN,
-                User::ROLE_CLIENT_ADMIN,
-                User::ROLE_MANAGER,
-            ];
-
-            // Power Admin may also manage plans / import / discontinue advisors / invoices /
-            // activity logs / pricing / renew day.
-            if (in_array($key, [
-                'dashboard_manage_plans',
-                'advisor_excel_import',
-                'advisor_discontinue',
-                'dashboard_view_advisor_invoices',
-                'dashboard_view_activity_logs',
-                'dashboard_manage_advisor_pricing',
-                'dashboard_manage_advisor_renewal',
-            ], true)) {
-                $roles[] = User::ROLE_POWER_ADMIN;
-            }
-
-            // Auto-renew date is primarily Power Admin + FinProms admin.
+            // Auto-renew date stays limited to Power Admin + FinProms admin.
             if ($key === 'dashboard_manage_advisor_renewal') {
                 return [
                     User::ROLE_POWER_ADMIN,
@@ -74,19 +54,39 @@ class CapabilitiesMatrixService
                 ];
             }
 
-            return $roles;
+            // Hub-admin dashboard tools apply to every role column so Power Admin
+            // can grant screens to staff and remaining roles (approver, advisor, user).
+            return self::MATRIX_ROLES;
         }
 
-        if ($group === Hub::GROUP_MEMBER) {
-            return [
-                User::ROLE_APPROVER,
-                User::ROLE_ADVISOR,
-                User::ROLE_USER,
-            ];
+        if ($group === Hub::GROUP_MEMBER || $group === Hub::GROUP_GENERAL) {
+            // User-facing caps apply to every role column so Power Admin can
+            // enable catalog / purchases / invoices / general dashboard for
+            // staff and users alike.
+            return self::MATRIX_ROLES;
         }
 
         // Behaviour / Functionalities are hub-level, not per-role.
         return [];
+    }
+
+    /**
+     * Whether this role may open the member personal dashboard
+     * (General options sections).
+     */
+    public function roleHasGeneralDashboardAccess(Hub $hub, string $role): bool
+    {
+        if ($role === 'admin') {
+            $role = User::ROLE_CLIENT_ADMIN;
+        }
+
+        foreach (Hub::GENERAL_DASHBOARD_KEYS as $key) {
+            if ($this->roleCan($hub, $role, $key)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -312,7 +312,72 @@ class CapabilitiesMatrixService
             }
         }
 
+        // Catalog browse is on for every role by default (staff + users).
+        foreach (self::MATRIX_ROLES as $role) {
+            if (isset($matrix[$role])) {
+                $matrix[$role]['member_browse_catalog'] = true;
+            }
+        }
+
+        // Content management tools enabled for Power Admin by default.
+        foreach ([
+            'dashboard_manage_posts',
+            'dashboard_manage_bundles',
+            'dashboard_manage_types',
+            'dashboard_manage_categories',
+            'dashboard_manage_tags',
+            'dashboard_manage_subscriber_credits',
+        ] as $key) {
+            if (isset($matrix[User::ROLE_POWER_ADMIN])) {
+                $matrix[User::ROLE_POWER_ADMIN][$key] = true;
+            }
+        }
+
+        // Subscriber credits also default on for FinProms admin on white-label hubs.
+        if (isset($matrix[User::ROLE_FINPROMS_ADMIN])) {
+            $matrix[User::ROLE_FINPROMS_ADMIN]['dashboard_manage_subscriber_credits'] =
+                $hubType === Hub::TYPE_WHITE_LABEL;
+        }
+
+        // Remaining roles (approver / advisor / user): dashboard tools off by default.
+        // Power Admin enables them per hub in the Capabilities matrix.
+        foreach ([User::ROLE_APPROVER, User::ROLE_ADVISOR, User::ROLE_USER] as $role) {
+            foreach (array_keys($matrix[$role] ?? []) as $key) {
+                $meta = Hub::CHECKLIST_DEFINITIONS[$key] ?? null;
+                if (($meta['group'] ?? null) === Hub::GROUP_DASHBOARD) {
+                    $matrix[$role][$key] = false;
+                }
+            }
+        }
+
         return $matrix;
+    }
+
+    /**
+     * Whether this role may open the hub-admin dashboard shell.
+     * Traditional hub-admin roles always can; remaining roles only when at least
+     * one dashboard capability is enabled for them on this hub.
+     */
+    public function roleHasHubDashboardAccess(Hub $hub, string $role): bool
+    {
+        if ($role === 'admin') {
+            $role = User::ROLE_CLIENT_ADMIN;
+        }
+
+        if (in_array($role, User::HUB_ADMIN_ROLES, true)) {
+            return true;
+        }
+
+        foreach (Hub::CHECKLIST_DEFINITIONS as $key => $meta) {
+            if (($meta['group'] ?? null) !== Hub::GROUP_DASHBOARD) {
+                continue;
+            }
+            if ($this->roleCan($hub, $role, $key)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -333,6 +398,15 @@ class CapabilitiesMatrixService
                 $enabled = (bool) ($checklist[$key] ?? false);
                 foreach ($this->rolesForCapability($key) as $role) {
                     $defaults[$role][$key] = $enabled;
+                }
+            }
+
+            // Remaining roles must not inherit hub-wide dashboard OR flags.
+            foreach ([User::ROLE_APPROVER, User::ROLE_ADVISOR, User::ROLE_USER] as $role) {
+                foreach (Hub::CHECKLIST_DEFINITIONS as $key => $meta) {
+                    if (($meta['group'] ?? null) === Hub::GROUP_DASHBOARD) {
+                        $defaults[$role][$key] = false;
+                    }
                 }
             }
 

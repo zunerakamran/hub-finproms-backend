@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-09-10
+Last updated: 2026-09-11
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -40,6 +40,8 @@ IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
 - Every content item has type + category + tags. Do NOT treat category as type.
 
 2.2 Content browsing & listing UX
+- Hub catalog / main member pages require login. Unauthenticated visitors are
+  sent to the login screen and must not see the hub main/catalog UI.
 - Users browse posts, reels, and other types.
 - Listing page uses a 3-column grid (2 columns on tablet, 1 on mobile).
 - For REELS: admin can upload a video when type is Reel.
@@ -95,10 +97,14 @@ IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
   b) Individual post/reel purchases
 
 2.7 Roles & separate dashboards
-Admin / staff dashboards are SEPARATE from the member application (catalog /
-plans / purchases): own routes and layout shells. Logging in as staff lands in
-their dashboard by default; they can also open the main website and return.
-Member users never see admin navigation.
+There is ONE universal dashboard shell at /my-dashboard for every role.
+What each user sees (sidebar + home cards) is driven by the Capabilities
+matrix (and Power Admin’s own pa_* checklist for platform tools).
+
+The member catalog (posts / bundles / plans) stays on the main website.
+Staff and members open Dashboard from the main site nav; login lands on
+/my-dashboard. Legacy /client-admin and /power-admin URLs redirect into
+/my-dashboard. Members never see tools that are not enabled for their role.
 
 ROLES (canonical list):
 
@@ -138,10 +144,11 @@ ROLES (canonical list):
        is_advisor and has_unlimited_credits when hub behaviour allows.
      - Uses member UI (same as user).
 
-  7) USER / MEMBER (user) — general member / subscriber
-     - Browse / subscribe / buy / download as member capability checklist allows.
+  7) USER (user) — general user / subscriber
+     - Browse / subscribe / buy / download as user capability checklist allows.
      - Role stays user after a paid public-hub plan subscription (credits only).
      - Private-hub Excel-imported advisors also keep role=user (flags distinguish them).
+     - Label in the Capabilities matrix is "User" (not "Member").
 
 Notes:
 - Former "admin" → client_admin. Shared hub operator should use finproms_admin
@@ -192,7 +199,16 @@ Notes:
 - Public users cannot subscribe.
 - Client provides an Excel sheet of advisors.
 - Advisors from that sheet are added into the application.
-- Those advisors are subscribed and have UNLIMITED credits to buy posts.
+- Power Admin sets subscriber credits for the hub (dashboard + Capabilities):
+  - Capability: `dashboard_manage_subscriber_credits` (private-hub dashboard tool)
+  - Unlimited (default for white-label), OR
+  - A fixed number of credits per subscriber per billing period.
+- On Excel import, each new / reactivated advisor receives that allotment
+  (unlimited flag, or balance set to the hub credit number).
+- If Power Admin changes the credit number (or switches unlimited ↔ fixed)
+  after advisors are already subscribed, existing balances are NOT changed
+  mid-period; the new allotment is applied on the next monthly autorenew
+  to all active advisors.
 - Client admin (or Power Admin with import capability) can Discontinue an
   individual advisor: permanent end of access (WP FPSUB end equivalent).
   Discontinued advisors cannot log in, drop out of billing counts, and are
@@ -206,8 +222,8 @@ Notes:
     (paid credits, one-off purchase, public subscribe; unlimited credits and
     advisor subscriber billing off).
 - When the hub is switched back public → private:
-  - Previously suspended imported advisors are REACTIVATED with unlimited
-    credits and advisor_import subscriptions restored.
+  - Previously suspended imported advisors are REACTIVATED with the hub’s
+    current subscriber-credit allotment and advisor_import subscriptions restored.
   - Auto-renew is NOT restarted automatically; client admin pays again after
     import / billing flow if needed.
 
@@ -264,8 +280,9 @@ Notes:
 - This is a role × capability matrix per hub, managed only from the
   shared hub Power Admin dashboard. Examples of what it should control:
 
-  Member-facing (end users / advisors):
-  - Browse catalog / posts / reels
+  Member-facing (end users / advisors / staff columns):
+  - Browse catalog / posts / reels — available for ALL roles in the matrix
+    (Power Admin, FinProms admin, client admin, manager, approver, advisor, user)
   - View plans / self-serve subscribe
   - One-off purchase / spend credits
   - Download purchased content
@@ -273,22 +290,33 @@ Notes:
   - In-app post editing (when built)
   - Other member features as they are added
 
+  General options (dashboard) — member personal dashboard sections, ALL roles:
+  - Show subscription (active plan + recent subscriptions)
+  - Show remaining credits
+  - Show invoices (summary on /my-dashboard)
+  - Show purchases (summary on /my-dashboard)
+  - Members with any of these enabled see Dashboard in the member nav and can
+    open /my-dashboard (role=user lands here after login when enabled)
+
   Hub-admin dashboard (FinProms admin on shared; client_admin on white-label):
-  - Manage posts/reels
-  - Manage post bundles (group posts/reels; description + total credits)
-  - Manage types / categories / tags
-  - Manage subscription plans
-  - Manage settings (e.g. NEW banner)
-  - Confirm bank transfers
-  - Import advisors (Excel/CSV) — enableable for FinProms admin, client admin,
-    manager, AND Power Admin (per hub in the Capabilities matrix)
+  - Manage posts/reels — enableable for ALL roles in the matrix
+    (Power Admin, FinProms admin, client admin, manager, approver, advisor, user);
+    remaining roles (approver / advisor / user) default OFF until Power Admin enables them
+  - Manage post bundles (group posts/reels; description + total credits) — same roles
+  - Manage types / categories / tags — same roles
+  - Manage subscription plans — same roles
+  - Manage settings (e.g. NEW banner) — same roles
+  - Confirm bank transfers — same roles
+  - Import advisors (Excel/CSV) — same roles
   - Discontinue advisors — separate capability; who can permanently end an
-    imported advisor’s access (FinProms admin, client admin, manager, Power Admin)
+    imported advisor’s access — same roles
   - View activity logs / report — who can open the audit trail and activity
-    report for the hub (FinProms admin, client admin, manager, Power Admin)
-  - AI content generation / push content to white-labels (FinProms admin /
-    shared-only where appropriate)
+    report for the hub — same roles
+  - AI content generation / push content to white-labels — same roles
+    (typically FinProms admin / shared-only where appropriate)
   - Any other admin dashboard screens/actions
+  - Approver / advisor / user only see the hub-admin shell when at least one
+    dashboard capability is enabled for their role on that hub
 
 - White-label client_admin sees ONLY the dashboard items Power Admin enables
   for that hub (restricted options).
@@ -362,8 +390,9 @@ Notes:
 --------------------------------------------------------------------------------
 - Single codebase for shared + all white-labelled hubs.
 - Roles: power_admin, finproms_admin, client_admin, manager, approver, advisor, user.
-- Separate frontend shells: member app, hub-admin shell (FinProms/client/manager),
-  and power_admin shell (different layouts/entry routes), same codebase/API.
+- Separate frontend shells: member catalog app, and one universal Dashboard
+  shell at /my-dashboard (tools from Capabilities + Power Admin pa_* checklist).
+  Legacy /client-admin and /power-admin routes redirect to /my-dashboard.
 - Tenant/hub configuration stored in database (branding, flags, rights).
 - Feature flags / rights checklists must drive behaviour AND dashboard menus,
   not hard-coded forks. Power Admin has its own platform capability checklist
@@ -395,7 +424,9 @@ STEP 1 — Shared hub core
 [x] Power Admin / hub-admin can toggle show_reach / show_views / show_buys on plans
 [x] Role rename: admin → client_admin
 [x] Separate client_admin dashboard (manage everything)
-[x] client_admin / power_admin shells separated from member app
+[x] Universal /my-dashboard shell for all roles (Capabilities-driven menus)
+[x] Legacy /client-admin and /power-admin URLs redirect to /my-dashboard
+[x] client_admin / power_admin / my-dashboard tools live under one dashboard app
 [x] Subscriptions + credits (basic exists)
 [x] Plan subscribe / private Excel import keep role=user (advisor via is_advisor flag only)
 [x] Seeded finproms_admin user (finproms@hubfinproms.com)
@@ -413,6 +444,10 @@ STEP 1 — Shared hub core
 [x] Frontend: power_admin hubs + checklist UI
 [x] White-labelled private advisor import (Excel/CSV)
 [x] Unlimited credits for white-labelled advisors (role/flag per user; checklist wired)
+[x] Power Admin can set hub subscriber credits (unlimited OR fixed number per period)
+[x] Capability: dashboard_manage_subscriber_credits — who can set private-hub subscriber credits
+[x] Power Admin / hub-admin Subscriber credits dashboard page (gated by Capabilities)
+[x] Fixed/unlimited allotment applied on Excel import; changed amount applies on autorenew
 [x] Subscriber-count pricing tiers (rate × advisors; managed by Power Admin)
 [x] Default advisor tiers copied from WP FP Subscriptions (£25/£22/£20/£15)
 [x] Post-import advisor billing + Stripe auto-renew / bank transfer + invoices
@@ -429,6 +464,7 @@ STEP 1 — Shared hub core
 [x] Activity logs report — aggregates by action / user / day; filterable
 [x] Capability: dashboard_view_activity_logs — who can view logs & report
 [x] Private-only capabilities blurred/inactive on Capabilities matrix when hub is public
+    (incl. dashboard_manage_subscriber_credits)
 [x] Public-only capabilities blurred/inactive on Capabilities matrix when hub is private
 [x] Power Admin can manage subscription plans when dashboard_manage_plans is enabled
 [x] Hub Functionalities checklist (section 5.1) — Power Admin Functionalities screen only
@@ -440,7 +476,16 @@ STEP 1 — Shared hub core
 [x] Power Admin capabilities checklist (section 5.3) — separate from hub Functionalities
 [x] Wire Power Admin nav/APIs to Power Admin capabilities
 [x] Capabilities matrix UI — roles × user capabilities (incl. Power Admin) per hub
+[x] Member capabilities (incl. browse catalog) apply to all role columns in the matrix
+[x] Hub-admin dashboard capabilities apply to all role columns (remaining roles
+    approver / advisor / user default off; shell access when any dashboard cap is on)
+[x] Capabilities matrix role label: user column shown as "User" (not "Member")
 [x] Split UI: Functionalities vs Capabilities (no overlapping checklist items)
+[x] Member hub catalog requires login (guests see login screen only)
+[x] General options (dashboard) capabilities — show subscription / credits /
+    invoices / purchases on universal /my-dashboard
+[x] Universal Dashboard at /my-dashboard — hub tools + Power Admin platform
+    tools appear only when enabled in Capabilities / Power Admin checklist
 [ ] Approver / manager dedicated UIs (compliance & ops flows)
 [x] Power Admin user management UI (pa_manage_users_roles — create/update/delete/roles)
 [ ] Push/select posts from shared hub to white-labelled hubs
