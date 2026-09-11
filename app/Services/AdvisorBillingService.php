@@ -112,7 +112,7 @@ class AdvisorBillingService
 
         $this->ensureApiKey();
         $customerId = $this->ensureStripeCustomer($user);
-        $frontendUrl = rtrim(config('app.frontend_url', env('FRONTEND_URL', 'http://localhost:5173')), '/');
+        $frontendUrl = $this->hubs->current()->frontendBaseUrl();
 
         $session = Session::create([
             'mode' => 'setup',
@@ -559,7 +559,7 @@ class AdvisorBillingService
     {
         $this->ensureApiKey();
         $hub = $billing->hub ?? Hub::query()->findOrFail($billing->hub_id);
-        $frontendUrl = rtrim(config('app.frontend_url', env('FRONTEND_URL', 'http://localhost:5173')), '/');
+        $frontendUrl = $hub->frontendBaseUrl();
         $totalAdvisors = (int) ($billing->meta['total_advisors'] ?? $this->pricing->currentAdvisorCount());
 
         $params = [

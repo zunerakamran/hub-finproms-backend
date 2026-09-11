@@ -327,10 +327,17 @@ class CapabilitiesMatrixService
             'dashboard_manage_categories',
             'dashboard_manage_tags',
             'dashboard_manage_subscriber_credits',
+            'dashboard_push_content',
         ] as $key) {
             if (isset($matrix[User::ROLE_POWER_ADMIN])) {
                 $matrix[User::ROLE_POWER_ADMIN][$key] = true;
             }
+        }
+
+        // Push content is a shared-hub tool; default on for FinProms admin there.
+        if (isset($matrix[User::ROLE_FINPROMS_ADMIN])) {
+            $matrix[User::ROLE_FINPROMS_ADMIN]['dashboard_push_content'] =
+                $hubType === Hub::TYPE_SHARED;
         }
 
         // Subscriber credits also default on for FinProms admin on white-label hubs.

@@ -41,12 +41,23 @@ class PowerAdminHubController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        $this->normalizeOptionalUrlFields($request);
+
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'slug' => ['nullable', 'string', 'max:255', 'alpha_dash', 'unique:hubs,slug'],
             'primary_color' => ['nullable', 'string', 'max:32'],
             'secondary_color' => ['nullable', 'string', 'max:32'],
             'logo_url' => ['nullable', 'string', 'max:2048'],
+            'frontend_url' => ['nullable', 'string', 'max:2048', 'url'],
+            'api_url' => ['nullable', 'string', 'max:2048', 'url'],
+            'deploy_notes' => ['nullable', 'string', 'max:5000'],
+            'db_driver' => ['nullable', 'string', Rule::in(['mysql', 'pgsql', 'sqlsrv'])],
+            'db_host' => ['nullable', 'string', 'max:255'],
+            'db_port' => ['nullable', 'integer', 'min:1', 'max:65535'],
+            'db_database' => ['nullable', 'string', 'max:255'],
+            'db_username' => ['nullable', 'string', 'max:255'],
+            'db_password' => ['nullable', 'string', 'max:1000'],
             'is_active' => ['sometimes', 'boolean'],
             'checklist' => ['sometimes', 'array'],
         ]);
@@ -68,6 +79,15 @@ class PowerAdminHubController extends Controller
             'primary_color' => $validated['primary_color'] ?? null,
             'secondary_color' => $validated['secondary_color'] ?? null,
             'logo_url' => $validated['logo_url'] ?? null,
+            'frontend_url' => $validated['frontend_url'] ?? null,
+            'api_url' => $validated['api_url'] ?? null,
+            'deploy_notes' => $validated['deploy_notes'] ?? null,
+            'db_driver' => $validated['db_driver'] ?? 'mysql',
+            'db_host' => $validated['db_host'] ?? null,
+            'db_port' => $validated['db_port'] ?? null,
+            'db_database' => $validated['db_database'] ?? null,
+            'db_username' => $validated['db_username'] ?? null,
+            'db_password' => $validated['db_password'] ?? null,
             'checklist' => $checklist,
         ]);
 
@@ -88,6 +108,8 @@ class PowerAdminHubController extends Controller
 
     public function update(Request $request, Hub $hub): JsonResponse
     {
+        $this->normalizeOptionalUrlFields($request);
+
         $validated = $request->validate([
             'name' => ['sometimes', 'string', 'max:255'],
             'slug' => [
@@ -100,6 +122,16 @@ class PowerAdminHubController extends Controller
             'primary_color' => ['nullable', 'string', 'max:32'],
             'secondary_color' => ['nullable', 'string', 'max:32'],
             'logo_url' => ['nullable', 'string', 'max:2048'],
+            'frontend_url' => ['nullable', 'string', 'max:2048', 'url'],
+            'api_url' => ['nullable', 'string', 'max:2048', 'url'],
+            'deploy_notes' => ['nullable', 'string', 'max:5000'],
+            'db_driver' => ['nullable', 'string', Rule::in(['mysql', 'pgsql', 'sqlsrv'])],
+            'db_host' => ['nullable', 'string', 'max:255'],
+            'db_port' => ['nullable', 'integer', 'min:1', 'max:65535'],
+            'db_database' => ['nullable', 'string', 'max:255'],
+            'db_username' => ['nullable', 'string', 'max:255'],
+            'db_password' => ['nullable', 'string', 'max:1000'],
+            'clear_db_password' => ['sometimes', 'boolean'],
             'is_active' => ['sometimes', 'boolean'],
             // null / omitted unlimited flag + credits: Power Admin subscriber allotment
             'subscriber_credits_unlimited' => ['sometimes', 'boolean'],
@@ -123,7 +155,18 @@ class PowerAdminHubController extends Controller
         ]));
         unset($validated['subscriber_credits_unlimited'], $validated['subscriber_credits']);
 
+        $clearDbPassword = (bool) ($validated['clear_db_password'] ?? false);
+        unset($validated['clear_db_password']);
+
+        // Blank password on update means "keep existing".
+        if (array_key_exists('db_password', $validated) && ! filled($validated['db_password'])) {
+            unset($validated['db_password']);
+        }
+
         $hub->fill($validated);
+        if ($clearDbPassword) {
+            $hub->db_password = null;
+        }
         $hub->save();
 
         if ($creditsPayload !== []) {
@@ -288,5 +331,24 @@ class PowerAdminHubController extends Controller
         }
 
         return $groups;
+    }
+
+    /**
+     * Empty strings fail Laravel's "url" rule; treat them as null.
+     */
+    private function normalizeOptionalUrlFields(Request $request): void
+    {
+        $merge = [];
+        foreach (['frontend_url', 'api_url', 'deploy_notes', 'logo_url', 'db_host', 'db_database', 'db_username', 'db_password'] as $key) {
+            if ($request->exists($key) && $request->input($key) === '') {
+                $merge[$key] = null;
+            }
+        }
+        if ($request->exists('db_port') && $request->input('db_port') === '') {
+            $merge['db_port'] = null;
+        }
+        if ($merge !== []) {
+            $request->merge($merge);
+        }
     }
 }

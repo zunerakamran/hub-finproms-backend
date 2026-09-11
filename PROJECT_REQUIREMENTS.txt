@@ -185,10 +185,13 @@ Notes:
 4. WHITE-LABELLED HUBS
 --------------------------------------------------------------------------------
 
-4.1 Multi-instance / Same Codebase
+4.1 Multi-instance / Same Codebase + Separate Databases
 - The shared hub is copied/reused to form white-labelled hubs.
 - There will be MANY white-labelled hubs.
 - Code must remain the SAME for shared hub and all white-labelled hubs.
+- Each hub (shared AND every white-label) has its OWN database — not a shared
+  multi-tenant DB. Content, users, and settings for a white-label live in that
+  hub's database only.
 - Everything that differs per hub (especially branding) must be driven by DB:
   - Application name
   - Colour scheme (primary / secondary)
@@ -197,6 +200,25 @@ Notes:
 - Hub admins with `dashboard_manage_settings` can edit these branding fields
   (plus NEW banner days) for the current hub via client-admin settings; they
   are returned on public GET /hub under branding and applied in the UI.
+- Power Admin on the SHARED hub is the control plane. The shared DB stores a
+  hub registry for every white-label, including deploy wiring so shared can
+  reach that hub for management / content push:
+  - frontend_url — public site URL for that hub's deploy
+  - api_url — optional backend API base URL
+  - db_* — that white-label's database connection (host, port, database,
+    username, encrypted password, driver) so shared can push content / sync
+  - deploy_notes — free-text ops notes
+  - Deploy contract: white-label deploy uses the SAME codebase with its OWN
+    .env (its own DB_* + FRONTEND_URL / APP_URL). HUB_SLUG identifies the hub
+    on that deploy. Shared does NOT share the white-label database.
+  - When frontend_url is set, emails / Stripe return URLs prefer that hub URL
+    over the global FRONTEND_URL env (on that hub's own deploy).
+  - Power Admin hub detail shows a deploy checklist + copyable env snippet.
+    Registry "ready" = active + frontend_url + remote DB credentials set.
+  - Hub list badges: Wiring ready / Needs wiring.
+- Content push (shared → white-label): FinProms admin selects posts and target
+  hub(s); shared uses the stored remote DB connection (or API) to publish into
+  that white-label's own database. (Feature still to build.)
 
 4.2 Private Access (White-labelled)
 - White-labelled hubs are PRIVATE.
@@ -246,10 +268,18 @@ Notes:
   rate(total) × total (single Stripe subscription per hub).
 - Shared hub manages these pricing rules.
 
-4.4 Content Distribution from Shared Hub → White-labelled
-- Shared hub (FinProms admin) generates posts (including via AI later).
-- Shared hub has an option to choose WHICH white-labelled hub(s) receive posts.
-- Selected posts are then added/published onto those white-labelled hubs.
+4.4 Content for white-labelled hubs (from shared control plane)
+- Capability: `dashboard_push_content` — “Publish content to white-labelled hubs”.
+- On Posts / Types / Categories / Tags / Bundles, users with this capability see a
+  Hub dropdown (same UI pattern as Capabilities / Functionalities).
+- Selecting the shared hub → manage the shared catalog as usual.
+- Selecting a white-label hub → create/list content in THAT hub’s OWN database
+  only. Those posts/reels are NOT stored on the shared hub and do not appear in
+  the shared catalog.
+- Target white-label must have Functionalities `receive_content_from_shared`
+  and remote DB credentials configured.
+- Media for white-label posts is stored as a public URL reachable from shared
+  storage (file is uploaded via shared, path saved on the white-label DB).
 
 4.5 Code Updates
 - Updates made in the shared hub codebase are also reflected in white-labelled
@@ -400,7 +430,8 @@ Notes:
 - Feature flags / rights checklists must drive behaviour AND dashboard menus,
   not hard-coded forks. Power Admin has its own platform capability checklist
   (separate from per-hub checklists).
-- Shared hub acts as content + configuration source of truth for white labels.
+- Shared hub acts as content + configuration source of truth for white labels
+  (registry + remote DB credentials on shared; each white-label has its own DB).
 - Design for future: AI generation (FinProms admin), in-app edit, compliance,
   more features.
 - Settings that vary (e.g. NEW-banner duration) come from the database.
@@ -441,6 +472,13 @@ STEP 1 — Shared hub core
 [x] power_admin can manage payment methods (Stripe / bank transfer)
 [x] Hub model + rights/permissions checklist (DB-driven)
 [x] power_admin can list/create hubs and edit checklist per hub
+[x] Power Admin hub registry stores deploy wiring (frontend_url, api_url, deploy_notes)
+[x] Power Admin stores each white-label's own DB credentials (encrypted password)
+[x] Hub frontend_url preferred for emails / Stripe redirects when set
+[x] Deploy checklist + copyable HUB_SLUG env snippet on hub detail
+[x] Hub list shows Wiring ready / Needs wiring status
+[x] Publish content to white-label hubs via Hub dropdown (own DB, not shared copy)
+[x] Create-time hub select on posts, types, categories, tags, bundles (dashboard_push_content)
 [x] Public GET /hub returns current hub branding + checklist
 [x] Checklist gates: public register, self-serve subscribe, one-off purchase, unlimited credits
 [x] Checklist opposite pairs auto-uncheck (public/private, paid/unlimited)
@@ -491,7 +529,8 @@ STEP 1 — Shared hub core
     tools appear only when enabled in Capabilities / Power Admin checklist
 [ ] Approver / manager dedicated UIs (compliance & ops flows)
 [x] Power Admin user management UI (pa_manage_users_roles — create/update/delete/roles)
-[ ] Push/select posts from shared hub to white-labelled hubs
+[x] Publish content to white-label hubs via Hub dropdown (own DB, not shared copy)
+[x] Create-time hub select on posts, types, categories, tags, bundles (dashboard_push_content)
 [ ] AI post/reel generation by FinProms admin (later)
 [ ] In-app post editing for buyers (later)
 [ ] Compliance check flow (later)

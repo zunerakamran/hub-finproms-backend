@@ -357,8 +357,8 @@ class Hub extends Model
             'default_white_label' => false,
         ],
         'dashboard_push_content' => [
-            'label' => 'Push content to white-label hubs',
-            'description' => 'Shared hub admin can select white-label hubs to receive posts (future).',
+            'label' => 'Publish content to white-labelled hubs',
+            'description' => 'Unlocks a Hub dropdown on posts / types / categories / tags / bundles (like Capabilities). Creating content for a white-label hub writes only to that hub’s own database — not the shared catalog. Requires the matching Manage capability on that screen.',
             'group' => self::GROUP_DASHBOARD,
             'default_shared' => true,
             'default_white_label' => false,
@@ -374,6 +374,15 @@ class Hub extends Model
         'secondary_color',
         'logo_url',
         'from_email',
+        'frontend_url',
+        'api_url',
+        'deploy_notes',
+        'db_driver',
+        'db_host',
+        'db_port',
+        'db_database',
+        'db_username',
+        'db_password',
         'checklist',
         'role_capabilities',
         'advisor_billing_renew_day',
@@ -388,6 +397,7 @@ class Hub extends Model
     protected $hidden = [
         'stripe_secret',
         'stripe_webhook_secret',
+        'db_password',
     ];
 
     protected function casts(): array
@@ -398,8 +408,10 @@ class Hub extends Model
             'role_capabilities' => 'array',
             'advisor_billing_renew_day' => 'integer',
             'subscriber_credits' => 'integer',
+            'db_port' => 'integer',
             'stripe_secret' => 'encrypted',
             'stripe_webhook_secret' => 'encrypted',
+            'db_password' => 'encrypted',
         ];
     }
 
@@ -592,6 +604,163 @@ class Hub extends Model
     }
 
     /**
+     * Public frontend base URL for this hub's deploy.
+     * Prefers the hub registry value; falls back to app.frontend_url.
+     */
+    public function frontendBaseUrl(): string
+    {
+        if (filled($this->frontend_url)) {
+            return rtrim((string) $this->frontend_url, '/');
+        }
+
+        return rtrim((string) config('app.frontend_url', 'http://localhost:5173'), '/');
+    }
+
+    /**
+     * Whether remote DB credentials are complete enough for content push.
+     */
+    public function hasRemoteDatabaseConfigured(): bool
+    {
+        return filled($this->db_host)
+            && filled($this->db_database)
+            && filled($this->db_username)
+            && filled($this->db_password);
+    }
+
+    /**
+     * Safe remote DB config for Power Admin UI (password masked).
+     *
+     * @return array<string, mixed>
+     */
+    public function remoteDatabaseForAdmin(): array
+    {
+        return [
+            'driver' => $this->db_driver ?: 'mysql',
+            'host' => $this->db_host,
+            'port' => $this->db_port,
+            'database' => $this->db_database,
+            'username' => $this->db_username,
+            'password_set' => filled($this->db_password),
+        ];
+    }
+
+    /**
+     * Deploy wiring stored on the hub registry (Power Admin).
+     *
+     * @return array{
+     *   frontend_url: ?string,
+     *   api_url: ?string,
+     *   deploy_notes: ?string,
+     *   database: array<string, mixed>,
+     *   hub_slug_env: string,
+     *   ready: bool,
+     *   status: string,
+     *   status_label: string,
+     *   checklist: list<array{key: string, label: string, done: bool, required: bool}>,
+     *   env_snippet: string
+     * }
+     */
+    public function deployWiringForAdmin(): array
+    {
+        $hasFrontend = filled($this->frontend_url);
+        $hasApi = filled($this->api_url);
+        $hasNotes = filled($this->deploy_notes);
+        $hasDb = $this->hasRemoteDatabaseConfigured();
+        $isActive = (bool) $this->is_active;
+        $database = $this->remoteDatabaseForAdmin();
+        $needsRemoteDb = ! $this->isShared();
+
+        $checklist = [
+            [
+                'key' => 'active',
+                'label' => 'Hub is active in the registry',
+                'done' => $isActive,
+                'required' => true,
+            ],
+            [
+                'key' => 'frontend_url',
+                'label' => 'Frontend URL recorded',
+                'done' => $hasFrontend,
+                'required' => true,
+            ],
+            [
+                'key' => 'remote_db',
+                'label' => $needsRemoteDb
+                    ? 'White-label database credentials recorded (own DB)'
+                    : 'Shared hub uses its own .env database (not stored here)',
+                'done' => $needsRemoteDb ? $hasDb : true,
+                'required' => $needsRemoteDb,
+            ],
+            [
+                'key' => 'api_url',
+                'label' => 'API URL recorded (optional)',
+                'done' => $hasApi,
+                'required' => false,
+            ],
+            [
+                'key' => 'hub_slug',
+                'label' => 'White-label backend uses HUB_SLUG='.$this->slug,
+                'done' => true,
+                'required' => true,
+            ],
+            [
+                'key' => 'own_db_env',
+                'label' => 'White-label .env points at its OWN database (not shared)',
+                'done' => true,
+                'required' => $needsRemoteDb,
+            ],
+            [
+                'key' => 'deploy_notes',
+                'label' => 'Deploy notes added (optional)',
+                'done' => $hasNotes,
+                'required' => false,
+            ],
+        ];
+
+        $ready = $isActive && $hasFrontend && (! $needsRemoteDb || $hasDb);
+        $status = $ready ? 'ready' : 'needs_wiring';
+        $statusLabel = $ready ? 'Deploy wiring ready' : 'Needs deploy wiring';
+
+        $apiLine = $hasApi
+            ? 'APP_URL='.rtrim((string) $this->api_url, '/')
+            : 'APP_URL=https://api.example.com';
+        $frontendLine = $hasFrontend
+            ? 'FRONTEND_URL='.rtrim((string) $this->frontend_url, '/')
+            : 'FRONTEND_URL=https://example.com';
+
+        $dbHost = $database['host'] ?: '127.0.0.1';
+        $dbPort = $database['port'] ?: 3306;
+        $dbName = $database['database'] ?: 'hub_white_label';
+        $dbUser = $database['username'] ?: 'hub_user';
+
+        $envSnippet = implode("\n", [
+            '# White-label deploy — same codebase, OWN database (not the shared hub DB)',
+            'HUB_SLUG='.$this->slug,
+            $frontendLine,
+            $apiLine,
+            'DB_CONNECTION='.($database['driver'] ?: 'mysql'),
+            'DB_HOST='.$dbHost,
+            'DB_PORT='.$dbPort,
+            'DB_DATABASE='.$dbName,
+            'DB_USERNAME='.$dbUser,
+            'DB_PASSWORD=********',
+        ]);
+
+        return [
+            'frontend_url' => $this->frontend_url,
+            'api_url' => $this->api_url,
+            'deploy_notes' => $this->deploy_notes,
+            'database' => $database,
+            'hub_slug_env' => $this->slug,
+            'ready' => $ready,
+            'status' => $status,
+            'status_label' => $statusLabel,
+            'checklist' => $checklist,
+            'env_snippet' => $envSnippet,
+        ];
+    }
+
+    /**
      * Absolute logo URL suitable for emails (requires a publicly reachable host).
      */
     public function logoAbsoluteUrl(): ?string
@@ -683,6 +852,7 @@ class Hub extends Model
             'type' => $this->type,
             'is_active' => $this->is_active,
             'branding' => $this->brandingPayload(),
+            'deploy' => $this->deployWiringForAdmin(),
             'stripe' => $this->stripeConfigForAdmin(),
             'subscriber_credits' => $this->subscriberCreditsConfig(),
             'checklist' => $this->checklistForAdmin(),

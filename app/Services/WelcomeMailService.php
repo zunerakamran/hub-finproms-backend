@@ -21,7 +21,7 @@ class WelcomeMailService
         }
 
         $hub = $this->hubs->current();
-        $frontendUrl = rtrim((string) config('app.frontend_url', 'http://localhost:5173'), '/');
+        $frontendUrl = $hub->frontendBaseUrl();
         $fromEmail = $hub->mailFromAddress();
         $supportEmail = filled($hub->from_email)
             ? (string) $hub->from_email

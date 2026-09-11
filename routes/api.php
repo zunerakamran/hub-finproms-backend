@@ -7,7 +7,9 @@ use App\Http\Controllers\Api\AdvisorPaymentCardController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BundleController;
 use App\Http\Controllers\Api\CategoryController;
+use App\Http\Controllers\Api\ContentPushController;
 use App\Http\Controllers\Api\ContentTypeController;
+use App\Http\Controllers\Api\HubContentController;
 use App\Http\Controllers\Api\HubController;
 use App\Http\Controllers\Api\InvoiceController;
 use App\Http\Controllers\Api\MyDashboardController;
@@ -88,6 +90,26 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/posts/{post}', [PostController::class, 'update']);
             Route::put('/posts/{post}', [PostController::class, 'update']);
             Route::delete('/posts/{post}', [PostController::class, 'destroy']);
+        });
+
+        Route::middleware('hub_can:dashboard_push_content')->group(function () {
+            Route::get('/hub-content/targets', [HubContentController::class, 'targets']);
+            Route::get('/hub-content/posts', [HubContentController::class, 'posts']);
+            Route::post('/hub-content/posts', [HubContentController::class, 'storePost']);
+            Route::get('/hub-content/types', [HubContentController::class, 'types']);
+            Route::post('/hub-content/types', [HubContentController::class, 'storeType']);
+            Route::get('/hub-content/categories', [HubContentController::class, 'categories']);
+            Route::post('/hub-content/categories', [HubContentController::class, 'storeCategory']);
+            Route::get('/hub-content/tags', [HubContentController::class, 'tags']);
+            Route::post('/hub-content/tags', [HubContentController::class, 'storeTag']);
+            Route::get('/hub-content/bundles', [HubContentController::class, 'bundles']);
+            Route::post('/hub-content/bundles', [HubContentController::class, 'storeBundle']);
+
+            Route::get('/content-push/targets', [ContentPushController::class, 'targets']);
+            Route::get('/content-push/posts', [ContentPushController::class, 'posts']);
+            Route::get('/content-push/recent', [ContentPushController::class, 'recent']);
+            Route::post('/content-push', [ContentPushController::class, 'push']);
+            Route::post('/content-push/hubs/{hub}/test-connection', [ContentPushController::class, 'testConnection']);
         });
 
         Route::middleware('hub_can:dashboard_manage_bundles')->group(function () {
@@ -280,6 +302,26 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/posts/{post}', [PostController::class, 'update']);
             Route::put('/posts/{post}', [PostController::class, 'update']);
             Route::delete('/posts/{post}', [PostController::class, 'destroy']);
+        });
+
+        Route::middleware('hub_can:dashboard_push_content')->group(function () {
+            Route::get('/hub-content/targets', [HubContentController::class, 'targets']);
+            Route::get('/hub-content/posts', [HubContentController::class, 'posts']);
+            Route::post('/hub-content/posts', [HubContentController::class, 'storePost']);
+            Route::get('/hub-content/types', [HubContentController::class, 'types']);
+            Route::post('/hub-content/types', [HubContentController::class, 'storeType']);
+            Route::get('/hub-content/categories', [HubContentController::class, 'categories']);
+            Route::post('/hub-content/categories', [HubContentController::class, 'storeCategory']);
+            Route::get('/hub-content/tags', [HubContentController::class, 'tags']);
+            Route::post('/hub-content/tags', [HubContentController::class, 'storeTag']);
+            Route::get('/hub-content/bundles', [HubContentController::class, 'bundles']);
+            Route::post('/hub-content/bundles', [HubContentController::class, 'storeBundle']);
+
+            Route::get('/content-push/targets', [ContentPushController::class, 'targets']);
+            Route::get('/content-push/posts', [ContentPushController::class, 'posts']);
+            Route::get('/content-push/recent', [ContentPushController::class, 'recent']);
+            Route::post('/content-push', [ContentPushController::class, 'push']);
+            Route::post('/content-push/hubs/{hub}/test-connection', [ContentPushController::class, 'testConnection']);
         });
 
         Route::middleware('hub_can:dashboard_manage_bundles')->group(function () {

@@ -41,7 +41,7 @@ class OrderConfirmationMailService
         }
 
         $hub = $this->hubs->current();
-        $frontendUrl = rtrim((string) config('app.frontend_url', 'http://localhost:5173'), '/');
+        $frontendUrl = $hub->frontendBaseUrl();
         $primary = $hub->primary_color ?: '#1d4ed8';
         $secondary = $hub->secondary_color ?: '#0f766e';
         $fromEmail = $hub->mailFromAddress();

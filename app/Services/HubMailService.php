@@ -36,7 +36,7 @@ class HubMailService
         $hub ??= $this->hubs->current();
         $fromEmail = $hub->mailFromAddress();
         $supportEmail = filled($hub->from_email) ? (string) $hub->from_email : $fromEmail;
-        $frontendUrl = rtrim((string) config('app.frontend_url', 'http://localhost:5173'), '/');
+        $frontendUrl = $hub->frontendBaseUrl();
 
         return [
             'site_name' => $hub->name,

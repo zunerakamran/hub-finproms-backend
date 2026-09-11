@@ -14,7 +14,8 @@ class StripeSubscriptionService
 
     public function __construct(
         private readonly InvoiceService $invoices,
-        private readonly PaymentSettingsService $paymentSettings
+        private readonly PaymentSettingsService $paymentSettings,
+        private readonly HubService $hubs
     ) {}
 
     private function ensureApiKey(): void
@@ -30,7 +31,7 @@ class StripeSubscriptionService
     public function createCheckoutSession(User $user, SubscriptionPlan $plan): Session
     {
         $this->ensureApiKey();
-        $frontendUrl = rtrim(config('app.frontend_url', env('FRONTEND_URL', 'http://localhost:5173')), '/');
+        $frontendUrl = $this->hubs->current()->frontendBaseUrl();
 
         $session = Session::create([
             'mode' => 'payment',

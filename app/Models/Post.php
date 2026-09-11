@@ -59,6 +59,10 @@ class Post extends Model
             return null;
         }
 
+        if ($this->attachmentPathIsAbsolute()) {
+            return $this->attachment_path;
+        }
+
         return Storage::disk('public')->url($this->attachment_path);
     }
 
@@ -66,6 +70,10 @@ class Post extends Model
     {
         if (! $this->attachment_path || ! $this->isImageAttachment()) {
             return null;
+        }
+
+        if ($this->attachmentPathIsAbsolute()) {
+            return $this->attachment_path;
         }
 
         return Storage::disk('public')->url($this->attachment_path);
@@ -81,7 +89,18 @@ class Post extends Model
             return null;
         }
 
+        if ($this->attachmentPathIsAbsolute()) {
+            return $this->attachment_path;
+        }
+
         return Storage::disk('public')->url($this->attachment_path);
+    }
+
+    protected function attachmentPathIsAbsolute(): bool
+    {
+        $path = (string) $this->attachment_path;
+
+        return str_starts_with($path, 'http://') || str_starts_with($path, 'https://');
     }
 
     public function getIsVideoAttribute(): bool
