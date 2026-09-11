@@ -12,6 +12,12 @@ use Illuminate\Support\Facades\DB;
 
 class InvoiceService
 {
+    public function __construct(
+        private readonly OrderConfirmationMailService $orderConfirmationMail,
+        private readonly AdminDownloadPurchaseMailService $adminDownloadPurchaseMail,
+        private readonly FunctionalMailService $functionalMail
+    ) {}
+
     public function createForSubscription(UserSubscription $subscription): Invoice
     {
         $existing = Invoice::query()
@@ -167,7 +173,7 @@ class InvoiceService
      */
     private function createInvoice(array $payload): Invoice
     {
-        return DB::transaction(function () use ($payload) {
+        $invoice = DB::transaction(function () use ($payload) {
             for ($attempt = 0; $attempt < 5; $attempt++) {
                 try {
                     $invoice = Invoice::create([
@@ -194,6 +200,26 @@ class InvoiceService
 
             throw new \RuntimeException('Unable to allocate invoice number.');
         });
+
+        $invoiceId = $invoice->id;
+        DB::afterCommit(function () use ($invoiceId) {
+            $fresh = Invoice::query()->with([
+                'user',
+                'subscription.plan',
+                'postPurchase.post',
+                'bundlePurchase.bundle',
+                'advisorBilling',
+            ])->find($invoiceId);
+
+            if ($fresh) {
+                $this->orderConfirmationMail->sendForInvoice($fresh);
+                $this->adminDownloadPurchaseMail->sendForInvoice($fresh);
+                $this->functionalMail->adminSubscriptionPaid($fresh);
+                $this->functionalMail->advisorBillingPaid($fresh);
+            }
+        });
+
+        return $invoice;
     }
 
     private function nextInvoiceNumber(): string

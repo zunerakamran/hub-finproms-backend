@@ -72,7 +72,10 @@ class BankTransferSubscriptionService
             return $this->markPaidAndGrantCredits($subscription);
         }
 
-        return $subscription->load('plan');
+        $subscription = $subscription->load('plan', 'user');
+        app(FunctionalMailService::class)->bankTransferSubscriptionPending($subscription);
+
+        return $subscription;
     }
 
     public function markPaidAndGrantCredits(UserSubscription $subscription): UserSubscription

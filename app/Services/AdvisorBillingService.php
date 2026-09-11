@@ -655,11 +655,14 @@ class AdvisorBillingService
             ];
         }
 
+        $billing = $billing->fresh(['billedUser', 'hub']);
+        app(FunctionalMailService::class)->bankTransferAdvisorBillingPending($billing);
+
         return [
             'payment_method' => 'bank_transfer',
             'auto_renew' => false,
             'auto_confirmed' => false,
-            'billing' => $billing->fresh(),
+            'billing' => $billing,
             'bank_details' => $this->bankTransfer->bankDetails(),
             'payment_reference' => $reference,
         ];

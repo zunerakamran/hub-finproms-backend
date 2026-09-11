@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Storage;
 
 class Hub extends Model
 {
@@ -18,6 +19,8 @@ class Hub extends Model
 
     public const GROUP_DASHBOARD = 'dashboard';
 
+    public const GROUP_ADMIN_EMAILS = 'admin_emails';
+
     /**
      * @var array<string, string>
      */
@@ -26,6 +29,7 @@ class Hub extends Model
         self::GROUP_MEMBER => 'User capabilities',
         self::GROUP_GENERAL => 'General options (dashboard)',
         self::GROUP_DASHBOARD => 'Hub-admin dashboard',
+        self::GROUP_ADMIN_EMAILS => 'Admin emails',
     ];
 
     /**
@@ -46,6 +50,7 @@ class Hub extends Model
         self::GROUP_MEMBER,
         self::GROUP_GENERAL,
         self::GROUP_DASHBOARD,
+        self::GROUP_ADMIN_EMAILS,
     ];
 
     /**
@@ -193,20 +198,6 @@ class Hub extends Model
             'default_shared' => true,
             'default_white_label' => true,
         ],
-        'member_view_purchases' => [
-            'label' => 'View purchase history',
-            'description' => 'Members can open My Purchases.',
-            'group' => self::GROUP_MEMBER,
-            'default_shared' => true,
-            'default_white_label' => true,
-        ],
-        'member_view_invoices' => [
-            'label' => 'View invoices',
-            'description' => 'Members can open their personal invoices.',
-            'group' => self::GROUP_MEMBER,
-            'default_shared' => true,
-            'default_white_label' => true,
-        ],
         'member_in_app_edit' => [
             'label' => 'In-app post editing',
             'description' => 'Buyers can edit purchased posts in-app (future).',
@@ -290,8 +281,15 @@ class Hub extends Model
         ],
         'dashboard_manage_settings' => [
             'label' => 'Manage settings',
-            'description' => 'Hub admin can manage hub settings (e.g. NEW banner).',
+            'description' => 'Hub admin can manage hub settings: NEW banner, logo, color scheme, and application name.',
             'group' => self::GROUP_DASHBOARD,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'receive_admin_emails' => [
+            'label' => 'Receive admin emails',
+            'description' => 'Receive all admin notification emails for this hub (registrations, purchases, payments, advisor events, etc.).',
+            'group' => self::GROUP_ADMIN_EMAILS,
             'default_shared' => true,
             'default_white_label' => true,
         ],
@@ -375,6 +373,7 @@ class Hub extends Model
         'primary_color',
         'secondary_color',
         'logo_url',
+        'from_email',
         'checklist',
         'role_capabilities',
         'advisor_billing_renew_day',
@@ -575,6 +574,80 @@ class Hub extends Model
     }
 
     /**
+     * Public URL for the hub logo (uploaded storage path or legacy external URL).
+     */
+    public function logoPublicUrl(): ?string
+    {
+        if (! $this->logo_url) {
+            return null;
+        }
+
+        if (str_starts_with($this->logo_url, 'http://')
+            || str_starts_with($this->logo_url, 'https://')
+            || str_starts_with($this->logo_url, '/')) {
+            return $this->logo_url;
+        }
+
+        return Storage::disk('public')->url($this->logo_url);
+    }
+
+    /**
+     * Absolute logo URL suitable for emails (requires a publicly reachable host).
+     */
+    public function logoAbsoluteUrl(): ?string
+    {
+        $url = $this->logoPublicUrl();
+        if (! $url) {
+            return null;
+        }
+
+        if (str_starts_with($url, 'http://') || str_starts_with($url, 'https://')) {
+            return $url;
+        }
+
+        return rtrim((string) config('app.url'), '/').'/'.ltrim($url, '/');
+    }
+
+    /**
+     * From address for transactional mail; falls back to mail config when unset.
+     */
+    public function mailFromAddress(): string
+    {
+        if (filled($this->from_email)) {
+            return (string) $this->from_email;
+        }
+
+        return (string) config('mail.from.address', 'hello@example.com');
+    }
+
+    /**
+     * Tenant branding used by the frontend for this hub.
+     *
+     * @return array{
+     *   application_name: string,
+     *   logo_url: ?string,
+     *   from_email: ?string,
+     *   primary_color: ?string,
+     *   secondary_color: ?string,
+     *   color_scheme: array{primary: ?string, secondary: ?string}
+     * }
+     */
+    public function brandingPayload(): array
+    {
+        return [
+            'application_name' => $this->name,
+            'logo_url' => $this->logoPublicUrl(),
+            'from_email' => $this->from_email,
+            'primary_color' => $this->primary_color,
+            'secondary_color' => $this->secondary_color,
+            'color_scheme' => [
+                'primary' => $this->primary_color,
+                'secondary' => $this->secondary_color,
+            ],
+        ];
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function toPublicArray(): array
@@ -588,11 +661,7 @@ class Hub extends Model
             'name' => $this->name,
             'slug' => $this->slug,
             'type' => $this->type,
-            'branding' => [
-                'primary_color' => $this->primary_color,
-                'secondary_color' => $this->secondary_color,
-                'logo_url' => $this->logo_url,
-            ],
+            'branding' => $this->brandingPayload(),
             'checklist' => $checklist,
             // Frontend should hide Sign up when registration_enabled is false.
             'auth' => [
@@ -613,11 +682,7 @@ class Hub extends Model
             'slug' => $this->slug,
             'type' => $this->type,
             'is_active' => $this->is_active,
-            'branding' => [
-                'primary_color' => $this->primary_color,
-                'secondary_color' => $this->secondary_color,
-                'logo_url' => $this->logo_url,
-            ],
+            'branding' => $this->brandingPayload(),
             'stripe' => $this->stripeConfigForAdmin(),
             'subscriber_credits' => $this->subscriberCreditsConfig(),
             'checklist' => $this->checklistForAdmin(),

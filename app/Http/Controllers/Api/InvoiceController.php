@@ -16,10 +16,7 @@ class InvoiceController extends Controller
         $matrix = app(\App\Services\CapabilitiesMatrixService::class);
         $role = (string) $user->role;
 
-        $allowed = $matrix->roleCan($hub, $role, 'member_view_invoices')
-            || $matrix->roleCan($hub, $role, 'general_show_invoices');
-
-        if (! $allowed) {
+        if (! $matrix->roleCan($hub, $role, 'general_show_invoices')) {
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
 
@@ -42,15 +39,13 @@ class InvoiceController extends Controller
         $matrix = app(\App\Services\CapabilitiesMatrixService::class);
 
         $isOwner = $invoice->user_id === $user->id;
-        $canMemberInvoices = $matrix->roleCan($hub, (string) $user->role, 'member_view_invoices');
         $canGeneralInvoices = $matrix->roleCan($hub, (string) $user->role, 'general_show_invoices');
         $canAdvisorInvoices = $matrix->roleCan($hub, (string) $user->role, 'dashboard_view_advisor_invoices');
 
         // Staff must have the matching invoice capability — role alone is not enough.
         $allowed = $invoice->type === Invoice::TYPE_ADVISOR_BILLING
             ? ($isOwner || $canAdvisorInvoices)
-            : (($isOwner && ($canMemberInvoices || $canGeneralInvoices))
-                || ($user->isClientAdmin() && $canMemberInvoices));
+            : ($isOwner && $canGeneralInvoices);
 
         if (! $allowed) {
             return response()->json(['message' => 'Unauthorized.'], 403);

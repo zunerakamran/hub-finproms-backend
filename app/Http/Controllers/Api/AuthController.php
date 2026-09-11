@@ -5,11 +5,15 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\ActivityLogService;
+use App\Services\AdminNewUserRegistrationMailService;
+use App\Services\FunctionalMailService;
 use App\Services\HubService;
 use App\Services\PowerAdminCapabilitiesService;
+use App\Services\WelcomeMailService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Password as PasswordBroker;
 use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationException;
 
@@ -18,7 +22,10 @@ class AuthController extends Controller
     public function __construct(
         private readonly HubService $hubs,
         private readonly PowerAdminCapabilitiesService $powerCapabilities,
-        private readonly ActivityLogService $activityLogs
+        private readonly ActivityLogService $activityLogs,
+        private readonly WelcomeMailService $welcomeMail,
+        private readonly AdminNewUserRegistrationMailService $adminNewUserMail,
+        private readonly FunctionalMailService $functionalMail
     ) {}
 
     public function register(Request $request): JsonResponse
@@ -56,11 +63,67 @@ class AuthController extends Controller
             'status_code' => 201,
         ]);
 
+        $this->welcomeMail->send($user);
+        $this->adminNewUserMail->send($user);
+
         return response()->json([
             'message' => 'Registration successful.',
             'user' => $user,
             'token' => $token,
         ], 201);
+    }
+
+    public function forgotPassword(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'email' => ['required', 'email'],
+        ]);
+
+        $user = User::query()->where('email', $validated['email'])->first();
+
+        // Always return the same message to avoid account enumeration.
+        if ($user) {
+            $token = PasswordBroker::broker()->createToken($user);
+            $this->functionalMail->sendPasswordResetLink($user, $token);
+        }
+
+        return response()->json([
+            'message' => 'If that email is registered, a password reset link has been sent.',
+        ]);
+    }
+
+    public function resetPassword(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'token' => ['required', 'string'],
+            'email' => ['required', 'email'],
+            'password' => ['required', 'confirmed', Password::defaults()],
+        ]);
+
+        $status = PasswordBroker::broker()->reset(
+            [
+                'email' => $validated['email'],
+                'password' => $validated['password'],
+                'password_confirmation' => $request->input('password_confirmation'),
+                'token' => $validated['token'],
+            ],
+            function (User $user, string $password) {
+                $user->forceFill([
+                    'password' => $password,
+                ])->save();
+                $user->tokens()->delete();
+            }
+        );
+
+        if ($status !== PasswordBroker::PASSWORD_RESET) {
+            throw ValidationException::withMessages([
+                'email' => [__($status)],
+            ]);
+        }
+
+        return response()->json([
+            'message' => 'Password has been reset successfully. You can sign in now.',
+        ]);
     }
 
     public function login(Request $request): JsonResponse

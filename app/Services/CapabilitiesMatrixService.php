@@ -45,7 +45,7 @@ class CapabilitiesMatrixService
         $meta = Hub::CHECKLIST_DEFINITIONS[$key] ?? null;
         $group = $meta['group'] ?? null;
 
-        if ($group === Hub::GROUP_DASHBOARD) {
+        if ($group === Hub::GROUP_DASHBOARD || $group === Hub::GROUP_ADMIN_EMAILS) {
             // Auto-renew date stays limited to Power Admin + FinProms admin.
             if ($key === 'dashboard_manage_advisor_renewal') {
                 return [
@@ -54,14 +54,14 @@ class CapabilitiesMatrixService
                 ];
             }
 
-            // Hub-admin dashboard tools apply to every role column so Power Admin
-            // can grant screens to staff and remaining roles (approver, advisor, user).
+            // Hub-admin dashboard / admin-email tools apply to every role column so
+            // Power Admin can grant them to staff and remaining roles.
             return self::MATRIX_ROLES;
         }
 
         if ($group === Hub::GROUP_MEMBER || $group === Hub::GROUP_GENERAL) {
             // User-facing caps apply to every role column so Power Admin can
-            // enable catalog / purchases / invoices / general dashboard for
+            // enable catalog / purchases / general dashboard for
             // staff and users alike.
             return self::MATRIX_ROLES;
         }
@@ -307,7 +307,7 @@ class CapabilitiesMatrixService
 
         // Approver: browse-focused by default
         foreach (array_keys($matrix[User::ROLE_APPROVER] ?? []) as $key) {
-            if (str_starts_with($key, 'member_') && $key !== 'member_browse_catalog' && $key !== 'member_view_purchases') {
+            if (str_starts_with($key, 'member_') && $key !== 'member_browse_catalog') {
                 $matrix[User::ROLE_APPROVER][$key] = false;
             }
         }
@@ -339,12 +339,13 @@ class CapabilitiesMatrixService
                 $hubType === Hub::TYPE_WHITE_LABEL;
         }
 
-        // Remaining roles (approver / advisor / user): dashboard tools off by default.
+        // Remaining roles (approver / advisor / user): dashboard & admin-email tools off by default.
         // Power Admin enables them per hub in the Capabilities matrix.
         foreach ([User::ROLE_APPROVER, User::ROLE_ADVISOR, User::ROLE_USER] as $role) {
             foreach (array_keys($matrix[$role] ?? []) as $key) {
                 $meta = Hub::CHECKLIST_DEFINITIONS[$key] ?? null;
-                if (($meta['group'] ?? null) === Hub::GROUP_DASHBOARD) {
+                $group = $meta['group'] ?? null;
+                if ($group === Hub::GROUP_DASHBOARD || $group === Hub::GROUP_ADMIN_EMAILS) {
                     $matrix[$role][$key] = false;
                 }
             }
@@ -401,10 +402,11 @@ class CapabilitiesMatrixService
                 }
             }
 
-            // Remaining roles must not inherit hub-wide dashboard OR flags.
+            // Remaining roles must not inherit hub-wide dashboard / admin-email OR flags.
             foreach ([User::ROLE_APPROVER, User::ROLE_ADVISOR, User::ROLE_USER] as $role) {
                 foreach (Hub::CHECKLIST_DEFINITIONS as $key => $meta) {
-                    if (($meta['group'] ?? null) === Hub::GROUP_DASHBOARD) {
+                    $group = $meta['group'] ?? null;
+                    if ($group === Hub::GROUP_DASHBOARD || $group === Hub::GROUP_ADMIN_EMAILS) {
                         $defaults[$role][$key] = false;
                     }
                 }

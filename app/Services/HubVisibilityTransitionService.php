@@ -91,9 +91,9 @@ class HubVisibilityTransitionService
      */
     public function applyPrivateToPublic(Hub $hub): array
     {
-        $suspended = 0;
+        $suspendedUsers = [];
 
-        DB::transaction(function () use (&$suspended) {
+        DB::transaction(function () use (&$suspendedUsers) {
             $advisors = User::query()
                 ->where('is_advisor', true)
                 ->where('is_suspended', false)
@@ -111,14 +111,18 @@ class HubVisibilityTransitionService
                     ->where('status', 'active')
                     ->update(['status' => 'suspended']);
 
-                $suspended++;
+                $suspendedUsers[] = $advisor->fresh();
             }
         });
 
         $this->advisorBilling->stopAutoRenewForHub($hub);
 
+        foreach ($suspendedUsers as $advisor) {
+            app(FunctionalMailService::class)->advisorSuspended($advisor, $hub);
+        }
+
         return [
-            'advisors_suspended' => $suspended,
+            'advisors_suspended' => count($suspendedUsers),
             'auto_renew_stopped' => true,
         ];
     }
@@ -128,9 +132,9 @@ class HubVisibilityTransitionService
      */
     public function applyPublicToPrivate(Hub $hub): int
     {
-        $reactivated = 0;
+        $reactivatedUsers = [];
 
-        DB::transaction(function () use ($hub, &$reactivated) {
+        DB::transaction(function () use ($hub, &$reactivatedUsers) {
             $advisors = User::query()
                 ->where('is_advisor', true)
                 ->where('is_suspended', true)
@@ -144,11 +148,15 @@ class HubVisibilityTransitionService
 
                 $this->ensureAdvisorSubscription($advisor);
                 $this->subscriberCredits->applyToAdvisor($advisor->fresh(), $hub, true);
-                $reactivated++;
+                $reactivatedUsers[] = $advisor->fresh();
             }
         });
 
-        return $reactivated;
+        foreach ($reactivatedUsers as $advisor) {
+            app(FunctionalMailService::class)->advisorReactivated($advisor);
+        }
+
+        return count($reactivatedUsers);
     }
 
     /**

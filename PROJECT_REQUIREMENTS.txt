@@ -190,9 +190,13 @@ Notes:
 - There will be MANY white-labelled hubs.
 - Code must remain the SAME for shared hub and all white-labelled hubs.
 - Everything that differs per hub (especially branding) must be driven by DB:
-  - Colour scheme
+  - Application name
+  - Colour scheme (primary / secondary)
   - Logo
   - Other tenant-specific settings as needed
+- Hub admins with `dashboard_manage_settings` can edit these branding fields
+  (plus NEW banner days) for the current hub via client-admin settings; they
+  are returned on public GET /hub under branding and applied in the UI.
 
 4.2 Private Access (White-labelled)
 - White-labelled hubs are PRIVATE.
@@ -286,7 +290,6 @@ Notes:
   - View plans / self-serve subscribe
   - One-off purchase / spend credits
   - Download purchased content
-  - View invoices / purchase history
   - In-app post editing (when built)
   - Other member features as they are added
 
@@ -305,7 +308,7 @@ Notes:
   - Manage post bundles (group posts/reels; description + total credits) — same roles
   - Manage types / categories / tags — same roles
   - Manage subscription plans — same roles
-  - Manage settings (e.g. NEW banner) — same roles
+  - Manage settings (NEW banner, logo upload, color scheme, application name) — same roles
   - Confirm bank transfers — same roles
   - Import advisors (Excel/CSV) — same roles
   - Discontinue advisors — separate capability; who can permanently end an

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\AdminNewUserRegistrationMailService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -25,6 +26,11 @@ class PowerAdminUserController extends Controller
         User::ROLE_ADVISOR,
         User::ROLE_USER,
     ];
+
+    public function __construct(
+        private readonly AdminNewUserRegistrationMailService $adminNewUserMail,
+        private readonly FunctionalMailService $functionalMail
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -78,6 +84,9 @@ class PowerAdminUserController extends Controller
             'is_suspended' => $validated['is_suspended'] ?? false,
         ]);
 
+        $this->adminNewUserMail->send($user);
+        $this->functionalMail->accountCreatedByAdmin($user);
+
         return response()->json([
             'message' => 'User created successfully.',
             'user' => $this->serialize($user->fresh()),
@@ -101,6 +110,7 @@ class PowerAdminUserController extends Controller
             $this->assertCanChangeRole($request, $user, $validated['role']);
         }
 
+        $wasSuspended = (bool) $user->is_suspended;
         $payload = collect($validated)->except(['password'])->all();
 
         if (! empty($validated['password'])) {
@@ -117,6 +127,13 @@ class PowerAdminUserController extends Controller
 
         if (array_key_exists('password', $payload)) {
             $user->tokens()->delete();
+            $this->functionalMail->passwordChangedByAdmin($user);
+        }
+
+        if (array_key_exists('is_suspended', $payload)
+            && (bool) $payload['is_suspended'] === true
+            && ! $wasSuspended) {
+            $this->functionalMail->accountSuspendedByAdmin($user);
         }
 
         return response()->json([

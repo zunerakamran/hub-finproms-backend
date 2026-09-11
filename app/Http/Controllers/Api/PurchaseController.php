@@ -191,10 +191,7 @@ class PurchaseController extends Controller
         $matrix = app(\App\Services\CapabilitiesMatrixService::class);
         $role = (string) $user->role;
 
-        $allowed = $matrix->roleCan($hub, $role, 'member_view_purchases')
-            || $matrix->roleCan($hub, $role, 'general_show_purchases');
-
-        if (! $allowed) {
+        if (! $matrix->roleCan($hub, $role, 'general_show_purchases')) {
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
 

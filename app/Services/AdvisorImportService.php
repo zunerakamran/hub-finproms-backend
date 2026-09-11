@@ -149,11 +149,16 @@ class AdvisorImportService
                     'email' => $result['user']->email,
                     'temporary_password' => $result['temporary_password'],
                 ];
+                app(FunctionalMailService::class)->advisorInvite(
+                    $result['user'],
+                    $result['temporary_password'] ?? null
+                );
             } elseif ($result['status'] === 'reactivated') {
                 $reactivated[] = [
                     'name' => $result['user']->name,
                     'email' => $result['user']->email,
                 ];
+                app(FunctionalMailService::class)->advisorReactivated($result['user']);
             } else {
                 $updated[] = [
                     'name' => $result['user']->name,
@@ -161,6 +166,8 @@ class AdvisorImportService
                 ];
             }
         }
+
+        app(FunctionalMailService::class)->adminAdvisorImportSummary($created, $reactivated);
 
         return [
             'created' => $created,
@@ -224,7 +231,7 @@ class AdvisorImportService
             return $advisor;
         }
 
-        return DB::transaction(function () use ($advisor) {
+        $advisor = DB::transaction(function () use ($advisor) {
             $advisor->is_discontinued = true;
             $advisor->discontinued_at = now();
             $advisor->has_unlimited_credits = false;
@@ -242,6 +249,10 @@ class AdvisorImportService
 
             return $advisor->fresh();
         });
+
+        app(FunctionalMailService::class)->advisorDiscontinued($advisor);
+
+        return $advisor;
     }
 
     /**

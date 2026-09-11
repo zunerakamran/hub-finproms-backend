@@ -30,6 +30,8 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
     Route::post('/login', [AuthController::class, 'login']);
+    Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+    Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::post('/logout', [AuthController::class, 'logout']);
@@ -125,7 +127,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::middleware('hub_can:dashboard_manage_settings')->group(function () {
             Route::get('/settings', [SettingController::class, 'index']);
-            Route::put('/settings', [SettingController::class, 'update']);
+            // POST accepts multipart logo uploads (PHP does not populate files on PUT).
+            Route::match(['put', 'post'], '/settings', [SettingController::class, 'update']);
         });
 
         Route::get('/advisors', [AdvisorController::class, 'index']);
