@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Storage;
 
@@ -181,6 +182,13 @@ class Post extends Model
     public function purchases(): HasMany
     {
         return $this->hasMany(PostPurchase::class);
+    }
+
+    public function bundles(): BelongsToMany
+    {
+        return $this->belongsToMany(Bundle::class, 'bundle_post')
+            ->withPivot('sort_order')
+            ->withTimestamps();
     }
 
     public function reaches(): HasMany

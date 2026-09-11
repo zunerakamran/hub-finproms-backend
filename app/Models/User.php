@@ -219,6 +219,11 @@ class User extends Authenticatable
         return $this->hasMany(PostPurchase::class);
     }
 
+    public function bundlePurchases(): HasMany
+    {
+        return $this->hasMany(BundlePurchase::class);
+    }
+
     public function invoices(): HasMany
     {
         return $this->hasMany(Invoice::class);
@@ -227,6 +232,11 @@ class User extends Authenticatable
     public function hasPurchased(Post $post): bool
     {
         return $this->purchases()->where('post_id', $post->id)->exists();
+    }
+
+    public function hasPurchasedBundle(Bundle $bundle): bool
+    {
+        return $this->bundlePurchases()->where('bundle_id', $bundle->id)->exists();
     }
 
     public function hasActiveSubscription(): bool

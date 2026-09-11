@@ -206,6 +206,13 @@ class Hub extends Model
             'default_shared' => true,
             'default_white_label' => true,
         ],
+        'dashboard_manage_bundles' => [
+            'label' => 'Manage post bundles',
+            'description' => 'Create bundles of posts/reels (existing or new), with description and total credits.',
+            'group' => self::GROUP_DASHBOARD,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
         'dashboard_manage_types' => [
             'label' => 'Manage types',
             'description' => 'Hub admin can manage content types.',

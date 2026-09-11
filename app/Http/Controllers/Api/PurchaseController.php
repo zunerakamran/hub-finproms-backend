@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Bundle;
+use App\Models\BundlePurchase;
 use App\Models\Post;
 use App\Models\PostPurchase;
 use App\Services\HubService;
@@ -84,6 +86,100 @@ class PurchaseController extends Controller
             'purchase' => $purchase,
             'invoice' => $invoice,
             'post' => $post,
+            'user' => $user,
+        ], 201);
+    }
+
+    public function purchaseBundle(Request $request, Bundle $bundle): JsonResponse
+    {
+        if (! $bundle->is_active) {
+            return response()->json([
+                'message' => 'This bundle is not available for purchase.',
+            ], 422);
+        }
+
+        $bundle->load('posts');
+
+        if ($bundle->posts->isEmpty()) {
+            return response()->json([
+                'message' => 'This bundle has no posts.',
+            ], 422);
+        }
+
+        $user = $request->user();
+
+        if ($user->hasPurchasedBundle($bundle)) {
+            return response()->json([
+                'message' => 'You already purchased this bundle.',
+                'bundle' => $bundle,
+            ], 422);
+        }
+
+        $hubUnlimited = $this->hubs->can('unlimited_credits');
+        $unlimited = $user->hasUnlimitedCredits($hubUnlimited);
+        $hasSubscription = $user->hasActiveSubscription();
+
+        if (! $hasSubscription && ! $unlimited && ! $this->hubs->can('one_off_purchase')) {
+            return response()->json([
+                'message' => 'One-off purchases are disabled for this hub. An active subscription is required.',
+            ], 403);
+        }
+
+        if (! $unlimited && $user->credits < $bundle->credits_cost) {
+            return response()->json([
+                'message' => 'Insufficient credits. Buy a plan or top up — 1 credit = £1.',
+                'credits' => $user->credits,
+                'required' => $bundle->credits_cost,
+            ], 422);
+        }
+
+        $creditsToSpend = $unlimited ? 0 : $bundle->credits_cost;
+
+        [$purchase, $invoice] = DB::transaction(function () use ($user, $bundle, $creditsToSpend, $unlimited) {
+            if (! $unlimited && $creditsToSpend > 0) {
+                $user->decrement('credits', $creditsToSpend);
+            }
+
+            $purchase = BundlePurchase::create([
+                'user_id' => $user->id,
+                'bundle_id' => $bundle->id,
+                'credits_spent' => $creditsToSpend,
+                'purchased_at' => now(),
+            ]);
+
+            foreach ($bundle->posts as $post) {
+                if ($user->hasPurchased($post)) {
+                    continue;
+                }
+
+                PostPurchase::create([
+                    'user_id' => $user->id,
+                    'post_id' => $post->id,
+                    'credits_spent' => 0,
+                    'purchased_at' => now(),
+                ]);
+
+                $post->increment('buy_count');
+            }
+
+            $bundle->increment('buy_count');
+
+            $invoice = $this->invoices->createForBundlePurchase($purchase);
+
+            return [$purchase, $invoice];
+        });
+
+        $user->refresh();
+        $bundle->refresh();
+        $bundle->load(['creator:id,name', 'posts.creator:id,name']);
+        $bundle->loadCount('posts');
+        $bundle->setAttribute('is_purchased', true);
+
+        return response()->json([
+            'message' => 'Bundle purchased successfully.',
+            'purchase' => $purchase,
+            'invoice' => $invoice,
+            'bundle' => $bundle,
             'user' => $user,
         ], 201);
     }

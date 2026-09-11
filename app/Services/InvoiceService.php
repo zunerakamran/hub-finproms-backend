@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\BundlePurchase;
 use App\Models\HubAdvisorBilling;
 use App\Models\Invoice;
 use App\Models\PostPurchase;
@@ -107,6 +108,7 @@ class InvoiceService
             'type' => Invoice::TYPE_POST_PURCHASE,
             'user_subscription_id' => null,
             'post_purchase_id' => $purchase->id,
+            'bundle_purchase_id' => null,
             'description' => "Post purchase — {$title}",
             'amount' => $amount,
             'credits' => $credits,
@@ -114,6 +116,44 @@ class InvoiceService
             'billing_email' => $user->email,
             'line_items' => [[
                 'label' => $title,
+                'quantity' => $credits,
+                'unit_amount' => 1.00,
+                'total' => $amount,
+                'note' => '1 credit = £1',
+            ]],
+        ]);
+    }
+
+    public function createForBundlePurchase(BundlePurchase $purchase): Invoice
+    {
+        $existing = Invoice::query()
+            ->where('bundle_purchase_id', $purchase->id)
+            ->first();
+
+        if ($existing) {
+            return $existing->loadMissing(['bundlePurchase.bundle', 'user']);
+        }
+
+        $purchase->loadMissing(['bundle.posts', 'user']);
+        $user = $purchase->user ?? User::findOrFail($purchase->user_id);
+        $credits = (int) $purchase->credits_spent;
+        $amount = (float) $credits;
+        $title = $purchase->bundle?->title ?? 'Bundle';
+        $postCount = $purchase->bundle?->posts?->count() ?? 0;
+
+        return $this->createInvoice([
+            'user_id' => $user->id,
+            'type' => Invoice::TYPE_BUNDLE_PURCHASE,
+            'user_subscription_id' => null,
+            'post_purchase_id' => null,
+            'bundle_purchase_id' => $purchase->id,
+            'description' => "Bundle purchase — {$title}",
+            'amount' => $amount,
+            'credits' => $credits,
+            'billing_name' => $user->name,
+            'billing_email' => $user->email,
+            'line_items' => [[
+                'label' => "{$title} ({$postCount} posts)",
                 'quantity' => $credits,
                 'unit_amount' => 1.00,
                 'total' => $amount,
@@ -138,7 +178,13 @@ class InvoiceService
                         'issued_at' => now(),
                     ]);
 
-                    return $invoice->fresh()->load(['subscription.plan', 'postPurchase.post', 'advisorBilling', 'user']);
+                    return $invoice->fresh()->load([
+                        'subscription.plan',
+                        'postPurchase.post',
+                        'bundlePurchase.bundle',
+                        'advisorBilling',
+                        'user',
+                    ]);
                 } catch (\Illuminate\Database\UniqueConstraintViolationException $e) {
                     if ($attempt === 4) {
                         throw $e;

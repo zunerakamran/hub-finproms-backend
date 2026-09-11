@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\AdvisorBillingController;
 use App\Http\Controllers\Api\AdvisorController;
 use App\Http\Controllers\Api\AdvisorPaymentCardController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\BundleController;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\ContentTypeController;
 use App\Http\Controllers\Api\HubController;
@@ -47,6 +48,8 @@ Route::middleware('hub_can:member_browse_catalog')->group(function () {
     Route::get('/posts', [PostController::class, 'index']);
     Route::post('/posts/reach', [PostController::class, 'recordReach']);
     Route::get('/posts/{post}', [PostController::class, 'show']);
+    Route::get('/bundles', [BundleController::class, 'index']);
+    Route::get('/bundles/{bundle}', [BundleController::class, 'show']);
 });
 
 Route::middleware('hub_can:member_view_plans')->group(function () {
@@ -63,6 +66,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::middleware('hub_can:member_purchase_content')->group(function () {
         Route::post('/posts/{post}/purchase', [PurchaseController::class, 'purchasePost']);
+        Route::post('/bundles/{bundle}/purchase', [PurchaseController::class, 'purchaseBundle']);
     });
 
     Route::middleware('hub_can:member_view_purchases')->group(function () {
@@ -82,6 +86,15 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/posts/{post}', [PostController::class, 'update']);
             Route::put('/posts/{post}', [PostController::class, 'update']);
             Route::delete('/posts/{post}', [PostController::class, 'destroy']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_bundles')->group(function () {
+            Route::get('/bundles', [BundleController::class, 'index']);
+            Route::get('/bundles/{bundle}', [BundleController::class, 'show']);
+            Route::post('/bundles', [BundleController::class, 'store']);
+            Route::post('/bundles/{bundle}', [BundleController::class, 'update']);
+            Route::put('/bundles/{bundle}', [BundleController::class, 'update']);
+            Route::delete('/bundles/{bundle}', [BundleController::class, 'destroy']);
         });
 
         Route::middleware('hub_can:dashboard_manage_categories')->group(function () {

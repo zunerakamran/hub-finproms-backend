@@ -11,6 +11,8 @@ class Invoice extends Model
 
     public const TYPE_POST_PURCHASE = 'post_purchase';
 
+    public const TYPE_BUNDLE_PURCHASE = 'bundle_purchase';
+
     public const TYPE_ADVISOR_BILLING = 'advisor_billing';
 
     protected $fillable = [
@@ -19,6 +21,7 @@ class Invoice extends Model
         'type',
         'user_subscription_id',
         'post_purchase_id',
+        'bundle_purchase_id',
         'hub_advisor_billing_id',
         'description',
         'amount',
@@ -54,6 +57,11 @@ class Invoice extends Model
     public function postPurchase(): BelongsTo
     {
         return $this->belongsTo(PostPurchase::class, 'post_purchase_id');
+    }
+
+    public function bundlePurchase(): BelongsTo
+    {
+        return $this->belongsTo(BundlePurchase::class, 'bundle_purchase_id');
     }
 
     public function advisorBilling(): BelongsTo
