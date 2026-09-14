@@ -1,0 +1,201 @@
+{
+  "Header": {
+    "logo_url": "logo-dark.png",
+    "phone_label": "Requesting a Call:",
+    "phone": "(210) 123 451",
+    "hours_label": "Sunday - Friday:",
+    "hours": "9am - 8pm",
+    "address_label": "Visit our office:",
+    "address": "12/7 New York, USA"
+  },
+  "Hero Slider": {
+    "eyebrow": "FINANCIAL CENTRE & WEALTH MANAGEMENT",
+    "heading": "Strategic Advisory for Long-Term Growth",
+    "subheading": "Customized financial planning, investment strategies, and fiduciary advice for leaders and families.",
+    "button_text": "GET IN TOUCH",
+    "button_url": "#appointment",
+    "video_url": "https://www.youtube.com/watch?v=SF4aHwxHtZ0",
+    "video_label": "SEE OUR ACTIVITY",
+    "slides": [
+      {
+        "title": ["Prosper in this", "volatile market", "funding."],
+        "image_url": "intime-08"
+      },
+      {
+        "title": ["We do the best", "thing for market", "funding."],
+        "image_url": "intime-12"
+      },
+      {
+        "title": ["We have to do", "business for your", "Satisfiction."],
+        "image_url": "intime-15"
+      }
+    ]
+  },
+  "What we do": {
+    "subheading": "WHAT WE DO",
+    "heading": "We are the best agency to improve your deals.",
+    "text": "Improve efficiency, provide a better customer experience with modern technology services available around the world. Our skilled staff, combined with decades of experience.",
+    "boxes": [
+      {
+        "image_url": "intime-12",
+        "heading": "Business & Strategy",
+        "text": "If you're looking for car insurance, we will help you to find the coverage that budget friendly.",
+        "button_text": "Read more",
+        "button_url": "#services"
+      },
+      {
+        "image_url": "intime-06",
+        "heading": "Business Planner",
+        "text": "If you're looking for car insurance, we will help you to find the coverage that budget friendly.",
+        "button_text": "Read more",
+        "button_url": "#services"
+      },
+      {
+        "image_url": "intime-15",
+        "heading": "Business Intelligence",
+        "text": "If you're looking for car insurance, we will help you to find the coverage that budget friendly.",
+        "button_text": "Read more",
+        "button_url": "#services"
+      }
+    ]
+  },
+  "About Section": {
+    "eyebrow": "ABOUT US",
+    "heading": "Why will you choose our?",
+    "subheading": "Our agency can only be as strong as our people & because of this, our team have designed game changing products.",
+    "text": "Intime is a design studio founded in London. Nowadays, we've grown and expanded our services, and have become a multinational firm, offering a variety of services and solutions Worldwide.",
+    "image_url": "intime-04.jpg",
+    "experience_years": "10+",
+    "experience_label": "Years of Experience",
+    "gauges": [
+      { "value": "50%", "label": "Business strategy growth" },
+      { "value": "75%", "label": "Finance valuable ideas" }
+    ]
+  },
+  "Company History": {
+    "subheading": "OUR JOURNEY",
+    "heading": "Our Company History",
+    "text": "A decade of growth, innovation, and unwavering commitment to client success.",
+    "years": [
+      { "year": "2010", "red_text": "2010 Milestone", "grey_text": "Company Founded", "heading": "Started Business", "image_url": "intime-06.jpg", "text": "We partner with you to enable your technology so you focus on your organization's mission, leveraging our top-tier talent." },
+      { "year": "2012", "red_text": "2012 Milestone", "grey_text": "10+ Key Partners", "heading": "Resilience & Expansion", "image_url": "intime-07.jpg", "text": "A dedicated People Ops leader committed to the growth and continuous development of leaders across operations." },
+      { "year": "2016", "red_text": "2016 Milestone", "grey_text": "24/7 Support Launched", "heading": "Crisis & Opportunity", "image_url": "intime-09.jpg", "text": "Our support works around the clock to ensure your business operations are secure, resilient, and monitored safely." },
+      { "year": "2017", "red_text": "2017 Milestone", "grey_text": "50+ Nationwide Branches", "heading": "50+ Branches Milestone", "image_url": "intime-01.jpg", "text": "We cross industries and provide services to almost every business either as a co-managed or supplemental asset." },
+      { "year": "2019", "red_text": "2019 Milestone", "grey_text": "Global Market Entry", "heading": "100+ Global Branches", "image_url": "intime-04.jpg", "text": "Providing consulting expertise on vendor technology, IT budget strategy, and multi-cloud enterprise security." },
+      { "year": "2021", "red_text": "2021 Milestone", "grey_text": "Top Enterprise Award", "heading": "Industry Excellence Award", "image_url": "intime-10.jpg", "text": "Our team is held to the highest level of accountability to ensure exceptional satisfaction and proven results." }
+    ]
+  },
+  "Featured Services": {
+    "subheading": "FEATURED SERVICES",
+    "heading": "We help to get Solutions!",
+    "text": "Provide users with appropriate view and access permissions to requests, problems, changes, contracts, assets, solutions",
+    "boxes": [
+      { "icon": "chart-pie", "heading": "Strategy & Planning", "text": "Collaborate Consulting exists to find the place where being seeming disparate interests meet.", "button_text": "Read more", "button_url": "#service-strategy-planning" },
+      { "icon": "tasks", "heading": "Program Manager", "text": "Collaborate Consulting exists to find the place where being seeming disparate interests meet.", "button_text": "Read more", "button_url": "#service-program-manager" },
+      { "icon": "landmark", "heading": "Tax Management", "text": "Collaborate Consulting exists to find the place where being seeming disparate interests meet.", "button_text": "Read more", "button_url": "#service-tax-management" },
+      { "icon": "coins", "heading": "Investment Policy", "text": "Collaborate Consulting exists to find the place where being seeming disparate interests meet.", "button_text": "Read more", "button_url": "#service-investment-policy" },
+      { "icon": "holding", "heading": "Financial Advices", "text": "Collaborate Consulting exists to find the place where being seeming disparate interests meet.", "button_text": "Read more", "button_url": "#service-financial-advices" },
+      { "icon": "seedling", "heading": "Business Growth Plan", "text": "Collaborate Consulting exists to find the place where being seeming disparate interests meet.", "button_text": "Read more", "button_url": "#service-business-growth-plan" }
+    ]
+  },
+  "Annual Progression": {
+    "subheading": "ANNUAL PROGRESSION",
+    "heading": "Our Business Growth is Really Incredible!",
+    "text": "We love what we do and we do it with passion. We value the experimentation, the reformation of the message, and the smart incentives.",
+    "bars": [
+      { "label": "Business growth", "year": "2018", "pct": 70 },
+      { "label": "Investment growth", "year": "2019", "pct": 80 },
+      { "label": "Financial growth", "year": "2020", "pct": 90 }
+    ],
+    "highlights": [
+      { "icon": "shield-alt", "heading": "Risk Free", "text": "We offer risk free business for tension free life." },
+      { "icon": "chart-line", "heading": "Business Growth", "text": "We ensure the business growth without conditions." }
+    ]
+  },
+  "Portfolio Section": {
+    "subheading": "COMPLETED PROJECTS",
+    "heading": "You can check our projects as inspirations.",
+    "items": [
+      { "heading": "Market Expansion", "category": "Business Strategy", "image_url": "intime-12.jpg", "button_text": "Read more", "button_url": "#portfolio" },
+      { "heading": "Business Growth", "category": "Investment", "image_url": "intime-11.jpg", "button_text": "Read more", "button_url": "#portfolio" },
+      { "heading": "Tax Management", "category": "Tax Consulting", "image_url": "intime-08.jpg", "button_text": "Read more", "button_url": "#portfolio" },
+      { "heading": "Investment Policy", "category": "Business Strategy", "image_url": "intime-10.jpg", "button_text": "Read more", "button_url": "#portfolio" },
+      { "heading": "Manage Investment", "category": "Investment", "image_url": "intime-04.jpg", "button_text": "Read more", "button_url": "#portfolio" },
+      { "heading": "Financial Advices", "category": "Tax Consulting", "image_url": "intime-01.jpg", "button_text": "Read more", "button_url": "#portfolio" }
+    ]
+  },
+  "Branches and Appointment": {
+    "subheading": "GET IN TOUCH",
+    "heading": "We are Connected All Time to Help Your Business!",
+    "text": "We understand the importance of approaching each work integrally and believe in the power of simple and easy communication.",
+    "form_heading": "Book an appionment",
+    "button_text": "SEND YOUR MESSAGE",
+    "branches_label": "Main Branches:",
+    "stat_value": "12+",
+    "stat_label": "Branches",
+    "map_image": "maps-point.png",
+    "items": [
+      { "name": "Sydney (Head Office)", "address": "1 Epping Road, North Ryde, NSW 2113", "phone": "+61 2 9870 7689", "email": "email@example.com" },
+      { "name": "Brisbane", "address": "Level 28, 400 George Street, Brisbane, QLD 4000", "phone": "+61 2 9870 7689", "email": "email@example.com" },
+      { "name": "Hobart", "address": "85 Macquarie Finoa Street, Hobart, TAS 7000", "phone": "+61 2 9870 7689", "email": "email@example.com" },
+      { "name": "Melbourne", "address": "Level 5, 4 Freshwater Place, Southbank, VIC 3006", "phone": "+61 2 9870 7689", "email": "email@example.com" }
+    ]
+  },
+  "Counter Stats": {
+    "stats": [
+      { "icon": "users", "value": "2,800+", "label": "Active Clients", "sub": "Empowering businesses globally with passion and proven expertise." },
+      { "icon": "star", "value": "1,670+", "label": "5-Star Reviews", "sub": "Top customer satisfaction and unmatched quality of service." },
+      { "icon": "user-tie", "value": "106+", "label": "Team Members", "sub": "Dedicated specialists and leaders driving continuous innovation." },
+      { "icon": "award", "value": "99.8%", "label": "Success Rate", "sub": "Consistently delivering top-tier performance and business growth." }
+    ]
+  },
+  "Testimonials Carousel": {
+    "eyebrow": "CLIENT'S TESTIMONIALS",
+    "heading": "We are Very Happy to Get Our Client's Reviews.",
+    "subheading": "Clients Reviews:",
+    "image_url": "intime-17.jpg",
+    "items": [
+      { "quote": "Working with several word press themes and templates the last years, I only can say this is the best in every level. I use it for my company and the reviews that I have already are all excellent.", "name": "Alina Lora", "role": "Former Manager, Intime", "image_url": "testimonial-01.jpg" },
+      { "quote": "This is one of the BEST THEMES I have ever worked with. The extra bells and whistles added to it are amazing. Elementor features add extra flavor. The customer support is very responsive.", "name": "Rohan Jho", "role": "Former Manager, Intime", "image_url": "testimonial-02.jpg" },
+      { "quote": "Great theme, one of the best I have worked with in a while. Full featured and great support for the minor issues I had which were really my not being skilled/experienced enough.", "name": "Donald Frew", "role": "Former Manager, Intime", "image_url": "testimonial-03.jpg" }
+    ]
+  },
+  "Latest News": {
+    "eyebrow": "OUR LATEST NEWS",
+    "heading": "Learn about our latest news from blog.",
+    "items": [
+      { "date": "10", "month": "Nov, 20", "author": "John Doe", "cat": "Consulting", "title": "We would love to share a similar experience", "excerpt": "The theory was first published in 2008 a press released under the name of Cliff Arnall, who at the time was a tutor at the…", "image_url": "intime-03.jpg", "button_text": "Read more", "button_url": "#news" },
+      { "date": "06", "month": "Nov, 20", "author": "John Doe", "cat": "HR Consulting", "title": "We glad to discuss your organisation situation.", "excerpt": "The theory was first published in 2008 a press released under the name of Cliff Arnall, who at the time was a tutor at the…", "image_url": "intime-02.jpg", "button_text": "Read more", "button_url": "#news" },
+      { "date": "20", "month": "Oct, 20", "author": "John Doe", "cat": "Consulting", "title": "In this context our main approach was to build.", "excerpt": "The theory was first published in 2008 a press released under the name of Cliff Arnall, who at the time was a tutor at the…", "image_url": "intime-05.jpg", "button_text": "Read more", "button_url": "#news" }
+    ]
+  },
+  "Client Logos": {
+    "items": [
+      { "name": "slack", "image_url": "" },
+      { "name": "Google", "image_url": "" },
+      { "name": "envato", "image_url": "" },
+      { "name": "Sketch", "image_url": "" },
+      { "name": "Figma", "image_url": "" }
+    ]
+  },
+  "CTA Banner": {
+    "heading": "Looking for the Best Business Consulting?",
+    "subheading": "As a web crawler expert, we will help to organize.",
+    "button_text": "GET A QUOTE",
+    "button_url": "#appointment"
+  },
+  "Footer": {
+    "logo_url": "logo-light.png",
+    "about": "We work with a passion of taking challenges and creating new ones in advertising sector.",
+    "about_button_text": "ABOUT US",
+    "newsletter_heading": "Newsletter",
+    "newsletter_text": "Subscribe our newsletter to get our latest update & news",
+    "info_heading": "Official info:",
+    "address": "30 Commercial Road\nFratton, Australia",
+    "phone": "1-888-452-1505",
+    "hours_heading": "Open Hours:",
+    "hours": "Mon – Sat: 8 am – 5 pm,\nSunday: CLOSED",
+    "gallery_heading": "Gallery",
+    "gallery": ["gallery-1.jpg", "gallery-2.jpg", "gallery-3.jpg", "gallery-4.jpg", "gallery-5.jpg", "gallery-6.jpg"]
+  }
+}

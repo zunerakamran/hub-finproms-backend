@@ -1,0 +1,484 @@
+<?php
+
+namespace App\Http\Controllers\Api\WebsiteCompliance;
+
+use App\Http\Controllers\Controller;
+use App\Models\WebsiteCompliance\Page;
+use App\Models\WebsiteCompliance\Section;
+use App\Models\WebsiteCompliance\TemplateRequest;
+use App\Services\ActivityLogService;
+use App\Services\WebsiteCompliance\AdvisorSectionService;
+use App\Services\WebsiteCompliance\CpanelSyncService;
+use App\Services\WebsiteCompliance\WebsiteComplianceGate;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+
+class TemplateRequestController extends Controller
+{
+    public function __construct(
+        private readonly WebsiteComplianceGate $gate,
+        private readonly ActivityLogService $activityLogs
+    ) {}
+
+    private function initializeAdvisorSections($advisorId, $templateSlug, $overwrite = false, $templateRequestId = null): void
+    {
+        AdvisorSectionService::ensureForAdvisor(
+            (int) $advisorId,
+            $templateSlug ?: 'template4',
+            (bool) $overwrite,
+            $templateRequestId !== null ? (int) $templateRequestId : null
+        );
+    }
+
+    /** @return list<string> */
+    private function requestRelations(): array
+    {
+        return ['advisor', 'assignedAdvisor', 'requestedBy'];
+    }
+
+    public function store(Request $request): JsonResponse
+    {
+        $request->validate([
+            'domain_name' => 'required|string|max:255',
+            'template_name' => 'nullable|string|max:255',
+            'request_type' => 'nullable|in:advisor_website,hub_main_website',
+            'logo_url' => 'nullable|string|max:500',
+            'primary_color' => 'nullable|string|max:50',
+            'secondary_color' => 'nullable|string|max:50',
+            'assigned_advisor_id' => 'nullable|exists:users,id',
+        ]);
+
+        $user = $request->user();
+        $this->gate->assertCan($user, 'wc_request_deployments');
+
+        $requestType = $request->request_type
+            ?? ($this->gate->can($user, 'wc_deploy_websites') ? 'hub_main_website' : 'advisor_website');
+
+        $templateRequest = TemplateRequest::create([
+            'advisor_id' => $user->isAdvisor() ? $user->id : null,
+            'requested_by_id' => $user->id,
+            'template_name' => $request->template_name ?? 'template4',
+            'request_type' => $requestType,
+            'assigned_advisor_id' => $request->assigned_advisor_id,
+            'domain_name' => $request->domain_name,
+            'logo_url' => $request->logo_url,
+            'primary_color' => $request->primary_color ?? '#0B1B3D',
+            'secondary_color' => $request->secondary_color ?? '#C8102E',
+            'status' => 'pending',
+        ]);
+
+        $targetAdvisorId = $templateRequest->assigned_advisor_id ?? $templateRequest->advisor_id;
+        if ($targetAdvisorId) {
+            $this->initializeAdvisorSections($targetAdvisorId, $templateRequest->template_name, false, $templateRequest->id);
+        }
+
+        $this->activityLogs->log([
+            'action' => 'wc.template_request.submit',
+            'description' => "Requested template ({$templateRequest->template_name}) deployment [{$requestType}] for domain: ".$request->domain_name,
+            'user' => $user,
+            'subject' => $templateRequest,
+            'request' => $request,
+        ]);
+
+        return response()->json($templateRequest->load($this->requestRelations()), 201);
+    }
+
+    public function index(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $this->gate->assertModuleEnabled($user);
+
+        $query = TemplateRequest::with($this->requestRelations());
+
+        if ($this->gate->can($user, 'wc_view_all_deployments')) {
+            $requests = $query->latest()->get();
+        } elseif ($this->gate->can($user, 'wc_request_deployments')) {
+            $requests = $query
+                ->where(function ($q) use ($user) {
+                    $q->where('advisor_id', $user->id)
+                        ->orWhere('assigned_advisor_id', $user->id)
+                        ->orWhere('requested_by_id', $user->id);
+                })
+                ->latest()
+                ->get();
+        } else {
+            $requests = $query
+                ->where(function ($q) use ($user) {
+                    $q->where('advisor_id', $user->id)
+                        ->orWhere('assigned_advisor_id', $user->id);
+                })
+                ->latest()
+                ->get();
+        }
+
+        return response()->json($requests);
+    }
+
+    public function deploy(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        $this->gate->assertCan($user, 'wc_deploy_websites');
+
+        $request->validate([
+            'cpanel_domain' => 'required|string|max:255',
+            'cpanel_db_host' => 'nullable|string|max:255',
+            'cpanel_db_name' => 'nullable|string|max:255',
+            'cpanel_db_user' => 'nullable|string|max:255',
+            'cpanel_db_password' => 'nullable|string|max:255',
+            'cpanel_api_key' => 'nullable|string|max:255',
+        ]);
+
+        $templateRequest = TemplateRequest::findOrFail($id);
+
+        $templateRequest->update([
+            'status' => 'deployed',
+            'cpanel_domain' => $request->cpanel_domain,
+            'cpanel_db_host' => $request->cpanel_db_host,
+            'cpanel_db_name' => $request->cpanel_db_name,
+            'cpanel_db_user' => $request->cpanel_db_user,
+            'cpanel_db_password' => $request->cpanel_db_password ?? $request->input('cpanel_db_pass'),
+            'cpanel_api_key' => $request->cpanel_api_key,
+        ]);
+
+        $targetAdvisorId = $templateRequest->assigned_advisor_id ?? $templateRequest->advisor_id;
+        $hubSectionsCreated = 0;
+        $hubSectionsCount = 0;
+
+        if ($targetAdvisorId) {
+            $hubSectionsCreated = AdvisorSectionService::ensureForAdvisor(
+                (int) $targetAdvisorId,
+                $templateRequest->template_name ?: 'template4',
+                true,
+                (int) $templateRequest->id
+            );
+            $hubSectionsCount = Section::where('advisor_id', $targetAdvisorId)
+                ->where('template_request_id', $templateRequest->id)
+                ->count();
+        }
+
+        $configSynced = CpanelSyncService::pushDeployConfig($templateRequest, $targetAdvisorId);
+        $contentSynced = false;
+
+        if ($targetAdvisorId) {
+            $contentSynced = CpanelSyncService::pushToTemplateRequestCpanel($templateRequest);
+        }
+
+        $this->activityLogs->log([
+            'action' => 'wc.template_request.deploy',
+            'description' => 'Deployed template to cPanel domain: '.$request->cpanel_domain
+                .($configSynced ? ' (remote config written)' : ' (remote config sync failed)')
+                .($contentSynced ? ' (initial content pushed)' : '')
+                .($targetAdvisorId
+                    ? " (hub sections for advisor {$targetAdvisorId}: {$hubSectionsCount})"
+                    : ' (NO advisor_id — hub sections were not created)'),
+            'user' => $user,
+            'subject' => $templateRequest,
+            'request' => $request,
+        ]);
+
+        $message = $configSynced
+            ? 'Template deployed and remote cPanel config written successfully!'
+            : 'Template marked deployed, but remote cPanel config could not be verified. Check Laravel logs and that api.php is reachable.';
+
+        if (! $targetAdvisorId) {
+            $message .= ' No advisor is linked to this request, so hub sections were not created — the advisor will have nothing to edit in the dashboard.';
+        } elseif ($hubSectionsCount === 0) {
+            $message .= ' Hub sections were not created for this advisor. Check Laravel logs (AdvisorSectionService).';
+        }
+
+        return response()->json([
+            'message' => $message,
+            'config_synced' => $configSynced,
+            'content_synced' => $contentSynced,
+            'advisor_id' => $targetAdvisorId,
+            'hub_sections_created' => $hubSectionsCreated,
+            'hub_sections_count' => $hubSectionsCount,
+            'template_request' => $templateRequest->load($this->requestRelations()),
+        ]);
+    }
+
+    public function assignAdvisor(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+
+        if (
+            ! $this->gate->can($user, 'wc_deploy_websites')
+            && ! $this->gate->can($user, 'wc_request_deployments')
+            && ! $this->gate->can($user, 'wc_assign_change_requests')
+        ) {
+            $this->gate->assertCan($user, 'wc_request_deployments');
+        }
+
+        $request->validate([
+            'assigned_advisor_id' => 'required|exists:users,id',
+        ]);
+
+        $templateRequest = TemplateRequest::with($this->requestRelations())->findOrFail($id);
+
+        $requester = $templateRequest->requestedBy;
+        $requestedByAdvisor = $requester
+            ? ($requester->isAdvisor() || $requester->role === 'editor')
+            : (bool) $templateRequest->advisor_id;
+
+        if ($requestedByAdvisor) {
+            return response()->json([
+                'message' => 'This deployment was requested by an advisor and cannot be reassigned.',
+            ], 422);
+        }
+
+        $templateRequest->update([
+            'assigned_advisor_id' => $request->assigned_advisor_id,
+        ]);
+
+        $this->initializeAdvisorSections(
+            $request->assigned_advisor_id,
+            $templateRequest->template_name,
+            false,
+            (int) $templateRequest->id
+        );
+
+        $this->activityLogs->log([
+            'action' => 'wc.template_request.assign_advisor',
+            'description' => 'Advisor ID '.$request->assigned_advisor_id.' assigned to deployment for domain: '.$templateRequest->domain_name,
+            'user' => $user,
+            'subject' => $templateRequest,
+            'request' => $request,
+        ]);
+
+        return response()->json($templateRequest->load($this->requestRelations()));
+    }
+
+    public function reject(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        $this->gate->assertCan($user, 'wc_deploy_websites');
+
+        $request->validate([
+            'rejection_reason' => 'required|string',
+        ]);
+
+        $templateRequest = TemplateRequest::findOrFail($id);
+
+        $templateRequest->update([
+            'status' => 'rejected',
+            'rejection_reason' => $request->rejection_reason,
+        ]);
+
+        $this->activityLogs->log([
+            'action' => 'wc.template_request.reject',
+            'description' => 'Template deployment request rejected: '.$request->rejection_reason,
+            'user' => $user,
+            'subject' => $templateRequest,
+            'request' => $request,
+        ]);
+
+        return response()->json(['message' => 'Template deployment request rejected.']);
+    }
+
+    public function sections(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        $this->gate->assertModuleEnabled($user);
+
+        $templateRequest = TemplateRequest::with($this->requestRelations())->findOrFail($id);
+
+        $isPowerAdminAccess = $this->gate->can($user, 'wc_manage_deployment_sections')
+            || $this->gate->can($user, 'wc_publish_live_content');
+        $isOwnerAdvisor = $user->isAdvisor() && (
+            (int) ($templateRequest->advisor_id ?? 0) === (int) $user->id
+            || (int) ($templateRequest->assigned_advisor_id ?? 0) === (int) $user->id
+        );
+
+        if (! $isPowerAdminAccess && ! $isOwnerAdvisor) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $advisorId = $templateRequest->assigned_advisor_id ?? $templateRequest->advisor_id;
+
+        if (! $advisorId) {
+            return response()->json([
+                'template_request' => $templateRequest,
+                'sections' => [],
+                'message' => 'No advisor assigned to this deployment.',
+            ]);
+        }
+
+        $page = Page::where('slug', 'home')->first();
+        if (! $page) {
+            return response()->json([
+                'template_request' => $templateRequest,
+                'sections' => [],
+            ]);
+        }
+
+        AdvisorSectionService::ensureForAdvisor(
+            (int) $advisorId,
+            $templateRequest->template_name ?: 'template4',
+            false,
+            (int) $templateRequest->id
+        );
+
+        $sections = Section::where('page_id', $page->id)
+            ->where('advisor_id', $advisorId)
+            ->where('template_request_id', $templateRequest->id)
+            ->orderBy('id')
+            ->get()
+            ->unique('name')
+            ->values();
+
+        return response()->json([
+            'template_request' => $templateRequest,
+            'sections' => $sections,
+        ]);
+    }
+
+    public function updateSections(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        $this->gate->assertCan($user, 'wc_manage_deployment_sections');
+
+        $request->validate([
+            'sections' => 'required|array|min:1',
+            'sections.*.id' => 'required|exists:wc_sections,id',
+            'sections.*.display_name' => 'nullable|string|max:255',
+            'sections.*.is_visible' => 'nullable|boolean',
+        ]);
+
+        $templateRequest = TemplateRequest::findOrFail($id);
+        $advisorId = $templateRequest->assigned_advisor_id ?? $templateRequest->advisor_id;
+
+        if (! $advisorId) {
+            return response()->json(['message' => 'No advisor assigned to this deployment.'], 422);
+        }
+
+        $updated = [];
+
+        foreach ($request->sections as $item) {
+            $section = Section::findOrFail($item['id']);
+
+            if ((int) $section->advisor_id !== (int) $advisorId) {
+                return response()->json([
+                    'message' => "Section \"{$section->name}\" does not belong to this deployment.",
+                ], 422);
+            }
+
+            if ((int) ($section->template_request_id ?? 0) !== (int) $templateRequest->id) {
+                return response()->json([
+                    'message' => "Section \"{$section->name}\" does not belong to this template request.",
+                ], 422);
+            }
+
+            $updates = [];
+            if (array_key_exists('display_name', $item)) {
+                $updates['display_name'] = $item['display_name'] ?: null;
+            }
+            if (array_key_exists('is_visible', $item)) {
+                $updates['is_visible'] = (bool) $item['is_visible'];
+            }
+
+            if (! empty($updates)) {
+                $section->update($updates);
+                $updated[] = $section->fresh();
+            }
+        }
+
+        if (! empty($updated)) {
+            CpanelSyncService::pushToTemplateRequestCpanel($templateRequest);
+
+            $this->activityLogs->log([
+                'action' => 'wc.template_request.sections_update',
+                'description' => 'Updated '.count($updated).' section(s) for deployment',
+                'user' => $user,
+                'subject' => $templateRequest,
+                'request' => $request,
+            ]);
+        }
+
+        return response()->json([
+            'message' => 'Section settings saved and synced to the deployed site.',
+            'sections' => $updated,
+        ]);
+    }
+
+    public function publishContent(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        $this->gate->assertCan($user, 'wc_publish_live_content');
+
+        $request->validate([
+            'section_edits' => 'required|array|min:1',
+            'section_edits.*.section_id' => 'required|exists:wc_sections,id',
+            'section_edits.*.content' => 'required|string',
+        ]);
+
+        $templateRequest = TemplateRequest::findOrFail($id);
+
+        if ($templateRequest->status !== 'deployed') {
+            return response()->json(['message' => 'Can only publish content for deployed sites.'], 422);
+        }
+
+        $advisorId = $templateRequest->assigned_advisor_id ?? $templateRequest->advisor_id;
+
+        if (! $advisorId) {
+            return response()->json(['message' => 'No advisor assigned to this deployment.'], 422);
+        }
+
+        $updatedSections = [];
+
+        foreach ($request->section_edits as $edit) {
+            $section = Section::findOrFail($edit['section_id']);
+
+            if ((int) $section->advisor_id !== (int) $advisorId) {
+                return response()->json([
+                    'message' => "Section \"{$section->name}\" does not belong to this deployment.",
+                ], 422);
+            }
+
+            if ((int) ($section->template_request_id ?? 0) !== (int) $templateRequest->id) {
+                $scoped = Section::where('advisor_id', $advisorId)
+                    ->where('template_request_id', $templateRequest->id)
+                    ->where('name', $section->name)
+                    ->first();
+
+                if (! $scoped) {
+                    return response()->json([
+                        'message' => "Section \"{$section->name}\" does not belong to this template request.",
+                    ], 422);
+                }
+
+                $section = $scoped;
+            }
+
+            $section->update([
+                'content' => $edit['content'],
+                'is_locked' => false,
+                'locked_by' => null,
+            ]);
+
+            $updatedSections[] = [
+                'name' => $section->name,
+                'display_name' => $section->display_name ?: $section->name,
+                'is_visible' => $section->is_visible !== false,
+                'content' => $edit['content'],
+            ];
+        }
+
+        $cpanelSynced = CpanelSyncService::pushToTemplateRequestCpanel($templateRequest, $updatedSections);
+
+        $this->activityLogs->log([
+            'action' => 'wc.template_request.publish_content',
+            'description' => 'Published '.count($updatedSections).' section(s) directly to live'
+                .($cpanelSynced ? ' (cPanel synced)' : ' (cPanel sync skipped or failed)'),
+            'user' => $user,
+            'subject' => $templateRequest,
+            'request' => $request,
+        ]);
+
+        return response()->json([
+            'message' => $cpanelSynced
+                ? 'Content published directly to the live site.'
+                : 'Content saved in the hub database, but the live site was not updated. Check Laravel logs and cPanel configuration.',
+            'cpanel_synced' => $cpanelSynced,
+        ]);
+    }
+}

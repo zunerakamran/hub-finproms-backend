@@ -86,6 +86,7 @@ class ActingHubService
         $followsActing = in_array($capability, Hub::ACTING_HUB_CONTENT_CAPABILITIES, true)
             || Hub::isSocialMediaComplianceCapability($capability)
             || Hub::isGeneralComplianceCapability($capability)
+            || Hub::isWebsiteComplianceCapability($capability)
             || Hub::isModuleKey($capability)
             || $capability === 'dashboard_manage_modules';
 

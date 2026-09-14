@@ -294,6 +294,29 @@ class GeneralComplianceService
     ): GeneralComplianceRequest {
         $this->assertModuleEnabled($hub);
 
+        $canAssign = $this->matrix->roleCan($hub, (string) $actor->role, 'gc_assign_requests');
+        $canReview = $this->matrix->roleCan($hub, (string) $actor->role, 'gc_review_requests');
+
+        if (! $canAssign && ! $canReview) {
+            throw ValidationException::withMessages([
+                'capability' => 'You do not have permission to assign general compliance requests.',
+            ]);
+        }
+
+        // Reviewers without assign capability may only pick up unassigned requests for themselves.
+        if (! $canAssign) {
+            if (! $assignTo || (int) $assignTo !== (int) $actor->id) {
+                throw ValidationException::withMessages([
+                    'assigned_to' => 'You can only assign this request to yourself.',
+                ]);
+            }
+            if ($compliance->assigned_to !== null && (int) $compliance->assigned_to !== (int) $actor->id) {
+                throw ValidationException::withMessages([
+                    'assigned_to' => 'This request is already assigned to another reviewer.',
+                ]);
+            }
+        }
+
         if ($assignTo) {
             $approver = User::query()->findOrFail($assignTo);
             if (! $this->matrix->roleCan($hub, (string) $approver->role, 'gc_review_requests')) {
@@ -321,6 +344,7 @@ class GeneralComplianceService
                 'properties' => [
                     'assigned_to' => $approver->id,
                     'assigned_to_name' => $approver->name,
+                    'self_assign' => (int) $approver->id === (int) $actor->id,
                 ],
             ]);
         } else {
@@ -438,7 +462,10 @@ class GeneralComplianceService
         if ($canViewAll) {
             // Full queue
         } elseif ($canReview) {
-            $query->where('assigned_to', $actor->id);
+            // Own assignments + unassigned (so reviewers can pick up / assign to themselves).
+            $query->where(function ($q) use ($actor) {
+                $q->where('assigned_to', $actor->id)->orWhereNull('assigned_to');
+            });
         } elseif ($canViewOwn) {
             $query->where('user_id', $actor->id);
         } else {

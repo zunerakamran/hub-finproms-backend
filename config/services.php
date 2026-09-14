@@ -42,4 +42,12 @@ return [
         'currency' => env('STRIPE_CURRENCY', 'usd'),
     ],
 
+    'website_compliance' => [
+        'hub_api_url' => env('WEBSITE_COMPLIANCE_HUB_API_URL'),
+        'uploads_origin' => env('WEBSITE_COMPLIANCE_UPLOADS_ORIGIN'),
+        'scheduler_secret' => env('SCHEDULER_SECRET'),
+        'template_preview_base_url' => env('TEMPLATE_PREVIEW_BASE_URL', 'https://epatronus.space'),
+        'template_preview_node_binary' => env('TEMPLATE_PREVIEW_NODE_BINARY'),
+    ],
+
 ];

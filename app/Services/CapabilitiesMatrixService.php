@@ -71,6 +71,7 @@ class CapabilitiesMatrixService
             || $group === Hub::GROUP_GENERAL
             || $group === Hub::GROUP_SOCIAL_MEDIA_COMPLIANCE
             || $group === Hub::GROUP_GENERAL_COMPLIANCE
+            || $group === Hub::GROUP_WEBSITE_COMPLIANCE
         ) {
             // User-facing / compliance caps apply to every role column so Power Admin
             // can enable them for staff and users alike (no hard role lock-in).
@@ -152,6 +153,7 @@ class CapabilitiesMatrixService
 
         $smcModuleOn = $hub->hasSocialMediaComplianceModule();
         $gcModuleOn = $hub->hasGeneralComplianceModule();
+        $wcModuleOn = $hub->hasWebsiteComplianceModule();
 
         // Member + dashboard + compliance rows (per hub, per role)
         foreach (Hub::CHECKLIST_DEFINITIONS as $key => $meta) {
@@ -164,10 +166,12 @@ class CapabilitiesMatrixService
             $requiresPublic = Hub::isPublicCapability($key);
             $requiresSmcModule = Hub::isSocialMediaComplianceCapability($key);
             $requiresGcModule = Hub::isGeneralComplianceCapability($key);
+            $requiresWcModule = Hub::isWebsiteComplianceCapability($key);
             $inactive = ($requiresPrivate && $publicMode)
                 || ($requiresPublic && $privateMode)
                 || ($requiresSmcModule && ! $smcModuleOn)
-                || ($requiresGcModule && ! $gcModuleOn);
+                || ($requiresGcModule && ! $gcModuleOn)
+                || ($requiresWcModule && ! $wcModuleOn);
 
             $inactiveReason = null;
             if ($inactive) {
@@ -175,6 +179,8 @@ class CapabilitiesMatrixService
                     $inactiveReason = 'module_social_media_compliance_off';
                 } elseif ($requiresGcModule && ! $gcModuleOn) {
                     $inactiveReason = 'module_general_compliance_off';
+                } elseif ($requiresWcModule && ! $wcModuleOn) {
+                    $inactiveReason = 'module_website_compliance_off';
                 } elseif ($requiresPrivate) {
                     $inactiveReason = 'private_only';
                 } else {
@@ -205,6 +211,8 @@ class CapabilitiesMatrixService
                 $requiresModule = 'module_social_media_compliance';
             } elseif ($requiresGcModule) {
                 $requiresModule = 'module_general_compliance';
+            } elseif ($requiresWcModule) {
+                $requiresModule = 'module_website_compliance';
             }
 
             $rows[] = [
@@ -231,13 +239,14 @@ class CapabilitiesMatrixService
                 'private_invite_only' => $privateMode,
                 'public_subscribe' => $publicMode,
                 'module_social_media_compliance' => $smcModuleOn,
-                'module_website_compliance' => $hub->can('module_website_compliance'),
+                'module_website_compliance' => $wcModuleOn,
                 'module_general_compliance' => $gcModuleOn,
             ],
             'private_capability_keys' => Hub::PRIVATE_CAPABILITY_KEYS,
             'public_capability_keys' => Hub::PUBLIC_CAPABILITY_KEYS,
             'social_media_compliance_capability_keys' => Hub::SOCIAL_MEDIA_COMPLIANCE_CAPABILITY_KEYS,
             'general_compliance_capability_keys' => Hub::GENERAL_COMPLIANCE_CAPABILITY_KEYS,
+            'website_compliance_capability_keys' => Hub::WEBSITE_COMPLIANCE_CAPABILITY_KEYS,
             'module_keys' => Hub::MODULE_KEYS,
             'roles' => $roles,
             'behaviour' => $behaviour,
@@ -442,6 +451,7 @@ class CapabilitiesMatrixService
             if ($group !== Hub::GROUP_DASHBOARD
                 && $group !== Hub::GROUP_SOCIAL_MEDIA_COMPLIANCE
                 && $group !== Hub::GROUP_GENERAL_COMPLIANCE
+                && $group !== Hub::GROUP_WEBSITE_COMPLIANCE
             ) {
                 continue;
             }
@@ -539,6 +549,11 @@ class CapabilitiesMatrixService
 
         // General Compliance caps are inactive while the module is off.
         if (Hub::isGeneralComplianceCapability($flag) && ! $hub->hasGeneralComplianceModule()) {
+            return false;
+        }
+
+        // Website Compliance caps are inactive while the module is off.
+        if (Hub::isWebsiteComplianceCapability($flag) && ! $hub->hasWebsiteComplianceModule()) {
             return false;
         }
 

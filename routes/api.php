@@ -10,6 +10,16 @@ use App\Http\Controllers\Api\BundleController;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\SocialMediaComplianceController;
 use App\Http\Controllers\Api\GeneralComplianceController;
+use App\Http\Controllers\Api\WebsiteCompliance\ChangeRequestController as WcChangeRequestController;
+use App\Http\Controllers\Api\WebsiteCompliance\PageController as WcPageController;
+use App\Http\Controllers\Api\WebsiteCompliance\PublicController as WcPublicController;
+use App\Http\Controllers\Api\WebsiteCompliance\ReportController as WcReportController;
+use App\Http\Controllers\Api\WebsiteCompliance\SchedulerController as WcSchedulerController;
+use App\Http\Controllers\Api\WebsiteCompliance\SectionController as WcSectionController;
+use App\Http\Controllers\Api\WebsiteCompliance\TemplateController as WcTemplateController;
+use App\Http\Controllers\Api\WebsiteCompliance\TemplateRequestController as WcTemplateRequestController;
+use App\Http\Controllers\Api\WebsiteCompliance\UploadController as WcUploadController;
+use App\Http\Controllers\Api\WebsiteCompliance\WebsiteComplianceAdvisorController;
 use App\Http\Controllers\Api\ContentPushController;
 use App\Http\Controllers\Api\ContentTypeController;
 use App\Http\Controllers\Api\HubContentController;
@@ -49,6 +59,15 @@ Route::post('/stripe/webhook', StripeWebhookController::class);
 
 Route::get('/hub', [HubController::class, 'current']);
 Route::get('/settings', [SettingController::class, 'publicIndex']);
+
+// Website Compliance — public endpoints for live templates / scheduler cron
+Route::get('/website-compliance/public/pages', [WcPublicController::class, 'getAllPages']);
+Route::get('/website-compliance/public/pages/{slug}', [WcPublicController::class, 'getPage']);
+Route::get('/website-compliance/public/templates/{slug}', [WcPublicController::class, 'getTemplateShowcase']);
+Route::get('/website-compliance/pages/home', [WcPublicController::class, 'getHomePageByAdvisor']);
+Route::get('/website-compliance/uploaded-images/{filename}', [WcUploadController::class, 'show'])
+    ->where('filename', '[A-Za-z0-9._-]+');
+Route::get('/website-compliance/scheduler/publish-scheduled', [WcSchedulerController::class, 'publishScheduled']);
 
 Route::middleware('hub_can:member_browse_catalog')->group(function () {
     Route::get('/categories', [CategoryController::class, 'index']);
@@ -107,6 +126,93 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/general-compliance/requests/mine', [GeneralComplianceController::class, 'mine']);
     Route::get('/general-compliance/requests/{generalComplianceRequest}', [GeneralComplianceController::class, 'show']);
+
+    // Website Compliance — authenticated domain (module + capability gated in controllers / hub_can)
+    Route::prefix('website-compliance')->group(function () {
+        Route::post('/upload-image', [WcUploadController::class, 'uploadImage']);
+
+        Route::middleware('hub_can:wc_edit_sections,wc_submit_change_requests,wc_manage_templates,wc_request_deployments,wc_view_all_deployments,wc_publish_live_content')->group(function () {
+            Route::get('/templates', [WcTemplateController::class, 'index']);
+            Route::get('/templates/{id}', [WcTemplateController::class, 'show'])->whereNumber('id');
+            Route::get('/templates/{id}/pages', [WcTemplateController::class, 'getTemplatePages'])->whereNumber('id');
+            Route::get('/pages', [WcPageController::class, 'index']);
+            Route::get('/pages/{id}', [WcPageController::class, 'show'])->whereNumber('id');
+            Route::get('/pages/{pageId}/sections', [WcSectionController::class, 'index'])->whereNumber('pageId');
+            Route::get('/sections/{id}', [WcSectionController::class, 'show'])->whereNumber('id');
+        });
+
+        Route::middleware('hub_can:wc_manage_templates')->group(function () {
+            Route::post('/templates', [WcTemplateController::class, 'store']);
+            Route::put('/templates/{id}', [WcTemplateController::class, 'update'])->whereNumber('id');
+            Route::delete('/templates/{id}', [WcTemplateController::class, 'destroy'])->whereNumber('id');
+            Route::post('/pages', [WcPageController::class, 'store']);
+            Route::put('/pages/{id}', [WcPageController::class, 'update'])->whereNumber('id');
+            Route::delete('/pages/{id}', [WcPageController::class, 'destroy'])->whereNumber('id');
+        });
+
+        Route::middleware('hub_can:wc_edit_sections,wc_publish_live_content')->group(function () {
+            Route::post('/sections', [WcSectionController::class, 'store']);
+            Route::post('/sections/{id}/lock', [WcSectionController::class, 'lock'])->whereNumber('id');
+            Route::post('/sections/{id}/unlock', [WcSectionController::class, 'unlock'])->whereNumber('id');
+        });
+
+        Route::middleware('hub_can:wc_manage_deployment_sections')->group(function () {
+            Route::put('/sections/{id}', [WcSectionController::class, 'update'])->whereNumber('id');
+        });
+
+        Route::middleware('hub_can:wc_submit_change_requests')->group(function () {
+            Route::post('/change-requests', [WcChangeRequestController::class, 'store']);
+            Route::post('/change-requests/{id}/resubmit', [WcChangeRequestController::class, 'resubmit'])->whereNumber('id');
+            Route::post('/change-requests/{id}/confirm-feedback', [WcChangeRequestController::class, 'confirmFeedback'])->whereNumber('id');
+        });
+
+        Route::get('/change-requests', [WcChangeRequestController::class, 'index']);
+        Route::get('/change-requests/{id}', [WcChangeRequestController::class, 'show'])->whereNumber('id');
+        Route::get('/change-requests/{id}/preview', [WcChangeRequestController::class, 'preview'])->whereNumber('id');
+
+        Route::middleware('hub_can:wc_review_change_requests')->group(function () {
+            Route::post('/change-requests/{id}/assign', [WcChangeRequestController::class, 'assign'])->whereNumber('id');
+            Route::post('/change-requests/{id}/approve', [WcChangeRequestController::class, 'approve'])->whereNumber('id');
+            Route::post('/change-requests/{id}/reject', [WcChangeRequestController::class, 'reject'])->whereNumber('id');
+            Route::post('/change-requests/{id}/approve-with-feedback', [WcChangeRequestController::class, 'approveWithFeedback'])->whereNumber('id');
+        });
+
+        Route::middleware('hub_can:wc_assign_change_requests')->group(function () {
+            Route::post('/change-requests/{id}/assign-to-approver', [WcChangeRequestController::class, 'assignToApprover'])->whereNumber('id');
+        });
+
+        Route::get('/template-requests', [WcTemplateRequestController::class, 'index']);
+        Route::middleware('hub_can:wc_request_deployments')->group(function () {
+            Route::post('/template-requests', [WcTemplateRequestController::class, 'store']);
+        });
+        Route::middleware('hub_can:wc_deploy_websites')->group(function () {
+            Route::post('/template-requests/{id}/deploy', [WcTemplateRequestController::class, 'deploy'])->whereNumber('id');
+            Route::post('/template-requests/{id}/reject', [WcTemplateRequestController::class, 'reject'])->whereNumber('id');
+        });
+        Route::middleware('hub_can:wc_deploy_websites,wc_request_deployments,wc_assign_change_requests')->group(function () {
+            Route::post('/template-requests/{id}/assign-advisor', [WcTemplateRequestController::class, 'assignAdvisor'])->whereNumber('id');
+        });
+        Route::get('/template-requests/{id}/sections', [WcTemplateRequestController::class, 'sections'])->whereNumber('id');
+        Route::middleware('hub_can:wc_manage_deployment_sections')->group(function () {
+            Route::put('/template-requests/{id}/sections', [WcTemplateRequestController::class, 'updateSections'])->whereNumber('id');
+        });
+        Route::middleware('hub_can:wc_publish_live_content')->group(function () {
+            Route::post('/template-requests/{id}/publish-content', [WcTemplateRequestController::class, 'publishContent'])->whereNumber('id');
+        });
+
+        Route::middleware('hub_can:wc_view_platform_report')->group(function () {
+            Route::get('/reports/summary', [WcReportController::class, 'summary']);
+            Route::post('/reports/summary/refresh', [WcReportController::class, 'refresh']);
+            Route::get('/reports', [WcReportController::class, 'index']);
+        });
+
+        Route::middleware('hub_can:wc_request_deployments,wc_view_all_deployments,wc_assign_change_requests,wc_deploy_websites')->group(function () {
+            Route::get('/advisors', [WebsiteComplianceAdvisorController::class, 'advisors']);
+        });
+        Route::middleware('hub_can:wc_assign_change_requests,wc_view_all_change_requests,wc_review_change_requests')->group(function () {
+            Route::get('/reviewers', [WebsiteComplianceAdvisorController::class, 'reviewers']);
+        });
+    });
 
     // client_admin management API (also aliased under /admin for older clients)
     $clientAdminRoutes = function () {
@@ -251,9 +357,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:smc_review_requests')->group(function () {
             Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/review', [SocialMediaComplianceController::class, 'review']);
         });
+        Route::middleware('hub_can:smc_assign_requests,smc_review_requests')->group(function () {
+            Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/assign', [SocialMediaComplianceController::class, 'assign']);
+        });
         Route::middleware('hub_can:smc_assign_requests')->group(function () {
             Route::get('/social-media-compliance/reviewers', [SocialMediaComplianceController::class, 'reviewers']);
-            Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/assign', [SocialMediaComplianceController::class, 'assign']);
         });
         Route::middleware('hub_can:smc_view_reports')->group(function () {
             Route::get('/social-media-compliance/reports', [SocialMediaComplianceController::class, 'report']);
@@ -271,15 +379,63 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:gc_review_requests')->group(function () {
             Route::post('/general-compliance/requests/{generalComplianceRequest}/review', [GeneralComplianceController::class, 'review']);
         });
+        Route::middleware('hub_can:gc_assign_requests,gc_review_requests')->group(function () {
+            Route::post('/general-compliance/requests/{generalComplianceRequest}/assign', [GeneralComplianceController::class, 'assign']);
+        });
         Route::middleware('hub_can:gc_assign_requests')->group(function () {
             Route::get('/general-compliance/reviewers', [GeneralComplianceController::class, 'reviewers']);
-            Route::post('/general-compliance/requests/{generalComplianceRequest}/assign', [GeneralComplianceController::class, 'assign']);
         });
         Route::middleware('hub_can:gc_view_reports')->group(function () {
             Route::get('/general-compliance/reports', [GeneralComplianceController::class, 'report']);
             Route::get('/general-compliance/reports/export', [GeneralComplianceController::class, 'export']);
             Route::get('/general-compliance/charts/approver-workload', [GeneralComplianceController::class, 'approverWorkload']);
             Route::get('/general-compliance/charts/advisor-comparison', [GeneralComplianceController::class, 'advisorComparison']);
+        });
+
+        // Website Compliance — queue / assign / review / reports / deployments
+        Route::prefix('website-compliance')->group(function () {
+            Route::middleware('hub_can:wc_view_all_change_requests,wc_assign_change_requests,wc_review_change_requests')->group(function () {
+                Route::get('/change-requests', [WcChangeRequestController::class, 'index']);
+                Route::get('/change-requests/{id}', [WcChangeRequestController::class, 'show'])->whereNumber('id');
+                Route::get('/change-requests/{id}/preview', [WcChangeRequestController::class, 'preview'])->whereNumber('id');
+            });
+            Route::middleware('hub_can:wc_submit_change_requests')->group(function () {
+                Route::post('/change-requests/{id}/resubmit', [WcChangeRequestController::class, 'resubmit'])->whereNumber('id');
+                Route::post('/change-requests/{id}/confirm-feedback', [WcChangeRequestController::class, 'confirmFeedback'])->whereNumber('id');
+            });
+            Route::middleware('hub_can:wc_review_change_requests')->group(function () {
+                Route::post('/change-requests/{id}/assign', [WcChangeRequestController::class, 'assign'])->whereNumber('id');
+                Route::post('/change-requests/{id}/approve', [WcChangeRequestController::class, 'approve'])->whereNumber('id');
+                Route::post('/change-requests/{id}/reject', [WcChangeRequestController::class, 'reject'])->whereNumber('id');
+                Route::post('/change-requests/{id}/approve-with-feedback', [WcChangeRequestController::class, 'approveWithFeedback'])->whereNumber('id');
+            });
+            Route::middleware('hub_can:wc_assign_change_requests')->group(function () {
+                Route::post('/change-requests/{id}/assign-to-approver', [WcChangeRequestController::class, 'assignToApprover'])->whereNumber('id');
+            });
+            Route::middleware('hub_can:wc_view_all_deployments,wc_request_deployments,wc_deploy_websites')->group(function () {
+                Route::get('/template-requests', [WcTemplateRequestController::class, 'index']);
+            });
+            Route::middleware('hub_can:wc_deploy_websites')->group(function () {
+                Route::post('/template-requests/{id}/deploy', [WcTemplateRequestController::class, 'deploy'])->whereNumber('id');
+                Route::post('/template-requests/{id}/reject', [WcTemplateRequestController::class, 'reject'])->whereNumber('id');
+            });
+            Route::middleware('hub_can:wc_manage_templates')->group(function () {
+                Route::get('/templates', [WcTemplateController::class, 'index']);
+                Route::post('/templates', [WcTemplateController::class, 'store']);
+                Route::put('/templates/{id}', [WcTemplateController::class, 'update'])->whereNumber('id');
+                Route::delete('/templates/{id}', [WcTemplateController::class, 'destroy'])->whereNumber('id');
+            });
+            Route::middleware('hub_can:wc_view_platform_report')->group(function () {
+                Route::get('/reports/summary', [WcReportController::class, 'summary']);
+                Route::post('/reports/summary/refresh', [WcReportController::class, 'refresh']);
+                Route::get('/reports', [WcReportController::class, 'index']);
+            });
+            Route::middleware('hub_can:wc_request_deployments,wc_view_all_deployments,wc_assign_change_requests,wc_deploy_websites')->group(function () {
+                Route::get('/advisors', [WebsiteComplianceAdvisorController::class, 'advisors']);
+            });
+            Route::middleware('hub_can:wc_assign_change_requests,wc_view_all_change_requests,wc_review_change_requests')->group(function () {
+                Route::get('/reviewers', [WebsiteComplianceAdvisorController::class, 'reviewers']);
+            });
         });
 
         // Card settings — always available to hub admins when advisor billing is on
@@ -464,9 +620,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:smc_review_requests')->group(function () {
             Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/review', [SocialMediaComplianceController::class, 'review']);
         });
+        Route::middleware('hub_can:smc_assign_requests,smc_review_requests')->group(function () {
+            Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/assign', [SocialMediaComplianceController::class, 'assign']);
+        });
         Route::middleware('hub_can:smc_assign_requests')->group(function () {
             Route::get('/social-media-compliance/reviewers', [SocialMediaComplianceController::class, 'reviewers']);
-            Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/assign', [SocialMediaComplianceController::class, 'assign']);
         });
         Route::middleware('hub_can:smc_view_reports')->group(function () {
             Route::get('/social-media-compliance/reports', [SocialMediaComplianceController::class, 'report']);
@@ -483,15 +641,63 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:gc_review_requests')->group(function () {
             Route::post('/general-compliance/requests/{generalComplianceRequest}/review', [GeneralComplianceController::class, 'review']);
         });
+        Route::middleware('hub_can:gc_assign_requests,gc_review_requests')->group(function () {
+            Route::post('/general-compliance/requests/{generalComplianceRequest}/assign', [GeneralComplianceController::class, 'assign']);
+        });
         Route::middleware('hub_can:gc_assign_requests')->group(function () {
             Route::get('/general-compliance/reviewers', [GeneralComplianceController::class, 'reviewers']);
-            Route::post('/general-compliance/requests/{generalComplianceRequest}/assign', [GeneralComplianceController::class, 'assign']);
         });
         Route::middleware('hub_can:gc_view_reports')->group(function () {
             Route::get('/general-compliance/reports', [GeneralComplianceController::class, 'report']);
             Route::get('/general-compliance/reports/export', [GeneralComplianceController::class, 'export']);
             Route::get('/general-compliance/charts/approver-workload', [GeneralComplianceController::class, 'approverWorkload']);
             Route::get('/general-compliance/charts/advisor-comparison', [GeneralComplianceController::class, 'advisorComparison']);
+        });
+
+        // Website Compliance — queue / assign / review / reports / deployments
+        Route::prefix('website-compliance')->group(function () {
+            Route::middleware('hub_can:wc_view_all_change_requests,wc_assign_change_requests,wc_review_change_requests')->group(function () {
+                Route::get('/change-requests', [WcChangeRequestController::class, 'index']);
+                Route::get('/change-requests/{id}', [WcChangeRequestController::class, 'show'])->whereNumber('id');
+                Route::get('/change-requests/{id}/preview', [WcChangeRequestController::class, 'preview'])->whereNumber('id');
+            });
+            Route::middleware('hub_can:wc_submit_change_requests')->group(function () {
+                Route::post('/change-requests/{id}/resubmit', [WcChangeRequestController::class, 'resubmit'])->whereNumber('id');
+                Route::post('/change-requests/{id}/confirm-feedback', [WcChangeRequestController::class, 'confirmFeedback'])->whereNumber('id');
+            });
+            Route::middleware('hub_can:wc_review_change_requests')->group(function () {
+                Route::post('/change-requests/{id}/assign', [WcChangeRequestController::class, 'assign'])->whereNumber('id');
+                Route::post('/change-requests/{id}/approve', [WcChangeRequestController::class, 'approve'])->whereNumber('id');
+                Route::post('/change-requests/{id}/reject', [WcChangeRequestController::class, 'reject'])->whereNumber('id');
+                Route::post('/change-requests/{id}/approve-with-feedback', [WcChangeRequestController::class, 'approveWithFeedback'])->whereNumber('id');
+            });
+            Route::middleware('hub_can:wc_assign_change_requests')->group(function () {
+                Route::post('/change-requests/{id}/assign-to-approver', [WcChangeRequestController::class, 'assignToApprover'])->whereNumber('id');
+            });
+            Route::middleware('hub_can:wc_view_all_deployments,wc_request_deployments,wc_deploy_websites')->group(function () {
+                Route::get('/template-requests', [WcTemplateRequestController::class, 'index']);
+            });
+            Route::middleware('hub_can:wc_deploy_websites')->group(function () {
+                Route::post('/template-requests/{id}/deploy', [WcTemplateRequestController::class, 'deploy'])->whereNumber('id');
+                Route::post('/template-requests/{id}/reject', [WcTemplateRequestController::class, 'reject'])->whereNumber('id');
+            });
+            Route::middleware('hub_can:wc_manage_templates')->group(function () {
+                Route::get('/templates', [WcTemplateController::class, 'index']);
+                Route::post('/templates', [WcTemplateController::class, 'store']);
+                Route::put('/templates/{id}', [WcTemplateController::class, 'update'])->whereNumber('id');
+                Route::delete('/templates/{id}', [WcTemplateController::class, 'destroy'])->whereNumber('id');
+            });
+            Route::middleware('hub_can:wc_view_platform_report')->group(function () {
+                Route::get('/reports/summary', [WcReportController::class, 'summary']);
+                Route::post('/reports/summary/refresh', [WcReportController::class, 'refresh']);
+                Route::get('/reports', [WcReportController::class, 'index']);
+            });
+            Route::middleware('hub_can:wc_request_deployments,wc_view_all_deployments,wc_assign_change_requests,wc_deploy_websites')->group(function () {
+                Route::get('/advisors', [WebsiteComplianceAdvisorController::class, 'advisors']);
+            });
+            Route::middleware('hub_can:wc_assign_change_requests,wc_view_all_change_requests,wc_review_change_requests')->group(function () {
+                Route::get('/reviewers', [WebsiteComplianceAdvisorController::class, 'reviewers']);
+            });
         });
     });
 });

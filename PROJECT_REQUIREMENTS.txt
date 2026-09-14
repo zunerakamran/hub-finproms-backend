@@ -177,7 +177,8 @@ Notes:
 3.3 Social Media Compliance
 - After purchase (and later editing), posts can go through a compliance check.
 - Power Admin enables the **Social Media Compliance** module per hub (Modules
-  checklist). Website Compliance remains reserved for later.
+  checklist). Website Compliance is also available as a hub module (templates,
+  section editing, change-request approval, cPanel deploy).
 - While the module is off, all Social Media Compliance capabilities appear
   blurred / inactive on the Capabilities matrix (same pattern as private/public).
 - Who can submit, assign, review, view queues, or open reports is controlled
@@ -340,7 +341,9 @@ Notes:
   - Social Media Compliance — activates the Social Media Compliance capability
     section (capabilities blurred while this module is off)
   - General Compliance — activates the General Compliance capability section
-  - Website Compliance — future
+  - Website Compliance — activates the Website Compliance capability section
+    (templates, deployments, change requests, cPanel publish; capabilities
+    blurred while this module is off)
 - Managed via `dashboard_manage_modules` / Modules API.
 
 5.2 User capabilities matrix (REQUIRED — Power Admin → Capabilities)
@@ -597,7 +600,7 @@ STEP 1 — Shared hub core
 [ ] In-app post editing for buyers (later)
 [x] Social Media Compliance check flow (module + APIs)
 [x] General Compliance module + APIs (description + multi-file attachments)
-[ ] Website Compliance module (future)
+[x] Website Compliance module + APIs (templates, sections, change requests, cPanel deploy)
 
 ================================================================================
 END OF REQUIREMENTS

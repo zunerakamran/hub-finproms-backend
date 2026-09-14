@@ -61,7 +61,7 @@ class HubModulesController extends Controller
         }
 
         // Future modules stay off until implemented.
-        $checklist['module_website_compliance'] = false;
+        // (Website Compliance is now available.)
 
         $hub->checklist = $checklist;
         $hub->save();
@@ -135,6 +135,7 @@ class HubModulesController extends Controller
             $available = in_array($key, [
                 'module_social_media_compliance',
                 'module_general_compliance',
+                'module_website_compliance',
             ], true);
             $items[] = [
                 'key' => $key,

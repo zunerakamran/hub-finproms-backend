@@ -19,6 +19,8 @@ class DatabaseSeeder extends Seeder
             SettingsSeeder::class,
             HubSeeder::class,
             AdvisorPricingSeeder::class,
+            // Idempotent by template/page slug; safe to leave enabled.
+            WebsiteComplianceTemplateSeeder::class,
         ]);
     }
 }

@@ -27,6 +27,8 @@ class Hub extends Model
 
     public const GROUP_GENERAL_COMPLIANCE = 'general_compliance';
 
+    public const GROUP_WEBSITE_COMPLIANCE = 'website_compliance';
+
     /**
      * @var array<string, string>
      */
@@ -39,6 +41,7 @@ class Hub extends Model
         self::GROUP_ADMIN_EMAILS => 'Admin emails',
         self::GROUP_SOCIAL_MEDIA_COMPLIANCE => 'Social Media Compliance',
         self::GROUP_GENERAL_COMPLIANCE => 'General Compliance',
+        self::GROUP_WEBSITE_COMPLIANCE => 'Website Compliance',
     ];
 
     /**
@@ -63,6 +66,7 @@ class Hub extends Model
         self::GROUP_ADMIN_EMAILS,
         self::GROUP_SOCIAL_MEDIA_COMPLIANCE,
         self::GROUP_GENERAL_COMPLIANCE,
+        self::GROUP_WEBSITE_COMPLIANCE,
     ];
 
     /**
@@ -102,6 +106,28 @@ class Hub extends Model
         'gc_review_requests',
         'gc_view_all_requests',
         'gc_view_reports',
+    ];
+
+    /**
+     * Website Compliance capabilities — inactive/blurred while the module is off.
+     * Mapped from the former content-flow PermissionCatalog (hub-owned user/role caps omitted).
+     *
+     * @var list<string>
+     */
+    public const WEBSITE_COMPLIANCE_CAPABILITY_KEYS = [
+        'wc_edit_sections',
+        'wc_submit_change_requests',
+        'wc_assign_change_requests',
+        'wc_view_all_change_requests',
+        'wc_review_change_requests',
+        'wc_request_deployments',
+        'wc_view_all_deployments',
+        'wc_deploy_websites',
+        'wc_manage_templates',
+        'wc_manage_deployment_sections',
+        'wc_publish_live_content',
+        'wc_view_activity_logs',
+        'wc_view_platform_report',
     ];
 
     /**
@@ -223,7 +249,7 @@ class Hub extends Model
         ],
         'module_website_compliance' => [
             'label' => 'Website Compliance',
-            'description' => 'Website compliance module (future).',
+            'description' => 'Enable website templates, section editing, change-request approval, and cPanel deployment on this hub. Related capabilities are blurred until this module is on.',
             'group' => self::GROUP_MODULES,
             'default_shared' => false,
             'default_white_label' => false,
@@ -432,7 +458,7 @@ class Hub extends Model
         ],
         'dashboard_manage_modules' => [
             'label' => 'Manage hub modules',
-            'description' => 'Enable or disable product modules for this hub (Social Media Compliance and General Compliance are live; Website Compliance is future). Related capability sections stay blurred while a module is off.',
+            'description' => 'Enable or disable product modules for this hub (Social Media, General, and Website Compliance). Related capability sections stay blurred while a module is off.',
             'group' => self::GROUP_DASHBOARD,
             'default_shared' => true,
             'default_white_label' => true,
@@ -522,6 +548,99 @@ class Hub extends Model
             'label' => 'View general compliance reports & charts',
             'description' => 'Open general compliance reports, export, approver workload, and advisor comparison charts.',
             'group' => self::GROUP_GENERAL_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+
+        // --- Website Compliance (blurred while module_website_compliance is off) ---
+        'wc_edit_sections' => [
+            'label' => 'Edit website sections',
+            'description' => 'Lock and edit website section content on a deployed template.',
+            'group' => self::GROUP_WEBSITE_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'wc_submit_change_requests' => [
+            'label' => 'Submit website change requests',
+            'description' => 'Submit section edits for approver review before they go live.',
+            'group' => self::GROUP_WEBSITE_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'wc_assign_change_requests' => [
+            'label' => 'Assign website change requests',
+            'description' => 'Assign pending website change requests to an approver.',
+            'group' => self::GROUP_WEBSITE_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'wc_view_all_change_requests' => [
+            'label' => 'View all website change requests',
+            'description' => 'See website change requests across the hub (not only own submissions).',
+            'group' => self::GROUP_WEBSITE_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'wc_review_change_requests' => [
+            'label' => 'Review website change requests',
+            'description' => 'Approve, reject, or schedule submitted website content changes.',
+            'group' => self::GROUP_WEBSITE_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'wc_request_deployments' => [
+            'label' => 'Request website deployments',
+            'description' => 'Request a new showcase / advisor site deployment from a template.',
+            'group' => self::GROUP_WEBSITE_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'wc_view_all_deployments' => [
+            'label' => 'View all website deployments',
+            'description' => 'See all deployment requests (list only; does not allow requesting or deploying).',
+            'group' => self::GROUP_WEBSITE_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'wc_deploy_websites' => [
+            'label' => 'Deploy websites to cPanel',
+            'description' => 'Deploy or update advisor sites on cPanel with domain and database credentials.',
+            'group' => self::GROUP_WEBSITE_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'wc_manage_templates' => [
+            'label' => 'Manage website templates',
+            'description' => 'Create, edit, and delete showcase templates.',
+            'group' => self::GROUP_WEBSITE_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'wc_manage_deployment_sections' => [
+            'label' => 'Manage deployment section visibility',
+            'description' => 'Show or hide sections on a deployed site.',
+            'group' => self::GROUP_WEBSITE_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'wc_publish_live_content' => [
+            'label' => 'Publish live website content',
+            'description' => 'Edit and publish live site content without approver review.',
+            'group' => self::GROUP_WEBSITE_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'wc_view_activity_logs' => [
+            'label' => 'View website compliance activity logs',
+            'description' => 'View website compliance audit and activity logs.',
+            'group' => self::GROUP_WEBSITE_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'wc_view_platform_report' => [
+            'label' => 'View website compliance platform report',
+            'description' => 'View and refresh the website compliance platform summary report.',
+            'group' => self::GROUP_WEBSITE_COMPLIANCE,
             'default_shared' => false,
             'default_white_label' => false,
         ],
@@ -695,6 +814,12 @@ class Hub extends Model
             || ((self::CHECKLIST_DEFINITIONS[$key]['group'] ?? null) === self::GROUP_GENERAL_COMPLIANCE);
     }
 
+    public static function isWebsiteComplianceCapability(string $key): bool
+    {
+        return in_array($key, self::WEBSITE_COMPLIANCE_CAPABILITY_KEYS, true)
+            || ((self::CHECKLIST_DEFINITIONS[$key]['group'] ?? null) === self::GROUP_WEBSITE_COMPLIANCE);
+    }
+
     public static function isModuleKey(string $key): bool
     {
         return in_array($key, self::MODULE_KEYS, true)
@@ -709,6 +834,11 @@ class Hub extends Model
     public function hasGeneralComplianceModule(): bool
     {
         return $this->can('module_general_compliance');
+    }
+
+    public function hasWebsiteComplianceModule(): bool
+    {
+        return $this->can('module_website_compliance');
     }
 
     /**
