@@ -41,8 +41,8 @@ return new class extends Migration
                 $table->timestamp('reviewed_at')->nullable();
                 $table->timestamps();
 
-                $table->unique(['request_id', 'version_number']);
-                $table->index(['request_id', 'status']);
+                $table->unique(['request_id', 'version_number'], 'gc_versions_request_version_unique');
+                $table->index(['request_id', 'status'], 'gc_versions_request_status_index');
             });
         }
 
@@ -60,7 +60,7 @@ return new class extends Migration
                 $table->unsignedSmallInteger('sort_order')->default(0);
                 $table->timestamps();
 
-                $table->index(['version_id', 'sort_order']);
+                $table->index(['version_id', 'sort_order'], 'gc_attachments_version_sort_index');
             });
         }
 

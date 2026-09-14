@@ -177,8 +177,7 @@ Notes:
 3.3 Social Media Compliance
 - After purchase (and later editing), posts can go through a compliance check.
 - Power Admin enables the **Social Media Compliance** module per hub (Modules
-  checklist). Website Compliance and General Compliance modules are reserved
-  for later.
+  checklist). Website Compliance remains reserved for later.
 - While the module is off, all Social Media Compliance capabilities appear
   blurred / inactive on the Capabilities matrix (same pattern as private/public).
 - Who can submit, assign, review, view queues, or open reports is controlled
@@ -190,6 +189,14 @@ Notes:
 - All Social Media Compliance mutations and report/chart views are written to
   activity_logs (actions: smc.submit / assign / unassign / review / resubmit /
   confirm_feedback / reports.* / charts.*).
+
+3.3b General Compliance
+- Same review flow as Social Media Compliance (submit → assign → review →
+  versions / reports), but submissions are free-form: required description
+  textarea + multiple file attachments (PDF, Office, images, ZIP, etc.).
+- Power Admin enables the **General Compliance** module per hub. Capabilities
+  (`gc_*`) are blurred while the module is off.
+- Activity logs use `gc.*` actions.
 
 3.4 Other Features (later)
 - Additional features to be added over time; keep architecture flexible.
@@ -332,9 +339,9 @@ Notes:
 - Per-hub module toggles (functionality group `modules`):
   - Social Media Compliance — activates the Social Media Compliance capability
     section (capabilities blurred while this module is off)
+  - General Compliance — activates the General Compliance capability section
   - Website Compliance — future
-  - General Compliance — future
-- Managed via `pa_manage_hub_checklists` (hub checklist API).
+- Managed via `dashboard_manage_modules` / Modules API.
 
 5.2 User capabilities matrix (REQUIRED — Power Admin → Capabilities)
 - Power Admin manages what users can do from their dashboards / member UI,
@@ -387,6 +394,15 @@ Notes:
   - smc_review_requests — set status + feedback
   - smc_view_all_requests — full hub queue
   - smc_view_reports — reports, CSV export, approver workload & advisor charts
+  - All roles available in the matrix; defaults OFF until Power Admin enables
+
+  General Compliance (blurred while module_general_compliance is off):
+  - gc_submit_request — submit / resubmit / confirm-feedback (description + files)
+  - gc_view_own_requests — own request history & detail
+  - gc_assign_requests — assign / unassign reviewers
+  - gc_review_requests — set status + feedback
+  - gc_view_all_requests — full hub queue
+  - gc_view_reports — reports, CSV export, approver workload & advisor charts
   - All roles available in the matrix; defaults OFF until Power Admin enables
 
   Hub-admin dashboard also includes:
@@ -580,7 +596,8 @@ STEP 1 — Shared hub core
 [ ] AI post/reel generation by FinProms admin (later)
 [ ] In-app post editing for buyers (later)
 [x] Social Media Compliance check flow (module + APIs)
-[ ] Website Compliance / General Compliance modules (future)
+[x] General Compliance module + APIs (description + multi-file attachments)
+[ ] Website Compliance module (future)
 
 ================================================================================
 END OF REQUIREMENTS
