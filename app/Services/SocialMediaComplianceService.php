@@ -78,7 +78,7 @@ class SocialMediaComplianceService
             ]);
         }
 
-        $description = trim((string) ($data['description'] ?? $post->description ?? ''));
+        $description = trim((string) ($data['description'] ?? ''));
         if ($description === '') {
             throw ValidationException::withMessages([
                 'description' => 'A description is required.',

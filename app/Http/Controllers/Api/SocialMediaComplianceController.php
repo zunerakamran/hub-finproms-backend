@@ -136,13 +136,13 @@ class SocialMediaComplianceController extends Controller
 
         $validated = $request->validate([
             'post_id' => ['required', 'integer', 'exists:posts,id'],
-            'description' => ['nullable', 'string', 'max:10000'],
+            'description' => ['required', 'string', 'max:10000'],
             'image' => ['nullable', 'image', 'max:5120'],
         ]);
 
         $compliance = $this->compliance->submit($hub, $user, [
             'post_id' => (int) $validated['post_id'],
-            'description' => $validated['description'] ?? null,
+            'description' => $validated['description'],
             'image' => $request->file('image'),
         ], $request);
 
