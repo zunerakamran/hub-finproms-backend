@@ -374,7 +374,7 @@ class Hub extends Model
         ],
         'dashboard_manage_settings' => [
             'label' => 'Manage settings',
-            'description' => 'Hub admin can manage hub settings: NEW banner, logo, color scheme, and application name.',
+            'description' => 'Hub admin can manage hub settings: NEW banner, logo, favicon, color scheme, and application name.',
             'group' => self::GROUP_DASHBOARD,
             'default_shared' => true,
             'default_white_label' => true,
@@ -668,6 +668,7 @@ class Hub extends Model
         'primary_color',
         'secondary_color',
         'logo_url',
+        'favicon_url',
         'from_email',
         'frontend_url',
         'api_url',
@@ -929,17 +930,33 @@ class Hub extends Model
      */
     public function logoPublicUrl(): ?string
     {
-        if (! $this->logo_url) {
+        return $this->publicAssetUrl($this->logo_url);
+    }
+
+    /**
+     * Public URL for the hub favicon (uploaded storage path or external URL).
+     */
+    public function faviconPublicUrl(): ?string
+    {
+        return $this->publicAssetUrl($this->favicon_url);
+    }
+
+    /**
+     * Resolve a stored asset path or absolute/external URL to a public URL.
+     */
+    private function publicAssetUrl(?string $value): ?string
+    {
+        if (! $value) {
             return null;
         }
 
-        if (str_starts_with($this->logo_url, 'http://')
-            || str_starts_with($this->logo_url, 'https://')
-            || str_starts_with($this->logo_url, '/')) {
-            return $this->logo_url;
+        if (str_starts_with($value, 'http://')
+            || str_starts_with($value, 'https://')
+            || str_starts_with($value, '/')) {
+            return $value;
         }
 
-        return Storage::disk('public')->url($this->logo_url);
+        return Storage::disk('public')->url($value);
     }
 
     /**
@@ -1134,6 +1151,7 @@ class Hub extends Model
      * @return array{
      *   application_name: string,
      *   logo_url: ?string,
+     *   favicon_url: ?string,
      *   from_email: ?string,
      *   primary_color: ?string,
      *   secondary_color: ?string,
@@ -1145,6 +1163,7 @@ class Hub extends Model
         return [
             'application_name' => $this->name,
             'logo_url' => $this->logoPublicUrl(),
+            'favicon_url' => $this->faviconPublicUrl(),
             'from_email' => $this->from_email,
             'primary_color' => $this->primary_color,
             'secondary_color' => $this->secondary_color,

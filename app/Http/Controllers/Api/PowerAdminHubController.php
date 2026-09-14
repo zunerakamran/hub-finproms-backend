@@ -49,6 +49,7 @@ class PowerAdminHubController extends Controller
             'primary_color' => ['nullable', 'string', 'max:32'],
             'secondary_color' => ['nullable', 'string', 'max:32'],
             'logo_url' => ['nullable', 'string', 'max:2048'],
+            'favicon_url' => ['nullable', 'string', 'max:2048'],
             'frontend_url' => ['nullable', 'string', 'max:2048', 'url'],
             'api_url' => ['nullable', 'string', 'max:2048', 'url'],
             'deploy_notes' => ['nullable', 'string', 'max:5000'],
@@ -79,6 +80,7 @@ class PowerAdminHubController extends Controller
             'primary_color' => $validated['primary_color'] ?? null,
             'secondary_color' => $validated['secondary_color'] ?? null,
             'logo_url' => $validated['logo_url'] ?? null,
+            'favicon_url' => $validated['favicon_url'] ?? null,
             'frontend_url' => $validated['frontend_url'] ?? null,
             'api_url' => $validated['api_url'] ?? null,
             'deploy_notes' => $validated['deploy_notes'] ?? null,
@@ -122,6 +124,7 @@ class PowerAdminHubController extends Controller
             'primary_color' => ['nullable', 'string', 'max:32'],
             'secondary_color' => ['nullable', 'string', 'max:32'],
             'logo_url' => ['nullable', 'string', 'max:2048'],
+            'favicon_url' => ['nullable', 'string', 'max:2048'],
             'frontend_url' => ['nullable', 'string', 'max:2048', 'url'],
             'api_url' => ['nullable', 'string', 'max:2048', 'url'],
             'deploy_notes' => ['nullable', 'string', 'max:5000'],
@@ -357,7 +360,7 @@ class PowerAdminHubController extends Controller
     private function normalizeOptionalUrlFields(Request $request): void
     {
         $merge = [];
-        foreach (['frontend_url', 'api_url', 'deploy_notes', 'logo_url', 'db_host', 'db_database', 'db_username', 'db_password'] as $key) {
+        foreach (['frontend_url', 'api_url', 'deploy_notes', 'logo_url', 'favicon_url', 'db_host', 'db_database', 'db_username', 'db_password'] as $key) {
             if ($request->exists($key) && $request->input($key) === '') {
                 $merge[$key] = null;
             }

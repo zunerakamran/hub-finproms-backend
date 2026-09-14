@@ -39,6 +39,9 @@ class SettingController extends Controller
             'from_email' => ['sometimes', 'nullable', 'email', 'max:255'],
             'logo' => ['sometimes', 'file', 'image', 'max:5120'],
             'remove_logo' => ['sometimes', 'boolean'],
+            // Favicons often use .ico; Laravel's "image" rule rejects that, so use mimes.
+            'favicon' => ['sometimes', 'file', 'mimes:ico,png,jpg,jpeg,gif,webp,svg', 'max:1024'],
+            'remove_favicon' => ['sometimes', 'boolean'],
             'color_scheme' => ['sometimes', 'array'],
             'color_scheme.primary' => ['nullable', 'string', 'max:32'],
             'color_scheme.secondary' => ['nullable', 'string', 'max:32'],
@@ -65,15 +68,29 @@ class SettingController extends Controller
 
         $removeLogo = filter_var($request->input('remove_logo'), FILTER_VALIDATE_BOOLEAN);
         if ($removeLogo && ! $request->hasFile('logo')) {
-            $this->deleteStoredLogo($hub->logo_url);
+            $this->deleteStoredAsset($hub->logo_url, 'hubs/logos/');
             $hub->logo_url = null;
             $hubDirty = true;
         }
 
         if ($request->hasFile('logo')) {
-            $this->deleteStoredLogo($hub->logo_url);
+            $this->deleteStoredAsset($hub->logo_url, 'hubs/logos/');
             $path = $request->file('logo')->store('hubs/logos', 'public');
             $hub->logo_url = $path;
+            $hubDirty = true;
+        }
+
+        $removeFavicon = filter_var($request->input('remove_favicon'), FILTER_VALIDATE_BOOLEAN);
+        if ($removeFavicon && ! $request->hasFile('favicon')) {
+            $this->deleteStoredAsset($hub->favicon_url, 'hubs/favicons/');
+            $hub->favicon_url = null;
+            $hubDirty = true;
+        }
+
+        if ($request->hasFile('favicon')) {
+            $this->deleteStoredAsset($hub->favicon_url, 'hubs/favicons/');
+            $path = $request->file('favicon')->store('hubs/favicons', 'public');
+            $hub->favicon_url = $path;
             $hubDirty = true;
         }
 
@@ -122,6 +139,7 @@ class SettingController extends Controller
             'application_name' => $hub->name,
             'from_email' => $hub->from_email,
             'logo_url' => $hub->logoPublicUrl(),
+            'favicon_url' => $hub->faviconPublicUrl(),
             'color_scheme' => [
                 'primary' => $hub->primary_color,
                 'secondary' => $hub->secondary_color,
@@ -129,15 +147,17 @@ class SettingController extends Controller
         ];
     }
 
-    private function deleteStoredLogo(?string $logo): void
+    /**
+     * Only delete files we stored under the given prefix (not external URLs).
+     */
+    private function deleteStoredAsset(?string $path, string $prefix): void
     {
-        if (! $logo) {
+        if (! $path) {
             return;
         }
 
-        // Only delete files we stored under hubs/logos (not external URLs).
-        if (str_starts_with($logo, 'hubs/logos/') && Storage::disk('public')->exists($logo)) {
-            Storage::disk('public')->delete($logo);
+        if (str_starts_with($path, $prefix) && Storage::disk('public')->exists($path)) {
+            Storage::disk('public')->delete($path);
         }
     }
 }

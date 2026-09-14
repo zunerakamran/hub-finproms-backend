@@ -293,7 +293,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::middleware('hub_can:dashboard_manage_settings')->group(function () {
             Route::get('/settings', [SettingController::class, 'index']);
-            // POST accepts multipart logo uploads (PHP does not populate files on PUT).
+            // POST accepts multipart logo / favicon uploads (PHP does not populate files on PUT).
             Route::match(['put', 'post'], '/settings', [SettingController::class, 'update']);
         });
 
