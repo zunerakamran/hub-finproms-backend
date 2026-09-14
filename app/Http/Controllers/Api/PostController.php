@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\Concerns\CreatesOnActingWhiteLabelHub;
 use App\Models\Category;
 use App\Models\ContentType;
 use App\Models\Post;
@@ -17,8 +18,25 @@ use Illuminate\Validation\Rule;
 
 class PostController extends Controller
 {
+    use CreatesOnActingWhiteLabelHub;
     public function index(Request $request): JsonResponse
     {
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            $listed = $this->whiteLabelContent()->listPosts(
+                $hub,
+                min(100, max(1, (int) $request->integer('per_page', 50)))
+            );
+
+            return response()->json([
+                'data' => $listed['data'],
+                'can_view_catalog' => true,
+                'new_banner_days' => Setting::newBannerDays(),
+                'visible_metrics' => [],
+                'target_hub' => $this->targetHubPayload($hub),
+                'acting_on_white_label' => true,
+            ]);
+        }
+
         $user = $this->optionalUser($request);
         $metricVisibility = $this->metricVisibilityFor($user);
 
@@ -154,6 +172,34 @@ class PostController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            if ($request->has('tags') && is_string($request->input('tags'))) {
+                $decoded = json_decode($request->input('tags'), true);
+                $request->merge([
+                    'tags' => (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) ? $decoded : [],
+                ]);
+            }
+            if ($request->has('is_active') && ! is_bool($request->input('is_active'))) {
+                $request->merge([
+                    'is_active' => filter_var($request->input('is_active'), FILTER_VALIDATE_BOOLEAN),
+                ]);
+            }
+
+            $validated = $request->validate([
+                'title' => ['required', 'string', 'max:255'],
+                'description' => ['nullable', 'string'],
+                'type' => ['required', 'string', 'max:100'],
+                'category' => ['required', 'string', 'max:100'],
+                'tags' => ['nullable', 'array'],
+                'tags.*' => ['string', 'max:100'],
+                'credits_cost' => ['required', 'integer', 'min:1'],
+                'is_active' => ['sometimes', 'boolean'],
+                'attachment' => ['nullable', 'file', 'max:102400'],
+            ]);
+
+            return $this->createPostOnActingHub($request, $hub, $validated);
+        }
+
         $validated = $this->validatePost($request);
 
         $attachment = $this->storeAttachment($request);
@@ -178,46 +224,81 @@ class PostController extends Controller
         ], 201);
     }
 
-    public function update(Request $request, Post $post): JsonResponse
+    public function update(Request $request, int $post): JsonResponse
     {
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            if ($request->has('tags') && is_string($request->input('tags'))) {
+                $decoded = json_decode($request->input('tags'), true);
+                $request->merge([
+                    'tags' => (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) ? $decoded : [],
+                ]);
+            }
+            if ($request->has('is_active') && ! is_bool($request->input('is_active'))) {
+                $request->merge([
+                    'is_active' => filter_var($request->input('is_active'), FILTER_VALIDATE_BOOLEAN),
+                ]);
+            }
+
+            $validated = $request->validate([
+                'title' => ['sometimes', 'string', 'max:255'],
+                'description' => ['nullable', 'string'],
+                'type' => ['sometimes', 'string', 'max:100'],
+                'category' => ['sometimes', 'string', 'max:100'],
+                'tags' => ['nullable', 'array'],
+                'tags.*' => ['string', 'max:100'],
+                'credits_cost' => ['sometimes', 'integer', 'min:1'],
+                'is_active' => ['sometimes', 'boolean'],
+                'attachment' => ['nullable', 'file', 'max:102400'],
+            ]);
+
+            return $this->updatePostOnActingHub($request, $hub, $post, $validated);
+        }
+
+        $model = Post::query()->findOrFail($post);
         $validated = $this->validatePost($request, updating: true);
 
         if ($request->hasFile('attachment')) {
-            if ($post->attachment_path) {
-                Storage::disk('public')->delete($post->attachment_path);
+            if ($model->attachment_path) {
+                Storage::disk('public')->delete($model->attachment_path);
             }
 
             $attachment = $this->storeAttachment($request);
-            $post->attachment_path = $attachment['path'];
-            $post->attachment_name = $attachment['name'];
-            $post->attachment_mime = $attachment['mime'];
+            $model->attachment_path = $attachment['path'];
+            $model->attachment_name = $attachment['name'];
+            $model->attachment_mime = $attachment['mime'];
         }
 
-        $post->fill([
-            'title' => $validated['title'] ?? $post->title,
-            'description' => array_key_exists('description', $validated) ? $validated['description'] : $post->description,
-            'type' => $validated['type'] ?? $post->type,
-            'category' => $validated['category'] ?? $post->category,
-            'tags' => array_key_exists('tags', $validated) ? $this->normalizeTags($validated['tags']) : $post->tags,
-            'credits_cost' => $validated['credits_cost'] ?? $post->credits_cost,
-            'is_active' => array_key_exists('is_active', $validated) ? $validated['is_active'] : $post->is_active,
+        $model->fill([
+            'title' => $validated['title'] ?? $model->title,
+            'description' => array_key_exists('description', $validated) ? $validated['description'] : $model->description,
+            'type' => $validated['type'] ?? $model->type,
+            'category' => $validated['category'] ?? $model->category,
+            'tags' => array_key_exists('tags', $validated) ? $this->normalizeTags($validated['tags']) : $model->tags,
+            'credits_cost' => $validated['credits_cost'] ?? $model->credits_cost,
+            'is_active' => array_key_exists('is_active', $validated) ? $validated['is_active'] : $model->is_active,
         ]);
 
-        $post->save();
+        $model->save();
 
         return response()->json([
             'message' => 'Post updated successfully.',
-            'post' => $post->fresh()->load('creator:id,name'),
+            'post' => $model->fresh()->load('creator:id,name'),
         ]);
     }
 
-    public function destroy(Post $post): JsonResponse
+    public function destroy(Request $request, int $post): JsonResponse
     {
-        if ($post->attachment_path) {
-            Storage::disk('public')->delete($post->attachment_path);
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            return $this->deletePostOnActingHub($hub, $post);
         }
 
-        $post->delete();
+        $model = Post::query()->findOrFail($post);
+
+        if ($model->attachment_path) {
+            Storage::disk('public')->delete($model->attachment_path);
+        }
+
+        $model->delete();
 
         return response()->json([
             'message' => 'Post deleted successfully.',

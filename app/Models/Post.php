@@ -203,6 +203,11 @@ class Post extends Model
         return $this->hasMany(PostPurchase::class);
     }
 
+    public function socialMediaComplianceRequests(): HasMany
+    {
+        return $this->hasMany(SocialMediaComplianceRequest::class);
+    }
+
     public function bundles(): BelongsToMany
     {
         return $this->belongsToMany(Bundle::class, 'bundle_post')

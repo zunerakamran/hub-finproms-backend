@@ -54,19 +54,30 @@ class CapabilitiesMatrixService
                 ];
             }
 
+            // Shared-hub control plane only — who may use the hub switcher.
+            if ($key === ActingHubService::CAPABILITY) {
+                return [
+                    User::ROLE_POWER_ADMIN,
+                    User::ROLE_FINPROMS_ADMIN,
+                ];
+            }
+
             // Hub-admin dashboard / admin-email tools apply to every role column so
             // Power Admin can grant them to staff and remaining roles.
             return self::MATRIX_ROLES;
         }
 
-        if ($group === Hub::GROUP_MEMBER || $group === Hub::GROUP_GENERAL) {
-            // User-facing caps apply to every role column so Power Admin can
-            // enable catalog / purchases / general dashboard for
-            // staff and users alike.
+        if ($group === Hub::GROUP_MEMBER
+            || $group === Hub::GROUP_GENERAL
+            || $group === Hub::GROUP_SOCIAL_MEDIA_COMPLIANCE
+            || $group === Hub::GROUP_GENERAL_COMPLIANCE
+        ) {
+            // User-facing / compliance caps apply to every role column so Power Admin
+            // can enable them for staff and users alike (no hard role lock-in).
             return self::MATRIX_ROLES;
         }
 
-        // Behaviour / Functionalities are hub-level, not per-role.
+        // Behaviour / Modules / Functionalities are hub-level, not per-role.
         return [];
     }
 
@@ -139,7 +150,10 @@ class CapabilitiesMatrixService
             ];
         }
 
-        // Member + dashboard rows (per hub, per role) — user capabilities only
+        $smcModuleOn = $hub->hasSocialMediaComplianceModule();
+        $gcModuleOn = $hub->hasGeneralComplianceModule();
+
+        // Member + dashboard + compliance rows (per hub, per role)
         foreach (Hub::CHECKLIST_DEFINITIONS as $key => $meta) {
             $group = $meta['group'] ?? Hub::GROUP_BEHAVIOUR;
             if (! Hub::isCapabilityKey($key)) {
@@ -148,7 +162,25 @@ class CapabilitiesMatrixService
 
             $requiresPrivate = Hub::isPrivateCapability($key);
             $requiresPublic = Hub::isPublicCapability($key);
-            $inactive = ($requiresPrivate && $publicMode) || ($requiresPublic && $privateMode);
+            $requiresSmcModule = Hub::isSocialMediaComplianceCapability($key);
+            $requiresGcModule = Hub::isGeneralComplianceCapability($key);
+            $inactive = ($requiresPrivate && $publicMode)
+                || ($requiresPublic && $privateMode)
+                || ($requiresSmcModule && ! $smcModuleOn)
+                || ($requiresGcModule && ! $gcModuleOn);
+
+            $inactiveReason = null;
+            if ($inactive) {
+                if ($requiresSmcModule && ! $smcModuleOn) {
+                    $inactiveReason = 'module_social_media_compliance_off';
+                } elseif ($requiresGcModule && ! $gcModuleOn) {
+                    $inactiveReason = 'module_general_compliance_off';
+                } elseif ($requiresPrivate) {
+                    $inactiveReason = 'private_only';
+                } else {
+                    $inactiveReason = 'public_only';
+                }
+            }
 
             $applicableRoles = $this->rolesForCapability($key);
             $cells = [];
@@ -158,7 +190,7 @@ class CapabilitiesMatrixService
                 if ($applicable) {
                     $enabled = (bool) ($roleCaps[$role][$key] ?? false);
                 }
-                // Mode-locked caps are inactive (shown off / not editable).
+                // Mode / module-locked caps are inactive (shown off / not editable).
                 if ($inactive) {
                     $enabled = false;
                 }
@@ -166,6 +198,13 @@ class CapabilitiesMatrixService
                     'applicable' => $applicable,
                     'enabled' => $enabled,
                 ];
+            }
+
+            $requiresModule = null;
+            if ($requiresSmcModule) {
+                $requiresModule = 'module_social_media_compliance';
+            } elseif ($requiresGcModule) {
+                $requiresModule = 'module_general_compliance';
             }
 
             $rows[] = [
@@ -176,12 +215,9 @@ class CapabilitiesMatrixService
                 'group_label' => Hub::CHECKLIST_GROUPS[$group] ?? $group,
                 'requires_private' => $requiresPrivate,
                 'requires_public' => $requiresPublic,
+                'requires_module' => $requiresModule,
                 'inactive' => $inactive,
-                'inactive_reason' => $inactive
-                    ? ($requiresPrivate
-                        ? 'private_only'
-                        : 'public_only')
-                    : null,
+                'inactive_reason' => $inactiveReason,
                 'cells' => $cells,
             ];
         }
@@ -194,9 +230,15 @@ class CapabilitiesMatrixService
                 'type' => $hub->type,
                 'private_invite_only' => $privateMode,
                 'public_subscribe' => $publicMode,
+                'module_social_media_compliance' => $smcModuleOn,
+                'module_website_compliance' => $hub->can('module_website_compliance'),
+                'module_general_compliance' => $gcModuleOn,
             ],
             'private_capability_keys' => Hub::PRIVATE_CAPABILITY_KEYS,
             'public_capability_keys' => Hub::PUBLIC_CAPABILITY_KEYS,
+            'social_media_compliance_capability_keys' => Hub::SOCIAL_MEDIA_COMPLIANCE_CAPABILITY_KEYS,
+            'general_compliance_capability_keys' => Hub::GENERAL_COMPLIANCE_CAPABILITY_KEYS,
+            'module_keys' => Hub::MODULE_KEYS,
             'roles' => $roles,
             'behaviour' => $behaviour,
             'rows' => $rows,
@@ -327,16 +369,17 @@ class CapabilitiesMatrixService
             'dashboard_manage_categories',
             'dashboard_manage_tags',
             'dashboard_manage_subscriber_credits',
-            'dashboard_push_content',
+            'dashboard_manage_modules',
+            ActingHubService::CAPABILITY,
         ] as $key) {
             if (isset($matrix[User::ROLE_POWER_ADMIN])) {
                 $matrix[User::ROLE_POWER_ADMIN][$key] = true;
             }
         }
 
-        // Push content is a shared-hub tool; default on for FinProms admin there.
+        // Control white-label hubs is a shared-hub tool; default on for FinProms admin there.
         if (isset($matrix[User::ROLE_FINPROMS_ADMIN])) {
-            $matrix[User::ROLE_FINPROMS_ADMIN]['dashboard_push_content'] =
+            $matrix[User::ROLE_FINPROMS_ADMIN][ActingHubService::CAPABILITY] =
                 $hubType === Hub::TYPE_SHARED;
         }
 
@@ -353,6 +396,24 @@ class CapabilitiesMatrixService
                 $meta = Hub::CHECKLIST_DEFINITIONS[$key] ?? null;
                 $group = $meta['group'] ?? null;
                 if ($group === Hub::GROUP_DASHBOARD || $group === Hub::GROUP_ADMIN_EMAILS) {
+                    $matrix[$role][$key] = false;
+                }
+            }
+        }
+
+        // Social Media Compliance caps default OFF for every role until Power Admin enables them.
+        foreach (self::MATRIX_ROLES as $role) {
+            foreach (Hub::SOCIAL_MEDIA_COMPLIANCE_CAPABILITY_KEYS as $key) {
+                if (isset($matrix[$role])) {
+                    $matrix[$role][$key] = false;
+                }
+            }
+        }
+
+        // General Compliance caps default OFF for every role until Power Admin enables them.
+        foreach (self::MATRIX_ROLES as $role) {
+            foreach (Hub::GENERAL_COMPLIANCE_CAPABILITY_KEYS as $key) {
+                if (isset($matrix[$role])) {
                     $matrix[$role][$key] = false;
                 }
             }
@@ -377,7 +438,11 @@ class CapabilitiesMatrixService
         }
 
         foreach (Hub::CHECKLIST_DEFINITIONS as $key => $meta) {
-            if (($meta['group'] ?? null) !== Hub::GROUP_DASHBOARD) {
+            $group = $meta['group'] ?? null;
+            if ($group !== Hub::GROUP_DASHBOARD
+                && $group !== Hub::GROUP_SOCIAL_MEDIA_COMPLIANCE
+                && $group !== Hub::GROUP_GENERAL_COMPLIANCE
+            ) {
                 continue;
             }
             if ($this->roleCan($hub, $role, $key)) {
@@ -419,6 +484,20 @@ class CapabilitiesMatrixService
                 }
             }
 
+            // Social Media Compliance never inherits from hub OR checklist on bootstrap.
+            foreach (self::MATRIX_ROLES as $role) {
+                foreach (Hub::SOCIAL_MEDIA_COMPLIANCE_CAPABILITY_KEYS as $key) {
+                    $defaults[$role][$key] = false;
+                }
+            }
+
+            // General Compliance never inherits from hub OR checklist on bootstrap.
+            foreach (self::MATRIX_ROLES as $role) {
+                foreach (Hub::GENERAL_COMPLIANCE_CAPABILITY_KEYS as $key) {
+                    $defaults[$role][$key] = false;
+                }
+            }
+
             return $defaults;
         }
 
@@ -450,6 +529,16 @@ class CapabilitiesMatrixService
 
         // Public-hub tools are inactive while the hub is private invite-only.
         if (Hub::isPublicCapability($flag) && $hub->isPrivateInviteOnly()) {
+            return false;
+        }
+
+        // Social Media Compliance caps are inactive while the module is off.
+        if (Hub::isSocialMediaComplianceCapability($flag) && ! $hub->hasSocialMediaComplianceModule()) {
+            return false;
+        }
+
+        // General Compliance caps are inactive while the module is off.
+        if (Hub::isGeneralComplianceCapability($flag) && ! $hub->hasGeneralComplianceModule()) {
             return false;
         }
 

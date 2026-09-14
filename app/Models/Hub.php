@@ -13,6 +13,8 @@ class Hub extends Model
 
     public const GROUP_BEHAVIOUR = 'behaviour';
 
+    public const GROUP_MODULES = 'modules';
+
     public const GROUP_MEMBER = 'member';
 
     public const GROUP_GENERAL = 'general';
@@ -21,24 +23,32 @@ class Hub extends Model
 
     public const GROUP_ADMIN_EMAILS = 'admin_emails';
 
+    public const GROUP_SOCIAL_MEDIA_COMPLIANCE = 'social_media_compliance';
+
+    public const GROUP_GENERAL_COMPLIANCE = 'general_compliance';
+
     /**
      * @var array<string, string>
      */
     public const CHECKLIST_GROUPS = [
         self::GROUP_BEHAVIOUR => 'Functionalities',
+        self::GROUP_MODULES => 'Modules',
         self::GROUP_MEMBER => 'User capabilities',
         self::GROUP_GENERAL => 'General options (dashboard)',
         self::GROUP_DASHBOARD => 'Hub-admin dashboard',
         self::GROUP_ADMIN_EMAILS => 'Admin emails',
+        self::GROUP_SOCIAL_MEDIA_COMPLIANCE => 'Social Media Compliance',
+        self::GROUP_GENERAL_COMPLIANCE => 'General Compliance',
     ];
 
     /**
-     * Groups edited on the Hub checklist screen (Functionalities only).
+     * Groups edited on the Hub checklist screen (Functionalities + Modules).
      *
      * @var list<string>
      */
     public const FUNCTIONALITY_GROUPS = [
         self::GROUP_BEHAVIOUR,
+        self::GROUP_MODULES,
     ];
 
     /**
@@ -51,6 +61,47 @@ class Hub extends Model
         self::GROUP_GENERAL,
         self::GROUP_DASHBOARD,
         self::GROUP_ADMIN_EMAILS,
+        self::GROUP_SOCIAL_MEDIA_COMPLIANCE,
+        self::GROUP_GENERAL_COMPLIANCE,
+    ];
+
+    /**
+     * Hub module functionality keys (enabled per hub on the Modules checklist).
+     *
+     * @var list<string>
+     */
+    public const MODULE_KEYS = [
+        'module_social_media_compliance',
+        'module_website_compliance',
+        'module_general_compliance',
+    ];
+
+    /**
+     * Social Media Compliance capabilities — inactive/blurred while the module is off.
+     *
+     * @var list<string>
+     */
+    public const SOCIAL_MEDIA_COMPLIANCE_CAPABILITY_KEYS = [
+        'smc_submit_request',
+        'smc_view_own_requests',
+        'smc_assign_requests',
+        'smc_review_requests',
+        'smc_view_all_requests',
+        'smc_view_reports',
+    ];
+
+    /**
+     * General Compliance capabilities — inactive/blurred while the module is off.
+     *
+     * @var list<string>
+     */
+    public const GENERAL_COMPLIANCE_CAPABILITY_KEYS = [
+        'gc_submit_request',
+        'gc_view_own_requests',
+        'gc_assign_requests',
+        'gc_review_requests',
+        'gc_view_all_requests',
+        'gc_view_reports',
     ];
 
     /**
@@ -154,19 +205,35 @@ class Hub extends Model
             'default_shared' => false,
             'default_white_label' => true,
         ],
-        'compliance_check' => [
-            'label' => 'Compliance check',
-            'description' => 'Posts can go through a compliance flow (future).',
-            'group' => self::GROUP_BEHAVIOUR,
-            'default_shared' => false,
-            'default_white_label' => false,
-        ],
         'advisor_subscriber_billing' => [
             'label' => 'Advisor subscriber billing (rate × advisors)',
             'description' => 'After Excel advisor import, bill rate × advisor count. Stripe auto-renews monthly.',
             'group' => self::GROUP_BEHAVIOUR,
             'default_shared' => false,
             'default_white_label' => true,
+        ],
+
+        // --- Modules (hub checklist) ---
+        'module_social_media_compliance' => [
+            'label' => 'Social Media Compliance',
+            'description' => 'Enable social media post compliance workflow on this hub. Related capabilities are blurred until this module is on.',
+            'group' => self::GROUP_MODULES,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'module_website_compliance' => [
+            'label' => 'Website Compliance',
+            'description' => 'Website compliance module (future).',
+            'group' => self::GROUP_MODULES,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'module_general_compliance' => [
+            'label' => 'General Compliance',
+            'description' => 'Enable general compliance workflow on this hub (free-form description + file attachments). Related capabilities are blurred until this module is on.',
+            'group' => self::GROUP_MODULES,
+            'default_shared' => false,
+            'default_white_label' => false,
         ],
 
         // --- Member capabilities ---
@@ -356,13 +423,122 @@ class Hub extends Model
             'default_shared' => true,
             'default_white_label' => false,
         ],
-        'dashboard_push_content' => [
-            'label' => 'Publish content to white-labelled hubs',
-            'description' => 'Unlocks a Hub dropdown on posts / types / categories / tags / bundles (like Capabilities). Creating content for a white-label hub writes only to that hub’s own database — not the shared catalog. Requires the matching Manage capability on that screen.',
+        'dashboard_control_white_label_hubs' => [
+            'label' => 'Control white labelled hubs',
+            'description' => 'On the shared hub dashboard, unlocks a hub switcher. Selecting a white-label hub shows that hub’s dashboard tools (based on its Capabilities matrix). Creating posts / types / categories / tags / bundles while that hub is selected writes only to that hub’s own database — not the shared catalog.',
             'group' => self::GROUP_DASHBOARD,
             'default_shared' => true,
             'default_white_label' => false,
         ],
+        'dashboard_manage_modules' => [
+            'label' => 'Manage hub modules',
+            'description' => 'Enable or disable product modules for this hub (Social Media Compliance and General Compliance are live; Website Compliance is future). Related capability sections stay blurred while a module is off.',
+            'group' => self::GROUP_DASHBOARD,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+
+        // --- Social Media Compliance (blurred while module_social_media_compliance is off) ---
+        'smc_submit_request' => [
+            'label' => 'Submit social media compliance requests',
+            'description' => 'Submit a purchased post for social media compliance review (and resubmit after rejection / confirm after approved-with-feedback).',
+            'group' => self::GROUP_SOCIAL_MEDIA_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'smc_view_own_requests' => [
+            'label' => 'View own social media compliance requests',
+            'description' => 'View personal social media compliance request history, detail, and version timeline.',
+            'group' => self::GROUP_SOCIAL_MEDIA_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'smc_assign_requests' => [
+            'label' => 'Assign social media compliance requests',
+            'description' => 'Assign or unassign social media compliance requests to reviewers.',
+            'group' => self::GROUP_SOCIAL_MEDIA_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'smc_review_requests' => [
+            'label' => 'Review social media compliance requests',
+            'description' => 'Set status and feedback on social media compliance requests (Pending / Approved / Rejected / Approved with Feedback).',
+            'group' => self::GROUP_SOCIAL_MEDIA_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'smc_view_all_requests' => [
+            'label' => 'View all social media compliance requests',
+            'description' => 'See the full social media compliance queue for the hub (not only assigned requests).',
+            'group' => self::GROUP_SOCIAL_MEDIA_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'smc_view_reports' => [
+            'label' => 'View social media compliance reports & charts',
+            'description' => 'Open social media compliance reports, export, approver workload, and advisor comparison charts.',
+            'group' => self::GROUP_SOCIAL_MEDIA_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+
+        // --- General Compliance (blurred while module_general_compliance is off) ---
+        'gc_submit_request' => [
+            'label' => 'Submit general compliance requests',
+            'description' => 'Submit a free-form general compliance request with description and file attachments (and resubmit after rejection / confirm after approved-with-feedback).',
+            'group' => self::GROUP_GENERAL_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'gc_view_own_requests' => [
+            'label' => 'View own general compliance requests',
+            'description' => 'View personal general compliance request history, detail, attachments, and version timeline.',
+            'group' => self::GROUP_GENERAL_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'gc_assign_requests' => [
+            'label' => 'Assign general compliance requests',
+            'description' => 'Assign or unassign general compliance requests to reviewers.',
+            'group' => self::GROUP_GENERAL_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'gc_review_requests' => [
+            'label' => 'Review general compliance requests',
+            'description' => 'Set status and feedback on general compliance requests (Pending / Approved / Rejected / Approved with Feedback).',
+            'group' => self::GROUP_GENERAL_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'gc_view_all_requests' => [
+            'label' => 'View all general compliance requests',
+            'description' => 'See the full general compliance queue for the hub (not only assigned requests).',
+            'group' => self::GROUP_GENERAL_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'gc_view_reports' => [
+            'label' => 'View general compliance reports & charts',
+            'description' => 'Open general compliance reports, export, approver workload, and advisor comparison charts.',
+            'group' => self::GROUP_GENERAL_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+    ];
+
+    /**
+     * Dashboard content tools that follow the acting white-label hub context
+     * when Control white labelled hubs is enabled.
+     *
+     * @var list<string>
+     */
+    public const ACTING_HUB_CONTENT_CAPABILITIES = [
+        'dashboard_manage_posts',
+        'dashboard_manage_bundles',
+        'dashboard_manage_types',
+        'dashboard_manage_categories',
+        'dashboard_manage_tags',
     ];
 
     protected $fillable = [
@@ -479,6 +655,11 @@ class Hub extends Model
         return $this->type === self::TYPE_SHARED;
     }
 
+    public function isWhiteLabel(): bool
+    {
+        return $this->type === self::TYPE_WHITE_LABEL;
+    }
+
     public function isPrivateInviteOnly(): bool
     {
         return (bool) ($this->resolvedChecklist()['private_invite_only'] ?? false);
@@ -500,6 +681,34 @@ class Hub extends Model
     public static function isPublicCapability(string $key): bool
     {
         return in_array($key, self::PUBLIC_CAPABILITY_KEYS, true);
+    }
+
+    public static function isSocialMediaComplianceCapability(string $key): bool
+    {
+        return in_array($key, self::SOCIAL_MEDIA_COMPLIANCE_CAPABILITY_KEYS, true)
+            || ((self::CHECKLIST_DEFINITIONS[$key]['group'] ?? null) === self::GROUP_SOCIAL_MEDIA_COMPLIANCE);
+    }
+
+    public static function isGeneralComplianceCapability(string $key): bool
+    {
+        return in_array($key, self::GENERAL_COMPLIANCE_CAPABILITY_KEYS, true)
+            || ((self::CHECKLIST_DEFINITIONS[$key]['group'] ?? null) === self::GROUP_GENERAL_COMPLIANCE);
+    }
+
+    public static function isModuleKey(string $key): bool
+    {
+        return in_array($key, self::MODULE_KEYS, true)
+            || ((self::CHECKLIST_DEFINITIONS[$key]['group'] ?? null) === self::GROUP_MODULES);
+    }
+
+    public function hasSocialMediaComplianceModule(): bool
+    {
+        return $this->can('module_social_media_compliance');
+    }
+
+    public function hasGeneralComplianceModule(): bool
+    {
+        return $this->can('module_general_compliance');
     }
 
     /**

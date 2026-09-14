@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\Concerns\CreatesOnActingWhiteLabelHub;
 use App\Models\Bundle;
 use App\Models\Post;
 use App\Models\Tag;
@@ -16,8 +17,22 @@ use Illuminate\Validation\ValidationException;
 
 class BundleController extends Controller
 {
+    use CreatesOnActingWhiteLabelHub;
     public function index(Request $request): JsonResponse
     {
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            $listed = $this->whiteLabelContent()->listBundles(
+                $hub,
+                min(100, max(1, (int) $request->integer('per_page', 50)))
+            );
+
+            return response()->json([
+                'data' => $listed['data'],
+                'target_hub' => $this->targetHubPayload($hub),
+                'acting_on_white_label' => true,
+            ]);
+        }
+
         $user = $this->optionalUser($request);
         $isAdmin = $user?->isClientAdmin() ?? false;
 
@@ -88,6 +103,33 @@ class BundleController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            if ($request->has('post_ids') && is_string($request->input('post_ids'))) {
+                $decoded = json_decode($request->input('post_ids'), true);
+                $request->merge([
+                    'post_ids' => (json_last_error() === JSON_ERROR_NONE && is_array($decoded))
+                        ? array_values(array_map('intval', $decoded))
+                        : [],
+                ]);
+            }
+            if ($request->has('is_active') && ! is_bool($request->input('is_active'))) {
+                $request->merge([
+                    'is_active' => filter_var($request->input('is_active'), FILTER_VALIDATE_BOOLEAN),
+                ]);
+            }
+
+            $validated = $request->validate([
+                'title' => ['required', 'string', 'max:255'],
+                'description' => ['nullable', 'string'],
+                'credits_cost' => ['required', 'integer', 'min:1'],
+                'is_active' => ['sometimes', 'boolean'],
+                'post_ids' => ['required', 'array', 'min:1'],
+                'post_ids.*' => ['integer'],
+            ]);
+
+            return $this->createBundleOnActingHub($hub, $validated);
+        }
+
         $validated = $this->validateBundle($request);
         $postIds = $this->resolvePostIds($request, $validated);
 
@@ -120,22 +162,50 @@ class BundleController extends Controller
         ], 201);
     }
 
-    public function update(Request $request, Bundle $bundle): JsonResponse
+    public function update(Request $request, int $bundle): JsonResponse
     {
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            if ($request->has('post_ids') && is_string($request->input('post_ids'))) {
+                $decoded = json_decode($request->input('post_ids'), true);
+                $request->merge([
+                    'post_ids' => (json_last_error() === JSON_ERROR_NONE && is_array($decoded))
+                        ? array_values(array_map('intval', $decoded))
+                        : [],
+                ]);
+            }
+            if ($request->has('is_active') && ! is_bool($request->input('is_active'))) {
+                $request->merge([
+                    'is_active' => filter_var($request->input('is_active'), FILTER_VALIDATE_BOOLEAN),
+                ]);
+            }
+
+            $validated = $request->validate([
+                'title' => ['sometimes', 'string', 'max:255'],
+                'description' => ['nullable', 'string'],
+                'credits_cost' => ['sometimes', 'integer', 'min:1'],
+                'is_active' => ['sometimes', 'boolean'],
+                'post_ids' => ['sometimes', 'array', 'min:1'],
+                'post_ids.*' => ['integer'],
+            ]);
+
+            return $this->updateBundleOnActingHub($hub, $bundle, $validated);
+        }
+
+        $model = Bundle::query()->findOrFail($bundle);
         $validated = $this->validateBundle($request, updating: true);
 
-        DB::transaction(function () use ($request, $bundle, $validated) {
-            $bundle->fill([
-                'title' => $validated['title'] ?? $bundle->title,
+        DB::transaction(function () use ($request, $model, $validated) {
+            $model->fill([
+                'title' => $validated['title'] ?? $model->title,
                 'description' => array_key_exists('description', $validated)
                     ? $validated['description']
-                    : $bundle->description,
-                'credits_cost' => $validated['credits_cost'] ?? $bundle->credits_cost,
+                    : $model->description,
+                'credits_cost' => $validated['credits_cost'] ?? $model->credits_cost,
                 'is_active' => array_key_exists('is_active', $validated)
                     ? $validated['is_active']
-                    : $bundle->is_active,
+                    : $model->is_active,
             ]);
-            $bundle->save();
+            $model->save();
 
             $hasPostIds = $request->has('post_ids') || array_key_exists('post_ids', $validated);
             $hasNewPosts = $request->has('new_posts');
@@ -143,7 +213,7 @@ class BundleController extends Controller
             if ($hasPostIds || $hasNewPosts) {
                 $postIds = $hasPostIds
                     ? $this->resolvePostIds($request, $validated)
-                    : $bundle->posts()->pluck('posts.id')->all();
+                    : $model->posts()->pluck('posts.id')->all();
                 $createdPostIds = $this->createInlinePosts($request, $request->user());
                 $allPostIds = array_values(array_unique(array_merge($postIds, $createdPostIds)));
 
@@ -153,19 +223,23 @@ class BundleController extends Controller
                     ]);
                 }
 
-                $bundle->syncOrderedPosts($allPostIds);
+                $model->syncOrderedPosts($allPostIds);
             }
         });
 
         return response()->json([
             'message' => 'Bundle updated successfully.',
-            'bundle' => $bundle->fresh()->load(['creator:id,name', 'posts.creator:id,name'])->loadCount('posts'),
+            'bundle' => $model->fresh()->load(['creator:id,name', 'posts.creator:id,name'])->loadCount('posts'),
         ]);
     }
 
-    public function destroy(Bundle $bundle): JsonResponse
+    public function destroy(Request $request, int $bundle): JsonResponse
     {
-        $bundle->delete();
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            return $this->deleteBundleOnActingHub($hub, $bundle);
+        }
+
+        Bundle::query()->findOrFail($bundle)->delete();
 
         return response()->json([
             'message' => 'Bundle deleted successfully.',

@@ -110,7 +110,7 @@ ROLES (canonical list):
 
   1) POWER ADMIN (power_admin) — platform developers / us
      - Shared hub Power Admin control plane.
-     - Manages hubs, hub Functionalities checklist (section 5.1),
+     - Manages hubs, hub Functionalities + Modules checklist (section 5.1 / 5.1A),
        user capabilities matrix (section 5.2), payment methods, and Power Admin's
        OWN capability checklist (section 5.3).
      - What a power_admin can do on that control plane is gated by the separate
@@ -119,7 +119,7 @@ ROLES (canonical list):
   2) FINPROMS ADMIN (finproms_admin) — shared hub admin
      - Day-to-day operator of the SHARED hub.
      - Manages shared hub content, types, categories, tags, plans, settings, etc.
-     - Can generate AI posts and push/select content for white-labelled hubs
+     - Can generate AI posts and control white-labelled hubs (hub switcher)
        (when those dashboard capabilities are enabled).
      - Uses the hub-admin shell; capabilities come from the SHARED hub's
        dashboard checklist (section 5.2).
@@ -174,8 +174,22 @@ Notes:
 3.2 In-app Post Editing (later)
 - Users who buy a post can edit that post within the application.
 
-3.3 Compliance Check (later)
-- After editing (and related flows), posts can go through a compliance check.
+3.3 Social Media Compliance
+- After purchase (and later editing), posts can go through a compliance check.
+- Power Admin enables the **Social Media Compliance** module per hub (Modules
+  checklist). Website Compliance and General Compliance modules are reserved
+  for later.
+- While the module is off, all Social Media Compliance capabilities appear
+  blurred / inactive on the Capabilities matrix (same pattern as private/public).
+- Who can submit, assign, review, view queues, or open reports is controlled
+  only by the Capabilities matrix — not hard-coded to Approver / buyer roles.
+- Buyers submit a purchased post (description + image); managers assign to
+  reviewers; reviewers set Pending / Approved / Rejected / Approved with
+  Feedback; version history supports reject-resubmit and approve-with-feedback
+  confirm/reupload. Emails notify admins, assignees, and submitters.
+- All Social Media Compliance mutations and report/chart views are written to
+  activity_logs (actions: smc.submit / assign / unassign / review / resubmit /
+  confirm_feedback / reports.* / charts.*).
 
 3.4 Other Features (later)
 - Additional features to be added over time; keep architecture flexible.
@@ -269,17 +283,25 @@ Notes:
 - Shared hub manages these pricing rules.
 
 4.4 Content for white-labelled hubs (from shared control plane)
-- Capability: `dashboard_push_content` — “Publish content to white-labelled hubs”.
-- On Posts / Types / Categories / Tags / Bundles, users with this capability see a
-  Hub dropdown (same UI pattern as Capabilities / Functionalities).
-- Selecting the shared hub → manage the shared catalog as usual.
-- Selecting a white-label hub → create/list content in THAT hub’s OWN database
-  only. Those posts/reels are NOT stored on the shared hub and do not appear in
-  the shared catalog.
+- Capability: `dashboard_control_white_label_hubs` — “Control white labelled hubs”
+  (replaces the old per-form Hub dropdown / `dashboard_push_content`).
+- Users with this capability on the SHARED hub (typically Power Admin and
+  FinProms admin) get a hub switcher at the top of the shared dashboard.
+- Selecting the shared hub → normal shared catalog tools and capabilities.
+- Selecting a white-label hub → dashboard menus/tools follow THAT hub’s
+  Capabilities matrix for the user’s role (e.g. Manage posts). Creating
+  posts / types / categories / tags / bundles while that hub is selected
+  writes only to THAT hub’s own database — not the shared catalog.
+- APIs: `GET/PUT /client-admin/acting-hub` (and power-admin / admin aliases).
+  Authenticated `GET /hub` includes `hub_switcher` + acting effective caps.
 - Target white-label must have Functionalities `receive_content_from_shared`
   and remote DB credentials configured.
 - Media for white-label posts is stored as a public URL reachable from shared
   storage (file is uploaded via shared, path saved on the white-label DB).
+- While a white-label is selected, list/create/update/delete that hub’s content
+  via the normal dashboard endpoints (`/posts`, `/types`, `/categories`, `/tags`,
+  `/bundles`) or `/hub-content/...` — both use the acting hub (no `hub_id`).
+  IDs in those requests are remote white-label database IDs.
 
 4.5 Code Updates
 - Updates made in the shared hub codebase are also reflected in white-labelled
@@ -302,10 +324,17 @@ Notes:
   - Paid credits vs unlimited credits
   - One-off purchase for non-subscribers
   - Receive content from shared hub
-  - Future: compliance
 - Each hub (shared + each white-label) has its own configuration.
 - Edited ONLY from Hub Functionalities / hub checklist screens — not from the
   Capabilities matrix (no duplication).
+
+5.1A Modules checklist (Power Admin → Modules, same hub checklist screen)
+- Per-hub module toggles (functionality group `modules`):
+  - Social Media Compliance — activates the Social Media Compliance capability
+    section (capabilities blurred while this module is off)
+  - Website Compliance — future
+  - General Compliance — future
+- Managed via `pa_manage_hub_checklists` (hub checklist API).
 
 5.2 User capabilities matrix (REQUIRED — Power Admin → Capabilities)
 - Power Admin manages what users can do from their dashboards / member UI,
@@ -345,11 +374,24 @@ Notes:
     imported advisor’s access — same roles
   - View activity logs / report — who can open the audit trail and activity
     report for the hub — same roles
-  - AI content generation / push content to white-labels — same roles
+  - AI content generation / control white-labelled hubs — same roles
     (typically FinProms admin / shared-only where appropriate)
   - Any other admin dashboard screens/actions
   - Approver / advisor / user only see the hub-admin shell when at least one
-    dashboard capability is enabled for their role on that hub
+    dashboard OR Social Media Compliance capability is enabled for their role
+
+  Social Media Compliance (blurred while module_social_media_compliance is off):
+  - smc_submit_request — submit / resubmit / confirm-feedback for purchased posts
+  - smc_view_own_requests — own request history & detail
+  - smc_assign_requests — assign / unassign reviewers
+  - smc_review_requests — set status + feedback
+  - smc_view_all_requests — full hub queue
+  - smc_view_reports — reports, CSV export, approver workload & advisor charts
+  - All roles available in the matrix; defaults OFF until Power Admin enables
+
+  Hub-admin dashboard also includes:
+  - Manage hub modules (`dashboard_manage_modules`) — who may enable/disable
+    Social Media / Website / General Compliance modules for that hub
 
 - White-label client_admin sees ONLY the dashboard items Power Admin enables
   for that hub (restricted options).
@@ -364,7 +406,7 @@ Notes:
   (shared hub /power-admin), for example:
   - View platform dashboard
   - Manage hubs (create/list/edit white-label hubs)
-  - Manage hub Functionalities checklists
+  - Manage hub Functionalities and Modules checklists
   - Manage payment methods
   - Manage Power Admin / user capabilities matrix (this list + 5.2)
   - Manage users / roles (create, update, delete, assign roles)
@@ -477,8 +519,8 @@ STEP 1 — Shared hub core
 [x] Hub frontend_url preferred for emails / Stripe redirects when set
 [x] Deploy checklist + copyable HUB_SLUG env snippet on hub detail
 [x] Hub list shows Wiring ready / Needs wiring status
-[x] Publish content to white-label hubs via Hub dropdown (own DB, not shared copy)
-[x] Create-time hub select on posts, types, categories, tags, bundles (dashboard_push_content)
+[x] Control white labelled hubs via dashboard hub switcher (dashboard_control_white_label_hubs)
+[x] Acting-hub content create/list on white-label DB (posts, types, categories, tags, bundles)
 [x] Public GET /hub returns current hub branding + checklist
 [x] Checklist gates: public register, self-serve subscribe, one-off purchase, unlimited credits
 [x] Checklist opposite pairs auto-uncheck (public/private, paid/unlimited)
@@ -527,13 +569,18 @@ STEP 1 — Shared hub core
     invoices / purchases on universal /my-dashboard
 [x] Universal Dashboard at /my-dashboard — hub tools + Power Admin platform
     tools appear only when enabled in Capabilities / Power Admin checklist
-[ ] Approver / manager dedicated UIs (compliance & ops flows)
+[x] Modules checklist — Social Media / Website / General Compliance toggles per hub
+[x] Social Media Compliance capability section (blurred while module off)
+[x] Social Media Compliance API — submit / assign / review / versions / reports / charts
+[x] Social Media Compliance activity logging (smc.* actions in activity_logs)
+[x] Approver / manager dedicated front-end UIs (SMC & ops flows)
 [x] Power Admin user management UI (pa_manage_users_roles — create/update/delete/roles)
-[x] Publish content to white-label hubs via Hub dropdown (own DB, not shared copy)
-[x] Create-time hub select on posts, types, categories, tags, bundles (dashboard_push_content)
+[x] Control white labelled hubs via dashboard hub switcher (dashboard_control_white_label_hubs)
+[x] Acting-hub content create/list on white-label DB (posts, types, categories, tags, bundles)
 [ ] AI post/reel generation by FinProms admin (later)
 [ ] In-app post editing for buyers (later)
-[ ] Compliance check flow (later)
+[x] Social Media Compliance check flow (module + APIs)
+[ ] Website Compliance / General Compliance modules (future)
 
 ================================================================================
 END OF REQUIREMENTS

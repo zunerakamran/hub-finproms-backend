@@ -225,6 +225,24 @@ class PowerAdminHubController extends Controller
             ARRAY_FILTER_USE_KEY
         );
 
+        // Module toggles are owned by dashboard_manage_modules — not this screen.
+        $canManageModules = false;
+        $actor = $request->user();
+        if ($actor) {
+            $canManageModules = $this->matrix->roleCan(
+                $hub,
+                (string) $actor->role,
+                'dashboard_manage_modules'
+            );
+        }
+        if (! $canManageModules) {
+            $input = array_filter(
+                $input,
+                fn ($key) => ! Hub::isModuleKey((string) $key),
+                ARRAY_FILTER_USE_KEY
+            );
+        }
+
         $before = $hub->resolvedChecklist();
         $merged = $this->hubs->mergeChecklist($hub, $input);
         $transitionType = $this->visibilityTransitions->detectTransition($before, $merged);

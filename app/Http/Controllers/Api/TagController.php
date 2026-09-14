@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\Concerns\CreatesOnActingWhiteLabelHub;
 use App\Models\Post;
 use App\Models\Tag;
 use Illuminate\Http\JsonResponse;
@@ -11,8 +12,19 @@ use Illuminate\Validation\Rule;
 
 class TagController extends Controller
 {
-    public function index(): JsonResponse
+    use CreatesOnActingWhiteLabelHub;
+
+    public function index(Request $request): JsonResponse
     {
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            $listed = $this->whiteLabelContent()->listTags($hub);
+
+            return response()->json(array_merge($listed, [
+                'target_hub' => $this->targetHubPayload($hub),
+                'acting_on_white_label' => true,
+            ]));
+        }
+
         $tags = Tag::query()->orderBy('name')->get(['id', 'name']);
 
         $tags = $tags->map(function (Tag $tag) {
@@ -33,6 +45,14 @@ class TagController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            $validated = $request->validate([
+                'name' => ['required', 'string', 'max:100'],
+            ]);
+
+            return $this->createTagOnActingHub($hub, $validated);
+        }
+
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:100', 'unique:tags,name'],
         ]);
@@ -47,21 +67,31 @@ class TagController extends Controller
         ], 201);
     }
 
-    public function update(Request $request, Tag $tag): JsonResponse
+    public function update(Request $request, int $tag): JsonResponse
     {
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            $validated = $request->validate([
+                'name' => ['required', 'string', 'max:100'],
+            ]);
+
+            return $this->updateTagOnActingHub($hub, $tag, $validated);
+        }
+
+        $model = Tag::query()->findOrFail($tag);
+
         $validated = $request->validate([
             'name' => [
                 'required',
                 'string',
                 'max:100',
-                Rule::unique('tags', 'name')->ignore($tag->id),
+                Rule::unique('tags', 'name')->ignore($model->id),
             ],
         ]);
 
-        $oldName = $tag->name;
+        $oldName = $model->name;
         $newName = trim($validated['name']);
 
-        $tag->update(['name' => $newName]);
+        $model->update(['name' => $newName]);
 
         if ($oldName !== $newName) {
             Post::query()
@@ -80,13 +110,18 @@ class TagController extends Controller
 
         return response()->json([
             'message' => 'Tag updated successfully.',
-            'tag' => $tag->fresh(),
+            'tag' => $model->fresh(),
         ]);
     }
 
-    public function destroy(Tag $tag): JsonResponse
+    public function destroy(Request $request, int $tag): JsonResponse
     {
-        $inUse = Post::query()->whereJsonContains('tags', $tag->name)->exists();
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            return $this->deleteTagOnActingHub($hub, $tag);
+        }
+
+        $model = Tag::query()->findOrFail($tag);
+        $inUse = Post::query()->whereJsonContains('tags', $model->name)->exists();
 
         if ($inUse) {
             return response()->json([
@@ -94,7 +129,7 @@ class TagController extends Controller
             ], 422);
         }
 
-        $tag->delete();
+        $model->delete();
 
         return response()->json([
             'message' => 'Tag deleted successfully.',

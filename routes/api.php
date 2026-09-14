@@ -1,16 +1,20 @@
 <?php
 
 use App\Http\Controllers\Api\ActivityLogController;
+use App\Http\Controllers\Api\ActingHubController;
 use App\Http\Controllers\Api\AdvisorBillingController;
 use App\Http\Controllers\Api\AdvisorController;
 use App\Http\Controllers\Api\AdvisorPaymentCardController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BundleController;
 use App\Http\Controllers\Api\CategoryController;
+use App\Http\Controllers\Api\SocialMediaComplianceController;
+use App\Http\Controllers\Api\GeneralComplianceController;
 use App\Http\Controllers\Api\ContentPushController;
 use App\Http\Controllers\Api\ContentTypeController;
 use App\Http\Controllers\Api\HubContentController;
 use App\Http\Controllers\Api\HubController;
+use App\Http\Controllers\Api\HubModulesController;
 use App\Http\Controllers\Api\InvoiceController;
 use App\Http\Controllers\Api\MyDashboardController;
 use App\Http\Controllers\Api\PostController;
@@ -83,6 +87,27 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/invoices/{invoice}', [InvoiceController::class, 'show']);
 
+    // Social Media Compliance — member / role-gated by smc_* capabilities (not hard-coded roles).
+    Route::middleware('hub_can:smc_submit_request')->group(function () {
+        Route::post('/social-media-compliance/requests', [SocialMediaComplianceController::class, 'store']);
+        Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/resubmit', [SocialMediaComplianceController::class, 'resubmit']);
+        Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/confirm-feedback', [SocialMediaComplianceController::class, 'confirmFeedback']);
+    });
+
+    // Own history/detail: submit OR view-own (checked in controller against matrix).
+    Route::get('/social-media-compliance/requests/mine', [SocialMediaComplianceController::class, 'mine']);
+    Route::get('/social-media-compliance/requests/{socialMediaComplianceRequest}', [SocialMediaComplianceController::class, 'show']);
+
+    // General Compliance — member / role-gated by gc_* capabilities (not hard-coded roles).
+    Route::middleware('hub_can:gc_submit_request')->group(function () {
+        Route::post('/general-compliance/requests', [GeneralComplianceController::class, 'store']);
+        Route::post('/general-compliance/requests/{generalComplianceRequest}/resubmit', [GeneralComplianceController::class, 'resubmit']);
+        Route::post('/general-compliance/requests/{generalComplianceRequest}/confirm-feedback', [GeneralComplianceController::class, 'confirmFeedback']);
+    });
+
+    Route::get('/general-compliance/requests/mine', [GeneralComplianceController::class, 'mine']);
+    Route::get('/general-compliance/requests/{generalComplianceRequest}', [GeneralComplianceController::class, 'show']);
+
     // client_admin management API (also aliased under /admin for older clients)
     $clientAdminRoutes = function () {
         Route::middleware('hub_can:dashboard_manage_posts')->group(function () {
@@ -92,18 +117,31 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::delete('/posts/{post}', [PostController::class, 'destroy']);
         });
 
-        Route::middleware('hub_can:dashboard_push_content')->group(function () {
+        Route::middleware('hub_can:dashboard_control_white_label_hubs')->group(function () {
+            Route::get('/acting-hub', [ActingHubController::class, 'show']);
+            Route::put('/acting-hub', [ActingHubController::class, 'update']);
+
             Route::get('/hub-content/targets', [HubContentController::class, 'targets']);
             Route::get('/hub-content/posts', [HubContentController::class, 'posts']);
             Route::post('/hub-content/posts', [HubContentController::class, 'storePost']);
+            Route::put('/hub-content/posts/{post}', [HubContentController::class, 'updatePost']);
+            Route::delete('/hub-content/posts/{post}', [HubContentController::class, 'destroyPost']);
             Route::get('/hub-content/types', [HubContentController::class, 'types']);
             Route::post('/hub-content/types', [HubContentController::class, 'storeType']);
+            Route::put('/hub-content/types/{type}', [HubContentController::class, 'updateType']);
+            Route::delete('/hub-content/types/{type}', [HubContentController::class, 'destroyType']);
             Route::get('/hub-content/categories', [HubContentController::class, 'categories']);
             Route::post('/hub-content/categories', [HubContentController::class, 'storeCategory']);
+            Route::put('/hub-content/categories/{category}', [HubContentController::class, 'updateCategory']);
+            Route::delete('/hub-content/categories/{category}', [HubContentController::class, 'destroyCategory']);
             Route::get('/hub-content/tags', [HubContentController::class, 'tags']);
             Route::post('/hub-content/tags', [HubContentController::class, 'storeTag']);
+            Route::put('/hub-content/tags/{tag}', [HubContentController::class, 'updateTag']);
+            Route::delete('/hub-content/tags/{tag}', [HubContentController::class, 'destroyTag']);
             Route::get('/hub-content/bundles', [HubContentController::class, 'bundles']);
             Route::post('/hub-content/bundles', [HubContentController::class, 'storeBundle']);
+            Route::put('/hub-content/bundles/{bundle}', [HubContentController::class, 'updateBundle']);
+            Route::delete('/hub-content/bundles/{bundle}', [HubContentController::class, 'destroyBundle']);
 
             Route::get('/content-push/targets', [ContentPushController::class, 'targets']);
             Route::get('/content-push/posts', [ContentPushController::class, 'posts']);
@@ -197,6 +235,51 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:dashboard_view_activity_logs')->group(function () {
             Route::get('/activity-logs', [ActivityLogController::class, 'index']);
             Route::get('/activity-logs/report', [ActivityLogController::class, 'report']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_modules')->group(function () {
+            Route::get('/modules', [HubModulesController::class, 'show']);
+            Route::put('/modules', [HubModulesController::class, 'update']);
+        });
+
+        // Social Media Compliance — queue / assign / review / reports
+        Route::middleware('hub_can:smc_view_all_requests,smc_assign_requests,smc_review_requests')->group(function () {
+            Route::get('/social-media-compliance/requests', [SocialMediaComplianceController::class, 'index']);
+            Route::get('/social-media-compliance/queue', [SocialMediaComplianceController::class, 'index']);
+            Route::get('/social-media-compliance/requests/{socialMediaComplianceRequest}', [SocialMediaComplianceController::class, 'show']);
+        });
+        Route::middleware('hub_can:smc_review_requests')->group(function () {
+            Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/review', [SocialMediaComplianceController::class, 'review']);
+        });
+        Route::middleware('hub_can:smc_assign_requests')->group(function () {
+            Route::get('/social-media-compliance/reviewers', [SocialMediaComplianceController::class, 'reviewers']);
+            Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/assign', [SocialMediaComplianceController::class, 'assign']);
+        });
+        Route::middleware('hub_can:smc_view_reports')->group(function () {
+            Route::get('/social-media-compliance/reports', [SocialMediaComplianceController::class, 'report']);
+            Route::get('/social-media-compliance/reports/export', [SocialMediaComplianceController::class, 'export']);
+            Route::get('/social-media-compliance/charts/approver-workload', [SocialMediaComplianceController::class, 'approverWorkload']);
+            Route::get('/social-media-compliance/charts/advisor-comparison', [SocialMediaComplianceController::class, 'advisorComparison']);
+        });
+
+        // General Compliance — queue / assign / review / reports
+        Route::middleware('hub_can:gc_view_all_requests,gc_assign_requests,gc_review_requests')->group(function () {
+            Route::get('/general-compliance/requests', [GeneralComplianceController::class, 'index']);
+            Route::get('/general-compliance/queue', [GeneralComplianceController::class, 'index']);
+            Route::get('/general-compliance/requests/{generalComplianceRequest}', [GeneralComplianceController::class, 'show']);
+        });
+        Route::middleware('hub_can:gc_review_requests')->group(function () {
+            Route::post('/general-compliance/requests/{generalComplianceRequest}/review', [GeneralComplianceController::class, 'review']);
+        });
+        Route::middleware('hub_can:gc_assign_requests')->group(function () {
+            Route::get('/general-compliance/reviewers', [GeneralComplianceController::class, 'reviewers']);
+            Route::post('/general-compliance/requests/{generalComplianceRequest}/assign', [GeneralComplianceController::class, 'assign']);
+        });
+        Route::middleware('hub_can:gc_view_reports')->group(function () {
+            Route::get('/general-compliance/reports', [GeneralComplianceController::class, 'report']);
+            Route::get('/general-compliance/reports/export', [GeneralComplianceController::class, 'export']);
+            Route::get('/general-compliance/charts/approver-workload', [GeneralComplianceController::class, 'approverWorkload']);
+            Route::get('/general-compliance/charts/advisor-comparison', [GeneralComplianceController::class, 'advisorComparison']);
         });
 
         // Card settings — always available to hub admins when advisor billing is on
@@ -304,18 +387,31 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::delete('/posts/{post}', [PostController::class, 'destroy']);
         });
 
-        Route::middleware('hub_can:dashboard_push_content')->group(function () {
+        Route::middleware('hub_can:dashboard_control_white_label_hubs')->group(function () {
+            Route::get('/acting-hub', [ActingHubController::class, 'show']);
+            Route::put('/acting-hub', [ActingHubController::class, 'update']);
+
             Route::get('/hub-content/targets', [HubContentController::class, 'targets']);
             Route::get('/hub-content/posts', [HubContentController::class, 'posts']);
             Route::post('/hub-content/posts', [HubContentController::class, 'storePost']);
+            Route::put('/hub-content/posts/{post}', [HubContentController::class, 'updatePost']);
+            Route::delete('/hub-content/posts/{post}', [HubContentController::class, 'destroyPost']);
             Route::get('/hub-content/types', [HubContentController::class, 'types']);
             Route::post('/hub-content/types', [HubContentController::class, 'storeType']);
+            Route::put('/hub-content/types/{type}', [HubContentController::class, 'updateType']);
+            Route::delete('/hub-content/types/{type}', [HubContentController::class, 'destroyType']);
             Route::get('/hub-content/categories', [HubContentController::class, 'categories']);
             Route::post('/hub-content/categories', [HubContentController::class, 'storeCategory']);
+            Route::put('/hub-content/categories/{category}', [HubContentController::class, 'updateCategory']);
+            Route::delete('/hub-content/categories/{category}', [HubContentController::class, 'destroyCategory']);
             Route::get('/hub-content/tags', [HubContentController::class, 'tags']);
             Route::post('/hub-content/tags', [HubContentController::class, 'storeTag']);
+            Route::put('/hub-content/tags/{tag}', [HubContentController::class, 'updateTag']);
+            Route::delete('/hub-content/tags/{tag}', [HubContentController::class, 'destroyTag']);
             Route::get('/hub-content/bundles', [HubContentController::class, 'bundles']);
             Route::post('/hub-content/bundles', [HubContentController::class, 'storeBundle']);
+            Route::put('/hub-content/bundles/{bundle}', [HubContentController::class, 'updateBundle']);
+            Route::delete('/hub-content/bundles/{bundle}', [HubContentController::class, 'destroyBundle']);
 
             Route::get('/content-push/targets', [ContentPushController::class, 'targets']);
             Route::get('/content-push/posts', [ContentPushController::class, 'posts']);
@@ -354,6 +450,48 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:dashboard_view_activity_logs')->group(function () {
             Route::get('/activity-logs', [ActivityLogController::class, 'index']);
             Route::get('/activity-logs/report', [ActivityLogController::class, 'report']);
+        });
+
+        // Capability is checked in the controller against hub_id (may differ from current hub).
+        Route::get('/modules', [HubModulesController::class, 'show']);
+        Route::put('/modules', [HubModulesController::class, 'update']);
+
+        Route::middleware('hub_can:smc_view_all_requests,smc_assign_requests,smc_review_requests')->group(function () {
+            Route::get('/social-media-compliance/requests', [SocialMediaComplianceController::class, 'index']);
+            Route::get('/social-media-compliance/queue', [SocialMediaComplianceController::class, 'index']);
+            Route::get('/social-media-compliance/requests/{socialMediaComplianceRequest}', [SocialMediaComplianceController::class, 'show']);
+        });
+        Route::middleware('hub_can:smc_review_requests')->group(function () {
+            Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/review', [SocialMediaComplianceController::class, 'review']);
+        });
+        Route::middleware('hub_can:smc_assign_requests')->group(function () {
+            Route::get('/social-media-compliance/reviewers', [SocialMediaComplianceController::class, 'reviewers']);
+            Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/assign', [SocialMediaComplianceController::class, 'assign']);
+        });
+        Route::middleware('hub_can:smc_view_reports')->group(function () {
+            Route::get('/social-media-compliance/reports', [SocialMediaComplianceController::class, 'report']);
+            Route::get('/social-media-compliance/reports/export', [SocialMediaComplianceController::class, 'export']);
+            Route::get('/social-media-compliance/charts/approver-workload', [SocialMediaComplianceController::class, 'approverWorkload']);
+            Route::get('/social-media-compliance/charts/advisor-comparison', [SocialMediaComplianceController::class, 'advisorComparison']);
+        });
+
+        Route::middleware('hub_can:gc_view_all_requests,gc_assign_requests,gc_review_requests')->group(function () {
+            Route::get('/general-compliance/requests', [GeneralComplianceController::class, 'index']);
+            Route::get('/general-compliance/queue', [GeneralComplianceController::class, 'index']);
+            Route::get('/general-compliance/requests/{generalComplianceRequest}', [GeneralComplianceController::class, 'show']);
+        });
+        Route::middleware('hub_can:gc_review_requests')->group(function () {
+            Route::post('/general-compliance/requests/{generalComplianceRequest}/review', [GeneralComplianceController::class, 'review']);
+        });
+        Route::middleware('hub_can:gc_assign_requests')->group(function () {
+            Route::get('/general-compliance/reviewers', [GeneralComplianceController::class, 'reviewers']);
+            Route::post('/general-compliance/requests/{generalComplianceRequest}/assign', [GeneralComplianceController::class, 'assign']);
+        });
+        Route::middleware('hub_can:gc_view_reports')->group(function () {
+            Route::get('/general-compliance/reports', [GeneralComplianceController::class, 'report']);
+            Route::get('/general-compliance/reports/export', [GeneralComplianceController::class, 'export']);
+            Route::get('/general-compliance/charts/approver-workload', [GeneralComplianceController::class, 'approverWorkload']);
+            Route::get('/general-compliance/charts/advisor-comparison', [GeneralComplianceController::class, 'advisorComparison']);
         });
     });
 });

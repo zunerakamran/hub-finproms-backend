@@ -257,6 +257,11 @@ class AuthController extends Controller
             $payload['power_admin_capabilities'] = $this->powerCapabilities->resolved();
         }
 
+        $switcher = app(\App\Services\ActingHubService::class)->switcherPayload($user);
+        if ($switcher !== null) {
+            $payload['hub_switcher'] = $switcher;
+        }
+
         return response()->json($payload);
     }
 }

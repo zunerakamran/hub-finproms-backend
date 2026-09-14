@@ -76,6 +76,7 @@ class PowerAdminCapabilityController extends Controller
         $validated = $request->validate([
             'hub_id' => ['required', 'integer', 'exists:hubs,id'],
             'behaviour' => ['sometimes', 'array'],
+            'modules' => ['sometimes', 'array'],
             'matrix' => ['sometimes', 'array'],
             'power_admin' => ['sometimes', 'array'],
         ]);

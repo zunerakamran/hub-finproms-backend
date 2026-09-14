@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -26,7 +27,7 @@ class User extends Authenticatable
     /** Mid-level hub staff. */
     public const ROLE_MANAGER = 'manager';
 
-    /** Compliance / content approver. */
+    /** Content / social media compliance approver. */
     public const ROLE_APPROVER = 'approver';
 
     /** White-label advisor (subscriber, typically unlimited credits). */
@@ -78,6 +79,7 @@ class User extends Authenticatable
         'discontinued_at',
         'stripe_customer_id',
         'stripe_payment_method_id',
+        'acting_hub_id',
     ];
 
     protected $hidden = [
@@ -219,6 +221,11 @@ class User extends Authenticatable
         return $this->hasMany(PostPurchase::class);
     }
 
+    public function actingHub(): BelongsTo
+    {
+        return $this->belongsTo(Hub::class, 'acting_hub_id');
+    }
+
     public function bundlePurchases(): HasMany
     {
         return $this->hasMany(BundlePurchase::class);
@@ -232,6 +239,26 @@ class User extends Authenticatable
     public function hasPurchased(Post $post): bool
     {
         return $this->purchases()->where('post_id', $post->id)->exists();
+    }
+
+    public function socialMediaComplianceRequests(): HasMany
+    {
+        return $this->hasMany(SocialMediaComplianceRequest::class);
+    }
+
+    public function assignedSocialMediaComplianceRequests(): HasMany
+    {
+        return $this->hasMany(SocialMediaComplianceRequest::class, 'assigned_to');
+    }
+
+    public function generalComplianceRequests(): HasMany
+    {
+        return $this->hasMany(GeneralComplianceRequest::class);
+    }
+
+    public function assignedGeneralComplianceRequests(): HasMany
+    {
+        return $this->hasMany(GeneralComplianceRequest::class, 'assigned_to');
     }
 
     public function hasPurchasedBundle(Bundle $bundle): bool

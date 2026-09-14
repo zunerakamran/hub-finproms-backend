@@ -38,42 +38,11 @@ class WhiteLabelContentService
 
     /**
      * @return list<array<string, mixed>>
+     * @deprecated Use ActingHubService::switcherHubs()
      */
     public function targetHubsForDropdown(): array
     {
-        $shared = $this->hubs->current();
-        $items = [];
-
-        if ($shared->isShared()) {
-            $items[] = [
-                'id' => $shared->id,
-                'name' => $shared->name,
-                'slug' => $shared->slug,
-                'type' => 'shared',
-                'eligible' => true,
-                'label' => $shared->name.' (shared — this hub)',
-            ];
-        }
-
-        foreach (
-            Hub::query()
-                ->where('type', Hub::TYPE_WHITE_LABEL)
-                ->where('is_active', true)
-                ->orderBy('name')
-                ->get() as $hub
-        ) {
-            $eligible = $hub->can('receive_content_from_shared') && $hub->hasRemoteDatabaseConfigured();
-            $items[] = [
-                'id' => $hub->id,
-                'name' => $hub->name,
-                'slug' => $hub->slug,
-                'type' => 'white_label',
-                'eligible' => $eligible,
-                'label' => $hub->name.($eligible ? ' (white-label)' : ' (not ready)'),
-            ];
-        }
-
-        return $items;
+        return app(ActingHubService::class)->switcherHubs();
     }
 
     /**
@@ -140,6 +109,95 @@ class WhiteLabelContentService
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    public function findPost(Hub $hub, int $postId): array
+    {
+        $connection = $this->connect($hub);
+        try {
+            $row = DB::connection($connection)->table('posts')->where('id', $postId)->first();
+            if (! $row) {
+                throw new InvalidArgumentException('Post not found on this white-label hub.');
+            }
+
+            return $this->mapPostRow($row);
+        } finally {
+            $this->remoteDb->disconnect($hub);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    public function updatePost(Hub $hub, int $postId, array $payload, ?UploadedFile $attachment = null): array
+    {
+        $connection = $this->connect($hub);
+        try {
+            $row = DB::connection($connection)->table('posts')->where('id', $postId)->first();
+            if (! $row) {
+                throw new InvalidArgumentException('Post not found on this white-label hub.');
+            }
+
+            $updates = ['updated_at' => now()];
+            foreach (['title', 'description', 'type', 'category'] as $field) {
+                if (array_key_exists($field, $payload)) {
+                    $updates[$field] = $payload[$field];
+                }
+            }
+            if (array_key_exists('tags', $payload)) {
+                $updates['tags'] = json_encode(array_values($payload['tags'] ?? []));
+            }
+            if (array_key_exists('credits_cost', $payload)) {
+                $updates['credits_cost'] = (int) $payload['credits_cost'];
+            }
+            if (array_key_exists('is_active', $payload)) {
+                $updates['is_active'] = (bool) $payload['is_active'];
+            }
+
+            if (isset($updates['type'])) {
+                $this->ensureNamedType($connection, (string) $updates['type']);
+            }
+            if (isset($updates['category'])) {
+                $this->ensureNamedCategory($connection, (string) $updates['category']);
+            }
+            foreach ($payload['tags'] ?? [] as $tagName) {
+                $this->ensureNamedTag($connection, (string) $tagName);
+            }
+
+            if ($attachment) {
+                $attachmentMeta = $this->storeAttachmentAsPublicUrl($attachment);
+                $updates['attachment_path'] = $attachmentMeta['path'] ?? null;
+                $updates['attachment_name'] = $attachmentMeta['name'] ?? null;
+                $updates['attachment_mime'] = $attachmentMeta['mime'] ?? null;
+            }
+
+            DB::connection($connection)->table('posts')->where('id', $postId)->update($updates);
+            $fresh = DB::connection($connection)->table('posts')->where('id', $postId)->first();
+
+            return $this->mapPostRow($fresh);
+        } finally {
+            $this->remoteDb->disconnect($hub);
+        }
+    }
+
+    public function deletePost(Hub $hub, int $postId): void
+    {
+        $connection = $this->connect($hub);
+        try {
+            $row = DB::connection($connection)->table('posts')->where('id', $postId)->first();
+            if (! $row) {
+                throw new InvalidArgumentException('Post not found on this white-label hub.');
+            }
+
+            DB::connection($connection)->table('bundle_post')->where('post_id', $postId)->delete();
+            DB::connection($connection)->table('posts')->where('id', $postId)->delete();
+        } finally {
+            $this->remoteDb->disconnect($hub);
+        }
+    }
+
+    /**
      * @return array{types: list<array<string, mixed>>}
      */
     public function listTypes(Hub $hub): array
@@ -184,6 +242,66 @@ class WhiteLabelContentService
             ]);
 
             return ['id' => $id, 'name' => $name, 'slug' => $slug];
+        } finally {
+            $this->remoteDb->disconnect($hub);
+        }
+    }
+
+    /**
+     * @param  array{name: string, slug?: ?string}  $payload
+     * @return array<string, mixed>
+     */
+    public function updateType(Hub $hub, int $typeId, array $payload): array
+    {
+        $connection = $this->connect($hub);
+        try {
+            $row = DB::connection($connection)->table('content_types')->where('id', $typeId)->first();
+            if (! $row) {
+                throw new InvalidArgumentException('Type not found on this white-label hub.');
+            }
+
+            $oldName = (string) $row->name;
+            $newName = trim($payload['name']);
+            $slug = trim((string) ($payload['slug'] ?? '')) ?: Str::slug($newName);
+
+            $dup = DB::connection($connection)->table('content_types')
+                ->where('name', $newName)
+                ->where('id', '!=', $typeId)
+                ->exists();
+            if ($dup) {
+                throw new InvalidArgumentException('A type with that name already exists on this hub.');
+            }
+
+            DB::connection($connection)->table('content_types')->where('id', $typeId)->update([
+                'name' => $newName,
+                'slug' => $slug,
+                'updated_at' => now(),
+            ]);
+
+            if ($oldName !== $newName) {
+                DB::connection($connection)->table('posts')
+                    ->where('type', $oldName)
+                    ->update(['type' => $newName, 'updated_at' => now()]);
+            }
+
+            return ['id' => $typeId, 'name' => $newName, 'slug' => $slug];
+        } finally {
+            $this->remoteDb->disconnect($hub);
+        }
+    }
+
+    public function deleteType(Hub $hub, int $typeId): void
+    {
+        $connection = $this->connect($hub);
+        try {
+            $row = DB::connection($connection)->table('content_types')->where('id', $typeId)->first();
+            if (! $row) {
+                throw new InvalidArgumentException('Type not found on this white-label hub.');
+            }
+            if (DB::connection($connection)->table('posts')->where('type', $row->name)->exists()) {
+                throw new InvalidArgumentException('Cannot delete a content type that is used by posts.');
+            }
+            DB::connection($connection)->table('content_types')->where('id', $typeId)->delete();
         } finally {
             $this->remoteDb->disconnect($hub);
         }
@@ -239,6 +357,66 @@ class WhiteLabelContentService
     }
 
     /**
+     * @param  array{name: string, slug?: ?string}  $payload
+     * @return array<string, mixed>
+     */
+    public function updateCategory(Hub $hub, int $categoryId, array $payload): array
+    {
+        $connection = $this->connect($hub);
+        try {
+            $row = DB::connection($connection)->table('categories')->where('id', $categoryId)->first();
+            if (! $row) {
+                throw new InvalidArgumentException('Category not found on this white-label hub.');
+            }
+
+            $oldName = (string) $row->name;
+            $newName = trim($payload['name']);
+            $slug = trim((string) ($payload['slug'] ?? '')) ?: Str::slug($newName);
+
+            $dup = DB::connection($connection)->table('categories')
+                ->where('name', $newName)
+                ->where('id', '!=', $categoryId)
+                ->exists();
+            if ($dup) {
+                throw new InvalidArgumentException('A category with that name already exists on this hub.');
+            }
+
+            DB::connection($connection)->table('categories')->where('id', $categoryId)->update([
+                'name' => $newName,
+                'slug' => $slug,
+                'updated_at' => now(),
+            ]);
+
+            if ($oldName !== $newName) {
+                DB::connection($connection)->table('posts')
+                    ->where('category', $oldName)
+                    ->update(['category' => $newName, 'updated_at' => now()]);
+            }
+
+            return ['id' => $categoryId, 'name' => $newName, 'slug' => $slug];
+        } finally {
+            $this->remoteDb->disconnect($hub);
+        }
+    }
+
+    public function deleteCategory(Hub $hub, int $categoryId): void
+    {
+        $connection = $this->connect($hub);
+        try {
+            $row = DB::connection($connection)->table('categories')->where('id', $categoryId)->first();
+            if (! $row) {
+                throw new InvalidArgumentException('Category not found on this white-label hub.');
+            }
+            if (DB::connection($connection)->table('posts')->where('category', $row->name)->exists()) {
+                throw new InvalidArgumentException('Cannot delete a category that is used by posts.');
+            }
+            DB::connection($connection)->table('categories')->where('id', $categoryId)->delete();
+        } finally {
+            $this->remoteDb->disconnect($hub);
+        }
+    }
+
+    /**
      * @return array{tags: list<array<string, mixed>>}
      */
     public function listTags(Hub $hub): array
@@ -279,6 +457,92 @@ class WhiteLabelContentService
             ]);
 
             return ['id' => $id, 'name' => $name];
+        } finally {
+            $this->remoteDb->disconnect($hub);
+        }
+    }
+
+    /**
+     * @param  array{name: string}  $payload
+     * @return array<string, mixed>
+     */
+    public function updateTag(Hub $hub, int $tagId, array $payload): array
+    {
+        $connection = $this->connect($hub);
+        try {
+            $row = DB::connection($connection)->table('tags')->where('id', $tagId)->first();
+            if (! $row) {
+                throw new InvalidArgumentException('Tag not found on this white-label hub.');
+            }
+
+            $oldName = (string) $row->name;
+            $newName = trim($payload['name']);
+
+            $dup = DB::connection($connection)->table('tags')
+                ->where('name', $newName)
+                ->where('id', '!=', $tagId)
+                ->exists();
+            if ($dup) {
+                throw new InvalidArgumentException('A tag with that name already exists on this hub.');
+            }
+
+            DB::connection($connection)->table('tags')->where('id', $tagId)->update([
+                'name' => $newName,
+                'updated_at' => now(),
+            ]);
+
+            if ($oldName !== $newName) {
+                $posts = DB::connection($connection)->table('posts')->get(['id', 'tags']);
+                foreach ($posts as $post) {
+                    $tags = $post->tags;
+                    if (is_string($tags)) {
+                        $decoded = json_decode($tags, true);
+                        $tags = is_array($decoded) ? $decoded : [];
+                    }
+                    if (! is_array($tags) || ! in_array($oldName, $tags, true)) {
+                        continue;
+                    }
+                    $tags = array_values(array_unique(array_map(
+                        fn ($t) => $t === $oldName ? $newName : $t,
+                        $tags
+                    )));
+                    DB::connection($connection)->table('posts')->where('id', $post->id)->update([
+                        'tags' => json_encode($tags),
+                        'updated_at' => now(),
+                    ]);
+                }
+            }
+
+            return ['id' => $tagId, 'name' => $newName];
+        } finally {
+            $this->remoteDb->disconnect($hub);
+        }
+    }
+
+    public function deleteTag(Hub $hub, int $tagId): void
+    {
+        $connection = $this->connect($hub);
+        try {
+            $row = DB::connection($connection)->table('tags')->where('id', $tagId)->first();
+            if (! $row) {
+                throw new InvalidArgumentException('Tag not found on this white-label hub.');
+            }
+
+            $name = (string) $row->name;
+            $inUse = DB::connection($connection)->table('posts')->get(['tags'])->contains(function ($post) use ($name) {
+                $tags = $post->tags;
+                if (is_string($tags)) {
+                    $decoded = json_decode($tags, true);
+                    $tags = is_array($decoded) ? $decoded : [];
+                }
+
+                return is_array($tags) && in_array($name, $tags, true);
+            });
+            if ($inUse) {
+                throw new InvalidArgumentException('Cannot delete a tag that is used by posts.');
+            }
+
+            DB::connection($connection)->table('tags')->where('id', $tagId)->delete();
         } finally {
             $this->remoteDb->disconnect($hub);
         }
@@ -366,6 +630,88 @@ class WhiteLabelContentService
                 'posts_count' => count($postIds),
                 'is_active' => (bool) ($payload['is_active'] ?? true),
             ];
+        } finally {
+            $this->remoteDb->disconnect($hub);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    public function updateBundle(Hub $hub, int $bundleId, array $payload): array
+    {
+        $connection = $this->connect($hub);
+        try {
+            $row = DB::connection($connection)->table('bundles')->where('id', $bundleId)->first();
+            if (! $row) {
+                throw new InvalidArgumentException('Bundle not found on this white-label hub.');
+            }
+
+            $updates = ['updated_at' => now()];
+            foreach (['title', 'description'] as $field) {
+                if (array_key_exists($field, $payload)) {
+                    $updates[$field] = $payload[$field];
+                }
+            }
+            if (array_key_exists('credits_cost', $payload)) {
+                $updates['credits_cost'] = (int) $payload['credits_cost'];
+            }
+            if (array_key_exists('is_active', $payload)) {
+                $updates['is_active'] = (bool) $payload['is_active'];
+            }
+
+            DB::connection($connection)->table('bundles')->where('id', $bundleId)->update($updates);
+
+            if (array_key_exists('post_ids', $payload)) {
+                $postIds = array_values(array_unique(array_map('intval', $payload['post_ids'] ?? [])));
+                if ($postIds === []) {
+                    throw new InvalidArgumentException('Add at least one post from this white-label hub.');
+                }
+                $found = DB::connection($connection)->table('posts')->whereIn('id', $postIds)->pluck('id')->all();
+                if (count($found) !== count($postIds)) {
+                    throw new InvalidArgumentException('One or more selected posts do not exist on this white-label hub.');
+                }
+
+                DB::connection($connection)->table('bundle_post')->where('bundle_id', $bundleId)->delete();
+                $now = now();
+                foreach ($postIds as $index => $postId) {
+                    DB::connection($connection)->table('bundle_post')->insert([
+                        'bundle_id' => $bundleId,
+                        'post_id' => $postId,
+                        'sort_order' => $index,
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ]);
+                }
+            }
+
+            $fresh = DB::connection($connection)->table('bundles')->where('id', $bundleId)->first();
+            $count = DB::connection($connection)->table('bundle_post')->where('bundle_id', $bundleId)->count();
+
+            return [
+                'id' => $bundleId,
+                'title' => $fresh->title,
+                'description' => $fresh->description,
+                'credits_cost' => (int) $fresh->credits_cost,
+                'is_active' => (bool) $fresh->is_active,
+                'posts_count' => $count,
+            ];
+        } finally {
+            $this->remoteDb->disconnect($hub);
+        }
+    }
+
+    public function deleteBundle(Hub $hub, int $bundleId): void
+    {
+        $connection = $this->connect($hub);
+        try {
+            $row = DB::connection($connection)->table('bundles')->where('id', $bundleId)->first();
+            if (! $row) {
+                throw new InvalidArgumentException('Bundle not found on this white-label hub.');
+            }
+            DB::connection($connection)->table('bundle_post')->where('bundle_id', $bundleId)->delete();
+            DB::connection($connection)->table('bundles')->where('id', $bundleId)->delete();
         } finally {
             $this->remoteDb->disconnect($hub);
         }
