@@ -9,17 +9,22 @@ class HubSeeder extends Seeder
 {
     public function run(): void
     {
+        $slug = (string) config('hub.current_slug', 'shared');
+        $isShared = $slug === 'shared';
+
         Hub::query()->updateOrCreate(
-            ['slug' => 'shared'],
+            ['slug' => $slug],
             [
-                'name' => 'Shared Hub',
-                'type' => Hub::TYPE_SHARED,
+                'name' => $isShared ? 'Shared Hub' : str($slug)->replace(['-', '_'], ' ')->title()->toString(),
+                'type' => $isShared ? Hub::TYPE_SHARED : Hub::TYPE_WHITE_LABEL,
                 'is_active' => true,
                 'primary_color' => null,
                 'secondary_color' => null,
                 'logo_url' => null,
                 'favicon_url' => null,
-                'checklist' => Hub::defaultChecklist(Hub::TYPE_SHARED),
+                'checklist' => Hub::defaultChecklist(
+                    $isShared ? Hub::TYPE_SHARED : Hub::TYPE_WHITE_LABEL
+                ),
             ]
         );
     }

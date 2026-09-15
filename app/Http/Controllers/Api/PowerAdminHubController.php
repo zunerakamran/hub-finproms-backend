@@ -8,11 +8,14 @@ use App\Services\CapabilitiesMatrixService;
 use App\Services\HubService;
 use App\Services\HubVisibilityTransitionService;
 use App\Services\SubscriberCreditsService;
+use App\Services\WhiteLabelDatabaseService;
+use App\Services\WhiteLabelHubSyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
 
 class PowerAdminHubController extends Controller
 {
@@ -20,13 +23,15 @@ class PowerAdminHubController extends Controller
         private readonly HubService $hubs,
         private readonly HubVisibilityTransitionService $visibilityTransitions,
         private readonly SubscriberCreditsService $subscriberCredits,
-        private readonly CapabilitiesMatrixService $matrix
+        private readonly CapabilitiesMatrixService $matrix,
+        private readonly WhiteLabelHubSyncService $whiteLabelSync,
+        private readonly WhiteLabelDatabaseService $remoteDb
     ) {}
 
     public function index(): JsonResponse
     {
         $hubs = Hub::query()
-            ->orderByRaw("CASE WHEN type = ? THEN 0 ELSE 1 END", [Hub::TYPE_SHARED])
+            ->orderByRaw('CASE WHEN type = ? THEN 0 ELSE 1 END', [Hub::TYPE_SHARED])
             ->orderBy('name')
             ->get()
             ->map(fn (Hub $hub) => $hub->toAdminArray())
@@ -199,6 +204,15 @@ class PowerAdminHubController extends Controller
 
         $this->hubs->forgetCurrentCache();
 
+        try {
+            $this->syncWhiteLabelSettings($hub->fresh());
+        } catch (InvalidArgumentException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'hub' => $hub->fresh()->toAdminArray(),
+            ], 422);
+        }
+
         return response()->json([
             'message' => 'Hub updated successfully.',
             'hub' => $hub->fresh()->toAdminArray(),
@@ -264,8 +278,35 @@ class PowerAdminHubController extends Controller
         $hub->save();
 
         $this->hubs->forgetCurrentCache();
+        $hub = $hub->fresh();
 
-        $sideEffects = $this->visibilityTransitions->runSideEffects($hub->fresh(), $transitionType);
+        $usersConnection = null;
+        $syncWarning = null;
+        try {
+            if ($hub->isWhiteLabel() && $hub->hasRemoteDatabaseConfigured()) {
+                $this->whiteLabelSync->pushSettings($hub);
+                $usersConnection = $this->remoteDb->connect($hub);
+            } elseif ($hub->isWhiteLabel()) {
+                $syncWarning = 'This hub has no remote database wiring, so the live white-label site was not updated.';
+            }
+        } catch (InvalidArgumentException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'hub' => $hub->toAdminArray(),
+            ], 422);
+        }
+
+        try {
+            $sideEffects = $this->visibilityTransitions->runSideEffects(
+                $hub,
+                $transitionType,
+                $usersConnection
+            );
+        } finally {
+            if ($usersConnection) {
+                $this->remoteDb->disconnect($hub);
+            }
+        }
 
         $message = 'Checklist updated successfully.';
         if ($sideEffects['type'] === 'private_to_public') {
@@ -278,6 +319,9 @@ class PowerAdminHubController extends Controller
                 'Hub switched to private. Reactivated %d imported advisor(s).',
                 $sideEffects['advisors_reactivated']
             );
+        }
+        if ($syncWarning) {
+            $message .= ' '.$syncWarning;
         }
 
         return response()->json([
@@ -352,6 +396,18 @@ class PowerAdminHubController extends Controller
         }
 
         return $groups;
+    }
+
+    /**
+     * Push registry settings onto the white-label hub's own database when wired.
+     */
+    private function syncWhiteLabelSettings(?Hub $hub): void
+    {
+        if (! $hub || $hub->isShared() || ! $hub->hasRemoteDatabaseConfigured()) {
+            return;
+        }
+
+        $this->whiteLabelSync->pushSettings($hub);
     }
 
     /**

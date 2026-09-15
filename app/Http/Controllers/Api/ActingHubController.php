@@ -54,7 +54,7 @@ class ActingHubController extends Controller
 
         return response()->json([
             'message' => $hub->isWhiteLabel()
-                ? 'Now controlling '.$hub->name.'. Dashboard tools use this hub’s capabilities; content is saved to its database.'
+                ? 'Now controlling '.$hub->name.'. Dashboard tools use this hub’s capabilities; users and content are saved to its database.'
                 : 'Switched back to the shared hub.',
             'hub_switcher' => $this->actingHubs->switcherPayload($request->user()->fresh()),
         ]);

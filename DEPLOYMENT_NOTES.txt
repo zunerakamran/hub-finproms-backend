@@ -1,0 +1,251 @@
+Hub FinProms — Deployment Notes
+================================
+Last updated: 2026-09-15
+
+Repos
+1. ARCHITECTURE (IMPORTANT)
+================================================================================
+- Backend and frontend are SEPARATE repos:
+  - Backend:  Desktop/hub-finproms-backend
+  - Frontend: Desktop/hub-finproms-frontend
+- Shared hub and every white-label hub use the SAME codebase.
+- Each hub has its OWN database (do NOT share DBs between hubs).
+- HUB_SLUG in .env identifies which hub this deploy is.
+- Power Admin on the SHARED hub is the control plane (hub registry + wiring).
+
+Option B (used for both shared + myhub):
+  Frontend:  https://<domain>/
+  API:       https://<domain>/api/...
+  Laravel lives in: public_html/api/
+  Document traffic for /api goes to: api/public/index.php via .htaccess
+
+
+================================================================================
+2. SHARED HUB — https://sharedhub.fin-proms.com
+================================================================================
+
+cPanel user example: sharedhubfp
+
+Folders:
+  public_html/
+    index.html, assets/, .htaccess   ← frontend build
+    api/                             ← Laravel backend
+
+.env essentials (public_html/api/.env):
+  APP_ENV=production
+  APP_DEBUG=false
+  APP_URL=https://sharedhub.fin-proms.com
+  FRONTEND_URL=https://sharedhub.fin-proms.com
+  SANCTUM_STATEFUL_DOMAINS=sharedhub.fin-proms.com
+  HUB_SLUG=shared
+  DB_HOST=localhost
+  DB_DATABASE=<shared cPanel DB name>
+  DB_USERNAME=<shared cPanel DB user>
+  DB_PASSWORD=<password>
+  FILESYSTEM_PUBLIC_URL=https://sharedhub.fin-proms.com/api/media
+  WEBSITE_COMPLIANCE_HUB_API_URL=https://sharedhub.fin-proms.com/api
+  WEBSITE_COMPLIANCE_UPLOADS_ORIGIN=https://sharedhub.fin-proms.com/api
+  SCHEDULER_SECRET=<long random secret>
+  BANK_TRANSFER_ENABLED=false
+
+Backend setup commands:
+  cd ~/public_html/api
+  composer install --no-dev --optimize-autoloader
+  # Ensure APP_KEY= line exists in .env, then:
+  php artisan key:generate
+  php artisan migrate --force
+  php artisan db:seed --force
+  php artisan storage:link
+  php artisan config:cache
+  php artisan route:cache
+
+Frontend:
+  - Build from hub-finproms-frontend with:
+      VITE_API_URL=https://sharedhub.fin-proms.com/api
+    (.env.production or: npm run build / build:shared)
+  - Upload dist (or dist-shared) contents into public_html
+  - Keep the api/ folder
+
+Smoke tests:
+  https://sharedhub.fin-proms.com/api/hub
+  https://sharedhub.fin-proms.com/
+
+
+================================================================================
+3. WHITE-LABEL HUB — https://myhub.fin-proms.com
+================================================================================
+
+cPanel user example: myhubfinproms
+Suggested slug: myhub
+
+Step A — Create hub on SHARED Power Admin first:
+  sharedhub → Power Admin → White-label hubs
+  Create hub with slug: myhub
+  Keep Active
+
+Step B — Own database on myhub cPanel (NOT shared DB)
+
+Step C — Backend in myhub public_html/api (same code)
+
+.env essentials (myhub public_html/api/.env):
+  APP_ENV=production
+  APP_DEBUG=false
+  APP_URL=https://myhub.fin-proms.com
+  FRONTEND_URL=https://myhub.fin-proms.com
+  SANCTUM_STATEFUL_DOMAINS=myhub.fin-proms.com
+  HUB_SLUG=myhub
+  DB_HOST=localhost
+  DB_DATABASE=<myhub cPanel DB name>
+  DB_USERNAME=<myhub cPanel DB user>
+  DB_PASSWORD=<password>
+  FILESYSTEM_PUBLIC_URL=https://myhub.fin-proms.com/api/media
+  WEBSITE_COMPLIANCE_HUB_API_URL=https://myhub.fin-proms.com/api
+  WEBSITE_COMPLIANCE_UPLOADS_ORIGIN=https://myhub.fin-proms.com/api
+  SCHEDULER_SECRET=<different long secret>
+  BANK_TRANSFER_ENABLED=false
+
+  WARNING: DB_HOST must be "localhost" (not "loaclhost" — typo causes 500).
+
+Same artisan commands as shared (migrate/seed/config cache).
+Upload updated HubSeeder.php so HUB_SLUG=myhub is seeded (not only "shared").
+
+Step D — Frontend for myhub:
+  From hub-finproms-frontend:
+    npm run build:myhub
+  Upload folder: dist-myhub/* → myhub public_html/
+  API baked in as: https://myhub.fin-proms.com/api
+
+Step E — Wire on SHARED Power Admin (hub detail → deploy wiring):
+  Frontend URL:  https://myhub.fin-proms.com
+  API URL:       https://myhub.fin-proms.com
+  DB driver:     mysql
+  DB host:       localhost
+  DB port:       3306
+  DB database:   <same as myhub .env DB_DATABASE>
+  DB username:   <same as myhub .env DB_USERNAME>
+  DB password:   <same as myhub .env DB_PASSWORD>
+  Deploy notes:  Option B: frontend + API on myhub.fin-proms.com, Laravel in /api
+
+  Target status: Deploy wiring ready
+
+Smoke tests:
+  https://myhub.fin-proms.com/api/hub
+  https://myhub.fin-proms.com/
+
+
+================================================================================
+4. public_html/.htaccess (BOTH hubs — Option B)
+================================================================================
+Copy this into public_html/.htaccess (domain root, next to frontend):
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # Already the real file path — stop here (prevents rewrite loops / 500)
+  RewriteRule ^api/storage/app/public/ - [L]
+
+  # Map public asset URLs to the real disk folder under the Laravel app
+  RewriteRule ^storage/(.*)$ api/storage/app/public/$1 [L]
+  RewriteRule ^api/storage/(.*)$ api/storage/app/public/$1 [L]
+
+  # Laravel API
+  RewriteCond %{REQUEST_URI} ^/api
+  RewriteRule ^api(?:/(.*))?$ api/public/index.php [L,QSA]
+
+  # Frontend SPA
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule ^ index.html [L]
+</IfModule>
+
+
+================================================================================
+5. LOGOS / FAVICONS (common production issue)
+================================================================================
+- Uploads are stored in: api/storage/app/public/hubs/logos|favicons/
+- On cPanel, public/storage symlink is often broken after zip upload.
+- Prefer FILESYSTEM_PUBLIC_URL=https://<domain>/api/media
+  (served by PublicStorageController — no symlink required)
+- Also keep .htaccess storage rules above as backup.
+- After changing .env:
+    php artisan config:clear
+    php artisan config:cache
+
+Test logo URL examples:
+  https://sharedhub.fin-proms.com/api/media/hubs/logos/<filename>
+  https://myhub.fin-proms.com/api/media/hubs/logos/<filename>
+
+
+================================================================================
+6. MIGRATION GOTCHA (MySQL index name too long)
+================================================================================
+If migrate fails on social_media_compliance_requests with:
+  Identifier name ... is too long
+
+Use the fixed migration files (short index names):
+  database/migrations/2026_09_12_180100_create_compliance_requests_tables.php
+  database/migrations/2026_09_12_210000_create_general_compliance_tables_and_capabilities.php
+
+If a half-created table exists:
+  DROP TABLE IF EXISTS social_media_compliance_request_versions;
+  DROP TABLE IF EXISTS social_media_compliance_requests;
+Then:
+  php artisan migrate --force
+  php artisan db:seed --force
+
+
+================================================================================
+7. FRONTEND BUILD COMMANDS (local PC)
+================================================================================
+cd Desktop/hub-finproms-frontend
+
+Shared:
+  npm run build
+  # or: npm run build:shared  → dist-shared/
+  Uses .env.production → https://sharedhub.fin-proms.com/api
+
+Myhub:
+  npm run build:myhub
+  → dist-myhub/
+  Uses .env.myhub → https://myhub.fin-proms.com/api
+
+Local dev:
+  .env keeps VITE_API_URL=http://127.0.0.1:8000/api
+
+
+================================================================================
+8. OPTIONAL — SCHEDULER (Website Compliance scheduled publish)
+================================================================================
+cPanel Cron (every minute), per hub:
+  cd /home/<cpanel_user>/public_html/api && php artisan schedule:run >> /dev/null 2>&1
+
+Or HTTP:
+  GET https://<domain>/api/website-compliance/scheduler/publish-scheduled?key=<SCHEDULER_SECRET>
+
+
+================================================================================
+9. QUICK DEBUG FOR 500 ERRORS
+================================================================================
+  cd ~/public_html/api
+  tail -n 80 storage/logs/laravel.log
+
+Or temporarily:
+  APP_DEBUG=true
+  php artisan config:clear
+  (reload the failing URL, then set APP_DEBUG=false again)
+
+
+================================================================================
+10. CHECKLIST — NEW WHITE-LABEL HUB
+================================================================================
+[ ] Create hub in Shared Power Admin (note slug)
+[ ] Point domain / SSL
+[ ] Create OWN MySQL database
+[ ] Upload backend to public_html/api
+[ ] Set .env (HUB_SLUG, DB_*, APP_URL, FRONTEND_URL, FILESYSTEM_PUBLIC_URL)
+[ ] composer install + key:generate + migrate + seed
+[ ] public_html/.htaccess (Option B rules)
+[ ] Build frontend for that domain API URL and upload to public_html
+[ ] Test /api/hub and site login
+[ ] Fill deploy wiring on Shared Power Admin
+[ ] Branding / capabilities / advisor import as needed

@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Models\Hub;
 use App\Models\User;
-use App\Services\PowerAdminCapabilitiesService;
 
 /**
  * Role × capability matrix for Power Admin.
@@ -113,6 +112,14 @@ class CapabilitiesMatrixService
     {
         $power = $this->powerCapabilities->resolved();
         $roleCaps = $this->resolvedRoleCapabilities($hub);
+        if ($hub->isWhiteLabel()) {
+            $sharedCaps = $this->resolvedRoleCapabilities($this->sharedHub());
+            foreach (ActingHubService::CONTROL_PLANE_ROLES as $role) {
+                if (isset($sharedCaps[$role])) {
+                    $roleCaps[$role] = $sharedCaps[$role];
+                }
+            }
+        }
         $privateMode = $hub->isPrivateInviteOnly();
         $publicMode = $hub->isPublicSubscribe();
 
@@ -242,6 +249,11 @@ class CapabilitiesMatrixService
                 'module_website_compliance' => $wcModuleOn,
                 'module_general_compliance' => $gcModuleOn,
             ],
+            'control_plane_roles' => ActingHubService::CONTROL_PLANE_ROLES,
+            'control_plane_hub' => [
+                'id' => $this->sharedHub()->id,
+                'slug' => $this->sharedHub()->slug,
+            ],
             'private_capability_keys' => Hub::PRIVATE_CAPABILITY_KEYS,
             'public_capability_keys' => Hub::PUBLIC_CAPABILITY_KEYS,
             'social_media_compliance_capability_keys' => Hub::SOCIAL_MEDIA_COMPLIANCE_CAPABILITY_KEYS,
@@ -262,7 +274,7 @@ class CapabilitiesMatrixService
      * }  $payload
      * @return array<string, mixed>
      */
-    public function update(Hub $hub, array $payload): array
+    public function update(Hub $hub, array $payload, ?Hub $actingWhiteLabel = null): array
     {
         // Functionalities (formerly hub behaviour) are edited on the Hub checklist
         // screen only — ignore any legacy behaviour payload here.
@@ -282,34 +294,106 @@ class CapabilitiesMatrixService
             }
         }
 
-        // Per-role hub matrix (incl. hub caps enabled for power_admin, e.g. advisor import)
+        $shared = $this->sharedHub();
+        if ($hub->isWhiteLabel()) {
+            $tenantHub = $hub;
+        } elseif ($actingWhiteLabel) {
+            $tenantHub = $actingWhiteLabel;
+        } else {
+            $tenantHub = $shared;
+        }
+
+        $matrixInput = isset($payload['matrix']) && is_array($payload['matrix'])
+            ? $payload['matrix']
+            : [];
+
+        $controlPlaneInput = array_intersect_key(
+            $matrixInput,
+            array_flip(ActingHubService::CONTROL_PLANE_ROLES)
+        );
+        $tenantInput = array_diff_key(
+            $matrixInput,
+            array_flip(ActingHubService::CONTROL_PLANE_ROLES)
+        );
+
+        $this->applyRoleMatrix($shared, $controlPlaneInput, ActingHubService::CONTROL_PLANE_ROLES);
+
+        if ($tenantHub->is($shared)) {
+            $this->applyRoleMatrix($shared, $tenantInput, $this->tenantRoles());
+        } else {
+            $this->applyRoleMatrix($tenantHub, $tenantInput, $this->tenantRoles(), stripControlPlane: true);
+            if ($tenantHub->hasRemoteDatabaseConfigured()) {
+                app(WhiteLabelHubSyncService::class)->pushSettings($tenantHub->fresh());
+            }
+        }
+
+        app(HubService::class)->forgetCurrentCache();
+
+        return $this->matrix($tenantHub->fresh() ?? $hub->fresh());
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function tenantRoles(): array
+    {
+        return array_values(array_filter(
+            self::MATRIX_ROLES,
+            fn (string $role) => ! ActingHubService::isControlPlaneRole($role)
+        ));
+    }
+
+    private function sharedHub(): Hub
+    {
+        $current = app(HubService::class)->current();
+        if ($current->isShared()) {
+            return $current;
+        }
+
+        return Hub::query()->where('type', Hub::TYPE_SHARED)->first() ?? $current;
+    }
+
+    /**
+     * @param  array<string, array<string, mixed>>  $matrixInput
+     * @param  list<string>  $roles
+     */
+    private function applyRoleMatrix(Hub $hub, array $matrixInput, array $roles, bool $stripControlPlane = false): void
+    {
+        if ($matrixInput === [] && ! $stripControlPlane) {
+            return;
+        }
+
         $roleCaps = $this->resolvedRoleCapabilities($hub);
-        if (isset($payload['matrix']) && is_array($payload['matrix'])) {
-            foreach (self::MATRIX_ROLES as $role) {
-                if (! isset($payload['matrix'][$role]) || ! is_array($payload['matrix'][$role])) {
+
+        foreach ($roles as $role) {
+            if (! isset($matrixInput[$role]) || ! is_array($matrixInput[$role])) {
+                continue;
+            }
+            foreach ($matrixInput[$role] as $key => $value) {
+                $key = (string) $key;
+                if (str_starts_with($key, 'pa_')) {
                     continue;
                 }
-                foreach ($payload['matrix'][$role] as $key => $value) {
-                    $key = (string) $key;
-                    if (str_starts_with($key, 'pa_')) {
-                        continue;
-                    }
-                    if (! Hub::isCapabilityKey($key)) {
-                        continue;
-                    }
-                    $applicable = $this->rolesForCapability($key);
-                    if (! in_array($role, $applicable, true)) {
-                        continue;
-                    }
-                    $roleCaps[$role][$key] = filter_var($value, FILTER_VALIDATE_BOOLEAN);
+                if (! Hub::isCapabilityKey($key)) {
+                    continue;
                 }
+                $applicable = $this->rolesForCapability($key);
+                if (! in_array($role, $applicable, true)) {
+                    continue;
+                }
+                $roleCaps[$role][$key] = filter_var($value, FILTER_VALIDATE_BOOLEAN);
+            }
+        }
+
+        if ($stripControlPlane) {
+            foreach (ActingHubService::CONTROL_PLANE_ROLES as $role) {
+                unset($roleCaps[$role]);
             }
         }
 
         $hub->role_capabilities = $roleCaps;
 
-        // Keep legacy hub checklist member/dashboard flags in sync:
-        // enabled if ANY applicable role has the capability.
+        $orRoles = $stripControlPlane ? $this->tenantRoles() : self::MATRIX_ROLES;
         $checklist = $hub->resolvedChecklist();
         foreach (Hub::CHECKLIST_DEFINITIONS as $key => $meta) {
             if (! Hub::isCapabilityKey($key)) {
@@ -317,6 +401,9 @@ class CapabilitiesMatrixService
             }
             $any = false;
             foreach ($this->rolesForCapability($key) as $role) {
+                if (! in_array($role, $orRoles, true)) {
+                    continue;
+                }
                 if (! empty($roleCaps[$role][$key])) {
                     $any = true;
                     break;
@@ -326,10 +413,6 @@ class CapabilitiesMatrixService
         }
         $hub->checklist = $checklist;
         $hub->save();
-
-        app(HubService::class)->forgetCurrentCache();
-
-        return $this->matrix($hub->fresh());
     }
 
     /**

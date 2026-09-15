@@ -46,24 +46,51 @@ class WhiteLabelDatabaseService
         $name = $this->connectionName($hub);
         $driver = $hub->db_driver ?: 'mysql';
 
-        Config::set("database.connections.{$name}", [
-            'driver' => $driver,
-            'host' => $hub->db_host,
-            'port' => $hub->db_port ?: ($driver === 'pgsql' ? 5432 : 3306),
-            'database' => $hub->db_database,
-            'username' => $hub->db_username,
-            'password' => $hub->db_password,
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_unicode_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => true,
-            'engine' => null,
-        ]);
+        if ($driver === 'sqlite') {
+            Config::set("database.connections.{$name}", [
+                'driver' => 'sqlite',
+                'database' => $hub->db_database,
+                'prefix' => '',
+                'foreign_key_constraints' => true,
+            ]);
+        } else {
+            Config::set("database.connections.{$name}", [
+                'driver' => $driver,
+                'host' => $hub->db_host,
+                'port' => $hub->db_port ?: ($driver === 'pgsql' ? 5432 : 3306),
+                'database' => $hub->db_database,
+                'username' => $hub->db_username,
+                'password' => $hub->db_password,
+                'charset' => 'utf8mb4',
+                'collation' => 'utf8mb4_unicode_ci',
+                'prefix' => '',
+                'prefix_indexes' => true,
+                'strict' => true,
+                'engine' => null,
+            ]);
+        }
 
         DB::purge($name);
 
         return $name;
+    }
+
+    /**
+     * Open the remote connection, run a callback, then always disconnect.
+     *
+     * @template T
+     *
+     * @param  callable(string): T  $callback
+     * @return T
+     */
+    public function run(Hub $hub, callable $callback): mixed
+    {
+        $name = $this->connect($hub);
+        try {
+            return $callback($name);
+        } finally {
+            $this->disconnect($hub);
+        }
     }
 
     /**

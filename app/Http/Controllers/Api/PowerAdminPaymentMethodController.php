@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Hub;
 use App\Models\Setting;
+use App\Services\ActingHubService;
 use App\Services\HubService;
 use App\Services\PaymentSettingsService;
 use Illuminate\Http\JsonResponse;
@@ -14,7 +15,8 @@ class PowerAdminPaymentMethodController extends Controller
 {
     public function __construct(
         private readonly PaymentSettingsService $paymentSettings,
-        private readonly HubService $hubs
+        private readonly HubService $hubs,
+        private readonly ActingHubService $actingHubs
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -87,11 +89,11 @@ class PowerAdminPaymentMethodController extends Controller
     private function resolveHub(Request $request): Hub
     {
         $hubId = $request->input('hub_id');
-        if ($hubId) {
-            return Hub::query()->findOrFail((int) $hubId);
-        }
 
-        return $this->hubs->current();
+        return $this->actingHubs->targetHub(
+            $request->user(),
+            $hubId ? (int) $hubId : null
+        );
     }
 
     /**

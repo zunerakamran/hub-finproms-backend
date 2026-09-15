@@ -4,16 +4,19 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Hub;
+use App\Services\ActingHubService;
 use App\Services\CapabilitiesMatrixService;
 use App\Services\PowerAdminCapabilitiesService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use InvalidArgumentException;
 
 class PowerAdminCapabilityController extends Controller
 {
     public function __construct(
         private readonly PowerAdminCapabilitiesService $capabilities,
-        private readonly CapabilitiesMatrixService $matrix
+        private readonly CapabilitiesMatrixService $matrix,
+        private readonly ActingHubService $actingHubs
     ) {}
 
     /**
@@ -56,12 +59,15 @@ class PowerAdminCapabilityController extends Controller
     public function matrix(Request $request): JsonResponse
     {
         $hubId = $request->integer('hub_id');
+        if (! $hubId && $request->user()) {
+            $hubId = $this->actingHubs->actingHub($request->user())->id;
+        }
         $hub = $hubId
             ? Hub::query()->findOrFail($hubId)
             : Hub::query()->where('slug', 'shared')->firstOrFail();
 
         $hubs = Hub::query()
-            ->orderByRaw("CASE WHEN type = ? THEN 0 ELSE 1 END", [Hub::TYPE_SHARED])
+            ->orderByRaw('CASE WHEN type = ? THEN 0 ELSE 1 END', [Hub::TYPE_SHARED])
             ->orderBy('name')
             ->get(['id', 'name', 'slug', 'type']);
 
@@ -82,7 +88,16 @@ class PowerAdminCapabilityController extends Controller
         ]);
 
         $hub = Hub::query()->findOrFail($validated['hub_id']);
-        $result = $this->matrix->update($hub, $validated);
+        $actingWhiteLabel = null;
+        $actor = $request->user();
+        if ($actor && $this->actingHubs->isActingOnWhiteLabel($actor)) {
+            $actingWhiteLabel = $this->actingHubs->actingHub($actor);
+        }
+        try {
+            $result = $this->matrix->update($hub, $validated, $actingWhiteLabel);
+        } catch (InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
 
         return response()->json([
             'message' => 'Capabilities matrix saved.',

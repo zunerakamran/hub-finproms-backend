@@ -3,13 +3,19 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Hub;
 use App\Models\User;
+use App\Services\ActingHubService;
 use App\Services\AdminNewUserRegistrationMailService;
 use App\Services\FunctionalMailService;
+use App\Services\WhiteLabelUserService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
+use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class PowerAdminUserController extends Controller
 {
@@ -30,7 +36,9 @@ class PowerAdminUserController extends Controller
 
     public function __construct(
         private readonly AdminNewUserRegistrationMailService $adminNewUserMail,
-        private readonly FunctionalMailService $functionalMail
+        private readonly FunctionalMailService $functionalMail,
+        private readonly ActingHubService $actingHubs,
+        private readonly WhiteLabelUserService $whiteLabelUsers
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -40,6 +48,30 @@ class PowerAdminUserController extends Controller
             'role' => ['sometimes', 'nullable', 'string', Rule::in(self::ASSIGNABLE_ROLES)],
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
         ]);
+
+        $perPage = (int) ($validated['per_page'] ?? 50);
+
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            try {
+                $listed = $this->whiteLabelUsers->paginate(
+                    $hub,
+                    $validated['q'] ?? null,
+                    $validated['role'] ?? null,
+                    $perPage,
+                    max(1, (int) $request->integer('page', 1))
+                );
+            } catch (InvalidArgumentException $e) {
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
+
+            return response()->json([
+                'users' => $listed['users'],
+                'meta' => $listed['meta'],
+                'roles' => $this->roleOptions(),
+                'acting_on_white_label' => true,
+                'target_hub' => $this->targetHubPayload($hub),
+            ]);
+        }
 
         $query = User::query()->orderBy('name')->orderBy('id');
 
@@ -55,7 +87,6 @@ class PowerAdminUserController extends Controller
             $query->where('role', $validated['role']);
         }
 
-        $perPage = (int) ($validated['per_page'] ?? 50);
         $paginator = $query->paginate($perPage);
 
         return response()->json([
@@ -67,12 +98,36 @@ class PowerAdminUserController extends Controller
                 'total' => $paginator->total(),
             ],
             'roles' => $this->roleOptions(),
+            'acting_on_white_label' => false,
         ]);
     }
 
     public function store(Request $request): JsonResponse
     {
-        $validated = $this->validatedPayload($request, null);
+        $hub = $this->actingWhiteLabelHub($request);
+        $validated = $this->validatedPayload($request, null, skipUnique: $hub !== null);
+
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            try {
+                $user = $this->whiteLabelUsers->create($hub, $validated);
+            } catch (InvalidArgumentException $e) {
+                return response()->json(['message' => $e->getMessage()], 422);
+            } catch (ValidationException $e) {
+                throw $e;
+            }
+
+            $mailUser = $this->mailableUser($user);
+            $this->adminNewUserMail->send($mailUser, $hub);
+            $this->functionalMail->accountCreatedByAdmin($mailUser, $hub);
+
+            return response()->json([
+                'message' => 'User created on '.$hub->name.' (white-label database).',
+                'user' => $user,
+                'roles' => $this->roleOptions(),
+                'acting_on_white_label' => true,
+                'target_hub' => $this->targetHubPayload($hub),
+            ], 201);
+        }
 
         $user = User::query()->create([
             'name' => $validated['name'],
@@ -92,26 +147,88 @@ class PowerAdminUserController extends Controller
             'message' => 'User created successfully.',
             'user' => $this->serialize($user->fresh()),
             'roles' => $this->roleOptions(),
+            'acting_on_white_label' => false,
         ], 201);
     }
 
-    public function show(User $user): JsonResponse
+    public function show(Request $request, int $user): JsonResponse
     {
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            try {
+                $payload = $this->whiteLabelUsers->find($hub, $user);
+            } catch (InvalidArgumentException $e) {
+                return response()->json(['message' => $e->getMessage()], 404);
+            }
+
+            return response()->json([
+                'user' => $payload,
+                'roles' => $this->roleOptions(),
+                'acting_on_white_label' => true,
+                'target_hub' => $this->targetHubPayload($hub),
+            ]);
+        }
+
+        $model = User::query()->findOrFail($user);
+
         return response()->json([
-            'user' => $this->serialize($user),
+            'user' => $this->serialize($model),
             'roles' => $this->roleOptions(),
+            'acting_on_white_label' => false,
         ]);
     }
 
-    public function update(Request $request, User $user): JsonResponse
+    public function update(Request $request, int $user): JsonResponse
     {
-        $validated = $this->validatedPayload($request, $user);
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            try {
+                $existing = $this->whiteLabelUsers->find($hub, $user);
+            } catch (InvalidArgumentException $e) {
+                return response()->json(['message' => $e->getMessage()], 404);
+            }
 
-        if (array_key_exists('role', $validated) && $validated['role'] !== $user->role) {
-            $this->assertCanChangeRole($request, $user, $validated['role']);
+            $current = new User($existing);
+            $current->id = $existing['id'];
+            $current->exists = true;
+            $current->role = $existing['role'];
+            $current->is_suspended = $existing['is_suspended'];
+
+            $validated = $this->validatedPayload($request, $current, skipUnique: true);
+
+            if (array_key_exists('role', $validated) && $validated['role'] !== $existing['role']) {
+                $this->assertCanChangeRoleOnHub($request, $hub, $existing, $validated['role']);
+            }
+
+            try {
+                $updated = $this->whiteLabelUsers->update($hub, $user, $validated);
+            } catch (InvalidArgumentException $e) {
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
+
+            $mailUser = $this->mailableUser($updated['user']);
+            if ($updated['password_changed']) {
+                $this->functionalMail->passwordChangedByAdmin($mailUser, $hub);
+            }
+            if ($updated['newly_suspended']) {
+                $this->functionalMail->accountSuspendedByAdmin($mailUser, $hub);
+            }
+
+            return response()->json([
+                'message' => 'User updated on '.$hub->name.'.',
+                'user' => $updated['user'],
+                'roles' => $this->roleOptions(),
+                'acting_on_white_label' => true,
+                'target_hub' => $this->targetHubPayload($hub),
+            ]);
         }
 
-        $wasSuspended = (bool) $user->is_suspended;
+        $model = User::query()->findOrFail($user);
+        $validated = $this->validatedPayload($request, $model);
+
+        if (array_key_exists('role', $validated) && $validated['role'] !== $model->role) {
+            $this->assertCanChangeRole($request, $model, $validated['role']);
+        }
+
+        $wasSuspended = (bool) $model->is_suspended;
         $payload = collect($validated)->except(['password'])->all();
 
         if (! empty($validated['password'])) {
@@ -123,57 +240,81 @@ class PowerAdminUserController extends Controller
             $payload['is_advisor'] = true;
         }
 
-        $user->fill($payload);
-        $user->save();
+        $model->fill($payload);
+        $model->save();
 
         if (array_key_exists('password', $payload)) {
-            $user->tokens()->delete();
-            $this->functionalMail->passwordChangedByAdmin($user);
+            $model->tokens()->delete();
+            $this->functionalMail->passwordChangedByAdmin($model);
         }
 
         if (array_key_exists('is_suspended', $payload)
             && (bool) $payload['is_suspended'] === true
             && ! $wasSuspended) {
-            $this->functionalMail->accountSuspendedByAdmin($user);
+            $this->functionalMail->accountSuspendedByAdmin($model);
         }
 
         return response()->json([
             'message' => 'User updated successfully.',
-            'user' => $this->serialize($user->fresh()),
+            'user' => $this->serialize($model->fresh()),
             'roles' => $this->roleOptions(),
+            'acting_on_white_label' => false,
         ]);
     }
 
-    public function destroy(Request $request, User $user): JsonResponse
+    public function destroy(Request $request, int $user): JsonResponse
     {
-        if ($request->user()->id === $user->id) {
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            try {
+                $this->whiteLabelUsers->delete($hub, $user);
+            } catch (InvalidArgumentException $e) {
+                $notFound = str_contains(strtolower($e->getMessage()), 'not found');
+
+                return response()->json(['message' => $e->getMessage()], $notFound ? 404 : 422);
+            }
+
+            return response()->json([
+                'message' => 'User deleted on '.$hub->name.'.',
+                'acting_on_white_label' => true,
+                'target_hub' => $this->targetHubPayload($hub),
+            ]);
+        }
+
+        $model = User::query()->findOrFail($user);
+
+        if ($request->user()->id === $model->id) {
             return response()->json([
                 'message' => 'You cannot delete your own account.',
             ], 422);
         }
 
-        if ($user->role === User::ROLE_POWER_ADMIN && $this->powerAdminCount() <= 1) {
+        if ($model->role === User::ROLE_POWER_ADMIN && $this->powerAdminCount() <= 1) {
             return response()->json([
                 'message' => 'Cannot delete the last Power Admin account.',
             ], 422);
         }
 
-        $user->tokens()->delete();
-        $user->delete();
+        $model->tokens()->delete();
+        $model->delete();
 
         return response()->json([
             'message' => 'User deleted successfully.',
+            'acting_on_white_label' => false,
         ]);
     }
 
     /**
      * @return array<string, mixed>
      */
-    private function validatedPayload(Request $request, ?User $user): array
+    private function validatedPayload(Request $request, ?User $user, bool $skipUnique = false): array
     {
-        $emailUnique = Rule::unique('users', 'email');
-        if ($user) {
-            $emailUnique = $emailUnique->ignore($user->id);
+        $emailRules = [$user ? 'sometimes' : 'required', 'string', 'email', 'max:255'];
+        if (! $skipUnique) {
+            $emailUnique = Rule::unique('users', 'email');
+            if ($user) {
+                $emailUnique = $emailUnique->ignore($user->id);
+            }
+            $emailRules[] = $emailUnique;
         }
 
         $passwordRules = $user
@@ -182,7 +323,7 @@ class PowerAdminUserController extends Controller
 
         return $request->validate([
             'name' => [$user ? 'sometimes' : 'required', 'string', 'max:255'],
-            'email' => [$user ? 'sometimes' : 'required', 'string', 'email', 'max:255', $emailUnique],
+            'email' => $emailRules,
             'password' => $passwordRules,
             'role' => [$user ? 'sometimes' : 'required', 'string', Rule::in(self::ASSIGNABLE_ROLES)],
             'credits' => ['sometimes', 'integer', 'min:0'],
@@ -203,14 +344,34 @@ class PowerAdminUserController extends Controller
         }
 
         if ($this->powerAdminCount() <= 1) {
-            throw \Illuminate\Validation\ValidationException::withMessages([
+            throw ValidationException::withMessages([
                 'role' => 'Cannot demote the last Power Admin account.',
             ]);
         }
 
         if ($request->user()->id === $user->id) {
-            throw \Illuminate\Validation\ValidationException::withMessages([
+            throw ValidationException::withMessages([
                 'role' => 'You cannot demote your own Power Admin role.',
+            ]);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $existing
+     */
+    private function assertCanChangeRoleOnHub(Request $request, Hub $hub, array $existing, string $newRole): void
+    {
+        if ($existing['role'] !== User::ROLE_POWER_ADMIN) {
+            return;
+        }
+
+        if ($newRole === User::ROLE_POWER_ADMIN) {
+            return;
+        }
+
+        if ($this->whiteLabelUsers->powerAdminCount($hub) <= 1) {
+            throw ValidationException::withMessages([
+                'role' => 'Cannot demote the last Power Admin account on this hub.',
             ]);
         }
     }
@@ -241,19 +402,43 @@ class PowerAdminUserController extends Controller
      */
     private function serialize(User $user): array
     {
-        return [
-            'id' => $user->id,
-            'name' => $user->name,
-            'email' => $user->email,
-            'role' => $user->role,
-            'role_label' => $user->role_label,
-            'credits' => (int) $user->credits,
-            'is_advisor' => (bool) $user->is_advisor,
-            'has_unlimited_credits' => (bool) $user->has_unlimited_credits,
-            'is_suspended' => (bool) $user->is_suspended,
-            'is_discontinued' => (bool) $user->is_discontinued,
-            'created_at' => $user->created_at?->toIso8601String(),
-            'updated_at' => $user->updated_at?->toIso8601String(),
-        ];
+        return $this->whiteLabelUsers->serialize($user);
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function mailableUser(array $payload): User
+    {
+        $user = new User;
+        $user->id = $payload['id'] ?? 0;
+        $user->name = $payload['name'] ?? '';
+        $user->email = $payload['email'] ?? '';
+        $user->role = $payload['role'] ?? User::ROLE_USER;
+        $user->exists = true;
+
+        return $user;
+    }
+
+    /**
+     * @return array{id: int, name: string, slug: string}
+     */
+    private function targetHubPayload(Hub $hub): array
+    {
+        return ['id' => $hub->id, 'name' => $hub->name, 'slug' => $hub->slug];
+    }
+
+    private function actingWhiteLabelHub(Request $request): ?Hub
+    {
+        $user = $request->user();
+        if (! $user || ! $this->actingHubs->isActingOnWhiteLabel($user)) {
+            return null;
+        }
+
+        try {
+            return $this->actingHubs->requireActingWhiteLabel($user);
+        } catch (InvalidArgumentException $e) {
+            throw new HttpException(422, $e->getMessage());
+        }
     }
 }

@@ -89,12 +89,13 @@ class HubVisibilityTransitionService
      *
      * @return array{advisors_suspended: int, auto_renew_stopped: bool}
      */
-    public function applyPrivateToPublic(Hub $hub): array
+    public function applyPrivateToPublic(Hub $hub, ?string $usersConnection = null): array
     {
         $suspendedUsers = [];
+        $connection = $usersConnection ?: (string) config('database.default');
 
-        DB::transaction(function () use (&$suspendedUsers) {
-            $advisors = User::query()
+        DB::connection($connection)->transaction(function () use ($connection, &$suspendedUsers) {
+            $advisors = User::on($connection)
                 ->where('is_advisor', true)
                 ->where('is_suspended', false)
                 ->where('is_discontinued', false)
@@ -103,9 +104,9 @@ class HubVisibilityTransitionService
             foreach ($advisors as $advisor) {
                 $advisor->is_suspended = true;
                 $advisor->save();
-                $advisor->tokens()->delete();
+                $this->deleteTokens($connection, $advisor->id);
 
-                UserSubscription::query()
+                UserSubscription::on($connection)
                     ->where('user_id', $advisor->id)
                     ->where('payment_method', 'advisor_import')
                     ->where('status', 'active')
@@ -130,12 +131,13 @@ class HubVisibilityTransitionService
     /**
      * Reactivate advisors previously suspended when the hub left private mode.
      */
-    public function applyPublicToPrivate(Hub $hub): int
+    public function applyPublicToPrivate(Hub $hub, ?string $usersConnection = null): int
     {
         $reactivatedUsers = [];
+        $connection = $usersConnection ?: (string) config('database.default');
 
-        DB::transaction(function () use ($hub, &$reactivatedUsers) {
-            $advisors = User::query()
+        DB::connection($connection)->transaction(function () use ($hub, $connection, &$reactivatedUsers) {
+            $advisors = User::on($connection)
                 ->where('is_advisor', true)
                 ->where('is_suspended', true)
                 ->where('is_discontinued', false)
@@ -169,7 +171,7 @@ class HubVisibilityTransitionService
      *   auto_renew_stopped: bool
      * }
      */
-    public function runSideEffects(Hub $hub, ?string $transition): array
+    public function runSideEffects(Hub $hub, ?string $transition, ?string $usersConnection = null): array
     {
         $result = [
             'type' => $transition,
@@ -178,20 +180,42 @@ class HubVisibilityTransitionService
             'auto_renew_stopped' => false,
         ];
 
+        if ($hub->isWhiteLabel() && $usersConnection === null) {
+            // Never mutate shared-hub users when toggling a white-label hub.
+            if ($transition === 'private_to_public') {
+                $this->advisorBilling->stopAutoRenewForHub($hub);
+                $result['auto_renew_stopped'] = true;
+            }
+
+            return $result;
+        }
+
         if ($transition === 'private_to_public') {
-            $applied = $this->applyPrivateToPublic($hub);
+            $applied = $this->applyPrivateToPublic($hub, $usersConnection);
             $result['advisors_suspended'] = $applied['advisors_suspended'];
             $result['auto_renew_stopped'] = $applied['auto_renew_stopped'];
         } elseif ($transition === 'public_to_private') {
-            $result['advisors_reactivated'] = $this->applyPublicToPrivate($hub);
+            $result['advisors_reactivated'] = $this->applyPublicToPrivate($hub, $usersConnection);
         }
 
         return $result;
     }
 
+    private function deleteTokens(string $connection, int $userId): void
+    {
+        if (! DB::connection($connection)->getSchemaBuilder()->hasTable('personal_access_tokens')) {
+            return;
+        }
+
+        DB::connection($connection)->table('personal_access_tokens')
+            ->where('tokenable_type', User::class)
+            ->where('tokenable_id', $userId)
+            ->delete();
+    }
+
     private function ensureAdvisorSubscription(User $user): void
     {
-        $existing = UserSubscription::query()
+        $existing = UserSubscription::on($user->getConnectionName())
             ->where('user_id', $user->id)
             ->where('payment_method', 'advisor_import')
             ->whereIn('status', ['active', 'suspended', 'discontinued'])
@@ -207,7 +231,7 @@ class HubVisibilityTransitionService
             return;
         }
 
-        UserSubscription::query()->create([
+        UserSubscription::on($user->getConnectionName())->create([
             'user_id' => $user->id,
             'subscription_plan_id' => null,
             'credits_granted' => 0,

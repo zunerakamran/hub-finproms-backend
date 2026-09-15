@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Hub;
+use App\Services\ActingHubService;
 use App\Services\CapabilitiesMatrixService;
 use App\Services\HubService;
 use App\Services\SubscriberCreditsService;
+use App\Services\WhiteLabelHubSyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -16,7 +18,9 @@ class SubscriberCreditsController extends Controller
     public function __construct(
         private readonly HubService $hubs,
         private readonly SubscriberCreditsService $subscriberCredits,
-        private readonly CapabilitiesMatrixService $matrix
+        private readonly CapabilitiesMatrixService $matrix,
+        private readonly ActingHubService $actingHubs,
+        private readonly WhiteLabelHubSyncService $whiteLabelSync
     ) {}
 
     public function show(Request $request): JsonResponse
@@ -61,6 +65,14 @@ class SubscriberCreditsController extends Controller
 
         $this->hubs->forgetCurrentCache();
 
+        try {
+            if ($hub->isWhiteLabel() && $hub->hasRemoteDatabaseConfigured()) {
+                $this->whiteLabelSync->pushSettings($hub->fresh());
+            }
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
         return response()->json([
             'message' => 'Subscriber credits updated. Existing subscribers receive the new allotment on next autorenew.',
             'hub' => [
@@ -76,23 +88,19 @@ class SubscriberCreditsController extends Controller
 
     private function resolveHub(Request $request): Hub
     {
-        $hubId = $request->integer('hub_id') ?: null;
-        if ($hubId) {
-            $hub = Hub::query()->find($hubId);
-            if (! $hub) {
-                abort(404, 'Hub not found.');
-            }
-
-            return $hub;
-        }
-
-        return $this->hubs->current();
+        return $this->actingHubs->targetHub(
+            $request->user(),
+            $request->integer('hub_id') ?: null
+        );
     }
 
     private function assertCanManage(Request $request, Hub $hub): void
     {
         $user = $request->user();
-        if (! $user || ! $this->matrix->roleCan($hub, (string) $user->role, 'dashboard_manage_subscriber_credits')) {
+        $checkHub = $user
+            ? $this->actingHubs->capabilityHub($user, 'dashboard_manage_subscriber_credits')
+            : $hub;
+        if (! $user || ! $this->matrix->roleCan($checkHub, (string) $user->role, 'dashboard_manage_subscriber_credits')) {
             abort(403, 'Setting subscriber credits is disabled for your role. Enable it in Power Admin → Capabilities.');
         }
     }

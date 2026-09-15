@@ -4,11 +4,14 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Hub;
+use App\Services\ActingHubService;
 use App\Services\ActivityLogService;
 use App\Services\CapabilitiesMatrixService;
 use App\Services\HubService;
+use App\Services\WhiteLabelHubSyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use InvalidArgumentException;
 
 class HubModulesController extends Controller
 {
@@ -17,7 +20,9 @@ class HubModulesController extends Controller
     public function __construct(
         private readonly HubService $hubs,
         private readonly CapabilitiesMatrixService $matrix,
-        private readonly ActivityLogService $activityLogs
+        private readonly ActivityLogService $activityLogs,
+        private readonly WhiteLabelHubSyncService $whiteLabelSync,
+        private readonly ActingHubService $actingHubs
     ) {}
 
     public function show(Request $request): JsonResponse
@@ -67,6 +72,14 @@ class HubModulesController extends Controller
         $hub->save();
         $this->hubs->forgetCurrentCache();
 
+        try {
+            $this->syncWhiteLabelSettings($hub->fresh());
+        } catch (InvalidArgumentException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+
         $hub = $hub->fresh();
 
         $this->activityLogs->log([
@@ -98,23 +111,29 @@ class HubModulesController extends Controller
 
     private function resolveHub(Request $request): Hub
     {
-        $hubId = $request->integer('hub_id') ?: null;
-        if ($hubId) {
-            $hub = Hub::query()->find($hubId);
-            if (! $hub) {
-                abort(404, 'Hub not found.');
-            }
+        return $this->actingHubs->targetHub(
+            $request->user(),
+            $request->integer('hub_id') ?: null
+        );
+    }
 
-            return $hub;
+    private function syncWhiteLabelSettings(?Hub $hub): void
+    {
+        if (! $hub || $hub->isShared() || ! $hub->hasRemoteDatabaseConfigured()) {
+            return;
         }
 
-        return $this->hubs->current();
+        $this->whiteLabelSync->pushSettings($hub);
     }
 
     private function assertCanManage(Request $request, Hub $hub): void
     {
         $user = $request->user();
-        if (! $user || ! $this->matrix->roleCan($hub, (string) $user->role, self::CAPABILITY)) {
+        if (! $user || ! $this->matrix->roleCan(
+            $this->actingHubs->capabilityHub($user, self::CAPABILITY),
+            (string) $user->role,
+            self::CAPABILITY
+        )) {
             abort(403, 'Managing modules is disabled for your role on this hub. Enable “Manage hub modules” in Power Admin → Capabilities.');
         }
     }

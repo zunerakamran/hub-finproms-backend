@@ -322,9 +322,9 @@ class FunctionalMailService
         );
     }
 
-    public function accountCreatedByAdmin(User $user): void
+    public function accountCreatedByAdmin(User $user, ?Hub $hub = null): void
     {
-        $hub = $this->hubs->current();
+        $hub ??= $this->hubs->current();
         $branding = $this->mail->branding($hub);
 
         $this->mail->sendToUser(
@@ -343,9 +343,9 @@ class FunctionalMailService
         );
     }
 
-    public function accountSuspendedByAdmin(User $user): void
+    public function accountSuspendedByAdmin(User $user, ?Hub $hub = null): void
     {
-        $hub = $this->hubs->current();
+        $hub ??= $this->hubs->current();
         $branding = $this->mail->branding($hub);
 
         $this->mail->sendToUser(
@@ -359,9 +359,9 @@ class FunctionalMailService
         );
     }
 
-    public function passwordChangedByAdmin(User $user): void
+    public function passwordChangedByAdmin(User $user, ?Hub $hub = null): void
     {
-        $hub = $this->hubs->current();
+        $hub ??= $this->hubs->current();
         $branding = $this->mail->branding($hub);
 
         $this->mail->sendToUser(
@@ -389,7 +389,7 @@ class FunctionalMailService
             heading: 'Reset your password',
             intro: "Hi {$user->name},\n\nWe received a request to reset your password for {$branding['site_name']}.",
             cta: ['label' => 'Reset password', 'url' => $url],
-            closing: "If you did not request this, you can ignore this email. This link expires soon.",
+            closing: 'If you did not request this, you can ignore this email. This link expires soon.',
             hub: $hub,
         );
     }

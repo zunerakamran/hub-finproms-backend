@@ -3,16 +3,22 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Hub;
 use App\Models\Setting;
+use App\Services\ActingHubService;
 use App\Services\HubService;
+use App\Services\WhiteLabelHubSyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use InvalidArgumentException;
 
 class SettingController extends Controller
 {
     public function __construct(
-        private readonly HubService $hubs
+        private readonly HubService $hubs,
+        private readonly ActingHubService $actingHubs,
+        private readonly WhiteLabelHubSyncService $whiteLabelSync
     ) {}
 
     public function publicIndex(): JsonResponse
@@ -24,10 +30,10 @@ class SettingController extends Controller
         ]);
     }
 
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         return response()->json([
-            'settings' => $this->settingsPayload(),
+            'settings' => $this->settingsPayload($request),
         ]);
     }
 
@@ -53,7 +59,7 @@ class SettingController extends Controller
             Setting::setValue(Setting::KEY_NEW_BANNER_DAYS, $validated['new_banner_days']);
         }
 
-        $hub = $this->hubs->current();
+        $hub = $this->targetHub($request);
         $hubDirty = false;
 
         if (array_key_exists('application_name', $validated)) {
@@ -118,21 +124,28 @@ class SettingController extends Controller
         if ($hubDirty) {
             $hub->save();
             $this->hubs->forgetCurrentCache();
+            try {
+                if ($hub->isWhiteLabel() && $hub->hasRemoteDatabaseConfigured()) {
+                    $this->whiteLabelSync->pushSettings($hub->fresh());
+                }
+            } catch (InvalidArgumentException $e) {
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
         }
 
         return response()->json([
             'message' => 'Settings updated successfully.',
-            'settings' => $this->settingsPayload(),
-            'hub' => $this->hubs->current()->toPublicArray(),
+            'settings' => $this->settingsPayload($request),
+            'hub' => $this->targetHub($request)->toPublicArray(),
         ]);
     }
 
     /**
      * @return array<string, mixed>
      */
-    private function settingsPayload(): array
+    private function settingsPayload(?Request $request = null): array
     {
-        $hub = $this->hubs->current();
+        $hub = $request ? $this->targetHub($request) : $this->hubs->current();
 
         return [
             'new_banner_days' => Setting::newBannerDays(),
@@ -159,5 +172,10 @@ class SettingController extends Controller
         if (str_starts_with($path, $prefix) && Storage::disk('public')->exists($path)) {
             Storage::disk('public')->delete($path);
         }
+    }
+
+    private function targetHub(Request $request): Hub
+    {
+        return $this->actingHubs->targetHub($request->user());
     }
 }

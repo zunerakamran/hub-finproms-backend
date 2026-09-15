@@ -451,7 +451,7 @@ class Hub extends Model
         ],
         'dashboard_control_white_label_hubs' => [
             'label' => 'Control white labelled hubs',
-            'description' => 'On the shared hub dashboard, unlocks a hub switcher. Selecting a white-label hub shows that hub’s dashboard tools (based on its Capabilities matrix). Creating posts / types / categories / tags / bundles while that hub is selected writes only to that hub’s own database — not the shared catalog.',
+            'description' => 'On the shared hub dashboard, unlocks a hub switcher. Selecting a white-label hub shows that hub’s dashboard tools (based on its Capabilities matrix). Creating users / posts / types / categories / tags / bundles while that hub is selected writes only to that hub’s own database — not the shared catalog.',
             'group' => self::GROUP_DASHBOARD,
             'default_shared' => true,
             'default_white_label' => false,

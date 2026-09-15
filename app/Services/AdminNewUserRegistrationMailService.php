@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Mail\AdminNewUserRegistrationMail;
+use App\Models\Hub;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -19,9 +20,9 @@ class AdminNewUserRegistrationMailService
      * Notify users with the Receive admin emails capability
      * when a new account is registered or created.
      */
-    public function send(User $user): void
+    public function send(User $user, ?Hub $hub = null): void
     {
-        $hub = $this->hubs->current();
+        $hub ??= $this->hubs->current();
         $newEmail = strtolower(trim((string) $user->email));
 
         $recipients = array_values(array_filter(

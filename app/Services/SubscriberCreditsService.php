@@ -119,7 +119,7 @@ class SubscriberCreditsService
 
     private function syncSubscriptionCreditsGranted(User $advisor, int $creditsGranted): void
     {
-        $subscription = UserSubscription::query()
+        $subscription = UserSubscription::on($advisor->getConnectionName())
             ->where('user_id', $advisor->id)
             ->where('payment_method', 'advisor_import')
             ->whereIn('status', ['active', 'suspended'])
