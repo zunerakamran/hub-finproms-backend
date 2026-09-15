@@ -10,7 +10,17 @@ return new class extends Migration
     {
         // Prefer the Social Media Compliance table names. If an older install already
         // created compliance_requests, the later rename migration handles it.
-        if (Schema::hasTable('compliance_requests') || Schema::hasTable('social_media_compliance_requests')) {
+        if (Schema::hasTable('compliance_requests')) {
+            return;
+        }
+
+        // Recover from a previous failed migrate (table created, index name too long).
+        if (Schema::hasTable('social_media_compliance_requests')
+            && ! Schema::hasTable('social_media_compliance_request_versions')) {
+            Schema::drop('social_media_compliance_requests');
+        }
+
+        if (Schema::hasTable('social_media_compliance_requests')) {
             return;
         }
 
@@ -26,9 +36,10 @@ return new class extends Migration
             $table->foreignId('assigned_by')->nullable()->constrained('users')->nullOnDelete();
             $table->timestamps();
 
-            $table->index(['user_id', 'submission_date']);
-            $table->index(['assigned_to', 'submission_date']);
-            $table->index('post_id');
+            // Short names: MySQL identifier limit is 64 chars.
+            $table->index(['user_id', 'submission_date'], 'smc_req_user_sub_idx');
+            $table->index(['assigned_to', 'submission_date'], 'smc_req_assignee_sub_idx');
+            $table->index('post_id', 'smc_req_post_idx');
         });
 
         Schema::create('social_media_compliance_request_versions', function (Blueprint $table) {
@@ -46,8 +57,8 @@ return new class extends Migration
             $table->timestamp('reviewed_at')->nullable();
             $table->timestamps();
 
-            $table->unique(['request_id', 'version_number']);
-            $table->index(['request_id', 'status']);
+            $table->unique(['request_id', 'version_number'], 'smc_ver_req_num_uq');
+            $table->index(['request_id', 'status'], 'smc_ver_req_status_idx');
         });
     }
 

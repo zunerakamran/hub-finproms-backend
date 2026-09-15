@@ -41,7 +41,8 @@ return [
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),
-            'url' => rtrim(env('APP_URL', 'http://localhost'), '/').'/storage',
+            // Option B (API under /api): set FILESYSTEM_PUBLIC_URL=https://your-domain/api/storage
+            'url' => rtrim(env('FILESYSTEM_PUBLIC_URL', rtrim(env('APP_URL', 'http://localhost'), '/').'/storage'), '/'),
             'visibility' => 'public',
             'throw' => false,
             'report' => false,

@@ -22,8 +22,9 @@ return new class extends Migration
                 $table->foreignId('assigned_by')->nullable()->constrained('users')->nullOnDelete();
                 $table->timestamps();
 
-                $table->index(['user_id', 'submission_date']);
-                $table->index(['assigned_to', 'submission_date']);
+                // Short names: MySQL identifier limit is 64 chars.
+                $table->index(['user_id', 'submission_date'], 'gc_req_user_sub_idx');
+                $table->index(['assigned_to', 'submission_date'], 'gc_req_assignee_sub_idx');
             });
         }
 

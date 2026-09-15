@@ -39,6 +39,7 @@ use App\Http\Controllers\Api\StripeWebhookController;
 use App\Http\Controllers\Api\SubscriptionController;
 use App\Http\Controllers\Api\SubscriberCreditsController;
 use App\Http\Controllers\Api\TagController;
+use App\Http\Controllers\PublicStorageController;
 use App\Http\Middleware\EnsureUserIsClientAdmin;
 use App\Http\Middleware\EnsureUserIsPowerAdmin;
 use Illuminate\Support\Facades\Route;
@@ -59,6 +60,10 @@ Route::post('/stripe/webhook', StripeWebhookController::class);
 
 Route::get('/hub', [HubController::class, 'current']);
 Route::get('/settings', [SettingController::class, 'publicIndex']);
+
+// Public uploads (logos/favicons) — works without public/storage symlink
+Route::get('/media/{path}', [PublicStorageController::class, 'show'])
+    ->where('path', '.*');
 
 // Website Compliance — public endpoints for live templates / scheduler cron
 Route::get('/website-compliance/public/pages', [WcPublicController::class, 'getAllPages']);
