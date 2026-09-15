@@ -19,6 +19,12 @@ jobs:
           password: ${{ secrets.CPANEL1_PASSWORD }}
           local-dir: ./
           server-dir: ${{ secrets.CPANEL1_PATH }}
+          dangerous-clean-slate: true
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**
+            **/.ftp-deploy-sync-state.json
 
   deploy-cpanel2:
     runs-on: ubuntu-latest
@@ -33,3 +39,9 @@ jobs:
           password: ${{ secrets.CPANEL2_PASSWORD }}
           local-dir: ./
           server-dir: ${{ secrets.CPANEL2_PATH }}
+          dangerous-clean-slate: true
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**
+            **/.ftp-deploy-sync-state.json
