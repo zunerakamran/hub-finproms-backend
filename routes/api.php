@@ -103,6 +103,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('hub_can:member_purchase_content')->group(function () {
         Route::post('/posts/{post}/purchase', [PurchaseController::class, 'purchasePost']);
         Route::post('/bundles/{bundle}/purchase', [PurchaseController::class, 'purchaseBundle']);
+        Route::post('/content-purchases/confirm', [PurchaseController::class, 'confirm']);
     });
 
     // Member list pages — also reachable from General options (dashboard).
@@ -341,6 +342,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:dashboard_bank_transfers')->group(function () {
             Route::get('/bank-transfers/pending', [SubscriptionController::class, 'pendingBankTransfers']);
             Route::post('/bank-transfers/{subscription}/confirm', [SubscriptionController::class, 'confirmBankTransfer']);
+            Route::post('/content-bank-transfers/{checkout}/confirm', [PurchaseController::class, 'confirmContentBankTransfer']);
         });
 
         Route::middleware('hub_can:dashboard_view_activity_logs')->group(function () {

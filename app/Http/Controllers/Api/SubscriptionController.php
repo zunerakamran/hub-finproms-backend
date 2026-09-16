@@ -3,9 +3,12 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Bundle;
+use App\Models\Post;
 use App\Models\SubscriptionPlan;
 use App\Models\UserSubscription;
 use App\Services\BankTransferSubscriptionService;
+use App\Services\ContentPurchaseCheckoutService;
 use App\Services\HubService;
 use App\Services\InvoiceService;
 use App\Services\PaymentSettingsService;
@@ -20,6 +23,7 @@ class SubscriptionController extends Controller
     public function __construct(
         private readonly StripeSubscriptionService $stripeSubscriptions,
         private readonly BankTransferSubscriptionService $bankTransferSubscriptions,
+        private readonly ContentPurchaseCheckoutService $contentCheckouts,
         private readonly InvoiceService $invoices,
         private readonly PaymentSettingsService $paymentSettings,
         private readonly HubService $hubs
@@ -344,8 +348,22 @@ class SubscriptionController extends Controller
             ->latest()
             ->get();
 
+        $contentCheckouts = collect($this->contentCheckouts->pendingBankTransfers())->map(function ($checkout) {
+            $title = null;
+            if ($checkout->isBundle()) {
+                $title = Bundle::query()->whereKey($checkout->item_id)->value('title');
+            } elseif ($checkout->isPost()) {
+                $title = Post::query()->whereKey($checkout->item_id)->value('title');
+            }
+
+            $checkout->setAttribute('item_title', $title);
+
+            return $checkout;
+        });
+
         return response()->json([
             'subscriptions' => $subscriptions,
+            'content_checkouts' => $contentCheckouts->values(),
         ]);
     }
 

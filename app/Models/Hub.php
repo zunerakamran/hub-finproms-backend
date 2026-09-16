@@ -219,7 +219,7 @@ class Hub extends Model
         ],
         'one_off_purchase' => [
             'label' => 'One-off purchase (non-subscribers)',
-            'description' => 'Non-subscribers can buy individual posts/reels (1 credit = £1).',
+            'description' => 'Non-subscribers can buy posts/reels and post bundles without a subscription (1 credit = £1), using credits or an enabled payment method (Stripe / bank transfer).',
             'group' => self::GROUP_BEHAVIOUR,
             'default_shared' => true,
             'default_white_label' => false,

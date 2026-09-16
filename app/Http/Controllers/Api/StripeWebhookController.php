@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Hub;
 use App\Models\Setting;
 use App\Services\AdvisorBillingService;
+use App\Services\ContentPurchaseCheckoutService;
 use App\Services\HubService;
 use App\Services\PaymentSettingsService;
 use App\Services\StripeSubscriptionService;
@@ -21,6 +22,7 @@ class StripeWebhookController extends Controller
     public function __construct(
         private readonly StripeSubscriptionService $stripeSubscriptions,
         private readonly AdvisorBillingService $advisorBilling,
+        private readonly ContentPurchaseCheckoutService $contentCheckouts,
         private readonly PaymentSettingsService $paymentSettings,
         private readonly HubService $hubs
     ) {}
@@ -47,6 +49,8 @@ class StripeWebhookController extends Controller
 
             if ($sessionId && $metaType === 'advisor_billing') {
                 $this->advisorBilling->fulfillStripeSession($sessionId);
+            } elseif ($sessionId && $metaType === 'content_purchase') {
+                $this->contentCheckouts->fulfillStripeSession($sessionId);
             } elseif ($sessionId) {
                 $this->stripeSubscriptions->fulfillCheckoutSession($sessionId);
             }

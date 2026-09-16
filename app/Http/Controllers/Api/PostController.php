@@ -167,6 +167,10 @@ class PostController extends Controller
             'can_view_catalog' => $canViewCatalog,
             'new_banner_days' => Setting::newBannerDays(),
             'visible_metrics' => $metricVisibility,
+            'payment_methods' => app(\App\Services\HubService::class)->can('one_off_purchase')
+                ? app(\App\Services\ContentPurchaseCheckoutService::class)->availablePaymentMethods()
+                : [],
+            'one_off_purchase' => app(\App\Services\HubService::class)->can('one_off_purchase'),
         ]);
     }
 

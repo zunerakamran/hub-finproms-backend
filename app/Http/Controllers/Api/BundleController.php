@@ -98,6 +98,10 @@ class BundleController extends Controller
 
         return response()->json([
             'bundle' => $bundle,
+            'payment_methods' => app(\App\Services\HubService::class)->can('one_off_purchase')
+                ? app(\App\Services\ContentPurchaseCheckoutService::class)->availablePaymentMethods()
+                : [],
+            'one_off_purchase' => app(\App\Services\HubService::class)->can('one_off_purchase'),
         ]);
     }
 
