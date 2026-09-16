@@ -208,6 +208,37 @@ class WhiteLabelControlPlaneTest extends TestCase
         }
     }
 
+    public function test_settings_logo_sync_pushes_absolute_url_to_white_label_database(): void
+    {
+        config(['app.url' => 'https://sharedhub.fin-proms.com']);
+        config(['filesystems.disks.public.url' => 'https://sharedhub.fin-proms.com/api/media']);
+
+        [$admin, $hub] = $this->actingPowerAdminOnWiredHub();
+
+        $hub->logo_url = 'hubs/logos/brand-logo.png';
+        $hub->favicon_url = 'hubs/favicons/brand.ico';
+        $hub->save();
+
+        app(\App\Services\WhiteLabelHubSyncService::class)->pushSettings($hub->fresh());
+
+        $remote = app(WhiteLabelDatabaseService::class);
+        $connection = $remote->connect($hub);
+        try {
+            $row = DB::connection($connection)->table('hubs')->where('slug', 'myhub')->first();
+            $this->assertNotNull($row);
+            $this->assertSame(
+                'https://sharedhub.fin-proms.com/api/media/hubs/logos/brand-logo.png',
+                $row->logo_url
+            );
+            $this->assertSame(
+                'https://sharedhub.fin-proms.com/api/media/hubs/favicons/brand.ico',
+                $row->favicon_url
+            );
+        } finally {
+            $remote->disconnect($hub);
+        }
+    }
+
     private function actingPowerAdminOnWiredHub(): array
     {
         Hub::query()->create([

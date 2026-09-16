@@ -46,14 +46,17 @@ class WhiteLabelHubSyncService
                     }
                 }
 
+                // Logos/favicons are uploaded on the shared control-plane disk.
+                // Push absolute URLs so the white-label deploy can load them
+                // (relative storage paths would 404 on the tenant host).
                 $payload = [
                     'name' => $hub->name,
                     'type' => Hub::TYPE_WHITE_LABEL,
                     'is_active' => $hub->is_active ? 1 : 0,
                     'primary_color' => $hub->primary_color,
                     'secondary_color' => $hub->secondary_color,
-                    'logo_url' => $hub->logo_url,
-                    'favicon_url' => $hub->favicon_url,
+                    'logo_url' => $hub->logoAbsoluteUrl(),
+                    'favicon_url' => $hub->faviconAbsoluteUrl(),
                     'from_email' => $hub->from_email,
                     'frontend_url' => $hub->frontend_url,
                     'checklist' => json_encode($hub->resolvedChecklist()),

@@ -1117,11 +1117,27 @@ class Hub extends Model
     }
 
     /**
-     * Absolute logo URL suitable for emails (requires a publicly reachable host).
+     * Absolute logo URL suitable for emails and white-label sync
+     * (files live on the control-plane deploy).
      */
     public function logoAbsoluteUrl(): ?string
     {
-        $url = $this->logoPublicUrl();
+        return $this->absoluteAssetUrl($this->logoPublicUrl());
+    }
+
+    /**
+     * Absolute favicon URL for emails and white-label sync.
+     */
+    public function faviconAbsoluteUrl(): ?string
+    {
+        return $this->absoluteAssetUrl($this->faviconPublicUrl());
+    }
+
+    /**
+     * Ensure a public asset URL is host-absolute (http/https).
+     */
+    private function absoluteAssetUrl(?string $url): ?string
+    {
         if (! $url) {
             return null;
         }

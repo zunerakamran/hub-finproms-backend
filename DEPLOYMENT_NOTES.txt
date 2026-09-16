@@ -31,6 +31,15 @@ Folders:
     index.html, assets/, .htaccess   ← frontend build
     api/                             ← Laravel backend
 
+GitHub Actions FTP (IMPORTANT):
+  The FTP account Directory in cPanel MUST be:
+    /home/<cPanelUser>/public_html
+  If it is set to something like:
+    /home/<cPanelUser>/sharedhub.fin-proms.com/ftpaccount
+  builds upload "successfully" but the live site never updates.
+  Fix: cPanel → FTP Accounts → Change Directory → public_html
+  Then re-run the frontend deploy workflow.
+
 .env essentials (public_html/api/.env):
   APP_ENV=production
   APP_DEBUG=false
@@ -190,9 +199,16 @@ Copy this into public_html/.htaccess (domain root, next to frontend):
     php artisan config:clear
     php artisan config:cache
 
+- Branding edited from the SHARED hub (hub switcher) uploads files onto
+  shared storage. White-label sync pushes absolute shared media URLs into
+  the tenant hubs row (not relative paths). Shared must have a correct
+  FILESYSTEM_PUBLIC_URL / APP_URL so those URLs are publicly reachable.
+- After deploying this sync fix, re-save logo/favicon once from Shared so
+  the white-label DB gets absolute URLs (or wait ≤60s for hub cache).
+
 Test logo URL examples:
   https://sharedhub.fin-proms.com/api/media/hubs/logos/<filename>
-  https://myhub.fin-proms.com/api/media/hubs/logos/<filename>
+  (white-label site may reference the shared URL above after control-plane sync)
 
 
 ================================================================================
