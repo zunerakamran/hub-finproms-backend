@@ -7,6 +7,7 @@ use App\Models\WebsiteCompliance\Page;
 use App\Models\WebsiteCompliance\Template;
 use App\Services\ActivityLogService;
 use App\Services\WebsiteCompliance\AdvisorSectionService;
+use App\Services\WebsiteCompliance\ShowcaseSectionService;
 use App\Services\WebsiteCompliance\TemplatePreviewCaptureService;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
 use Illuminate\Http\JsonResponse;
@@ -26,15 +27,7 @@ class TemplateController extends Controller
         $this->gate->assertModuleEnabled($user);
 
         if (Template::count() === 0) {
-            $dummyPath = database_path('data/website-compliance/template4-dummy-content.json');
-            Template::create([
-                'name' => 'Template 4 (Complete Financial Centre)',
-                'slug' => 'template4',
-                'description' => 'Modern React corporate financial centre template with 13 sections matching the template4 layout.',
-                'preview_url' => 'https://epatronus.space/template4/',
-                'is_active' => true,
-                'dummy_content' => file_exists($dummyPath) ? file_get_contents($dummyPath) : json_encode(new \stdClass),
-            ]);
+            ShowcaseSectionService::syncFromDefaults('template4', true);
         }
 
         if ($request->query('all') || $this->gate->can($user, 'wc_manage_templates')) {
@@ -219,7 +212,7 @@ class TemplateController extends Controller
 
     private function defaultPreviewUrl(string $slug): string
     {
-        $base = rtrim((string) config('services.website_compliance.template_preview_base_url', 'https://epatronus.space'), '/');
+        $base = rtrim((string) config('services.website_compliance.template_preview_base_url', 'https://sharedhub.fin-proms.com'), '/');
 
         return $base.'/'.trim($slug, '/').'/';
     }

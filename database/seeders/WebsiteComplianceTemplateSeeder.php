@@ -4,11 +4,8 @@ namespace Database\Seeders;
 
 use App\Models\Hub;
 use App\Models\User;
-use App\Models\WebsiteCompliance\Page;
-use App\Models\WebsiteCompliance\Section;
-use App\Models\WebsiteCompliance\Template;
 use App\Services\CapabilitiesMatrixService;
-use App\Support\WebsiteCompliance\TemplateDefaultContent;
+use App\Services\WebsiteCompliance\ShowcaseSectionService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Schema;
 
@@ -20,73 +17,9 @@ class WebsiteComplianceTemplateSeeder extends Seeder
             return;
         }
 
-        $this->seedTemplate4();
+        // Always refresh showcase wc_sections + dummy_content from on-disk JSON
+        ShowcaseSectionService::syncFromDefaults('template4', true);
         $this->enableModuleWithDefaultCapabilities();
-    }
-
-    private function seedTemplate4(): void
-    {
-        $dummyPath = database_path('data/website-compliance/template4-dummy-content.json');
-        $dummy = file_exists($dummyPath)
-            ? (string) file_get_contents($dummyPath)
-            : json_encode(new \stdClass);
-
-        $template = Template::firstOrCreate(
-            ['slug' => 'template4'],
-            [
-                'name' => 'Template 4 (Complete Financial Centre)',
-                'description' => 'Modern React corporate financial centre template with sections matching the template4 layout.',
-                'preview_url' => 'https://epatronus.space/template4/',
-                'is_active' => true,
-                'dummy_content' => $dummy,
-            ]
-        );
-
-        if ($dummy) {
-            $template->update(['dummy_content' => $dummy]);
-        }
-
-        $homePage = Page::firstOrCreate(
-            ['slug' => 'home'],
-            ['title' => 'Home Page', 'template_id' => $template->id]
-        );
-        if (! $homePage->template_id) {
-            $homePage->update(['template_id' => $template->id]);
-        }
-
-        $defaults = TemplateDefaultContent::forTemplate($template, 'template4');
-        if (empty($defaults)) {
-            return;
-        }
-
-        foreach ($defaults as $name => $content) {
-            if (! is_string($name) || $name === '') {
-                continue;
-            }
-
-            $section = Section::where('page_id', $homePage->id)
-                ->where('name', $name)
-                ->whereNull('advisor_id')
-                ->first();
-
-            $payload = [
-                'content' => TemplateDefaultContent::encode($content),
-                'template_id' => $template->id,
-                'section_key' => strtolower((string) preg_replace('/[^a-z0-9]+/i', '', $name)),
-                'display_name' => $name,
-                'is_visible' => true,
-            ];
-
-            if ($section) {
-                $section->update($payload);
-            } else {
-                Section::create(array_merge($payload, [
-                    'page_id' => $homePage->id,
-                    'name' => $name,
-                    'advisor_id' => null,
-                ]));
-            }
-        }
     }
 
     /**

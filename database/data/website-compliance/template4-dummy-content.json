@@ -9,25 +9,43 @@
     "address": "12/7 New York, USA"
   },
   "Hero Slider": {
-    "eyebrow": "FINANCIAL CENTRE & WEALTH MANAGEMENT",
-    "heading": "Strategic Advisory for Long-Term Growth",
-    "subheading": "Customized financial planning, investment strategies, and fiduciary advice for leaders and families.",
     "button_text": "GET IN TOUCH",
     "button_url": "#appointment",
     "video_url": "https://www.youtube.com/watch?v=SF4aHwxHtZ0",
     "video_label": "SEE OUR ACTIVITY",
     "slides": [
       {
+        "eyebrow": "FINANCIAL CENTRE & WEALTH MANAGEMENT",
+        "heading": "Prosper in this volatile market funding.",
+        "subheading": "Customized financial planning, investment strategies, and fiduciary advice for leaders and families.",
         "title": ["Prosper in this", "volatile market", "funding."],
-        "image_url": "intime-08"
+        "image_url": "intime-08",
+        "button_text": "GET IN TOUCH",
+        "button_url": "#appointment",
+        "video_url": "https://www.youtube.com/watch?v=SF4aHwxHtZ0",
+        "video_label": "SEE OUR ACTIVITY"
       },
       {
+        "eyebrow": "STRATEGIC GROWTH & ADVISORY",
+        "heading": "We do the best thing for market funding.",
+        "subheading": "Comprehensive solutions tailored to accelerate your financial goals and wealth stability.",
         "title": ["We do the best", "thing for market", "funding."],
-        "image_url": "intime-12"
+        "image_url": "intime-12",
+        "button_text": "GET IN TOUCH",
+        "button_url": "#appointment",
+        "video_url": "https://www.youtube.com/watch?v=SF4aHwxHtZ0",
+        "video_label": "SEE OUR ACTIVITY"
       },
       {
+        "eyebrow": "TRUSTED FIDUCIARY ADVISORY",
+        "heading": "We have to do business for your satisfaction.",
+        "subheading": "Dedicated experts navigating market complexity to protect and grow your assets.",
         "title": ["We have to do", "business for your", "Satisfiction."],
-        "image_url": "intime-15"
+        "image_url": "intime-15",
+        "button_text": "GET IN TOUCH",
+        "button_url": "#appointment",
+        "video_url": "https://www.youtube.com/watch?v=SF4aHwxHtZ0",
+        "video_label": "SEE OUR ACTIVITY"
       }
     ]
   },

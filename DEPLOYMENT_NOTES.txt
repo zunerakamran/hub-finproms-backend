@@ -249,7 +249,64 @@ Local dev:
 
 
 ================================================================================
-8. OPTIONAL — SCHEDULER (Website Compliance scheduled publish)
+8. WEBSITE COMPLIANCE — TEMPLATE4 SHOWCASE (shared hub)
+================================================================================
+Deploy Desktop/template4-showcase to:
+  https://sharedhub.fin-proms.com/template4/
+
+Local prepare:
+  cd Desktop/template4-showcase
+  # config.js DEPLOYMENT_MODE=showcase, UPLOADS_ORIGIN=https://sharedhub.fin-proms.com/api
+  npm install
+  npm run build
+
+cPanel (sharedhubfp) upload:
+  Create folder: public_html/template4/
+  Upload ALL of dist/* into that folder (index.html, assets/, api.php,
+  includes/, data/, .htaccess, cpanel-config.php, etc.)
+
+Edit public_html/template4/cpanel-config.php (showcase mode):
+  DEPLOYMENT_MODE = showcase
+  DB_*            = SAME as public_html/api/.env (shared hub Laravel DB)
+  ADVISOR_ID      = null
+  UPLOADS_ORIGIN  = https://sharedhub.fin-proms.com/api
+  SITE_URL        = https://sharedhub.fin-proms.com/template4
+  LARAVEL_API_URL = https://sharedhub.fin-proms.com/api
+
+Laravel shared hub .env:
+  TEMPLATE_PREVIEW_BASE_URL=https://sharedhub.fin-proms.com
+  WEBSITE_COMPLIANCE_HUB_API_URL=https://sharedhub.fin-proms.com/api
+  WEBSITE_COMPLIANCE_UPLOADS_ORIGIN=https://sharedhub.fin-proms.com/api
+
+After uploading a new backend (or after changing template4-dummy-content.json),
+refresh showcase rows in the shared hub DB:
+
+  cd ~/public_html/api
+  php artisan wc:seed-showcase-sections
+  # or: php artisan db:seed --class=WebsiteComplianceTemplateSeeder --force
+
+This overwrites wc_templates.dummy_content + wc_sections where advisor_id IS NULL
+from database/data/website-compliance/template4-dummy-content.json
+(Hero per-slide content, What we do boxes, etc.).
+
+Update preview URL in DB (or re-seed WC templates):
+  UPDATE wc_templates SET preview_url='https://sharedhub.fin-proms.com/template4/'
+  WHERE slug='template4';
+
+Smoke tests:
+  https://sharedhub.fin-proms.com/template4/
+  https://sharedhub.fin-proms.com/template4/api.php
+  (api.php should report deployment_mode=showcase)
+
+Root public_html/.htaccess already skips real directories (!-d), so /template4/
+will not be swallowed by the SPA once the folder exists.
+
+NOTE: Advisor live sites use a SEPARATE copy + local DB + DEPLOYMENT_MODE=advisor.
+Never copy showcase cpanel-config.php onto an advisor cPanel.
+
+
+================================================================================
+9. OPTIONAL — SCHEDULER (Website Compliance scheduled publish)
 ================================================================================
 cPanel Cron (every minute), per hub:
   cd /home/<cpanel_user>/public_html/api && php artisan schedule:run >> /dev/null 2>&1
@@ -259,7 +316,7 @@ Or HTTP:
 
 
 ================================================================================
-9. QUICK DEBUG FOR 500 ERRORS
+10. QUICK DEBUG FOR 500 ERRORS
 ================================================================================
   cd ~/public_html/api
   tail -n 80 storage/logs/laravel.log
@@ -271,7 +328,7 @@ Or temporarily:
 
 
 ================================================================================
-10. CHECKLIST — NEW WHITE-LABEL HUB
+11. CHECKLIST — NEW WHITE-LABEL HUB
 ================================================================================
 [ ] Create hub in Shared Power Admin (note slug)
 [ ] Point domain / SSL
