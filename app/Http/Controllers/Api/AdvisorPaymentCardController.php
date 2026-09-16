@@ -8,8 +8,9 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 /**
- * Client admin card on file — shown on their dashboard when advisor billing is on.
- * Not part of the Power Admin capabilities matrix.
+ * Client admin card on file — private-hub payer tool only.
+ * Not part of the Power Admin capabilities matrix; power/finproms staff
+ * charge the client admin card during import checkout instead.
  */
 class AdvisorPaymentCardController extends Controller
 {
@@ -73,12 +74,14 @@ class AdvisorPaymentCardController extends Controller
 
     private function assertClientAdminPayer(?\App\Models\User $user): void
     {
-        if (! $user || (! $user->isClientAdmin() && ! $user->isPowerAdmin())) {
-            abort(response()->json(['message' => 'Unauthorized.'], 403));
+        // Payment card is the white-label client-admin payer entrance only.
+        // Do not use isClientAdmin() — that includes finproms_admin / manager.
+        if (! $user || ! $user->isWhiteLabelClientAdmin()) {
+            abort(response()->json([
+                'message' => 'Only the client admin can manage the payment card for this hub.',
+            ], 403));
         }
 
-        // White-label client admins manage their own card; FinProms/manager may
-        // view the profile when billing is enabled (setup still saves on their user).
         if (! $this->billing->billingEnabled()) {
             abort(response()->json([
                 'message' => 'Advisor billing is not enabled for this hub.',

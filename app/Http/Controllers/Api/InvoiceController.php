@@ -4,6 +4,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Invoice;
+use App\Services\ActingHubService;
+use App\Services\CapabilitiesMatrixService;
+use App\Services\HubService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -12,8 +15,8 @@ class InvoiceController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
-        $hub = app(\App\Services\HubService::class)->current();
-        $matrix = app(\App\Services\CapabilitiesMatrixService::class);
+        $hub = app(HubService::class)->current();
+        $matrix = app(CapabilitiesMatrixService::class);
         $role = (string) $user->role;
 
         if (! $matrix->roleCan($hub, $role, 'general_show_invoices')) {
@@ -35,17 +38,25 @@ class InvoiceController extends Controller
     public function show(Request $request, Invoice $invoice): JsonResponse
     {
         $user = $request->user();
-        $hub = app(\App\Services\HubService::class)->current();
-        $matrix = app(\App\Services\CapabilitiesMatrixService::class);
+        // Use acting/target hub so white-label private caps resolve correctly
+        // (dashboard_view_advisor_invoices is private-only and false on shared current()).
+        $hub = app(ActingHubService::class)->targetHub($user);
+        $matrix = app(CapabilitiesMatrixService::class);
+        $role = (string) $user->role;
 
-        $isOwner = $invoice->user_id === $user->id;
-        $canGeneralInvoices = $matrix->roleCan($hub, (string) $user->role, 'general_show_invoices');
-        $canAdvisorInvoices = $matrix->roleCan($hub, (string) $user->role, 'dashboard_view_advisor_invoices');
+        $isOwner = (int) $invoice->user_id === (int) $user->id;
+        $canGeneralInvoices = $matrix->roleCan($hub, $role, 'general_show_invoices');
+        $canAdvisorInvoices = $matrix->roleCan($hub, $role, 'dashboard_view_advisor_invoices');
 
-        // Staff must have the matching invoice capability — role alone is not enough.
-        $allowed = $invoice->type === Invoice::TYPE_ADVISOR_BILLING
-            ? ($isOwner || $canAdvisorInvoices)
-            : ($isOwner && $canGeneralInvoices);
+        if ($invoice->type === Invoice::TYPE_ADVISOR_BILLING) {
+            $invoice->loadMissing('advisorBilling');
+            $billingHubId = (int) ($invoice->advisorBilling?->hub_id ?? 0);
+            $belongsToTargetHub = $billingHubId === 0 || $billingHubId === (int) $hub->id;
+            $allowed = $isOwner || ($canAdvisorInvoices && $belongsToTargetHub);
+        } else {
+            // Personal invoices: owner + general invoices capability.
+            $allowed = $isOwner && $canGeneralInvoices;
+        }
 
         if (! $allowed) {
             return response()->json(['message' => 'Unauthorized.'], 403);
@@ -54,6 +65,7 @@ class InvoiceController extends Controller
         $invoice->load([
             'subscription.plan',
             'postPurchase.post',
+            'bundlePurchase.bundle',
             'advisorBilling',
             'user:id,name,email',
         ]);

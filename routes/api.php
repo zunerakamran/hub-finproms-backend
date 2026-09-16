@@ -445,8 +445,8 @@ Route::middleware('auth:sanctum')->group(function () {
             });
         });
 
-        // Card settings — always available to hub admins when advisor billing is on
-        // (not gated by the capabilities matrix).
+        // Card settings — client_admin payer only when advisor billing is on
+        // (not gated by the capabilities matrix; controller enforces role).
         Route::get('/payment-card', [AdvisorPaymentCardController::class, 'show']);
         Route::post('/payment-card/setup', [AdvisorPaymentCardController::class, 'setup']);
         Route::post('/payment-card/confirm', [AdvisorPaymentCardController::class, 'confirm']);

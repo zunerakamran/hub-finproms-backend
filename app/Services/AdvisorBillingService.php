@@ -384,7 +384,13 @@ class AdvisorBillingService
      */
     public function checkout(HubAdvisorBilling $billing, User $user, string $paymentMethod): array
     {
-        if ($billing->billed_user_id !== $user->id && ! $user->isClientAdmin() && ! $user->isPowerAdmin()) {
+        // Payer of record is always the client admin; power/finproms may complete
+        // checkout on their behalf after Excel import.
+        $canStaffPay = $user->isWhiteLabelClientAdmin()
+            || $user->isPowerAdmin()
+            || $user->isFinpromsAdmin();
+
+        if ((int) $billing->billed_user_id !== (int) $user->id && ! $canStaffPay) {
             throw new InvalidArgumentException('You cannot pay this billing.');
         }
 
@@ -1010,9 +1016,14 @@ class AdvisorBillingService
             }, $methods);
         }
 
+        $paymentRequired = $billing
+            && $billing->status === HubAdvisorBilling::STATUS_PENDING
+            && $billing->payment_status !== 'paid';
+
         return [
             ...$quote,
             'billing_enabled' => $this->billingEnabled($hub),
+            'payment_required' => $paymentRequired,
             'billing' => $billing?->loadMissing(['invoice']),
             'payment_methods' => $methods,
             'auto_renew' => true,
