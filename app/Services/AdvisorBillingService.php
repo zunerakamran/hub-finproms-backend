@@ -263,9 +263,14 @@ class AdvisorBillingService
      *
      * @param  array<string, mixed>  $importSummary
      */
-    public function createPendingAfterImport(User $importer, array $importSummary = []): ?HubAdvisorBilling
+    public function createPendingAfterImport(
+        User $importer,
+        array $importSummary = [],
+        ?Hub $hub = null,
+        bool $countAdvisorsRemotely = false
+    ): ?HubAdvisorBilling
     {
-        $hub = $this->hubs->current();
+        $hub ??= $this->hubs->current();
 
         if (! $this->billingEnabled($hub)) {
             return null;
@@ -274,7 +279,9 @@ class AdvisorBillingService
         $created = (int) ($importSummary['created'] ?? 0);
         $reactivated = (int) ($importSummary['reactivated'] ?? 0);
         $batchCount = (int) ($importSummary['billable_batch'] ?? ($created + $reactivated));
-        $totalAdvisors = $this->pricing->currentAdvisorCount();
+        $totalAdvisors = $countAdvisorsRemotely
+            ? $this->pricing->currentAdvisorCountForHub($hub)
+            : $this->pricing->currentAdvisorCount();
 
         if ($batchCount < 1 || $totalAdvisors < 1) {
             return null;
@@ -320,6 +327,8 @@ class AdvisorBillingService
                 'renewal_quantity' => $quote['total_advisors'],
                 'payer_role' => $payer->role,
                 'renew_day' => $hub->advisorBillingRenewDay(),
+                'target_hub_id' => $hub->id,
+                'target_hub_slug' => $hub->slug,
             ],
         ]);
     }
@@ -950,10 +959,12 @@ class AdvisorBillingService
     /**
      * @return array<string, mixed>
      */
-    public function quotePayload(?HubAdvisorBilling $billing = null, ?User $viewer = null): array
+    public function quotePayload(?HubAdvisorBilling $billing = null, ?User $viewer = null, ?Hub $hub = null): array
     {
-        $hub = $this->hubs->current();
-        $totalAdvisors = $this->pricing->currentAdvisorCount();
+        $hub ??= $this->hubs->current();
+        $totalAdvisors = $hub->isWhiteLabel() && $hub->hasRemoteDatabaseConfigured()
+            ? $this->pricing->currentAdvisorCountForHub($hub)
+            : $this->pricing->currentAdvisorCount();
 
         if ($billing) {
             $batch = (int) ($billing->meta['batch_count'] ?? $billing->advisor_count);
@@ -1001,7 +1012,7 @@ class AdvisorBillingService
 
         return [
             ...$quote,
-            'billing_enabled' => $this->billingEnabled(),
+            'billing_enabled' => $this->billingEnabled($hub),
             'billing' => $billing?->loadMissing(['invoice']),
             'payment_methods' => $methods,
             'auto_renew' => true,

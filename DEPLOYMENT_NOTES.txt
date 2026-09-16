@@ -48,16 +48,30 @@ Folders:
   SCHEDULER_SECRET=<long random secret>
   BANK_TRANSFER_ENABLED=false
 
-Backend setup commands:
-  cd ~/public_html/api
+  WARNING: Do NOT copy .env.example over production .env.
+  WARNING: Do NOT run php artisan key:generate if APP_KEY already exists.
+  WARNING: Do NOT run php artisan db:seed --force on production
+           (it resets seeded admin passwords to "password").
+
+After a zip replace, run these in ~/public_html/api:
   composer install --no-dev --optimize-autoloader
-  # Ensure APP_KEY= line exists in .env, then:
-  php artisan key:generate
-  php artisan migrate --force
-  php artisan db:seed --force
-  php artisan storage:link
+  mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views storage/logs bootstrap/cache
+  chmod -R 775 storage bootstrap/cache
+  php artisan config:clear
+  php artisan cache:clear
+  php artisan route:clear
+
+.env must keep the EXISTING APP_KEY=base64:... from the old deploy.
+Add if missing:
+  SESSION_DRIVER=file
+  CACHE_STORE=file
+  QUEUE_CONNECTION=sync
+
+Then:
   php artisan config:cache
-  php artisan route:cache
+
+If login still fails, check:
+  tail -n 80 storage/logs/laravel.log
 
 Frontend:
   - Build from hub-finproms-frontend with:
@@ -140,6 +154,11 @@ Copy this into public_html/.htaccess (domain root, next to frontend):
 
 <IfModule mod_rewrite.c>
   RewriteEngine On
+
+  # cPanel CGI often drops Authorization; without this, login 200 then /auth/me 401
+  RewriteCond %{HTTP:Authorization} .
+  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+  SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
 
   # Already the real file path — stop here (prevents rewrite loops / 500)
   RewriteRule ^api/storage/app/public/ - [L]

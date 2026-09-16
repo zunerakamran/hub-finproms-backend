@@ -12,7 +12,7 @@ use App\Services\PowerAdminCapabilitiesService;
 use App\Services\WelcomeMailService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password as PasswordBroker;
 use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationException;
@@ -133,34 +133,39 @@ class AuthController extends Controller
             'password' => ['required', 'string'],
         ]);
 
-        if (! Auth::attempt($credentials)) {
-            $this->activityLogs->log([
-                'action' => 'auth.login_failed',
-                'description' => 'Failed login attempt for '.$credentials['email'],
-                'request' => $request,
-                'status_code' => 422,
-                'properties' => ['email' => $credentials['email']],
-            ]);
+        $user = User::query()->where('email', $credentials['email'])->first();
+
+        if (! $user || ! Hash::check($credentials['password'], $user->password)) {
+            try {
+                $this->activityLogs->log([
+                    'action' => 'auth.login_failed',
+                    'description' => 'Failed login attempt for '.$credentials['email'],
+                    'request' => $request,
+                    'status_code' => 422,
+                    'properties' => ['email' => $credentials['email']],
+                ]);
+            } catch (\Throwable) {
+                // Never block login on audit logging.
+            }
 
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials are incorrect.'],
             ]);
         }
 
-        /** @var User $user */
-        $user = Auth::user();
-
         if ($user->isSuspended()) {
-            Auth::logout();
-
-            $this->activityLogs->log([
-                'action' => 'auth.login_blocked',
-                'description' => 'Suspended user blocked from login: '.$user->email,
-                'user' => $user,
-                'request' => $request,
-                'status_code' => 403,
-                'properties' => ['reason' => 'suspended'],
-            ]);
+            try {
+                $this->activityLogs->log([
+                    'action' => 'auth.login_blocked',
+                    'description' => 'Suspended user blocked from login: '.$user->email,
+                    'user' => $user,
+                    'request' => $request,
+                    'status_code' => 403,
+                    'properties' => ['reason' => 'suspended'],
+                ]);
+            } catch (\Throwable) {
+                //
+            }
 
             return response()->json([
                 'message' => 'This account is suspended. Contact your hub administrator.',
@@ -168,16 +173,18 @@ class AuthController extends Controller
         }
 
         if ($user->isDiscontinued()) {
-            Auth::logout();
-
-            $this->activityLogs->log([
-                'action' => 'auth.login_blocked',
-                'description' => 'Discontinued advisor blocked from login: '.$user->email,
-                'user' => $user,
-                'request' => $request,
-                'status_code' => 403,
-                'properties' => ['reason' => 'discontinued'],
-            ]);
+            try {
+                $this->activityLogs->log([
+                    'action' => 'auth.login_blocked',
+                    'description' => 'Discontinued advisor blocked from login: '.$user->email,
+                    'user' => $user,
+                    'request' => $request,
+                    'status_code' => 403,
+                    'properties' => ['reason' => 'discontinued'],
+                ]);
+            } catch (\Throwable) {
+                //
+            }
 
             return response()->json([
                 'message' => 'This advisor account has been discontinued. Contact your hub administrator.',
@@ -185,16 +192,18 @@ class AuthController extends Controller
         }
 
         if ($this->hubs->can('private_invite_only') && ! $user->mayLoginOnInviteOnlyHub()) {
-            Auth::logout();
-
-            $this->activityLogs->log([
-                'action' => 'auth.login_blocked',
-                'description' => 'Invite-only hub blocked login: '.$user->email,
-                'user' => $user,
-                'request' => $request,
-                'status_code' => 403,
-                'properties' => ['reason' => 'invite_only'],
-            ]);
+            try {
+                $this->activityLogs->log([
+                    'action' => 'auth.login_blocked',
+                    'description' => 'Invite-only hub blocked login: '.$user->email,
+                    'user' => $user,
+                    'request' => $request,
+                    'status_code' => 403,
+                    'properties' => ['reason' => 'invite_only'],
+                ]);
+            } catch (\Throwable) {
+                //
+            }
 
             return response()->json([
                 'message' => 'This hub is invite-only. Only advisors imported from the invite list can sign in.',
@@ -203,16 +212,28 @@ class AuthController extends Controller
             ], 403);
         }
 
-        $token = $user->createToken('auth_token')->plainTextToken;
+        try {
+            $token = $user->createToken('auth_token')->plainTextToken;
+        } catch (\Throwable $e) {
+            report($e);
 
-        $this->activityLogs->log([
-            'action' => 'auth.login',
-            'description' => 'User logged in: '.$user->email,
-            'user' => $user,
-            'request' => $request,
-            'subject' => $user,
-            'status_code' => 200,
-        ]);
+            return response()->json([
+                'message' => 'Login matched, but the server could not create a session token. Check storage permissions and run: php artisan migrate --force',
+            ], 500);
+        }
+
+        try {
+            $this->activityLogs->log([
+                'action' => 'auth.login',
+                'description' => 'User logged in: '.$user->email,
+                'user' => $user,
+                'request' => $request,
+                'subject' => $user,
+                'status_code' => 200,
+            ]);
+        } catch (\Throwable) {
+            //
+        }
 
         return response()->json([
             'message' => 'Login successful.',
@@ -257,7 +278,12 @@ class AuthController extends Controller
             $payload['power_admin_capabilities'] = $this->powerCapabilities->resolved();
         }
 
-        $switcher = app(\App\Services\ActingHubService::class)->switcherPayload($user);
+        $switcher = null;
+        try {
+            $switcher = app(\App\Services\ActingHubService::class)->switcherPayload($user);
+        } catch (\Throwable) {
+            $switcher = null;
+        }
         if ($switcher !== null) {
             $payload['hub_switcher'] = $switcher;
         }

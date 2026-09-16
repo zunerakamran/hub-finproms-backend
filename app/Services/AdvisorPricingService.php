@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\AdvisorPricingTier;
+use App\Models\Hub;
 use App\Models\User;
 use InvalidArgumentException;
 
@@ -204,6 +205,24 @@ class AdvisorPricingService
             ->where('is_suspended', false)
             ->where('is_discontinued', false)
             ->count();
+    }
+
+    /**
+     * Count active advisors on a white-label hub's own database.
+     */
+    public function currentAdvisorCountForHub(Hub $hub): int
+    {
+        if ($hub->isShared() || ! $hub->hasRemoteDatabaseConfigured()) {
+            return $this->currentAdvisorCount();
+        }
+
+        return (int) app(WhiteLabelDatabaseService::class)->run($hub, function (string $connection) {
+            return User::on($connection)
+                ->where('is_advisor', true)
+                ->where('is_suspended', false)
+                ->where('is_discontinued', false)
+                ->count();
+        });
     }
 
     public function assertHasTiers(): void

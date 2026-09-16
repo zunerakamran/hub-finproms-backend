@@ -1,4 +1,3 @@
-<!-- Zunera Kamran -->
 <?php
 
 use App\Http\Controllers\Api\ActivityLogController;

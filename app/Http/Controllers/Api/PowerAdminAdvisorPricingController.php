@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\AdvisorPricingTier;
+use App\Services\ActingHubService;
 use App\Services\AdvisorPricingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -11,20 +12,30 @@ use Illuminate\Http\Request;
 class PowerAdminAdvisorPricingController extends Controller
 {
     public function __construct(
-        private readonly AdvisorPricingService $pricing
+        private readonly AdvisorPricingService $pricing,
+        private readonly ActingHubService $actingHubs
     ) {}
 
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         $this->pricing->seedDefaultsIfEmpty();
 
+        $hub = $this->actingHubs->targetHub($request->user());
         $tiers = $this->pricing->listTiers();
-        $quote = $this->pricing->quote($this->pricing->currentAdvisorCount());
+        $count = $hub->isWhiteLabel() && $hub->hasRemoteDatabaseConfigured()
+            ? $this->pricing->currentAdvisorCountForHub($hub)
+            : $this->pricing->currentAdvisorCount();
+        $quote = $this->pricing->quote($count);
 
         return response()->json([
             'tiers' => $tiers,
             'current_quote' => $quote,
             'formula' => 'amount = rate_per_advisor × advisor_count',
+            'target_hub' => [
+                'id' => $hub->id,
+                'name' => $hub->name,
+                'slug' => $hub->slug,
+            ],
         ]);
     }
 

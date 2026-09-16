@@ -88,10 +88,16 @@ class SubscriberCreditsController extends Controller
 
     private function resolveHub(Request $request): Hub
     {
-        return $this->actingHubs->targetHub(
-            $request->user(),
-            $request->integer('hub_id') ?: null
-        );
+        // Prefer the hub switcher selection; ignore legacy hub_id dropdown.
+        $hub = $this->actingHubs->targetHub($request->user());
+
+        if ($hub->isShared() || ! $hub->isPrivateInviteOnly()) {
+            abort(response()->json([
+                'message' => 'Subscriber credits are only configured for private invite-only hubs. Select a private white-label hub in Control hub.',
+            ], 422));
+        }
+
+        return $hub;
     }
 
     private function assertCanManage(Request $request, Hub $hub): void

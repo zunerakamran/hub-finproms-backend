@@ -112,14 +112,10 @@ class CapabilitiesMatrixService
     {
         $power = $this->powerCapabilities->resolved();
         $roleCaps = $this->resolvedRoleCapabilities($hub);
-        if ($hub->isWhiteLabel()) {
-            $sharedCaps = $this->resolvedRoleCapabilities($this->sharedHub());
-            foreach (ActingHubService::CONTROL_PLANE_ROLES as $role) {
-                if (isset($sharedCaps[$role])) {
-                    $roleCaps[$role] = $sharedCaps[$role];
-                }
-            }
-        }
+        $shared = $this->sharedHub();
+        $sharedRoleCaps = $hub->isWhiteLabel()
+            ? $this->resolvedRoleCapabilities($shared)
+            : $roleCaps;
         $privateMode = $hub->isPrivateInviteOnly();
         $publicMode = $hub->isPublicSubscribe();
 
@@ -201,7 +197,12 @@ class CapabilitiesMatrixService
                 $applicable = in_array($role, $applicableRoles, true);
                 $enabled = false;
                 if ($applicable) {
-                    $enabled = (bool) ($roleCaps[$role][$key] ?? false);
+                    // Hub switcher flag always reflects the shared hub matrix.
+                    if ($key === ActingHubService::CAPABILITY) {
+                        $enabled = (bool) ($sharedRoleCaps[$role][$key] ?? false);
+                    } else {
+                        $enabled = (bool) ($roleCaps[$role][$key] ?? false);
+                    }
                 }
                 // Mode / module-locked caps are inactive (shown off / not editable).
                 if ($inactive) {
@@ -251,8 +252,8 @@ class CapabilitiesMatrixService
             ],
             'control_plane_roles' => ActingHubService::CONTROL_PLANE_ROLES,
             'control_plane_hub' => [
-                'id' => $this->sharedHub()->id,
-                'slug' => $this->sharedHub()->slug,
+                'id' => $shared->id,
+                'slug' => $shared->slug,
             ],
             'private_capability_keys' => Hub::PRIVATE_CAPABILITY_KEYS,
             'public_capability_keys' => Hub::PUBLIC_CAPABILITY_KEYS,
@@ -316,12 +317,35 @@ class CapabilitiesMatrixService
             array_flip(ActingHubService::CONTROL_PLANE_ROLES)
         );
 
-        $this->applyRoleMatrix($shared, $controlPlaneInput, ActingHubService::CONTROL_PLANE_ROLES);
+        // Hub switcher capability always lives on the shared hub.
+        $switcherInput = [];
+        foreach (ActingHubService::CONTROL_PLANE_ROLES as $role) {
+            if (! isset($controlPlaneInput[$role]) || ! is_array($controlPlaneInput[$role])) {
+                continue;
+            }
+            if (! array_key_exists(ActingHubService::CAPABILITY, $controlPlaneInput[$role])) {
+                continue;
+            }
+            $switcherInput[$role] = [
+                ActingHubService::CAPABILITY => $controlPlaneInput[$role][ActingHubService::CAPABILITY],
+            ];
+            unset($controlPlaneInput[$role][ActingHubService::CAPABILITY]);
+            if ($controlPlaneInput[$role] === []) {
+                unset($controlPlaneInput[$role]);
+            }
+        }
+        if ($switcherInput !== []) {
+            $this->applyRoleMatrix($shared, $switcherInput, ActingHubService::CONTROL_PLANE_ROLES);
+        }
 
         if ($tenantHub->is($shared)) {
+            $this->applyRoleMatrix($shared, $controlPlaneInput, ActingHubService::CONTROL_PLANE_ROLES);
             $this->applyRoleMatrix($shared, $tenantInput, $this->tenantRoles());
         } else {
-            $this->applyRoleMatrix($tenantHub, $tenantInput, $this->tenantRoles(), stripControlPlane: true);
+            // Power Admin / FinProms hub tools are per white-label hub so the
+            // shared dashboard navbar follows that hub while it is selected.
+            $this->applyRoleMatrix($tenantHub, $controlPlaneInput, ActingHubService::CONTROL_PLANE_ROLES);
+            $this->applyRoleMatrix($tenantHub, $tenantInput, $this->tenantRoles());
             if ($tenantHub->hasRemoteDatabaseConfigured()) {
                 app(WhiteLabelHubSyncService::class)->pushSettings($tenantHub->fresh());
             }

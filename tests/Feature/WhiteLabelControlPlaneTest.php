@@ -86,7 +86,7 @@ class WhiteLabelControlPlaneTest extends TestCase
         }
     }
 
-    public function test_power_admin_capabilities_live_on_shared_and_apply_while_acting_on_white_label(): void
+    public function test_power_admin_capabilities_follow_selected_white_label_hub(): void
     {
         [$admin, $hub] = $this->actingPowerAdminOnWiredHub();
         $shared = Hub::query()->where('slug', 'shared')->firstOrFail();
@@ -96,24 +96,44 @@ class WhiteLabelControlPlaneTest extends TestCase
             'matrix' => [
                 'power_admin' => [
                     'dashboard_manage_posts' => false,
+                    'smc_view_reports' => false,
+                    'advisor_excel_import' => false,
+                    'dashboard_manage_advisor_pricing' => false,
+                    'dashboard_manage_advisor_renewal' => false,
                 ],
             ],
         ])->assertOk();
 
         $shared->refresh();
-        $this->assertFalse((bool) data_get($shared->role_capabilities, 'power_admin.dashboard_manage_posts'));
         $hub->refresh();
-        $this->assertArrayNotHasKey('power_admin', $hub->role_capabilities ?? []);
+        $this->assertFalse((bool) data_get($hub->role_capabilities, 'power_admin.dashboard_manage_posts'));
+        $this->assertArrayNotHasKey('power_admin', $shared->role_capabilities ?? []);
 
         $this->getJson('/api/hub')
             ->assertOk()
             ->assertJsonPath('hub.hub_switcher.effective_capabilities.dashboard_manage_posts', false);
+
+        $this->putJson('/api/power-admin/modules', [
+            'modules' => [
+                'module_social_media_compliance' => true,
+                'module_general_compliance' => true,
+                'module_website_compliance' => true,
+            ],
+        ])->assertOk();
 
         $this->putJson('/api/power-admin/capabilities/matrix', [
             'hub_id' => $hub->id,
             'matrix' => [
                 'power_admin' => [
                     'dashboard_manage_posts' => true,
+                    'smc_view_reports' => true,
+                    'gc_view_reports' => true,
+                    'wc_view_platform_report' => true,
+                    'advisor_excel_import' => true,
+                    'dashboard_manage_advisor_pricing' => true,
+                    'dashboard_manage_advisor_renewal' => true,
+                    'dashboard_view_advisor_invoices' => true,
+                    'dashboard_manage_subscriber_credits' => true,
                 ],
                 'client_admin' => [
                     'dashboard_manage_posts' => true,
@@ -123,14 +143,27 @@ class WhiteLabelControlPlaneTest extends TestCase
             ->assertJsonPath('matrix.control_plane_roles.0', 'power_admin');
 
         $shared->refresh();
-        $this->assertTrue((bool) data_get($shared->role_capabilities, 'power_admin.dashboard_manage_posts'));
         $hub->refresh();
+        $this->assertTrue((bool) data_get($hub->role_capabilities, 'power_admin.dashboard_manage_posts'));
+        $this->assertTrue((bool) data_get($hub->role_capabilities, 'power_admin.smc_view_reports'));
+        $this->assertTrue((bool) data_get($hub->role_capabilities, 'power_admin.advisor_excel_import'));
+        $this->assertTrue((bool) data_get($hub->role_capabilities, 'power_admin.dashboard_manage_advisor_pricing'));
+        $this->assertTrue((bool) data_get($hub->role_capabilities, 'power_admin.dashboard_manage_advisor_renewal'));
         $this->assertTrue((bool) data_get($hub->role_capabilities, 'client_admin.dashboard_manage_posts'));
-        $this->assertArrayNotHasKey('power_admin', $hub->role_capabilities ?? []);
+        $this->assertNull(data_get($shared->role_capabilities, 'power_admin.dashboard_manage_posts'));
 
         $this->getJson('/api/hub')
             ->assertOk()
-            ->assertJsonPath('hub.hub_switcher.effective_capabilities.dashboard_manage_posts', true);
+            ->assertJsonPath('hub.hub_switcher.effective_capabilities.dashboard_manage_posts', true)
+            ->assertJsonPath('hub.hub_switcher.effective_capabilities.smc_view_reports', true)
+            ->assertJsonPath('hub.hub_switcher.effective_capabilities.gc_view_reports', true)
+            ->assertJsonPath('hub.hub_switcher.effective_capabilities.wc_view_platform_report', true)
+            ->assertJsonPath('hub.hub_switcher.effective_capabilities.advisor_excel_import', true)
+            ->assertJsonPath('hub.hub_switcher.effective_capabilities.dashboard_manage_advisor_pricing', true)
+            ->assertJsonPath('hub.hub_switcher.effective_capabilities.dashboard_manage_advisor_renewal', true)
+            ->assertJsonPath('hub.hub_switcher.effective_capabilities.dashboard_view_advisor_invoices', true)
+            ->assertJsonPath('hub.hub_switcher.effective_capabilities.dashboard_manage_subscriber_credits', true)
+            ->assertJsonPath('hub.hub_switcher.effective_capabilities.module_social_media_compliance', true);
 
         $remote = app(WhiteLabelDatabaseService::class);
         $connection = $remote->connect($hub);
@@ -139,7 +172,8 @@ class WhiteLabelControlPlaneTest extends TestCase
             $caps = is_string($row->role_capabilities)
                 ? json_decode($row->role_capabilities, true)
                 : (array) $row->role_capabilities;
-            $this->assertArrayNotHasKey('power_admin', $caps ?? []);
+            $this->assertTrue((bool) data_get($caps, 'power_admin.dashboard_manage_posts'));
+            $this->assertTrue((bool) data_get($caps, 'power_admin.smc_view_reports'));
             $this->assertTrue((bool) data_get($caps, 'client_admin.dashboard_manage_posts'));
         } finally {
             $remote->disconnect($hub);

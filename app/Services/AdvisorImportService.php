@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Hub;
 use App\Models\User;
 use App\Models\UserSubscription;
 use Illuminate\Http\UploadedFile;
@@ -24,10 +25,11 @@ class AdvisorImportService
      *   summary: array{total_rows: int, created: int, updated: int, skipped: int}
      * }
      */
-    public function import(UploadedFile $file): array
+    public function import(UploadedFile $file, ?Hub $hub = null, ?string $connection = null): array
     {
         $rows = $this->parseFile($file);
-        $hub = $this->hubs->current();
+        $hub ??= $this->hubs->current();
+        $connection ??= config('database.default');
 
         if ($rows === []) {
             throw new RuntimeException(
@@ -64,8 +66,8 @@ class AdvisorImportService
             }
 
             try {
-                $result = DB::transaction(function () use ($name, $email, $password, $hub) {
-                    $user = User::query()->where('email', $email)->first();
+                $result = DB::connection($connection)->transaction(function () use ($name, $email, $password, $hub, $connection) {
+                    $user = User::on($connection)->where('email', $email)->first();
                     $temporaryPassword = null;
 
                     if ($user) {
@@ -104,7 +106,7 @@ class AdvisorImportService
                         $password = $temporaryPassword;
                     }
 
-                    $user = User::query()->create([
+                    $user = User::on($connection)->create([
                         'name' => $name,
                         'email' => $email,
                         'password' => $password,
@@ -187,7 +189,10 @@ class AdvisorImportService
 
     public function ensureAdvisorSubscription(User $user): UserSubscription
     {
-        $existing = $user->subscriptions()
+        $connection = $user->getConnectionName();
+
+        $existing = UserSubscription::on($connection)
+            ->where('user_id', $user->id)
             ->whereIn('status', ['active', 'suspended', 'discontinued'])
             ->where('payment_method', 'advisor_import')
             ->orderByDesc('id')
@@ -202,7 +207,7 @@ class AdvisorImportService
             return $existing;
         }
 
-        return UserSubscription::query()->create([
+        return UserSubscription::on($connection)->create([
             'user_id' => $user->id,
             'subscription_plan_id' => null,
             'credits_granted' => 0,
@@ -231,14 +236,22 @@ class AdvisorImportService
             return $advisor;
         }
 
-        $advisor = DB::transaction(function () use ($advisor) {
+        $advisor = DB::connection($advisor->getConnectionName())->transaction(function () use ($advisor) {
+            $connection = $advisor->getConnectionName();
             $advisor->is_discontinued = true;
             $advisor->discontinued_at = now();
             $advisor->has_unlimited_credits = false;
             $advisor->save();
-            $advisor->tokens()->delete();
 
-            UserSubscription::query()
+            if (method_exists($advisor, 'tokens')) {
+                try {
+                    $advisor->tokens()->delete();
+                } catch (\Throwable) {
+                    // Remote hubs may not have Sanctum tokens table wired the same way.
+                }
+            }
+
+            UserSubscription::on($connection)
                 ->where('user_id', $advisor->id)
                 ->where('payment_method', 'advisor_import')
                 ->whereIn('status', ['active', 'suspended'])

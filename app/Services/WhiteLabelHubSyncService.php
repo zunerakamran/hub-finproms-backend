@@ -39,8 +39,11 @@ class WhiteLabelHubSyncService
             $this->remoteDb->run($hub, function (string $connection) use ($hub): void {
                 $now = now();
                 $roleCaps = is_array($hub->role_capabilities) ? $hub->role_capabilities : [];
+                // Hub switcher is shared-only; strip it from the tenant copy.
                 foreach (ActingHubService::CONTROL_PLANE_ROLES as $role) {
-                    unset($roleCaps[$role]);
+                    if (isset($roleCaps[$role]) && is_array($roleCaps[$role])) {
+                        unset($roleCaps[$role][ActingHubService::CAPABILITY]);
+                    }
                 }
 
                 $payload = [

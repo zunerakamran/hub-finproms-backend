@@ -38,15 +38,23 @@ class HubController extends Controller
         }
 
         if ($user) {
-            $switcher = $this->actingHubs->switcherPayload($user);
+            $switcher = null;
+            try {
+                $switcher = $this->actingHubs->switcherPayload($user);
+            } catch (\Throwable) {
+                $switcher = null;
+            }
             if ($switcher !== null) {
                 $payload['hub_switcher'] = $switcher;
                 // Dashboard menus should follow the acting hub's effective caps.
                 $payload['effective_capabilities'] = $switcher['effective_capabilities'];
-                $acting = $this->actingHubs->actingHub($user);
                 $payload['acting_hub'] = $switcher['acting_hub'];
-                // Expose acting hub checklist so UI can mirror selected hub behaviour flags.
-                $payload['acting_checklist'] = $acting->resolvedChecklist();
+                try {
+                    $acting = $this->actingHubs->actingHub($user);
+                    $payload['acting_checklist'] = $acting->resolvedChecklist();
+                } catch (\Throwable) {
+                    $payload['acting_checklist'] = $payload['checklist'] ?? [];
+                }
             } else {
                 $effective = [];
                 foreach (array_keys($payload['checklist']) as $flag) {

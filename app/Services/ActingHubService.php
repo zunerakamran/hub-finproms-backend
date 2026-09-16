@@ -17,9 +17,11 @@ class ActingHubService
     public const CAPABILITY = 'dashboard_control_white_label_hubs';
 
     /**
-     * These roles only exist as users on the shared hub. Their Capabilities
-     * matrix cells always live on the shared hub, even while a white-label
-     * hub is selected in the switcher.
+     * These roles only exist as users on the shared hub. The hub switcher
+     * capability (`dashboard_control_white_label_hubs`) always lives on shared.
+     * All other hub dashboard / compliance matrix cells for these roles are
+     * stored per hub — including each white-label — so the navbar follows the
+     * selected hub's Capabilities matrix (see PROJECT_REQUIREMENTS §4.4).
      *
      * @var list<string>
      */
@@ -113,37 +115,27 @@ class ActingHubService
 
     /**
      * Capability checks for hub-level flags follow the acting white-label hub.
-     * Power Admin / FinProms admin role cells always come from the shared hub.
+     * Only the shared-hub switcher capability stays on the shared deploy hub.
      */
     public function capabilityHub(User $user, string $capability): Hub
     {
         $current = $this->hubs->current();
 
+        // Hub switcher itself is always a shared-hub capability.
         if ($capability === self::CAPABILITY) {
             return $current;
         }
 
-        // Modules / functionalities are properties of the tenant being controlled.
-        if (Hub::isModuleKey($capability) || Hub::isFunctionalityKey($capability)) {
-            if ($this->isActingOnWhiteLabel($user)) {
-                return $this->actingHub($user);
-            }
-
+        if (! $this->isActingOnWhiteLabel($user)) {
             return $current;
         }
 
-        // PA / FinProms users only exist on shared — their matrix lives there.
-        if (self::isControlPlaneRole((string) $user->role) && Hub::isCapabilityKey($capability)) {
-            return $current;
-        }
-
-        $followsActing = in_array($capability, Hub::ACTING_HUB_CONTENT_CAPABILITIES, true)
-            || Hub::isSocialMediaComplianceCapability($capability)
-            || Hub::isGeneralComplianceCapability($capability)
-            || Hub::isWebsiteComplianceCapability($capability)
-            || $capability === 'dashboard_manage_modules';
-
-        if ($followsActing && $this->isActingOnWhiteLabel($user)) {
+        // While a white-label is selected, modules / functionalities / role
+        // matrix cells (including Power Admin / FinProms) follow that hub.
+        if (Hub::isModuleKey($capability)
+            || Hub::isFunctionalityKey($capability)
+            || Hub::isCapabilityKey($capability)
+        ) {
             return $this->actingHub($user);
         }
 
@@ -232,8 +224,8 @@ class ActingHubService
 
     /**
      * Effective capabilities for the dashboard while a hub is selected.
-     * Control-white-label and Power Admin / FinProms role cells stay from shared.
-     * Hub modules / functionalities follow the acting tenant.
+     * Hub modules / functionalities / role matrix cells follow the acting
+     * tenant. Only `dashboard_control_white_label_hubs` stays on shared.
      *
      * @return array<string, bool>
      */

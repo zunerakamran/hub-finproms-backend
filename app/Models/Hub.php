@@ -705,9 +705,9 @@ class Hub extends Model
             'advisor_billing_renew_day' => 'integer',
             'subscriber_credits' => 'integer',
             'db_port' => 'integer',
-            'stripe_secret' => 'encrypted',
-            'stripe_webhook_secret' => 'encrypted',
-            'db_password' => 'encrypted',
+            'stripe_secret' => \App\Casts\SafeEncrypted::class,
+            'stripe_webhook_secret' => \App\Casts\SafeEncrypted::class,
+            'db_password' => \App\Casts\SafeEncrypted::class,
         ];
     }
 
