@@ -124,12 +124,15 @@ class AdvisorBillingController extends Controller
             return response()->json(['message' => 'Billing not found for this session.'], 404);
         }
 
+        $meta = is_array($billing->meta) ? $billing->meta : [];
+
         return response()->json([
             'message' => $billing->payment_status === 'paid'
-                ? 'Advisor billing paid successfully. Card saved for future imports.'
+                ? 'Advisor billing paid successfully. Advisors created and card saved for future imports.'
                 : 'Checkout recorded; payment still pending.',
             'billing' => $billing->load(['invoice', 'billedUser', 'hub']),
             'invoice' => $billing->invoice,
+            'import' => $meta['import_result'] ?? null,
         ]);
     }
 

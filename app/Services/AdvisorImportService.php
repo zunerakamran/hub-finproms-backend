@@ -18,14 +18,34 @@ class AdvisorImportService
     ) {}
 
     /**
+     * Parse + commit immediately (used when advisor billing is off).
+     *
      * @return array{
-     *   created: list<array{name: string, email: string, temporary_password: string}>,
+     *   created: list<array{name: string, email: string, temporary_password: ?string}>,
      *   updated: list<array{name: string, email: string}>,
+     *   reactivated: list<array{name: string, email: string}>,
      *   skipped: list<array{row: int, email: ?string, reason: string}>,
-     *   summary: array{total_rows: int, created: int, updated: int, skipped: int}
+     *   summary: array{total_rows: int, created: int, updated: int, reactivated: int, skipped: int, billable_batch: int}
      * }
      */
     public function import(UploadedFile $file, ?Hub $hub = null, ?string $connection = null): array
+    {
+        $plan = $this->buildPlan($file, $hub, $connection);
+
+        return $this->commitPending($plan['pending'], $hub, $connection, $plan['skipped']);
+    }
+
+    /**
+     * Classify rows without creating users. Used when payment is required first.
+     *
+     * @return array{
+     *   pending: list<array{action: string, name: string, email: string, password: string}>,
+     *   preview: array{created: list<array{name: string, email: string}>, updated: list<array{name: string, email: string}>, reactivated: list<array{name: string, email: string}>},
+     *   skipped: list<array{row: int, email: ?string, reason: string}>,
+     *   summary: array{total_rows: int, created: int, updated: int, reactivated: int, skipped: int, billable_batch: int}
+     * }
+     */
+    public function buildPlan(UploadedFile $file, ?Hub $hub = null, ?string $connection = null): array
     {
         $rows = $this->parseFile($file);
         $hub ??= $this->hubs->current();
@@ -37,13 +57,14 @@ class AdvisorImportService
             );
         }
 
-        $created = [];
-        $updated = [];
-        $reactivated = [];
+        $pending = [];
+        $previewCreated = [];
+        $previewUpdated = [];
+        $previewReactivated = [];
         $skipped = [];
 
         foreach ($rows as $index => $row) {
-            $rowNumber = $index + 2; // header is row 1
+            $rowNumber = $index + 2;
             $name = trim((string) ($row['name'] ?? ''));
             $email = strtolower(trim((string) ($row['email'] ?? '')));
             $password = trim((string) ($row['password'] ?? ''));
@@ -65,8 +86,118 @@ class AdvisorImportService
                 $name = Str::before($email, '@');
             }
 
+            $user = User::on($connection)->where('email', $email)->first();
+
+            if ($user) {
+                if ($user->isClientAdmin() || $user->isPowerAdmin()) {
+                    $skipped[] = [
+                        'row' => $rowNumber,
+                        'email' => $email,
+                        'reason' => 'Email belongs to an admin account.',
+                    ];
+                    continue;
+                }
+
+                $wasInactive = $user->isDiscontinued() || $user->isSuspended();
+                $action = $wasInactive ? 'reactivate' : 'update';
+                $pending[] = [
+                    'action' => $action,
+                    'name' => $name,
+                    'email' => $email,
+                    'password' => '',
+                ];
+
+                if ($action === 'reactivate') {
+                    $previewReactivated[] = ['name' => $name, 'email' => $email];
+                } else {
+                    $previewUpdated[] = ['name' => $name, 'email' => $email];
+                }
+
+                continue;
+            }
+
+            $pending[] = [
+                'action' => 'create',
+                'name' => $name,
+                'email' => $email,
+                'password' => $password,
+            ];
+            $previewCreated[] = ['name' => $name, 'email' => $email];
+        }
+
+        return [
+            'pending' => $pending,
+            'preview' => [
+                'created' => $previewCreated,
+                'updated' => $previewUpdated,
+                'reactivated' => $previewReactivated,
+            ],
+            'skipped' => $skipped,
+            'summary' => [
+                'total_rows' => count($rows),
+                'created' => count($previewCreated),
+                'updated' => count($previewUpdated),
+                'reactivated' => count($previewReactivated),
+                'skipped' => count($skipped),
+                'billable_batch' => count($previewCreated) + count($previewReactivated),
+            ],
+        ];
+    }
+
+    /**
+     * Apply a previously staged import plan (after payment method is chosen).
+     *
+     * @param  list<array{action: string, name: string, email: string, password?: string}>  $pending
+     * @param  list<array{row: int, email: ?string, reason: string}>  $skipped
+     * @return array{
+     *   created: list<array{name: string, email: string, temporary_password: ?string}>,
+     *   updated: list<array{name: string, email: string}>,
+     *   reactivated: list<array{name: string, email: string}>,
+     *   skipped: list<array{row: int, email: ?string, reason: string}>,
+     *   summary: array{total_rows: int, created: int, updated: int, reactivated: int, skipped: int, billable_batch: int}
+     * }
+     */
+    public function commitPending(
+        array $pending,
+        ?Hub $hub = null,
+        ?string $connection = null,
+        array $skipped = []
+    ): array {
+        $hub ??= $this->hubs->current();
+        $connection ??= config('database.default');
+
+        $created = [];
+        $updated = [];
+        $reactivated = [];
+
+        foreach ($pending as $index => $row) {
+            $action = (string) ($row['action'] ?? '');
+            $name = trim((string) ($row['name'] ?? ''));
+            $email = strtolower(trim((string) ($row['email'] ?? '')));
+            $password = trim((string) ($row['password'] ?? ''));
+
+            if ($email === '' || ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $skipped[] = [
+                    'row' => $index + 1,
+                    'email' => $email !== '' ? $email : null,
+                    'reason' => 'Valid email is required.',
+                ];
+                continue;
+            }
+
+            if ($name === '') {
+                $name = Str::before($email, '@');
+            }
+
             try {
-                $result = DB::connection($connection)->transaction(function () use ($name, $email, $password, $hub, $connection) {
+                $result = DB::connection($connection)->transaction(function () use (
+                    $action,
+                    $name,
+                    $email,
+                    $password,
+                    $hub,
+                    $connection
+                ) {
                     $user = User::on($connection)->where('email', $email)->first();
                     $temporaryPassword = null;
 
@@ -90,7 +221,6 @@ class AdvisorImportService
                         ]);
                         $user->save();
                         $this->ensureAdvisorSubscription($user);
-                        // Fresh allotment only for new / reactivated; active advisors wait for autorenew.
                         if ($wasInactive) {
                             $this->subscriberCredits->applyToAdvisor($user->fresh(), $hub, true);
                         }
@@ -99,6 +229,10 @@ class AdvisorImportService
                             'status' => $wasInactive ? 'reactivated' : 'updated',
                             'user' => $user->fresh(),
                         ];
+                    }
+
+                    if ($action !== 'create' && $action !== '') {
+                        // Stale plan row (e.g. already created) — treat as create if missing.
                     }
 
                     if ($password === '') {
@@ -129,7 +263,7 @@ class AdvisorImportService
                 });
             } catch (\Throwable $e) {
                 $skipped[] = [
-                    'row' => $rowNumber,
+                    'row' => $index + 1,
                     'email' => $email,
                     'reason' => $e->getMessage(),
                 ];
@@ -138,7 +272,7 @@ class AdvisorImportService
 
             if (($result['status'] ?? null) === 'skipped') {
                 $skipped[] = [
-                    'row' => $rowNumber,
+                    'row' => $index + 1,
                     'email' => $email,
                     'reason' => $result['reason'] ?? 'Skipped.',
                 ];
@@ -177,7 +311,7 @@ class AdvisorImportService
             'reactivated' => $reactivated,
             'skipped' => $skipped,
             'summary' => [
-                'total_rows' => count($rows),
+                'total_rows' => count($pending) + count($skipped),
                 'created' => count($created),
                 'updated' => count($updated),
                 'reactivated' => count($reactivated),

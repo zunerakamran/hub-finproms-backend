@@ -128,8 +128,113 @@ class AdvisorController extends Controller
             ], 422);
         }
 
+        $useRemote = $this->shouldUseRemote($request, $hub);
+        $billingOn = $this->billingService->billingEnabled($hub);
+
         try {
-            if ($this->shouldUseRemote($request, $hub)) {
+            if ($billingOn) {
+                // Stage only — advisors are created when Pay now runs.
+                if ($useRemote) {
+                    $plan = $this->remoteDb->run($hub, function (string $connection) use ($file, $hub) {
+                        return $this->importService->buildPlan($file, $hub, $connection);
+                    });
+                } else {
+                    $plan = $this->importService->buildPlan($file, $hub);
+                }
+
+                $billable = (int) ($plan['summary']['billable_batch'] ?? 0);
+
+                if ($billable < 1) {
+                    // Updates / skips only — nothing to charge; apply immediately.
+                    if ($useRemote) {
+                        $result = $this->remoteDb->run($hub, function (string $connection) use ($plan, $hub) {
+                            return $this->importService->commitPending(
+                                $plan['pending'],
+                                $hub,
+                                $connection,
+                                $plan['skipped']
+                            );
+                        });
+                    } else {
+                        $result = $this->importService->commitPending(
+                            $plan['pending'],
+                            $hub,
+                            null,
+                            $plan['skipped']
+                        );
+                    }
+
+                    $quote = $this->billingService->quotePayload(null, $request->user(), $hub);
+                    $quote['payment_required'] = false;
+                    $quote['message'] = 'No new advisors were imported, so no payment is due.';
+
+                    return response()->json([
+                        'message' => sprintf(
+                            'Import finished: %d created, %d updated, %d skipped.',
+                            $result['summary']['created'],
+                            $result['summary']['updated'],
+                            $result['summary']['skipped']
+                        ),
+                        ...$result,
+                        'awaiting_payment' => false,
+                        'billing' => null,
+                        'quote' => $quote,
+                        'target_hub' => $this->hubPayload($hub),
+                    ]);
+                }
+
+                $billing = null;
+                $quote = null;
+                try {
+                    $billing = $this->billingService->createPendingAfterImport(
+                        $request->user(),
+                        $plan['summary'],
+                        $hub,
+                        $useRemote,
+                        [
+                            'rows' => $plan['pending'],
+                            'skipped' => $plan['skipped'],
+                            'use_remote' => $useRemote,
+                        ]
+                    );
+                    $quote = $this->billingService->quotePayload($billing, $request->user(), $hub);
+
+                    if (! $billing) {
+                        $quote['payment_required'] = true;
+                        $quote['error'] = $quote['error']
+                            ?? 'Billing quote could not be created. Check advisor pricing tiers.';
+                    } else {
+                        $quote['payment_required'] = true;
+                    }
+                } catch (\Throwable $e) {
+                    $quote = [
+                        'billing_enabled' => true,
+                        'payment_required' => true,
+                        'error' => $e->getMessage(),
+                        'payment_methods' => [],
+                    ];
+                }
+
+                return response()->json([
+                    'message' => sprintf(
+                        'Import ready: %d new advisors will be created after you choose a payment method.',
+                        $billable
+                    ),
+                    'created' => [],
+                    'updated' => $plan['preview']['updated'] ?? [],
+                    'reactivated' => [],
+                    'skipped' => $plan['skipped'] ?? [],
+                    'preview' => $plan['preview'] ?? [],
+                    'summary' => $plan['summary'] ?? [],
+                    'awaiting_payment' => (bool) $billing,
+                    'billing' => $billing,
+                    'quote' => $quote,
+                    'target_hub' => $this->hubPayload($hub),
+                ]);
+            }
+
+            // Billing off — create users immediately.
+            if ($useRemote) {
                 $result = $this->remoteDb->run($hub, function (string $connection) use ($file, $hub) {
                     return $this->importService->import($file, $hub, $connection);
                 });
@@ -140,39 +245,6 @@ class AdvisorController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
-        $billing = null;
-        $quote = null;
-        try {
-            $billing = $this->billingService->createPendingAfterImport(
-                $request->user(),
-                $result['summary'] ?? [],
-                $hub,
-                $this->shouldUseRemote($request, $hub)
-            );
-            $quote = $this->billingService->quotePayload($billing, $request->user(), $hub);
-
-            if (! $billing && $this->billingService->billingEnabled($hub)) {
-                $billable = (int) ($result['summary']['billable_batch'] ?? 0);
-                if ($billable === 0) {
-                    $quote['payment_required'] = false;
-                    $quote['message'] = 'No new advisors were imported, so no payment is due.';
-                } else {
-                    $quote['payment_required'] = true;
-                    $quote['error'] = $quote['error']
-                        ?? 'Billing quote could not be created. Check advisor pricing tiers.';
-                }
-            } elseif ($billing) {
-                $quote['payment_required'] = true;
-            }
-        } catch (\Throwable $e) {
-            $quote = [
-                'billing_enabled' => $this->billingService->billingEnabled($hub),
-                'payment_required' => $this->billingService->billingEnabled($hub),
-                'error' => $e->getMessage(),
-                'payment_methods' => [],
-            ];
-        }
-
         return response()->json([
             'message' => sprintf(
                 'Import finished: %d created, %d updated, %d skipped.',
@@ -181,8 +253,13 @@ class AdvisorController extends Controller
                 $result['summary']['skipped']
             ),
             ...$result,
-            'billing' => $billing,
-            'quote' => $quote,
+            'awaiting_payment' => false,
+            'billing' => null,
+            'quote' => [
+                'billing_enabled' => false,
+                'payment_required' => false,
+                'payment_methods' => [],
+            ],
             'target_hub' => $this->hubPayload($hub),
         ]);
     }

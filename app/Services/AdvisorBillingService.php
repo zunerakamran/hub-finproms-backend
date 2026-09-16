@@ -26,7 +26,9 @@ class AdvisorBillingService
         private readonly PaymentSettingsService $paymentSettings,
         private readonly BankTransferSubscriptionService $bankTransfer,
         private readonly HubService $hubs,
-        private readonly SubscriberCreditsService $subscriberCredits
+        private readonly SubscriberCreditsService $subscriberCredits,
+        private readonly AdvisorImportService $imports,
+        private readonly WhiteLabelDatabaseService $remoteDb
     ) {}
 
     public function billingEnabled(?Hub $hub = null): bool
@@ -258,18 +260,20 @@ class AdvisorBillingService
     }
 
     /**
-     * Create a pending billing quote after advisor import.
-     * WP-style: rate from TOTAL active advisors, charge only this import batch.
+     * Create a pending billing quote for a staged advisor import.
+     * Users are NOT created yet — they are committed when checkout/Pay now runs.
+     * WP-style: rate from projected TOTAL advisors, charge only this import batch.
      *
      * @param  array<string, mixed>  $importSummary
+     * @param  array{rows: list<array<string, mixed>>, use_remote?: bool, skipped?: list<array<string, mixed>>}|null  $pendingImport
      */
     public function createPendingAfterImport(
         User $importer,
         array $importSummary = [],
         ?Hub $hub = null,
-        bool $countAdvisorsRemotely = false
-    ): ?HubAdvisorBilling
-    {
+        bool $countAdvisorsRemotely = false,
+        ?array $pendingImport = null
+    ): ?HubAdvisorBilling {
         $hub ??= $this->hubs->current();
 
         if (! $this->billingEnabled($hub)) {
@@ -279,9 +283,11 @@ class AdvisorBillingService
         $created = (int) ($importSummary['created'] ?? 0);
         $reactivated = (int) ($importSummary['reactivated'] ?? 0);
         $batchCount = (int) ($importSummary['billable_batch'] ?? ($created + $reactivated));
-        $totalAdvisors = $countAdvisorsRemotely
+        $currentAdvisors = $countAdvisorsRemotely
             ? $this->pricing->currentAdvisorCountForHub($hub)
             : $this->pricing->currentAdvisorCount();
+        // Projected headcount after this batch (users not created yet).
+        $totalAdvisors = $currentAdvisors + $batchCount;
 
         if ($batchCount < 1 || $totalAdvisors < 1) {
             return null;
@@ -306,6 +312,25 @@ class AdvisorBillingService
             ->where('payment_status', 'pending')
             ->update(['status' => HubAdvisorBilling::STATUS_CANCELED]);
 
+        $meta = [
+            'import_summary' => $importSummary,
+            'tier' => $quote['tier'],
+            'formula' => $quote['formula'],
+            'batch_count' => $quote['batch_count'],
+            'total_advisors' => $quote['total_advisors'],
+            'current_advisors' => $currentAdvisors,
+            'renewal_quantity' => $quote['total_advisors'],
+            'payer_role' => $payer->role,
+            'renew_day' => $hub->advisorBillingRenewDay(),
+            'target_hub_id' => $hub->id,
+            'target_hub_slug' => $hub->slug,
+            'import_committed' => false,
+        ];
+
+        if ($pendingImport !== null) {
+            $meta['pending_import'] = $pendingImport;
+        }
+
         return HubAdvisorBilling::query()->create([
             'hub_id' => $hub->id,
             'billed_user_id' => $payer->id,
@@ -318,19 +343,55 @@ class AdvisorBillingService
             'auto_renew' => true,
             'period_starts_at' => now(),
             'period_ends_at' => $periodEnds,
-            'meta' => [
-                'import_summary' => $importSummary,
-                'tier' => $quote['tier'],
-                'formula' => $quote['formula'],
-                'batch_count' => $quote['batch_count'],
-                'total_advisors' => $quote['total_advisors'],
-                'renewal_quantity' => $quote['total_advisors'],
-                'payer_role' => $payer->role,
-                'renew_day' => $hub->advisorBillingRenewDay(),
-                'target_hub_id' => $hub->id,
-                'target_hub_slug' => $hub->slug,
-            ],
+            'meta' => $meta,
         ]);
+    }
+
+    /**
+     * Create advisors from the staged import attached to this billing (idempotent).
+     * Called when the admin clicks Pay now — before payment is collected.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function fulfillPendingImport(HubAdvisorBilling $billing): ?array
+    {
+        $meta = is_array($billing->meta) ? $billing->meta : [];
+
+        if (! empty($meta['import_committed'])) {
+            return is_array($meta['import_result'] ?? null) ? $meta['import_result'] : null;
+        }
+
+        $pending = $meta['pending_import'] ?? null;
+        if (! is_array($pending) || empty($pending['rows']) || ! is_array($pending['rows'])) {
+            return null;
+        }
+
+        $hub = Hub::query()->find($billing->hub_id) ?? $this->hubs->current();
+        $useRemote = (bool) ($pending['use_remote'] ?? false);
+        $skipped = is_array($pending['skipped'] ?? null) ? $pending['skipped'] : [];
+
+        if ($useRemote && $hub->isWhiteLabel() && $hub->hasRemoteDatabaseConfigured()) {
+            $result = $this->remoteDb->run($hub, function (string $connection) use ($pending, $hub, $skipped) {
+                return $this->imports->commitPending($pending['rows'], $hub, $connection, $skipped);
+            });
+        } else {
+            $result = $this->imports->commitPending($pending['rows'], $hub, null, $skipped);
+        }
+
+        $meta['import_committed'] = true;
+        $meta['import_result'] = [
+            'created' => $result['created'] ?? [],
+            'updated' => $result['updated'] ?? [],
+            'reactivated' => $result['reactivated'] ?? [],
+            'skipped' => $result['skipped'] ?? [],
+            'summary' => $result['summary'] ?? [],
+        ];
+        // Drop plaintext passwords from staged rows once applied.
+        unset($meta['pending_import']);
+        $billing->meta = $meta;
+        $billing->save();
+
+        return $meta['import_result'];
     }
 
     public function nextRenewalAt(?Hub $hub = null): Carbon
@@ -402,6 +463,9 @@ class AdvisorBillingService
             throw new InvalidArgumentException('This billing was canceled. Import again to create a new quote.');
         }
 
+        // Create staged advisors only when Pay now is clicked (not on file upload).
+        $importResult = $this->fulfillPendingImport($billing->fresh());
+
         $payer = User::query()->findOrFail($billing->billed_user_id);
 
         if ($paymentMethod === 'saved_card') {
@@ -409,7 +473,10 @@ class AdvisorBillingService
                 throw new InvalidArgumentException('No saved card on file for the client admin. Choose Stripe to add a card.');
             }
 
-            return $this->chargeSavedCard($billing, $payer);
+            return [
+                ...$this->chargeSavedCard($billing->fresh(), $payer),
+                'import' => $importResult,
+            ];
         }
 
         $methods = collect($this->paymentSettings->publicMethods(
@@ -425,14 +492,23 @@ class AdvisorBillingService
         if ($paymentMethod === 'stripe') {
             // Card already on file from client-admin Card settings → charge it.
             if ($this->payerHasSavedCard($payer)) {
-                return $this->chargeSavedCard($billing, $payer);
+                return [
+                    ...$this->chargeSavedCard($billing->fresh(), $payer),
+                    'import' => $importResult,
+                ];
             }
 
-            return $this->checkoutStripe($billing, $payer);
+            return [
+                ...$this->checkoutStripe($billing->fresh(), $payer),
+                'import' => $importResult,
+            ];
         }
 
         if ($paymentMethod === 'bank_transfer') {
-            return $this->checkoutBankTransfer($billing, $payer);
+            return [
+                ...$this->checkoutBankTransfer($billing->fresh(), $payer),
+                'import' => $importResult,
+            ];
         }
 
         throw new InvalidArgumentException('Unsupported payment method.');
@@ -914,6 +990,9 @@ class AdvisorBillingService
 
     public function markPaid(HubAdvisorBilling $billing): HubAdvisorBilling
     {
+        // Safety net: commit staged advisors if checkout somehow skipped it.
+        $this->fulfillPendingImport($billing->fresh());
+
         return DB::transaction(function () use ($billing) {
             $locked = HubAdvisorBilling::query()
                 ->whereKey($billing->id)
