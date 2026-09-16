@@ -1178,8 +1178,10 @@ class Hub extends Model
     {
         return [
             'application_name' => $this->name,
-            'logo_url' => $this->logoPublicUrl(),
-            'favicon_url' => $this->faviconPublicUrl(),
+            // Absolute URLs so login/signup (and emails) always resolve the
+            // control-plane or local media host correctly.
+            'logo_url' => $this->logoAbsoluteUrl(),
+            'favicon_url' => $this->faviconAbsoluteUrl(),
             'from_email' => $this->from_email,
             'primary_color' => $this->primary_color,
             'secondary_color' => $this->secondary_color,
