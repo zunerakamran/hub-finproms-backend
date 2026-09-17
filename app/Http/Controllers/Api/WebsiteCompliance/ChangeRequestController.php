@@ -6,9 +6,11 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\WebsiteCompliance\ChangeRequest;
 use App\Models\WebsiteCompliance\Section;
+use App\Models\WebsiteCompliance\TemplateRequest;
 use App\Services\ActivityLogService;
 use App\Services\WebsiteCompliance\ChangeRequestPublishService;
 use App\Services\WebsiteCompliance\ChangeRequestWorkflowService;
+use App\Services\WebsiteCompliance\CpanelSyncService;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -380,6 +382,7 @@ class ChangeRequestController extends Controller
 
         $changeRequest = ChangeRequest::with(['section', 'currentVersionRow'])->findOrFail($id);
         $decoded = json_decode((string) $changeRequest->resolvedProposedContent(), true);
+        $branding = $this->resolvePreviewBranding($changeRequest, is_array($decoded) ? $decoded : null);
 
         if (is_array($decoded)) {
             $items = [];
@@ -393,13 +396,91 @@ class ChangeRequestController extends Controller
                 ];
             }
 
-            return response()->json(['is_batch' => true, 'edits' => $items]);
+            return response()->json(array_merge([
+                'is_batch' => true,
+                'edits' => $items,
+            ], $branding));
         }
 
-        return response()->json([
+        return response()->json(array_merge([
             'is_batch' => false,
             'current_content' => $changeRequest->section ? $changeRequest->section->content : null,
             'proposed_content' => $changeRequest->resolvedProposedContent(),
-        ]);
+        ], $branding));
+    }
+
+    /**
+     * Branding for in-hub preview must come from the advisor TemplateRequest,
+     * not the shared showcase template colours.
+     *
+     * @param  array<int, array<string, mixed>>|null  $batchEdits
+     * @return array<string, mixed>
+     */
+    private function resolvePreviewBranding(ChangeRequest $changeRequest, ?array $batchEdits): array
+    {
+        $section = $changeRequest->section;
+
+        if (! $section && is_array($batchEdits)) {
+            foreach ($batchEdits as $editItem) {
+                if (! empty($editItem['section_id'])) {
+                    $section = Section::find($editItem['section_id']);
+                    if ($section) {
+                        break;
+                    }
+                }
+            }
+        }
+
+        $templateRequest = $this->resolveTemplateRequestForSection($section);
+
+        if (! $templateRequest) {
+            return [
+                'primary_color' => '#0f5c45',
+                'secondary_color' => '#0a3f30',
+                'logo_url' => null,
+                'favicon_url' => null,
+                'template_request_id' => null,
+                'advisor_id' => $section?->advisor_id,
+                'site_url' => null,
+                'template_name' => null,
+            ];
+        }
+
+        $siteUrl = $templateRequest->cpanel_domain
+            ? rtrim((string) $templateRequest->cpanel_domain, '/')
+            : null;
+
+        return [
+            'primary_color' => $templateRequest->primary_color ?: '#0B1B3D',
+            'secondary_color' => $templateRequest->secondary_color ?: '#C8102E',
+            'logo_url' => CpanelSyncService::absoluteAssetUrl($templateRequest->logo_url),
+            'favicon_url' => CpanelSyncService::absoluteAssetUrl($templateRequest->favicon_url),
+            'template_request_id' => $templateRequest->id,
+            'advisor_id' => $section?->advisor_id
+                ?? $templateRequest->advisor_id
+                ?? $templateRequest->assigned_advisor_id,
+            'site_url' => $siteUrl,
+            'template_name' => $templateRequest->template_name,
+        ];
+    }
+
+    private function resolveTemplateRequestForSection(?Section $section): ?TemplateRequest
+    {
+        if (! $section) {
+            return null;
+        }
+
+        if ($section->template_request_id) {
+            $byId = TemplateRequest::find((int) $section->template_request_id);
+            if ($byId) {
+                return $byId;
+            }
+        }
+
+        if (! $section->advisor_id) {
+            return null;
+        }
+
+        return CpanelSyncService::findDeployedRequest($section->advisor_id);
     }
 }

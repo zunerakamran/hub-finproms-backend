@@ -7,12 +7,23 @@ use App\Models\WebsiteCompliance\Page;
 use App\Models\WebsiteCompliance\Section;
 use App\Models\WebsiteCompliance\TemplateRequest;
 use App\Services\WebsiteCompliance\AdvisorSectionService;
+use App\Services\WebsiteCompliance\CpanelSyncService;
 use App\Support\WebsiteCompliance\HubTemplateCatalog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class PublicController extends Controller
 {
+    /** Showcase template defaults (catalog / shared preview site). */
+    private const SHOWCASE_PRIMARY = '#0f5c45';
+
+    private const SHOWCASE_SECONDARY = '#0a3f30';
+
+    /** Advisor site defaults when a TemplateRequest has no colours set. */
+    private const ADVISOR_PRIMARY = '#0B1B3D';
+
+    private const ADVISOR_SECONDARY = '#C8102E';
+
     public function getPage(string $slug): JsonResponse
     {
         $page = Page::with('sections')->where('slug', $slug)->firstOrFail();
@@ -34,6 +45,8 @@ class PublicController extends Controller
             return response()->json(['message' => 'Home page not found'], 404);
         }
 
+        $templateRequest = null;
+
         if ($advisorId === '0' || $advisorId === 'showcase' || $advisorId === null || $advisorId === '') {
             $sectionsQuery = Section::where('page_id', $page->id)->whereNull('advisor_id');
         } else {
@@ -41,10 +54,10 @@ class PublicController extends Controller
             $templateRequestId = $request->query('template_request_id');
 
             if ($templateRequestId) {
-                $tr = TemplateRequest::find((int) $templateRequestId);
+                $templateRequest = TemplateRequest::find((int) $templateRequestId);
                 AdvisorSectionService::ensureForAdvisor(
                     $advisorIdInt,
-                    $tr?->template_name ?: HubTemplateCatalog::defaultSlug(),
+                    $templateRequest?->template_name ?: HubTemplateCatalog::defaultSlug(),
                     false,
                     (int) $templateRequestId
                 );
@@ -52,7 +65,7 @@ class PublicController extends Controller
                     ->where('advisor_id', $advisorIdInt)
                     ->where('template_request_id', (int) $templateRequestId);
             } else {
-                $active = TemplateRequest::query()
+                $templateRequest = TemplateRequest::query()
                     ->where('status', 'deployed')
                     ->where(function ($q) use ($advisorIdInt) {
                         $q->where('advisor_id', $advisorIdInt)
@@ -61,16 +74,16 @@ class PublicController extends Controller
                     ->latest('id')
                     ->first();
 
-                if ($active) {
+                if ($templateRequest) {
                     AdvisorSectionService::ensureForAdvisor(
                         $advisorIdInt,
-                        $active->template_name ?: HubTemplateCatalog::defaultSlug(),
+                        $templateRequest->template_name ?: HubTemplateCatalog::defaultSlug(),
                         false,
-                        (int) $active->id
+                        (int) $templateRequest->id
                     );
                     $sectionsQuery = Section::where('page_id', $page->id)
                         ->where('advisor_id', $advisorIdInt)
-                        ->where('template_request_id', $active->id);
+                        ->where('template_request_id', $templateRequest->id);
                 } else {
                     $sectionsQuery = Section::where('page_id', $page->id)->whereRaw('1 = 0');
                 }
@@ -79,7 +92,7 @@ class PublicController extends Controller
 
         $sections = $sectionsQuery->orderBy('id')->get();
 
-        return response()->json($this->publicPagePayload($page, $sections))
+        return response()->json($this->publicPagePayload($page, $sections, $templateRequest))
             ->header('Cache-Control', 'no-store, no-cache, must-revalidate');
     }
 
@@ -100,7 +113,11 @@ class PublicController extends Controller
             ->header('Cache-Control', 'no-store, no-cache, must-revalidate');
     }
 
-    private function publicPagePayload(Page $page, $sections): array
+    /**
+     * @param  \Illuminate\Support\Collection<int, Section>|iterable<Section>  $sections
+     * @return array<string, mixed>
+     */
+    private function publicPagePayload(Page $page, $sections, ?TemplateRequest $templateRequest = null): array
     {
         $sectionsList = [];
         $sectionsMap = [];
@@ -134,15 +151,50 @@ class PublicController extends Controller
         }
 
         $sectionsList = array_values($sectionsList);
+        $branding = $this->resolveBranding($templateRequest);
 
-        return [
+        return array_merge([
             'id' => $page->id,
             'name' => $page->title,
             'slug' => $page->slug,
-            'primary_color' => '#0f5c45',
-            'secondary_color' => '#0a3f30',
             'sections' => $sectionsMap,
             'sections_list' => $sectionsList,
+        ], $branding);
+    }
+
+    /**
+     * Advisor preview must use TemplateRequest branding; showcase keeps catalog greens.
+     *
+     * @return array<string, mixed>
+     */
+    private function resolveBranding(?TemplateRequest $templateRequest): array
+    {
+        if (! $templateRequest) {
+            return [
+                'primary_color' => self::SHOWCASE_PRIMARY,
+                'secondary_color' => self::SHOWCASE_SECONDARY,
+                'logo_url' => null,
+                'favicon_url' => null,
+                'template_request_id' => null,
+                'advisor_id' => null,
+                'site_url' => null,
+                'template_name' => null,
+            ];
+        }
+
+        $siteUrl = $templateRequest->cpanel_domain
+            ? rtrim((string) $templateRequest->cpanel_domain, '/')
+            : null;
+
+        return [
+            'primary_color' => $templateRequest->primary_color ?: self::ADVISOR_PRIMARY,
+            'secondary_color' => $templateRequest->secondary_color ?: self::ADVISOR_SECONDARY,
+            'logo_url' => CpanelSyncService::absoluteAssetUrl($templateRequest->logo_url),
+            'favicon_url' => CpanelSyncService::absoluteAssetUrl($templateRequest->favicon_url),
+            'template_request_id' => $templateRequest->id,
+            'advisor_id' => $templateRequest->advisor_id ?? $templateRequest->assigned_advisor_id,
+            'site_url' => $siteUrl,
+            'template_name' => $templateRequest->template_name,
         ];
     }
 }
