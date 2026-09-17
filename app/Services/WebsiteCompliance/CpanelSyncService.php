@@ -447,6 +447,14 @@ class CpanelSyncService
                     'body' => is_array($body) ? $body : mb_substr((string) $rawBody, 0, 400),
                 ];
 
+                if ((int) $response->status() === 401) {
+                    $last['message'] = 'Unauthorized: cPanel API key on this deployment does not match SECRET_API_KEY in the advisor site cpanel-config.php.';
+                    // No point trying alternate paths with the same key.
+                    Log::warning("cPanel push ({$label}) unauthorized at {$endpoint}");
+
+                    return $last;
+                }
+
                 // Treat JSON status=success as synced. Older success checks required
                 // db_active/updated_count and falsely failed when MySQL was down but
                 // content.json (visibility meta) was written, or when updated_count stayed 0.
@@ -584,6 +592,16 @@ class CpanelSyncService
 
         $payload = self::buildBasePayload($templateRequest, $advisorId);
         $payload['sections'] = $sectionsUpdated;
+
+        if (! filled($payload['api_key'] ?? null)) {
+            return [
+                'ok' => false,
+                'endpoint' => self::normalizeAdvisorSiteUrl($templateRequest->cpanel_domain).'/api.php',
+                'message' => 'No cpanel_api_key saved on this deployment. Set the same SECRET_API_KEY used in the advisor site cpanel-config.php.',
+                'http_status' => null,
+                'body' => null,
+            ];
+        }
 
         return self::postToCpanelWithDetails($templateRequest, $payload, count($sectionsUpdated).' section(s)');
     }
