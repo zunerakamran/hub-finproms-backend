@@ -401,27 +401,103 @@ class CpanelSyncService
 
     protected static function postToCpanel(TemplateRequest $templateRequest, array $payload, mixed $label): bool
     {
+        $result = self::postToCpanelWithDetails($templateRequest, $payload, $label);
+
+        return (bool) ($result['ok'] ?? false);
+    }
+
+    /**
+     * @return array{ok: bool, endpoint: ?string, message: ?string, http_status: ?int, body: mixed}
+     */
+    public static function postToCpanelWithDetails(TemplateRequest $templateRequest, array $payload, mixed $label): array
+    {
+        $last = [
+            'ok' => false,
+            'endpoint' => null,
+            'message' => 'No cPanel endpoints could be reached.',
+            'http_status' => null,
+            'body' => null,
+        ];
+
         foreach (self::advisorApiEndpoints($templateRequest) as $endpoint) {
             try {
-                $response = Http::timeout(20)->post($endpoint, $payload);
+                $response = Http::timeout(25)
+                    ->withHeaders([
+                        'Accept' => 'application/json',
+                        'X-API-Key' => (string) ($payload['api_key'] ?? ''),
+                    ])
+                    ->withOptions(['verify' => false])
+                    ->asJson()
+                    ->post($endpoint, $payload);
+
                 $body = $response->json();
-                $dbActive = is_array($body) ? ($body['db_active'] ?? false) : false;
+                $rawBody = $response->body();
+                $statusOk = is_array($body) && (($body['status'] ?? '') === 'success');
+                $dbActive = is_array($body) ? (bool) ($body['db_active'] ?? false) : false;
                 $updatedCount = is_array($body) ? (int) ($body['updated_count'] ?? 0) : 0;
-                $configWritten = is_array($body) ? ($body['config_written'] ?? false) : false;
-                $statusOk = is_array($body) ? (($body['status'] ?? '') === 'success') : false;
+                $configWritten = is_array($body) ? (bool) ($body['config_written'] ?? false) : false;
 
-                if ($response->successful() && $statusOk && ($dbActive || $updatedCount > 0 || $configWritten)) {
-                    Log::info("cPanel sync ({$label}) OK via {$endpoint}");
+                $last = [
+                    'ok' => false,
+                    'endpoint' => $endpoint,
+                    'message' => is_array($body)
+                        ? (string) ($body['message'] ?? 'Unexpected cPanel response')
+                        : ('Non-JSON response (HTTP '.$response->status().')'),
+                    'http_status' => $response->status(),
+                    'body' => is_array($body) ? $body : mb_substr((string) $rawBody, 0, 400),
+                ];
 
-                    return true;
+                // Treat JSON status=success as synced. Older success checks required
+                // db_active/updated_count and falsely failed when MySQL was down but
+                // content.json (visibility meta) was written, or when updated_count stayed 0.
+                if ($response->successful() && $statusOk) {
+                    Log::info("cPanel sync ({$label}) OK via {$endpoint}", [
+                        'db_active' => $dbActive,
+                        'updated_count' => $updatedCount,
+                        'config_written' => $configWritten,
+                    ]);
+
+                    return [
+                        'ok' => true,
+                        'endpoint' => $endpoint,
+                        'message' => (string) ($body['message'] ?? 'Synced'),
+                        'http_status' => $response->status(),
+                        'body' => $body,
+                    ];
                 }
-                Log::warning('cPanel push ('.$label.') to '.$endpoint.' returned HTTP '.$response->status().' '.$response->body());
+
+                Log::warning('cPanel push ('.$label.') to '.$endpoint.' returned HTTP '.$response->status().' '.$rawBody);
             } catch (\Exception $e) {
+                $last = [
+                    'ok' => false,
+                    'endpoint' => $endpoint,
+                    'message' => $e->getMessage(),
+                    'http_status' => null,
+                    'body' => null,
+                ];
                 Log::error("Failed cPanel sync ({$label}) to {$endpoint}: ".$e->getMessage());
             }
         }
 
-        return false;
+        return $last;
+    }
+
+    /**
+     * Normalize advisor site root to an absolute URL (scheme required for Http client).
+     */
+    public static function normalizeAdvisorSiteUrl(?string $domain): string
+    {
+        $domain = trim((string) $domain);
+        if ($domain === '') {
+            return '';
+        }
+
+        $domain = rtrim($domain, '/');
+        if (! preg_match('#^https?://#i', $domain)) {
+            $domain = 'https://'.$domain;
+        }
+
+        return $domain;
     }
 
     /**
@@ -429,32 +505,87 @@ class CpanelSyncService
      */
     public static function advisorApiEndpoints(TemplateRequest $templateRequest): array
     {
-        $domain = rtrim((string) $templateRequest->cpanel_domain, '/');
+        $domain = self::normalizeAdvisorSiteUrl($templateRequest->cpanel_domain);
+        if ($domain === '') {
+            return [];
+        }
+
         $slug = preg_replace('/[^a-z0-9_-]/i', '', (string) ($templateRequest->template_name ?: 'template4')) ?: 'template4';
 
-        // Live advisor sites ship the template4-showcase package (not the unused template4 repo).
+        // Live advisor sites ship the template4-showcase package.
         $pathSlugs = array_values(array_unique(array_filter([
-            $slug,
             $slug === 'template4' || $slug === 'template4showcase' ? 'template4-showcase' : null,
+            $slug,
             $slug === 'template4-showcase' ? 'template4' : null,
         ])));
 
         $origin = preg_replace('#/(template[\w-]+|public)/?$#i', '', $domain) ?: $domain;
+        $origin = rtrim((string) $origin, '/');
 
-        $endpoints = [
-            "{$domain}/api.php",
-            "{$domain}/api.php?action=sync",
-            "{$domain}/public/api.php",
-        ];
+        $endpoints = [];
+
+        // Prefer paths that already include the template folder on cpanel_domain.
+        $endpoints[] = "{$domain}/api.php";
+        $endpoints[] = "{$domain}/public/api.php";
 
         foreach ($pathSlugs as $pathSlug) {
-            $endpoints[] = "{$domain}/{$pathSlug}/api.php";
-            $endpoints[] = "{$domain}/{$pathSlug}/public/api.php";
             $endpoints[] = "{$origin}/{$pathSlug}/api.php";
             $endpoints[] = "{$origin}/{$pathSlug}/public/api.php";
+            $endpoints[] = "{$domain}/{$pathSlug}/api.php";
+            $endpoints[] = "{$domain}/{$pathSlug}/public/api.php";
         }
 
+        $endpoints[] = "{$domain}/api.php?action=sync";
+
         return array_values(array_unique(array_filter($endpoints)));
+    }
+
+    public static function pushToTemplateRequestCpanel(TemplateRequest $templateRequest, array $sectionsUpdated = []): bool
+    {
+        $result = self::pushToTemplateRequestCpanelWithDetails($templateRequest, $sectionsUpdated);
+
+        return (bool) ($result['ok'] ?? false);
+    }
+
+    /**
+     * @return array{ok: bool, endpoint: ?string, message: ?string, http_status: ?int, body: mixed}
+     */
+    public static function pushToTemplateRequestCpanelWithDetails(TemplateRequest $templateRequest, array $sectionsUpdated = []): array
+    {
+        if (! $templateRequest->cpanel_domain) {
+            Log::info('pushToTemplateRequestCpanel: no cpanel_domain on template request #'.$templateRequest->id);
+
+            return [
+                'ok' => false,
+                'endpoint' => null,
+                'message' => 'No cpanel_domain configured on this deployment.',
+                'http_status' => null,
+                'body' => null,
+            ];
+        }
+
+        $advisorId = $templateRequest->advisor_id ?? $templateRequest->assigned_advisor_id;
+
+        if (empty($sectionsUpdated)) {
+            $sectionsUpdated = self::advisorSectionPayloadForTemplateRequest((int) $templateRequest->id);
+        }
+
+        if (empty($sectionsUpdated)) {
+            Log::warning("No hub sections to push for template_request #{$templateRequest->id} (advisor {$advisorId}).");
+
+            return [
+                'ok' => false,
+                'endpoint' => null,
+                'message' => 'No hub sections found to push for this deployment.',
+                'http_status' => null,
+                'body' => null,
+            ];
+        }
+
+        $payload = self::buildBasePayload($templateRequest, $advisorId);
+        $payload['sections'] = $sectionsUpdated;
+
+        return self::postToCpanelWithDetails($templateRequest, $payload, count($sectionsUpdated).' section(s)');
     }
 
     public static function advisorSectionPayload(mixed $advisorId): array
@@ -488,7 +619,6 @@ class CpanelSyncService
                 'name' => $name,
                 'section_key' => $sec->section_key ?: strtolower((string) preg_replace('/[^a-z0-9]/i', '', $name)),
                 'display_name' => $sec->display_name ?: $name,
-                // Explicit 0/1 — some PHP receivers cast string "false" incorrectly.
                 'is_visible' => $sec->is_visible === false || $sec->is_visible === 0 || $sec->is_visible === '0' ? 0 : 1,
                 'content' => $sec->content,
             ];
@@ -514,38 +644,11 @@ class CpanelSyncService
                 'name' => $name,
                 'section_key' => $sec->section_key ?: strtolower((string) preg_replace('/[^a-z0-9]/i', '', $name)),
                 'display_name' => $sec->display_name ?: $name,
-                // Explicit 0/1 — some PHP receivers cast string "false" incorrectly.
                 'is_visible' => $sec->is_visible === false || $sec->is_visible === 0 || $sec->is_visible === '0' ? 0 : 1,
                 'content' => $sec->content,
             ];
         }
 
         return $payload;
-    }
-
-    public static function pushToTemplateRequestCpanel(TemplateRequest $templateRequest, array $sectionsUpdated = []): bool
-    {
-        if (! $templateRequest->cpanel_domain) {
-            Log::info('pushToTemplateRequestCpanel: no cpanel_domain on template request #'.$templateRequest->id);
-
-            return false;
-        }
-
-        $advisorId = $templateRequest->advisor_id ?? $templateRequest->assigned_advisor_id;
-
-        if (empty($sectionsUpdated)) {
-            $sectionsUpdated = self::advisorSectionPayloadForTemplateRequest((int) $templateRequest->id);
-        }
-
-        if (empty($sectionsUpdated)) {
-            Log::warning("No hub sections to push for template_request #{$templateRequest->id} (advisor {$advisorId}).");
-
-            return false;
-        }
-
-        $payload = self::buildBasePayload($templateRequest, $advisorId);
-        $payload['sections'] = $sectionsUpdated;
-
-        return self::postToCpanel($templateRequest, $payload, count($sectionsUpdated).' section(s)');
     }
 }

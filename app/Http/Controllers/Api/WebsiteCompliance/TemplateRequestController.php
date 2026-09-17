@@ -411,8 +411,10 @@ class TemplateRequestController extends Controller
         }
 
         $cpanelSynced = false;
+        $syncDetails = null;
         if ($updated !== []) {
-            $cpanelSynced = CpanelSyncService::pushToTemplateRequestCpanel($templateRequest);
+            $syncDetails = CpanelSyncService::pushToTemplateRequestCpanelWithDetails($templateRequest);
+            $cpanelSynced = (bool) ($syncDetails['ok'] ?? false);
 
             $this->activityLogs->log([
                 'action' => 'wc.template_request.sections_update',
@@ -424,13 +426,36 @@ class TemplateRequestController extends Controller
             ]);
         }
 
+        if ($cpanelSynced) {
+            return response()->json([
+                'message' => 'Section settings saved and synced to the deployed site.',
+                'cpanel_synced' => true,
+                'cpanel_endpoint' => $syncDetails['endpoint'] ?? null,
+                'sections' => $updated,
+            ]);
+        }
+
+        $detail = is_array($syncDetails) ? trim((string) ($syncDetails['message'] ?? '')) : '';
+        $endpoint = is_array($syncDetails) ? ($syncDetails['endpoint'] ?? null) : null;
+        $httpStatus = is_array($syncDetails) ? ($syncDetails['http_status'] ?? null) : null;
+
+        $message = 'Section settings saved in the hub, but the live advisor site was not updated.';
+        if ($detail !== '') {
+            $message .= ' '.$detail;
+        }
+        if ($endpoint) {
+            $message .= ' (tried: '.$endpoint.($httpStatus ? ', HTTP '.$httpStatus : '').')';
+        } else {
+            $message .= ' Check cPanel domain / API key on the deployment.';
+        }
+
         return response()->json([
-            'message' => $cpanelSynced
-                ? 'Section settings saved and synced to the deployed site.'
-                : 'Section settings saved in the hub, but the live advisor site was not updated. Check cPanel domain / API key.',
-            'cpanel_synced' => $cpanelSynced,
+            'message' => $message,
+            'cpanel_synced' => false,
+            'cpanel_endpoint' => $endpoint,
+            'cpanel_http_status' => $httpStatus,
             'sections' => $updated,
-        ], $updated !== [] && ! $cpanelSynced ? 502 : 200);
+        ], 502);
     }
 
     public function publishContent(Request $request, int $id): JsonResponse
