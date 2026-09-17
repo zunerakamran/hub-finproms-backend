@@ -14,6 +14,7 @@ use App\Support\WebsiteCompliance\HubTemplateCatalog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
 class TemplateController extends Controller
 {
@@ -102,7 +103,13 @@ class TemplateController extends Controller
 
         $request->validate([
             'name' => 'required|string|max:255',
-            'slug' => 'nullable|string|max:255|unique:wc_templates,slug',
+            'slug' => [
+                'nullable',
+                'string',
+                'max:255',
+                // Use the Template model so uniqueness hits the acting white-label DB.
+                Rule::unique(Template::class, 'slug'),
+            ],
             'description' => 'nullable|string',
             'thumbnail_url' => 'nullable|string|max:500',
             'preview_url' => 'nullable|string|max:500',
@@ -112,7 +119,13 @@ class TemplateController extends Controller
 
         $slug = $request->slug ? Str::slug($request->slug) : Str::slug($request->name);
 
-        if (! HubTemplateCatalog::allows($slug) && HubTemplateCatalog::allowedSlugs() !== []) {
+        // Local HUB_SLUG deploys stay catalog-bound. Remote PA/FinProms write to the
+        // acting white-label DB, so that hub may register any showcase slug it needs.
+        if (
+            ! $this->gate->isRemoteControlPlaneOperator($user)
+            && ! HubTemplateCatalog::allows($slug)
+            && HubTemplateCatalog::allowedSlugs() !== []
+        ) {
             return response()->json([
                 'message' => "Template slug [{$slug}] is not owned by hub [".HubTemplateCatalog::currentHubSlug().'].',
                 'allowed_templates' => HubTemplateCatalog::allowedSlugs(),
@@ -123,7 +136,20 @@ class TemplateController extends Controller
         $thumbnailUrl = $request->thumbnail_url;
 
         if ($previewUrl && ! $thumbnailUrl) {
-            $thumbnailUrl = app(TemplatePreviewCaptureService::class)->capture($previewUrl);
+            try {
+                $thumbnailUrl = app(TemplatePreviewCaptureService::class)->capture($previewUrl);
+            } catch (\Throwable $e) {
+                report($e);
+                $thumbnailUrl = null;
+            }
+        }
+
+        $existing = Template::query()->where('slug', $slug)->first();
+        if ($existing) {
+            return response()->json([
+                'message' => "A template with slug [{$slug}] already exists on this hub.",
+                'template' => $existing,
+            ], 422);
         }
 
         $template = Template::create([
@@ -136,13 +162,17 @@ class TemplateController extends Controller
             'is_active' => $request->has('is_active') ? (bool) $request->is_active : true,
         ]);
 
-        $this->activityLogs->log([
-            'action' => 'wc.template.create',
-            'description' => "Created showcase template: {$template->name} ({$template->slug})",
-            'user' => $user,
-            'subject' => $template,
-            'request' => $request,
-        ]);
+        try {
+            $this->activityLogs->log([
+                'action' => 'wc.template.create',
+                'description' => "Created showcase template: {$template->name} ({$template->slug})",
+                'user' => $user,
+                'subject' => $template,
+                'request' => $request,
+            ]);
+        } catch (\Throwable $e) {
+            report($e);
+        }
 
         return response()->json($template, 201);
     }
@@ -156,7 +186,13 @@ class TemplateController extends Controller
 
         $request->validate([
             'name' => 'sometimes|required|string|max:255',
-            'slug' => 'sometimes|required|string|max:255|unique:wc_templates,slug,'.$id,
+            'slug' => [
+                'sometimes',
+                'required',
+                'string',
+                'max:255',
+                Rule::unique(Template::class, 'slug')->ignore($id),
+            ],
             'description' => 'nullable|string',
             'thumbnail_url' => 'nullable|string|max:500',
             'preview_url' => 'nullable|string|max:500',
@@ -168,6 +204,16 @@ class TemplateController extends Controller
         $data = $request->only(['name', 'description', 'thumbnail_url', 'preview_url', 'dummy_content']);
         if ($request->has('slug')) {
             $data['slug'] = Str::slug($request->slug);
+            if (
+                ! $this->gate->isRemoteControlPlaneOperator($user)
+                && ! HubTemplateCatalog::allows($data['slug'])
+                && HubTemplateCatalog::allowedSlugs() !== []
+            ) {
+                return response()->json([
+                    'message' => "Template slug [{$data['slug']}] is not owned by hub [".HubTemplateCatalog::currentHubSlug().'].',
+                    'allowed_templates' => HubTemplateCatalog::allowedSlugs(),
+                ], 422);
+            }
         }
         if ($request->has('is_active')) {
             $data['is_active'] = (bool) $request->is_active;
@@ -183,21 +229,29 @@ class TemplateController extends Controller
             || ($request->has('preview_url') && $previewUrl !== $template->preview_url);
 
         if ($shouldCapture && $previewUrl) {
-            $captured = app(TemplatePreviewCaptureService::class)->capture($previewUrl);
-            if ($captured) {
-                $data['thumbnail_url'] = $captured;
+            try {
+                $captured = app(TemplatePreviewCaptureService::class)->capture($previewUrl);
+                if ($captured) {
+                    $data['thumbnail_url'] = $captured;
+                }
+            } catch (\Throwable $e) {
+                report($e);
             }
         }
 
         $template->update($data);
 
-        $this->activityLogs->log([
-            'action' => 'wc.template.update',
-            'description' => "Updated template ID {$template->id}: {$template->name}",
-            'user' => $user,
-            'subject' => $template,
-            'request' => $request,
-        ]);
+        try {
+            $this->activityLogs->log([
+                'action' => 'wc.template.update',
+                'description' => "Updated template ID {$template->id}: {$template->name}",
+                'user' => $user,
+                'subject' => $template,
+                'request' => $request,
+            ]);
+        } catch (\Throwable $e) {
+            report($e);
+        }
 
         return response()->json($template);
     }
@@ -209,13 +263,17 @@ class TemplateController extends Controller
 
         $template = Template::findOrFail($id);
 
-        $this->activityLogs->log([
-            'action' => 'wc.template.delete',
-            'description' => "Deleted template: {$template->name} ({$template->slug})",
-            'user' => $user,
-            'subject' => $template,
-            'request' => $request,
-        ]);
+        try {
+            $this->activityLogs->log([
+                'action' => 'wc.template.delete',
+                'description' => "Deleted template: {$template->name} ({$template->slug})",
+                'user' => $user,
+                'subject' => $template,
+                'request' => $request,
+            ]);
+        } catch (\Throwable $e) {
+            report($e);
+        }
 
         $template->delete();
 

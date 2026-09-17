@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\WebsiteCompliance;
 
 use App\Http\Controllers\Controller;
+use App\Models\User;
 use App\Models\WebsiteCompliance\Page;
 use App\Models\WebsiteCompliance\Section;
 use App\Models\WebsiteCompliance\TemplateRequest;
@@ -11,7 +12,6 @@ use App\Services\WebsiteCompliance\AdvisorSectionService;
 use App\Services\WebsiteCompliance\CpanelSyncService;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
 use App\Support\WebsiteCompliance\HubTemplateCatalog;
-use App\Support\WebsiteCompliance\WcDatabaseContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -51,8 +51,6 @@ class TemplateRequestController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        $usersConnection = WcDatabaseContext::connection() ?: config('database.default');
-
         $request->validate([
             'domain_name' => 'required|string|max:255',
             'template_name' => 'nullable|string|max:255',
@@ -61,7 +59,7 @@ class TemplateRequestController extends Controller
             'favicon_url' => 'nullable|string|max:1000',
             'primary_color' => 'nullable|string|max:50',
             'secondary_color' => 'nullable|string|max:50',
-            'assigned_advisor_id' => ['nullable', Rule::exists('users', 'id')->connection($usersConnection)],
+            'assigned_advisor_id' => ['nullable', Rule::exists(User::class, 'id')],
         ]);
 
         $user = $request->user();
@@ -238,9 +236,7 @@ class TemplateRequestController extends Controller
         }
 
         $request->validate([
-            'assigned_advisor_id' => ['required', Rule::exists('users', 'id')->connection(
-                WcDatabaseContext::connection() ?: config('database.default')
-            )],
+            'assigned_advisor_id' => ['required', Rule::exists(User::class, 'id')],
         ]);
 
         $templateRequest = TemplateRequest::with($this->requestRelations())->findOrFail($id);

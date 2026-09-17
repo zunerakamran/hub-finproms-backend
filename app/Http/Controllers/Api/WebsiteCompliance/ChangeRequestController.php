@@ -3,13 +3,13 @@
 namespace App\Http\Controllers\Api\WebsiteCompliance;
 
 use App\Http\Controllers\Controller;
+use App\Models\User;
 use App\Models\WebsiteCompliance\ChangeRequest;
 use App\Models\WebsiteCompliance\Section;
 use App\Services\ActivityLogService;
 use App\Services\WebsiteCompliance\ChangeRequestPublishService;
 use App\Services\WebsiteCompliance\ChangeRequestWorkflowService;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
-use App\Support\WebsiteCompliance\WcDatabaseContext;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -179,9 +179,7 @@ class ChangeRequestController extends Controller
         $this->gate->assertCan($user, 'wc_assign_change_requests');
 
         $request->validate([
-            'approver_id' => ['required', Rule::exists('users', 'id')->connection(
-                WcDatabaseContext::connection() ?: config('database.default')
-            )],
+            'approver_id' => ['required', Rule::exists(User::class, 'id')],
         ]);
 
         $changeRequest = ChangeRequest::findOrFail($id);

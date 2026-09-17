@@ -298,6 +298,64 @@ class WhiteLabelControlPlaneTest extends TestCase
             ->assertJsonFragment(['preview_url' => 'https://myhub.fin-proms.com/template4/']);
     }
 
+    public function test_power_admin_can_register_template_on_acting_white_label_hub(): void
+    {
+        config([
+            'services.website_compliance.hub_showcase_templates' => [
+                'myhub' => ['template4'],
+                'shared' => [],
+            ],
+        ]);
+
+        [$admin, $hub] = $this->actingPowerAdminOnWiredHub();
+
+        $checklist = $hub->resolvedChecklist();
+        $checklist['module_website_compliance'] = true;
+        $hub->forceFill(['checklist' => $checklist])->save();
+
+        $remote = app(WhiteLabelDatabaseService::class);
+        $connection = $remote->connect($hub);
+        try {
+            Schema::connection($connection)->create('wc_templates', function (Blueprint $table) {
+                $table->id();
+                $table->string('name');
+                $table->string('slug')->unique();
+                $table->text('description')->nullable();
+                $table->string('thumbnail_url', 500)->nullable();
+                $table->string('preview_url', 500)->nullable();
+                $table->longText('dummy_content')->nullable();
+                $table->boolean('is_active')->default(true);
+                $table->timestamps();
+            });
+        } finally {
+            $remote->disconnect($hub);
+        }
+
+        // Shared DB must not be used for uniqueness — leave shared without this slug.
+        $this->assertDatabaseMissing('wc_templates', ['slug' => 'template-new']);
+
+        $this->postJson('/api/website-compliance/templates', [
+            'name' => 'Template New',
+            'slug' => 'template-new',
+            'description' => 'Registered remotely onto myhub',
+            'is_active' => true,
+        ])
+            ->assertCreated()
+            ->assertJsonFragment(['slug' => 'template-new', 'name' => 'Template New']);
+
+        $this->assertDatabaseMissing('wc_templates', ['slug' => 'template-new']);
+
+        $connection = $remote->connect($hub);
+        try {
+            $this->assertDatabaseHas('wc_templates', [
+                'slug' => 'template-new',
+                'name' => 'Template New',
+            ], $connection);
+        } finally {
+            $remote->disconnect($hub);
+        }
+    }
+
     public function test_power_admin_sees_white_label_deployment_requests_and_platform_summary_remotely(): void
     {
         config([
