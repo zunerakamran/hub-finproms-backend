@@ -74,6 +74,11 @@ Route::get('/website-compliance/uploaded-images/{filename}', [WcUploadController
     ->where('filename', '[A-Za-z0-9._-]+');
 Route::get('/website-compliance/scheduler/publish-scheduled', [WcSchedulerController::class, 'publishScheduled']);
 
+// Hub iframe preview of live advisor sites (bypasses X-Frame-Options on cPanel).
+Route::match(['GET', 'HEAD'], '/website-compliance/embed-site/{templateRequestId}/{path?}', [WcPublicController::class, 'embedAdvisorSite'])
+    ->whereNumber('templateRequestId')
+    ->where('path', '.*');
+
 Route::middleware('hub_can:member_browse_catalog')->group(function () {
     Route::get('/categories', [CategoryController::class, 'index']);
     Route::get('/types', [ContentTypeController::class, 'index']);

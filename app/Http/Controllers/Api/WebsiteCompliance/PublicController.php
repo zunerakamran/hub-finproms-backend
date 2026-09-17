@@ -11,6 +11,8 @@ use App\Services\WebsiteCompliance\CpanelSyncService;
 use App\Support\WebsiteCompliance\HubTemplateCatalog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Http;
 
 class PublicController extends Controller
 {
@@ -196,5 +198,79 @@ class PublicController extends Controller
             'site_url' => $siteUrl,
             'template_name' => $templateRequest->template_name,
         ];
+    }
+
+    /**
+     * Reverse-proxy an advisor cPanel site so the hub can iframe it.
+     * Live advisor hosts often send X-Frame-Options: SAMEORIGIN ("refused to connect").
+     * Only the registered cpanel_domain for this TemplateRequest may be fetched (SSRF-safe).
+     */
+    public function embedAdvisorSite(Request $request, int $templateRequestId, ?string $path = null): Response
+    {
+        if (! in_array($request->method(), ['GET', 'HEAD'], true)) {
+            abort(405);
+        }
+
+        $templateRequest = TemplateRequest::find($templateRequestId);
+        if (! $templateRequest || ! filled($templateRequest->cpanel_domain)) {
+            abort(404, 'Deployment site not configured');
+        }
+
+        $base = rtrim(CpanelSyncService::normalizeAdvisorSiteUrl($templateRequest->cpanel_domain), '/').'/';
+        $path = str_replace('\\', '/', (string) $path);
+        $path = ltrim($path, '/');
+        if ($path !== '' && (str_contains($path, '..') || str_starts_with($path, '/'))) {
+            abort(400, 'Invalid path');
+        }
+
+        $target = $base.$path;
+        if ($qs = $request->getQueryString()) {
+            $target .= '?'.$qs;
+        }
+
+        $baseHostPath = $this->embedUrlPrefix($base);
+        $targetHostPath = $this->embedUrlPrefix($target);
+        if ($baseHostPath === '' || ! str_starts_with($targetHostPath, $baseHostPath)) {
+            abort(403, 'Target outside deployment site');
+        }
+
+        try {
+            $upstream = Http::timeout(45)
+                ->withOptions([
+                    'verify' => false,
+                    'allow_redirects' => ['max' => 5, 'strict' => true, 'referer' => true, 'track_redirects' => true],
+                ])
+                ->withHeaders([
+                    'User-Agent' => 'FinProms-WC-Embed/1.0',
+                    'Accept' => $request->header('Accept', '*/*'),
+                ])
+                ->get($target);
+        } catch (\Throwable $e) {
+            return response('Upstream advisor site unreachable: '.$e->getMessage(), 502)
+                ->header('Content-Type', 'text/plain; charset=UTF-8')
+                ->header('Content-Security-Policy', "frame-ancestors *");
+        }
+
+        $contentType = (string) ($upstream->header('Content-Type') ?: 'application/octet-stream');
+
+        // Drop framing headers from upstream; allow the hub (and any parent) to embed.
+        return response($upstream->body(), $upstream->status())
+            ->header('Content-Type', $contentType)
+            ->header('Cache-Control', 'private, no-store')
+            ->header('Content-Security-Policy', "frame-ancestors *");
+    }
+
+    /** Host + path prefix used for SSRF checks (scheme-insensitive, trailing slash normalized). */
+    private function embedUrlPrefix(string $url): string
+    {
+        $parts = parse_url($url);
+        if (! is_array($parts) || empty($parts['host'])) {
+            return '';
+        }
+
+        $host = strtolower((string) $parts['host']);
+        $path = isset($parts['path']) ? rtrim((string) $parts['path'], '/') : '';
+
+        return $host.$path;
     }
 }
