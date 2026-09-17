@@ -139,8 +139,8 @@ class PublicController extends Controller
             'id' => $page->id,
             'name' => $page->title,
             'slug' => $page->slug,
-            'primary_color' => '#0B1B3D',
-            'secondary_color' => '#C8102E',
+            'primary_color' => '#0f5c45',
+            'secondary_color' => '#0a3f30',
             'sections' => $sectionsMap,
             'sections_list' => $sectionsList,
         ];

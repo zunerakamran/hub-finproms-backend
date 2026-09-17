@@ -43,10 +43,10 @@ class UploadController extends Controller
                 $extension = 'jpg';
             }
 
-            $allowed = ['jpeg', 'jpg', 'png', 'gif', 'webp', 'svg'];
+            $allowed = ['jpeg', 'jpg', 'png', 'gif', 'webp', 'svg', 'ico'];
             if (! in_array($extension, $allowed, true)) {
                 return response()->json([
-                    'message' => 'Only jpeg, png, gif, webp, or svg images are allowed.',
+                    'message' => 'Only jpeg, png, gif, webp, svg, or ico images are allowed.',
                 ], 422);
             }
 

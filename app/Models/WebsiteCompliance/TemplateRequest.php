@@ -20,6 +20,7 @@ class TemplateRequest extends Model
         'request_type',
         'domain_name',
         'logo_url',
+        'favicon_url',
         'primary_color',
         'secondary_color',
         'status',

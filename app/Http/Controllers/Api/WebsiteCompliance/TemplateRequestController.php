@@ -53,7 +53,8 @@ class TemplateRequestController extends Controller
             'domain_name' => 'required|string|max:255',
             'template_name' => 'nullable|string|max:255',
             'request_type' => 'nullable|in:advisor_website,hub_main_website',
-            'logo_url' => 'nullable|string|max:500',
+            'logo_url' => 'nullable|string|max:1000',
+            'favicon_url' => 'nullable|string|max:1000',
             'primary_color' => 'nullable|string|max:50',
             'secondary_color' => 'nullable|string|max:50',
             'assigned_advisor_id' => 'nullable|exists:users,id',
@@ -80,9 +81,10 @@ class TemplateRequestController extends Controller
             'request_type' => $requestType,
             'assigned_advisor_id' => $request->assigned_advisor_id,
             'domain_name' => $request->domain_name,
-            'logo_url' => $request->logo_url,
-            'primary_color' => $request->primary_color ?? '#0B1B3D',
-            'secondary_color' => $request->secondary_color ?? '#C8102E',
+            'logo_url' => CpanelSyncService::absoluteAssetUrl($request->logo_url),
+            'favicon_url' => CpanelSyncService::absoluteAssetUrl($request->favicon_url),
+            'primary_color' => $request->primary_color ?? '#0f5c45',
+            'secondary_color' => $request->secondary_color ?? '#0a3f30',
             'status' => 'pending',
         ]);
 

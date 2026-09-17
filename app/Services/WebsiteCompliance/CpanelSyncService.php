@@ -89,12 +89,53 @@ class CpanelSyncService
             'laravel_api_url' => $hubApi,
             'primary_color' => $templateRequest->primary_color,
             'secondary_color' => $templateRequest->secondary_color,
-            'logo_url' => $templateRequest->logo_url,
+            'logo_url' => self::absoluteAssetUrl($templateRequest->logo_url),
+            'favicon_url' => self::absoluteAssetUrl($templateRequest->favicon_url),
             'db_host' => $templateRequest->cpanel_db_host ?: 'localhost',
             'db_name' => $templateRequest->cpanel_db_name,
             'db_user' => $templateRequest->cpanel_db_user,
             'db_pass' => $templateRequest->cpanel_db_password,
         ];
+    }
+
+    /**
+     * Make uploaded asset paths loadable from advisor cPanel sites.
+     */
+    public static function absoluteAssetUrl(mixed $path): ?string
+    {
+        if (! is_string($path)) {
+            return null;
+        }
+
+        $path = trim($path);
+        if ($path === '') {
+            return null;
+        }
+
+        if (preg_match('#^(https?:|data:|blob:)#i', $path)) {
+            return $path;
+        }
+
+        $hubApi = self::hubApiUrl();
+        $filename = basename(parse_url($path, PHP_URL_PATH) ?: $path);
+
+        if ($filename !== '' && (
+            str_contains($path, 'uploaded-images')
+            || str_contains($path, '/uploads/')
+            || str_starts_with($path, 'uploads/')
+        )) {
+            return $hubApi.'/website-compliance/uploaded-images/'.$filename;
+        }
+
+        if (str_starts_with($path, '/website-compliance/')) {
+            return $hubApi.$path;
+        }
+
+        if (str_starts_with($path, '/')) {
+            return $hubApi.$path;
+        }
+
+        return $hubApi.'/'.ltrim($path, '/');
     }
 
     public static function hubApiUrl(): string
