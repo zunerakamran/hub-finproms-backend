@@ -22,7 +22,7 @@ class CpanelSyncService
 
         $advisorId = $advisorId ?? $templateRequest->advisor_id ?? $templateRequest->assigned_advisor_id;
 
-        $payload = self::buildBasePayload($templateRequest, $advisorId);
+        $payload = self::buildBasePayload($templateRequest, $advisorId, true);
         $payload['write_config'] = true;
         $payload['sections'] = $advisorId
             ? self::advisorSectionPayloadForTemplateRequest((int) $templateRequest->id)
@@ -58,7 +58,7 @@ class CpanelSyncService
             return false;
         }
 
-        $payload = self::buildBasePayload($templateRequest, $advisorId);
+        $payload = self::buildBasePayload($templateRequest, $advisorId, false);
         $payload['sections'] = $sectionsUpdated;
 
         return self::postToCpanel($templateRequest, $payload, count($sectionsUpdated).' section(s)');
@@ -75,12 +75,12 @@ class CpanelSyncService
             ->first();
     }
 
-    public static function buildBasePayload(TemplateRequest $templateRequest, mixed $advisorId = null): array
+    public static function buildBasePayload(TemplateRequest $templateRequest, mixed $advisorId = null, bool $includeDbCredentials = true): array
     {
         $hubApi = self::hubApiUrl();
-        $siteUrl = rtrim((string) $templateRequest->cpanel_domain, '/');
+        $siteUrl = self::normalizeAdvisorSiteUrl($templateRequest->cpanel_domain) ?: rtrim((string) $templateRequest->cpanel_domain, '/');
 
-        return [
+        $payload = [
             'api_key' => $templateRequest->cpanel_api_key,
             'advisor_id' => $advisorId,
             'deployment_mode' => 'advisor',
@@ -92,11 +92,19 @@ class CpanelSyncService
             'secondary_color' => $templateRequest->secondary_color,
             'logo_url' => self::brandingAssetForCpanel($templateRequest->logo_url, 'logo'),
             'favicon_url' => self::brandingAssetForCpanel($templateRequest->favicon_url, 'favicon'),
-            'db_host' => $templateRequest->cpanel_db_host ?: 'localhost',
-            'db_name' => $templateRequest->cpanel_db_name,
-            'db_user' => $templateRequest->cpanel_db_user,
-            'db_pass' => $templateRequest->cpanel_db_password,
         ];
+
+        // Only send DB credentials on deploy/write_config. Routine content/visibility syncs
+        // must use the site's own cpanel-config.php — hub DB fields are often stale/wrong
+        // and override working local credentials (causing "MySQL is not connected").
+        if ($includeDbCredentials) {
+            $payload['db_host'] = $templateRequest->cpanel_db_host ?: 'localhost';
+            $payload['db_name'] = $templateRequest->cpanel_db_name;
+            $payload['db_user'] = $templateRequest->cpanel_db_user;
+            $payload['db_pass'] = $templateRequest->cpanel_db_password;
+        }
+
+        return $payload;
     }
 
     /**
@@ -590,7 +598,7 @@ class CpanelSyncService
             ];
         }
 
-        $payload = self::buildBasePayload($templateRequest, $advisorId);
+        $payload = self::buildBasePayload($templateRequest, $advisorId, false);
         $payload['sections'] = $sectionsUpdated;
 
         if (! filled($payload['api_key'] ?? null)) {
