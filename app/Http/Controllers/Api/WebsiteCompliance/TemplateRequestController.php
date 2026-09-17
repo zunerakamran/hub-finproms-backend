@@ -11,8 +11,10 @@ use App\Services\WebsiteCompliance\AdvisorSectionService;
 use App\Services\WebsiteCompliance\CpanelSyncService;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
 use App\Support\WebsiteCompliance\HubTemplateCatalog;
+use App\Support\WebsiteCompliance\WcDatabaseContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class TemplateRequestController extends Controller
 {
@@ -49,6 +51,8 @@ class TemplateRequestController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        $usersConnection = WcDatabaseContext::connection() ?: config('database.default');
+
         $request->validate([
             'domain_name' => 'required|string|max:255',
             'template_name' => 'nullable|string|max:255',
@@ -57,7 +61,7 @@ class TemplateRequestController extends Controller
             'favicon_url' => 'nullable|string|max:1000',
             'primary_color' => 'nullable|string|max:50',
             'secondary_color' => 'nullable|string|max:50',
-            'assigned_advisor_id' => 'nullable|exists:users,id',
+            'assigned_advisor_id' => ['nullable', Rule::exists('users', 'id')->connection($usersConnection)],
         ]);
 
         $user = $request->user();
@@ -74,17 +78,19 @@ class TemplateRequestController extends Controller
         $requestType = $request->request_type
             ?? ($this->gate->can($user, 'wc_deploy_websites') ? 'hub_main_website' : 'advisor_website');
 
+        $tenantUserId = $this->gate->tenantUserIdOrNull($user);
+
         $templateRequest = TemplateRequest::create([
-            'advisor_id' => $user->isAdvisor() ? $user->id : null,
-            'requested_by_id' => $user->id,
+            'advisor_id' => $user->isAdvisor() ? $tenantUserId : null,
+            'requested_by_id' => $tenantUserId,
             'template_name' => $templateName,
             'request_type' => $requestType,
             'assigned_advisor_id' => $request->assigned_advisor_id,
             'domain_name' => $request->domain_name,
             'logo_url' => CpanelSyncService::absoluteAssetUrl($request->logo_url),
             'favicon_url' => CpanelSyncService::absoluteAssetUrl($request->favicon_url),
-            'primary_color' => $request->primary_color ?? '#0f5c45',
-            'secondary_color' => $request->secondary_color ?? '#0a3f30',
+            'primary_color' => $request->primary_color ?? '#0B1B3D',
+            'secondary_color' => $request->secondary_color ?? '#C8102E',
             'status' => 'pending',
         ]);
 
@@ -111,7 +117,8 @@ class TemplateRequestController extends Controller
 
         $query = TemplateRequest::with($this->requestRelations());
 
-        if ($this->gate->can($user, 'wc_view_all_deployments')) {
+        // Control-plane operators (and anyone with view-all) see every deployment on the acting hub.
+        if ($this->gate->can($user, 'wc_view_all_deployments') || $this->gate->isRemoteControlPlaneOperator($user)) {
             $requests = $query->latest()->get();
         } elseif ($this->gate->can($user, 'wc_request_deployments')) {
             $requests = $query
@@ -231,7 +238,9 @@ class TemplateRequestController extends Controller
         }
 
         $request->validate([
-            'assigned_advisor_id' => 'required|exists:users,id',
+            'assigned_advisor_id' => ['required', Rule::exists('users', 'id')->connection(
+                WcDatabaseContext::connection() ?: config('database.default')
+            )],
         ]);
 
         $templateRequest = TemplateRequest::with($this->requestRelations())->findOrFail($id);

@@ -9,9 +9,11 @@ use App\Services\ActivityLogService;
 use App\Services\WebsiteCompliance\ChangeRequestPublishService;
 use App\Services\WebsiteCompliance\ChangeRequestWorkflowService;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
+use App\Support\WebsiteCompliance\WcDatabaseContext;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class ChangeRequestController extends Controller
 {
@@ -40,7 +42,7 @@ class ChangeRequestController extends Controller
 
             $changeRequest = ChangeRequest::create([
                 'section_id' => $primarySectionId,
-                'editor_id' => $user->id,
+                'editor_id' => $this->gate->tenantUserIdOrNull($user),
                 'proposed_content' => $proposedContent,
                 'status' => ChangeRequest::STATUS_PENDING,
                 'current_version' => 1,
@@ -76,7 +78,7 @@ class ChangeRequestController extends Controller
 
         $changeRequest = ChangeRequest::create([
             'section_id' => $request->section_id,
-            'editor_id' => $user->id,
+            'editor_id' => $this->gate->tenantUserIdOrNull($user),
             'proposed_content' => $proposedContent,
             'status' => ChangeRequest::STATUS_PENDING,
             'current_version' => 1,
@@ -151,7 +153,7 @@ class ChangeRequestController extends Controller
         }
 
         $changeRequest->update([
-            'approver_id' => $user->id,
+            'approver_id' => $this->gate->tenantUserIdOrNull($user),
             'status' => ChangeRequest::STATUS_UNDER_REVIEW,
         ]);
 
@@ -176,7 +178,11 @@ class ChangeRequestController extends Controller
         $user = $request->user();
         $this->gate->assertCan($user, 'wc_assign_change_requests');
 
-        $request->validate(['approver_id' => 'required|exists:users,id']);
+        $request->validate([
+            'approver_id' => ['required', Rule::exists('users', 'id')->connection(
+                WcDatabaseContext::connection() ?: config('database.default')
+            )],
+        ]);
 
         $changeRequest = ChangeRequest::findOrFail($id);
 
@@ -228,7 +234,7 @@ class ChangeRequestController extends Controller
             $changeRequest->update([
                 'status' => ChangeRequest::STATUS_SCHEDULED,
                 'scheduled_at' => $scheduledAt,
-                'approver_id' => $changeRequest->approver_id ?: $user->id,
+                'approver_id' => $changeRequest->approver_id ?: $this->gate->tenantUserIdOrNull($user),
             ]);
 
             $this->workflow->syncCurrentVersionStatus(

@@ -13,6 +13,7 @@ use App\Services\WebsiteCompliance\WebsiteComplianceGate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Throwable;
 
 class ReportController extends Controller
 {
@@ -26,13 +27,22 @@ class ReportController extends Controller
         $user = $request->user();
         $this->gate->assertCan($user, 'wc_view_platform_report');
 
-        $latest = PlatformReport::with('generator')->latest('generated_at')->first();
+        try {
+            $latest = PlatformReport::query()->latest('generated_at')->first();
 
-        if (! $latest) {
-            $latest = $this->captureSnapshot($user->id)->load('generator');
+            if (! $latest) {
+                $latest = $this->captureSnapshot($user);
+            }
+
+            return response()->json($this->summaryPayload($latest, $user));
+        } catch (Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => 'Unable to load the platform summary.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
         }
-
-        return response()->json($latest->toSummaryPayload());
     }
 
     public function refresh(Request $request): JsonResponse
@@ -40,17 +50,26 @@ class ReportController extends Controller
         $user = $request->user();
         $this->gate->assertCan($user, 'wc_view_platform_report');
 
-        $report = $this->captureSnapshot($user->id)->load('generator');
+        try {
+            $report = $this->captureSnapshot($user);
 
-        $this->activityLogs->log([
-            'action' => 'wc.platform_report.refresh',
-            'description' => 'Generated a new platform summary report snapshot.',
-            'user' => $user,
-            'subject' => $report,
-            'request' => $request,
-        ]);
+            $this->activityLogs->log([
+                'action' => 'wc.platform_report.refresh',
+                'description' => 'Generated a new platform summary report snapshot.',
+                'user' => $user,
+                'subject' => $report,
+                'request' => $request,
+            ]);
 
-        return response()->json($report->toSummaryPayload());
+            return response()->json($this->summaryPayload($report, $user));
+        } catch (Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => 'Unable to load the platform summary.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
     }
 
     public function index(Request $request): JsonResponse
@@ -58,16 +77,36 @@ class ReportController extends Controller
         $user = $request->user();
         $this->gate->assertCan($user, 'wc_view_platform_report');
 
-        $reports = PlatformReport::with('generator')
+        $reports = PlatformReport::query()
             ->latest('generated_at')
             ->paginate(20);
 
-        $reports->getCollection()->transform(fn (PlatformReport $report) => $report->toSummaryPayload());
+        $reports->getCollection()->transform(
+            fn (PlatformReport $report) => $this->summaryPayload($report, $user)
+        );
 
         return response()->json($reports);
     }
 
-    protected function captureSnapshot(?int $userId = null): PlatformReport
+    /**
+     * @return array<string, mixed>
+     */
+    protected function summaryPayload(PlatformReport $report, User $viewer): array
+    {
+        $payload = $report->toSummaryPayload();
+
+        // Generator may be a shared control-plane user id that does not exist on the tenant DB.
+        if (empty($payload['generated_by'])) {
+            $payload['generated_by'] = [
+                'id' => $viewer->id,
+                'name' => $viewer->name,
+            ];
+        }
+
+        return $payload;
+    }
+
+    protected function captureSnapshot(User $user): PlatformReport
     {
         $templatesTotal = Template::count();
         $templatesActive = Template::where('is_active', true)->count();
@@ -82,7 +121,8 @@ class ReportController extends Controller
         $approvers = (int) ($usersByRoleRaw['approver'] ?? 0);
         $managers = (int) ($usersByRoleRaw['manager'] ?? 0);
         $clientAdmins = (int) ($usersByRoleRaw['client_admin'] ?? 0) + (int) ($usersByRoleRaw['admin'] ?? 0);
-        $powerAdmins = (int) (($usersByRoleRaw['power_admin'] ?? 0) + ($usersByRoleRaw['finproms_admin'] ?? 0));
+        // Control-plane roles live on shared only — never count them as tenant WC operators.
+        $powerAdmins = 0;
         $usersTotal = $advisors + $approvers + $managers + $clientAdmins + $powerAdmins;
 
         $templateRequestsByStatus = TemplateRequest::query()
@@ -142,7 +182,8 @@ class ReportController extends Controller
             'change_requests_approved' => (int) ($changeRequestsByStatus['approved'] ?? 0),
             'change_requests_rejected' => (int) ($changeRequestsByStatus['rejected'] ?? 0),
             'change_requests_approved_with_feedback' => (int) ($changeRequestsByStatus['approved_with_feedback'] ?? 0),
-            'generated_by' => $userId,
+            // Never store shared PA/FinProms user ids on the white-label users FK.
+            'generated_by' => $this->gate->tenantUserIdOrNull($user),
             'generated_at' => now(),
         ]);
     }

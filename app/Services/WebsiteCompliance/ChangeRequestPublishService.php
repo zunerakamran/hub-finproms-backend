@@ -78,8 +78,14 @@ class ChangeRequestPublishService
         if ($version) {
             $reviewerName = null;
             if ($actorUserId) {
-                $reviewer = \App\Models\User::find($actorUserId);
-                $reviewerName = $reviewer?->name ?: (string) $actorUserId;
+                // Prefer the authenticated actor (shared control-plane user) over tenant User::find.
+                $authUser = auth()->user();
+                if ($authUser && (int) $authUser->id === (int) $actorUserId) {
+                    $reviewerName = $authUser->name ?: (string) $actorUserId;
+                } else {
+                    $reviewer = \App\Models\User::find($actorUserId);
+                    $reviewerName = $reviewer?->name ?: (string) $actorUserId;
+                }
             }
 
             $version->update([
@@ -93,13 +99,18 @@ class ChangeRequestPublishService
         $cpanelSynced = CpanelSyncService::pushToAdvisorCpanel($publishAdvisorId, $updatedSections);
 
         try {
+            $actor = auth()->user();
+            if (! $actor && $actorUserId) {
+                $actor = \App\Models\User::find($actorUserId);
+            }
+
             app(ActivityLogService::class)->log([
                 'action' => 'wc.change_request.approve',
                 'description' => $cpanelSynced
                     ? 'Content approved and published to advisor cPanel DB & hub DB'
                     : 'Content approved in hub DB but cPanel push did not update the live site',
                 'subject' => $changeRequest,
-                'user' => $actorUserId ? \App\Models\User::find($actorUserId) : null,
+                'user' => $actor,
                 'properties' => [
                     'cpanel_synced' => $cpanelSynced,
                     'approver_id' => $actorUserId ?: $changeRequest->approver_id,

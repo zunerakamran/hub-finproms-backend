@@ -163,18 +163,21 @@ class SectionController extends Controller
 
         $section = Section::findOrFail($id);
 
-        if ($section->is_locked && $section->locked_by !== $user->id) {
-            if (! $section->locked_by) {
-                return response()->json(['message' => 'This section has a pending or scheduled change request and cannot be edited until it is reviewed.'], 409);
-            }
-            $lockedUser = $section->lockedByUser ? $section->lockedByUser->name : 'another user';
+        if ($section->is_locked && (int) $section->locked_by !== (int) $user->id) {
+            // Remote control-plane operators can take over locks on white-label hubs.
+            if (! $this->gate->isRemoteControlPlaneOperator($user)) {
+                if (! $section->locked_by) {
+                    return response()->json(['message' => 'This section has a pending or scheduled change request and cannot be edited until it is reviewed.'], 409);
+                }
+                $lockedUser = $section->lockedByUser ? $section->lockedByUser->name : 'another user';
 
-            return response()->json(['message' => 'Section is locked by '.$lockedUser], 409);
+                return response()->json(['message' => 'Section is locked by '.$lockedUser], 409);
+            }
         }
 
         $section->update([
             'is_locked' => true,
-            'locked_by' => $user->id,
+            'locked_by' => $this->gate->tenantUserIdOrNull($user),
         ]);
 
         $this->activityLogs->log([

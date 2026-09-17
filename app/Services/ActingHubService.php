@@ -279,6 +279,7 @@ class ActingHubService
                 'slug' => $acting->slug,
                 'type' => $acting->type,
                 'is_white_label' => $acting->isWhiteLabel(),
+                'frontend_url' => $acting->frontendBaseUrl(),
                 'branding' => $acting->brandingPayload(),
             ],
             'is_acting_on_white_label' => $acting->isWhiteLabel(),

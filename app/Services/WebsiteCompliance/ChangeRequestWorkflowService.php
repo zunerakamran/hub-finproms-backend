@@ -14,7 +14,8 @@ use Symfony\Component\HttpKernel\Exception\HttpException;
 class ChangeRequestWorkflowService
 {
     public function __construct(
-        private readonly ActivityLogService $activityLogs
+        private readonly ActivityLogService $activityLogs,
+        private readonly WebsiteComplianceGate $gate
     ) {}
 
     /**
@@ -26,10 +27,17 @@ class ChangeRequestWorkflowService
     public function prepareAndLockEdits(array $sectionEdits, User $user): array
     {
         $edits = [];
+        $tenantUserId = $this->gate->tenantUserIdOrNull($user);
+        $canBypassLocks = $this->gate->isRemoteControlPlaneOperator($user);
 
         foreach ($sectionEdits as $edit) {
             $section = Section::findOrFail($edit['section_id']);
-            if ($section->is_locked && $section->locked_by !== $user->id) {
+            if (
+                $section->is_locked
+                && ! $canBypassLocks
+                && $section->locked_by !== null
+                && (int) $section->locked_by !== (int) ($tenantUserId ?? $user->id)
+            ) {
                 throw new HttpException(409, "Section '{$section->name}' is locked by another user");
             }
 
@@ -117,7 +125,7 @@ class ChangeRequestWorkflowService
         $changeRequest->update([
             'status' => ChangeRequest::STATUS_APPROVED_WITH_FEEDBACK,
             'feedback' => $feedback,
-            'approver_id' => $changeRequest->approver_id ?: $user->id,
+            'approver_id' => $changeRequest->approver_id ?: $this->gate->tenantUserIdOrNull($user),
             'rejection_reason' => null,
             'scheduled_at' => null,
         ]);
@@ -146,7 +154,7 @@ class ChangeRequestWorkflowService
      */
     public function resubmit(ChangeRequest $changeRequest, User $user, array $sectionEdits, ?Request $request = null): ChangeRequest
     {
-        if ((int) $changeRequest->editor_id !== (int) $user->id) {
+        if (! $this->isOriginalEditorOrRemoteOperator($changeRequest, $user)) {
             throw new HttpException(403, 'Only the original editor can resubmit this request.');
         }
 
@@ -176,7 +184,7 @@ class ChangeRequestWorkflowService
             'proposed_content' => $proposedContent,
             'status' => ChangeRequest::STATUS_PENDING,
             'feedback' => null,
-            'submitted_by' => $user->id,
+            'submitted_by' => $this->gate->tenantUserIdOrNull($user),
             'submitted_at' => now(),
         ]);
 
@@ -197,7 +205,7 @@ class ChangeRequestWorkflowService
      */
     public function confirmFeedback(ChangeRequest $changeRequest, User $user, ?array $sectionEdits = null, ?Request $request = null): array
     {
-        if ((int) $changeRequest->editor_id !== (int) $user->id) {
+        if (! $this->isOriginalEditorOrRemoteOperator($changeRequest, $user)) {
             throw new HttpException(403, 'Only the original editor can confirm feedback.');
         }
 
@@ -230,7 +238,7 @@ class ChangeRequestWorkflowService
                 'proposed_content' => $proposedContent,
                 'status' => ChangeRequest::STATUS_PENDING,
                 'feedback' => null,
-                'submitted_by' => $user->id,
+                'submitted_by' => $this->gate->tenantUserIdOrNull($user),
                 'submitted_at' => now(),
             ]);
         } else {
@@ -269,12 +277,11 @@ class ChangeRequestWorkflowService
 
     public function assertReviewable(ChangeRequest $changeRequest, User $user): void
     {
-        $gate = app(WebsiteComplianceGate::class);
-
         if (
-            ! $gate->can($user, 'wc_view_all_change_requests')
+            ! $this->gate->can($user, 'wc_view_all_change_requests')
+            && ! $this->gate->isRemoteControlPlaneOperator($user)
             && $changeRequest->approver_id !== null
-            && $changeRequest->approver_id !== $user->id
+            && (int) $changeRequest->approver_id !== (int) $user->id
         ) {
             throw new HttpException(403, 'Unauthorized');
         }
@@ -286,5 +293,14 @@ class ChangeRequestWorkflowService
         ], true)) {
             throw new HttpException(409, 'This request can no longer be reviewed.');
         }
+    }
+
+    private function isOriginalEditorOrRemoteOperator(ChangeRequest $changeRequest, User $user): bool
+    {
+        if ($this->gate->isRemoteControlPlaneOperator($user)) {
+            return true;
+        }
+
+        return (int) $changeRequest->editor_id === (int) $user->id;
     }
 }

@@ -55,12 +55,19 @@ class PlatformReport extends Model
      */
     public function toSummaryPayload(): array
     {
+        $generator = null;
+        try {
+            $generator = $this->generator;
+        } catch (\Throwable) {
+            $generator = null;
+        }
+
         return [
             'id' => $this->id,
             'generated_at' => optional($this->generated_at)->toIso8601String(),
-            'generated_by' => $this->generator ? [
-                'id' => $this->generator->id,
-                'name' => $this->generator->name,
+            'generated_by' => $generator ? [
+                'id' => $generator->id,
+                'name' => $generator->name,
             ] : null,
             'templates' => [
                 'total' => (int) $this->templates_total,

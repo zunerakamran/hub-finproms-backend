@@ -298,6 +298,142 @@ class WhiteLabelControlPlaneTest extends TestCase
             ->assertJsonFragment(['preview_url' => 'https://myhub.fin-proms.com/template4/']);
     }
 
+    public function test_power_admin_sees_white_label_deployment_requests_and_platform_summary_remotely(): void
+    {
+        config([
+            'services.website_compliance.hub_showcase_templates' => [
+                'myhub' => ['template4'],
+                'shared' => [],
+            ],
+        ]);
+
+        [$admin, $hub] = $this->actingPowerAdminOnWiredHub();
+
+        $checklist = $hub->resolvedChecklist();
+        $checklist['module_website_compliance'] = true;
+        $hub->forceFill(['checklist' => $checklist])->save();
+
+        $remote = app(WhiteLabelDatabaseService::class);
+        $connection = $remote->connect($hub);
+        try {
+            $advisorId = (int) DB::connection($connection)->table('users')->insertGetId([
+                'name' => 'WL Advisor',
+                'email' => 'advisor@myhub.test',
+                'password' => bcrypt('password'),
+                'role' => User::ROLE_ADVISOR,
+                'is_advisor' => 1,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            Schema::connection($connection)->create('wc_template_requests', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('advisor_id')->nullable();
+                $table->unsignedBigInteger('requested_by_id')->nullable();
+                $table->unsignedBigInteger('assigned_advisor_id')->nullable();
+                $table->string('template_name');
+                $table->string('request_type')->default('advisor_website');
+                $table->string('domain_name')->nullable();
+                $table->string('logo_url', 500)->nullable();
+                $table->string('favicon_url', 1000)->nullable();
+                $table->string('primary_color', 50)->nullable();
+                $table->string('secondary_color', 50)->nullable();
+                $table->string('status')->default('pending');
+                $table->text('rejection_reason')->nullable();
+                $table->string('cpanel_domain')->nullable();
+                $table->string('cpanel_db_host')->nullable();
+                $table->string('cpanel_db_name')->nullable();
+                $table->string('cpanel_db_user')->nullable();
+                $table->string('cpanel_db_password')->nullable();
+                $table->string('cpanel_api_key')->nullable();
+                $table->timestamps();
+            });
+
+            Schema::connection($connection)->create('wc_templates', function (Blueprint $table) {
+                $table->id();
+                $table->string('name');
+                $table->string('slug')->unique();
+                $table->boolean('is_active')->default(true);
+                $table->timestamps();
+            });
+
+            Schema::connection($connection)->create('wc_platform_reports', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedInteger('templates_total')->default(0);
+                $table->unsignedInteger('templates_active')->default(0);
+                $table->unsignedInteger('templates_inactive')->default(0);
+                $table->unsignedInteger('users_total')->default(0);
+                $table->unsignedInteger('advisors_count')->default(0);
+                $table->unsignedInteger('approvers_count')->default(0);
+                $table->unsignedInteger('managers_count')->default(0);
+                $table->unsignedInteger('client_admins_count')->default(0);
+                $table->unsignedInteger('power_admins_count')->default(0);
+                $table->unsignedInteger('template_requests_total')->default(0);
+                $table->unsignedInteger('template_requests_pending')->default(0);
+                $table->unsignedInteger('template_requests_deployed')->default(0);
+                $table->unsignedInteger('template_requests_rejected')->default(0);
+                $table->unsignedInteger('template_requests_advisor_website')->default(0);
+                $table->unsignedInteger('template_requests_hub_main_website')->default(0);
+                $table->json('template_requests_by_template')->nullable();
+                $table->unsignedInteger('change_requests_total')->default(0);
+                $table->unsignedInteger('change_requests_pending')->default(0);
+                $table->unsignedInteger('change_requests_under_review')->default(0);
+                $table->unsignedInteger('change_requests_scheduled')->default(0);
+                $table->unsignedInteger('change_requests_approved')->default(0);
+                $table->unsignedInteger('change_requests_rejected')->default(0);
+                $table->unsignedInteger('change_requests_approved_with_feedback')->default(0);
+                $table->unsignedBigInteger('generated_by')->nullable();
+                $table->timestamp('generated_at')->nullable();
+                $table->timestamps();
+            });
+
+            Schema::connection($connection)->create('wc_change_requests', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('section_id')->nullable();
+                $table->unsignedBigInteger('editor_id')->nullable();
+                $table->unsignedBigInteger('approver_id')->nullable();
+                $table->longText('proposed_content')->nullable();
+                $table->string('status')->default('pending');
+                $table->timestamps();
+            });
+
+            DB::connection($connection)->table('wc_templates')->insert([
+                'name' => 'Template 4',
+                'slug' => 'template4',
+                'is_active' => 1,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            DB::connection($connection)->table('wc_template_requests')->insert([
+                'advisor_id' => $advisorId,
+                'requested_by_id' => $advisorId,
+                'template_name' => 'template4',
+                'request_type' => 'advisor_website',
+                'domain_name' => 'advisor.myhub.test',
+                'status' => 'pending',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        } finally {
+            $remote->disconnect($hub);
+        }
+
+        $this->assertDatabaseMissing('wc_template_requests', ['domain_name' => 'advisor.myhub.test']);
+
+        $this->getJson('/api/website-compliance/template-requests')
+            ->assertOk()
+            ->assertJsonFragment(['domain_name' => 'advisor.myhub.test'])
+            ->assertJsonFragment(['status' => 'pending']);
+
+        $this->getJson('/api/website-compliance/reports/summary')
+            ->assertOk()
+            ->assertJsonPath('template_requests.total', 1)
+            ->assertJsonPath('template_requests.by_status.pending', 1)
+            ->assertJsonPath('users.by_role.advisor', 1)
+            ->assertJsonPath('users.by_role.power_admin', 0);
+    }
+
     private function actingPowerAdminOnWiredHub(): array
     {
         Hub::query()->create([

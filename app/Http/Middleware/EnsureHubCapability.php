@@ -2,6 +2,8 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\Hub;
+use App\Models\User;
 use App\Services\ActingHubService;
 use App\Services\CapabilitiesMatrixService;
 use App\Services\HubService;
@@ -51,6 +53,11 @@ class EnsureHubCapability
         foreach ($capabilities as $capability) {
             // When controlling a white-label hub, hub-scoped caps follow that hub's matrix.
             $hubForCap = $this->actingHubs->capabilityHub($user, $capability);
+
+            if ($this->controlPlaneRemoteWebsiteComplianceAllows($user, $hubForCap, $capability)) {
+                return $next($request);
+            }
+
             if ($this->matrix->roleCan($hubForCap, (string) $user->role, $capability)) {
                 return $next($request);
             }
@@ -66,5 +73,26 @@ class EnsureHubCapability
             'hub_id' => $failedHub->id,
             'hub_slug' => $failedHub->slug,
         ], 403);
+    }
+
+    /**
+     * Power Admin / FinProms Admin are shared-hub only. While the switcher is on a
+     * white-label with Website Compliance enabled, allow WC route caps remotely.
+     */
+    private function controlPlaneRemoteWebsiteComplianceAllows(User $user, Hub $hubForCap, string $capability): bool
+    {
+        if (! ActingHubService::isControlPlaneRole((string) $user->role)) {
+            return false;
+        }
+
+        if (! $this->actingHubs->isActingOnWhiteLabel($user)) {
+            return false;
+        }
+
+        if (! Hub::isWebsiteComplianceCapability($capability) && $capability !== 'module_website_compliance') {
+            return false;
+        }
+
+        return $hubForCap->hasWebsiteComplianceModule();
     }
 }

@@ -73,18 +73,18 @@ class HubTemplateCatalog
             return rtrim(trim($configured), '/');
         }
 
-        $acting = self::actingWhiteLabelHub();
-        if ($acting) {
-            if (filled($acting->frontend_url)) {
-                return rtrim((string) $acting->frontend_url, '/');
+        $hub = self::actingWhiteLabelHub() ?? self::currentHub();
+        if ($hub) {
+            if (filled($hub->frontend_url)) {
+                return rtrim((string) $hub->frontend_url, '/');
             }
-            if (filled($acting->api_url)) {
+            if (filled($hub->api_url)) {
                 // api_url is often https://myhub.../api — strip /api for site root
-                return rtrim(preg_replace('#/api/?$#', '', (string) $acting->api_url) ?: (string) $acting->api_url, '/');
+                return rtrim(preg_replace('#/api/?$#', '', (string) $hub->api_url) ?: (string) $hub->api_url, '/');
             }
         }
 
-        return rtrim((string) config('app.url', ''), '/');
+        return rtrim((string) config('app.frontend_url', config('app.url', '')), '/');
     }
 
     public static function previewUrlFor(string $slug): string
@@ -97,6 +97,15 @@ class HubTemplateCatalog
     public static function sanitizeSlug(?string $slug): string
     {
         return (string) preg_replace('/[^a-z0-9_-]/i', '', (string) $slug);
+    }
+
+    private static function currentHub(): ?Hub
+    {
+        try {
+            return app(\App\Services\HubService::class)->current();
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     private static function actingWhiteLabelHub(): ?Hub

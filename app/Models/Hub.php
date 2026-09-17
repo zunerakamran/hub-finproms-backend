@@ -1206,6 +1206,8 @@ class Hub extends Model
             'name' => $this->name,
             'slug' => $this->slug,
             'type' => $this->type,
+            // Public site root for WC previews / placeholders (hub deploy wiring).
+            'frontend_url' => $this->frontendBaseUrl(),
             'branding' => $this->brandingPayload(),
             'checklist' => $checklist,
             // Frontend should hide Sign up when registration_enabled is false.
