@@ -252,12 +252,63 @@ class PublicController extends Controller
         }
 
         $contentType = (string) ($upstream->header('Content-Type') ?: 'application/octet-stream');
+        $body = $upstream->body();
+
+        // Stamp live advisor brand colours into HTML so section preview never
+        // flashes showcase red (#C8102E) before api.php / postMessage runs.
+        if ($upstream->successful() && str_contains(strtolower($contentType), 'text/html')) {
+            $body = $this->injectEmbedBranding($body, $base);
+        }
 
         // Drop framing headers from upstream; allow the hub (and any parent) to embed.
-        return response($upstream->body(), $upstream->status())
+        return response($body, $upstream->status())
             ->header('Content-Type', $contentType)
             ->header('Cache-Control', 'private, no-store')
             ->header('Content-Security-Policy', "frame-ancestors *");
+    }
+
+    /**
+     * Fetch advisor api.php colours and inject CSS + window bootstrap into HTML.
+     */
+    private function injectEmbedBranding(string $html, string $siteBase): string
+    {
+        $primary = null;
+        $secondary = null;
+
+        try {
+            $brandRes = Http::timeout(12)
+                ->withOptions(['verify' => false])
+                ->get(rtrim($siteBase, '/').'/api.php');
+            if ($brandRes->successful()) {
+                $json = $brandRes->json();
+                if (is_array($json)) {
+                    $primary = is_string($json['primary_color'] ?? null) ? $json['primary_color'] : null;
+                    $secondary = is_string($json['secondary_color'] ?? null) ? $json['secondary_color'] : null;
+                }
+            }
+        } catch (\Throwable) {
+            // Best-effort only.
+        }
+
+        if (! $primary && ! $secondary) {
+            return $html;
+        }
+
+        $primary = $primary ?: '#0B1B3D';
+        $secondary = $secondary ?: '#0E6870';
+        $primaryJson = json_encode($primary);
+        $secondaryJson = json_encode($secondary);
+
+        $snippet = <<<HTML
+<style id="wc-embed-brand">:root{--brand-primary:{$primary}!important;--brand-primary-dark:{$primary}!important;--brand-secondary:{$secondary}!important;--brand-secondary-hover:{$secondary}!important}</style>
+<script>window.__WC_EMBED_BRANDING__={primary_color:{$primaryJson},secondary_color:{$secondaryJson}};</script>
+HTML;
+
+        if (stripos($html, '</head>') !== false) {
+            return (string) preg_replace('/<\/head>/i', $snippet.'</head>', $html, 1);
+        }
+
+        return $snippet.$html;
     }
 
     /** Host + path prefix used for SSRF checks (scheme-insensitive, trailing slash normalized). */
