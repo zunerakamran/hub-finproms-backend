@@ -324,8 +324,53 @@ Smoke tests:
 Root public_html/.htaccess already skips real directories (!-d), so /template4/
 will not be swallowed by the SPA once the folder exists.
 
-NOTE: Advisor live sites use a SEPARATE copy + local DB + DEPLOYMENT_MODE=advisor.
-Never copy showcase cpanel-config.php onto an advisor cPanel.
+================================================================================
+8b. WEBSITE COMPLIANCE — ADVISOR LIVE SITE (cPanel deploy)
+================================================================================
+Advisor sites are a SEPARATE copy of template4-showcase + a LOCAL MySQL DB.
+Never reuse the myhub showcase cpanel-config.php on an advisor account.
+
+----- A) On the advisor cPanel (one-time file setup) -----
+1. Create a MySQL database + user for THIS advisor (cPanel → MySQL Databases).
+2. Build the template locally:
+     cd Desktop/template4-showcase
+     npm install && npm run build
+3. Upload dist/* to the advisor document root, e.g.:
+     public_html/   OR   public_html/template4/
+   (Must include index.html, assets/, api.php, includes/, data/, .htaccess)
+4. Copy public/cpanel-config.advisor.example.php → cpanel-config.php next to api.php
+   Set at minimum:
+     DEPLOYMENT_MODE = advisor
+     SECRET_API_KEY  = a shared secret you will also paste in the Deploy form
+     DB_*            = the advisor MySQL you created (or leave placeholders —
+                       Deploy form can write them via write_config)
+     UPLOADS_ORIGIN / LARAVEL_API_URL = https://myhub.fin-proms.com/api
+     SITE_URL        = https://<advisor-domain>
+
+Smoke: open https://<advisor-domain>/api.php  (or .../template4/api.php)
+
+----- B) Power Admin on sharedhub (hub switcher = myhub) -----
+1. Website Compliance → Deploy hub → open the pending advisor request
+2. Deploy to cPanel and fill:
+     Site URL     = https://<advisor-domain>   (or .../template4 if nested)
+     DB host      = localhost
+     DB name/user/pass = advisor MySQL from step A
+     cPanel API key    = SAME as SECRET_API_KEY in cpanel-config.php
+3. Click Deploy
+
+Laravel will:
+  - mark the request deployed on myhub DB
+  - create advisor wc_sections on myhub
+  - POST write_config + sections to the advisor api.php
+
+Success message should say "remote cPanel config written successfully".
+If it says sync failed: check shared laravel.log and that
+  https://<advisor-domain>/api.php is reachable from the shared server.
+
+----- C) Verify -----
+- Live site: https://<advisor-domain>/
+- Branding (logo/favicon/colors) from the request should appear
+- Advisor can edit sections in myhub dashboard; PA approves → push to cPanel
 
 
 ================================================================================

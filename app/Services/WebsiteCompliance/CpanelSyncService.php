@@ -140,6 +140,11 @@ class CpanelSyncService
 
     public static function hubApiUrl(): string
     {
+        $actingApi = self::actingWhiteLabelApiUrl();
+        if ($actingApi) {
+            return $actingApi;
+        }
+
         $configured = config('services.website_compliance.hub_api_url');
         if ($configured) {
             return rtrim((string) $configured, '/');
@@ -156,6 +161,42 @@ class CpanelSyncService
         }
 
         return self::hubApiUrl();
+    }
+
+    /**
+     * When Power Admin deploys from shared onto a white-label, advisor sites
+     * must call that white-label's API (uploads / public assets), not shared's.
+     */
+    protected static function actingWhiteLabelApiUrl(): ?string
+    {
+        try {
+            $user = auth('sanctum')->user() ?? auth()->user();
+            if (! $user) {
+                return null;
+            }
+
+            $acting = app(\App\Services\ActingHubService::class);
+            if (! $acting->isActingOnWhiteLabel($user)) {
+                return null;
+            }
+
+            $hub = $acting->actingHub($user);
+            if (! $hub) {
+                return null;
+            }
+
+            if (filled($hub->api_url)) {
+                return rtrim((string) $hub->api_url, '/');
+            }
+
+            if (filled($hub->frontend_url)) {
+                return rtrim((string) $hub->frontend_url, '/').'/api';
+            }
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return null;
     }
 
     protected static function postToCpanel(TemplateRequest $templateRequest, array $payload, mixed $label): bool
