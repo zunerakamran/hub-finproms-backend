@@ -84,13 +84,14 @@ class CpanelSyncService
             'api_key' => $templateRequest->cpanel_api_key,
             'advisor_id' => $advisorId,
             'deployment_mode' => 'advisor',
-            'uploads_origin' => self::hubUploadsOrigin(),
+            // Uploads live on the hub that handled the upload (this deploy when remoting from shared).
+            'uploads_origin' => self::storageApiUrl(),
             'site_url' => $siteUrl,
             'laravel_api_url' => $hubApi,
             'primary_color' => $templateRequest->primary_color,
             'secondary_color' => $templateRequest->secondary_color,
-            'logo_url' => self::absoluteAssetUrl($templateRequest->logo_url),
-            'favicon_url' => self::absoluteAssetUrl($templateRequest->favicon_url),
+            'logo_url' => self::brandingAssetForCpanel($templateRequest->logo_url, 'logo'),
+            'favicon_url' => self::brandingAssetForCpanel($templateRequest->favicon_url, 'favicon'),
             'db_host' => $templateRequest->cpanel_db_host ?: 'localhost',
             'db_name' => $templateRequest->cpanel_db_name,
             'db_user' => $templateRequest->cpanel_db_user,
@@ -100,6 +101,8 @@ class CpanelSyncService
 
     /**
      * Make uploaded asset paths loadable from advisor cPanel sites.
+     * Relative upload paths are resolved against THIS deploy (where files were stored),
+     * not the acting white-label API URL.
      */
     public static function absoluteAssetUrl(mixed $path): ?string
     {
@@ -116,7 +119,7 @@ class CpanelSyncService
             return $path;
         }
 
-        $hubApi = self::hubApiUrl();
+        $hubApi = self::storageApiUrl();
         $filename = basename(parse_url($path, PHP_URL_PATH) ?: $path);
 
         if ($filename !== '' && (
@@ -138,6 +141,94 @@ class CpanelSyncService
         return $hubApi.'/'.ltrim($path, '/');
     }
 
+    /**
+     * Prefer embedding the file so advisor cPanel does not depend on hub upload routes.
+     * Falls back to an absolute URL on the storage hub.
+     */
+    public static function brandingAssetForCpanel(mixed $path, string $label = 'asset'): ?string
+    {
+        if (! is_string($path)) {
+            return null;
+        }
+
+        $path = trim($path);
+        if ($path === '') {
+            return null;
+        }
+
+        if (str_starts_with($path, 'data:')) {
+            return $path;
+        }
+
+        $filename = basename(parse_url($path, PHP_URL_PATH) ?: $path);
+        if ($filename === '' || $filename === '.' || $filename === '/') {
+            return self::absoluteAssetUrl($path);
+        }
+
+        $localPaths = [
+            storage_path('app/uploads/'.$filename),
+            public_path('uploads/'.$filename),
+        ];
+
+        foreach ($localPaths as $local) {
+            if (! is_file($local) || ! is_readable($local)) {
+                continue;
+            }
+
+            $size = filesize($local);
+            // Keep payload reasonable for cPanel api.php / MySQL TEXT.
+            if ($size === false || $size <= 0 || $size > 450000) {
+                break;
+            }
+
+            $mime = mime_content_type($local) ?: self::guessImageMime($filename);
+            $encoded = base64_encode((string) file_get_contents($local));
+
+            Log::info("cPanel branding: embedded {$label} from local file {$filename}");
+
+            return 'data:'.$mime.';base64,'.$encoded;
+        }
+
+        // Try fetching from storage candidates (this deploy + acting hub).
+        foreach (self::uploadApiCandidates() as $base) {
+            $url = rtrim($base, '/').'/website-compliance/uploaded-images/'.$filename;
+            try {
+                $response = Http::timeout(12)->get($url);
+                if (! $response->successful()) {
+                    continue;
+                }
+                $body = $response->body();
+                if ($body === '' || strlen($body) > 450000) {
+                    return $url;
+                }
+                $mime = $response->header('Content-Type') ?: self::guessImageMime($filename);
+                if (! str_starts_with((string) $mime, 'image/') && ! str_contains((string) $mime, 'icon')) {
+                    $mime = self::guessImageMime($filename);
+                }
+                Log::info("cPanel branding: embedded {$label} from {$url}");
+
+                return 'data:'.$mime.';base64,'.base64_encode($body);
+            } catch (\Throwable $e) {
+                Log::warning("cPanel branding: fetch failed for {$url}: ".$e->getMessage());
+            }
+        }
+
+        return self::absoluteAssetUrl($path);
+    }
+
+    /**
+     * API base for files stored by this Laravel process (shared when remoting).
+     */
+    public static function storageApiUrl(): string
+    {
+        $configured = config('services.website_compliance.uploads_origin');
+        if (is_string($configured) && trim($configured) !== '') {
+            return rtrim(trim($configured), '/');
+        }
+
+        return rtrim((string) config('app.url'), '/').'/api';
+    }
+
     public static function hubApiUrl(): string
     {
         $actingApi = self::actingWhiteLabelApiUrl();
@@ -150,22 +241,47 @@ class CpanelSyncService
             return rtrim((string) $configured, '/');
         }
 
-        return rtrim((string) config('app.url'), '/').'/api';
+        return self::storageApiUrl();
     }
 
     public static function hubUploadsOrigin(): string
     {
-        $configured = config('services.website_compliance.uploads_origin');
-        if ($configured) {
-            return rtrim((string) $configured, '/');
-        }
+        return self::storageApiUrl();
+    }
 
-        return self::hubApiUrl();
+    /**
+     * @return list<string>
+     */
+    protected static function uploadApiCandidates(): array
+    {
+        $candidates = array_filter([
+            self::storageApiUrl(),
+            self::actingWhiteLabelApiUrl(),
+            rtrim((string) config('app.url'), '/').'/api',
+            'https://sharedhub.fin-proms.com/api',
+            'https://myhub.fin-proms.com/api',
+        ]);
+
+        return array_values(array_unique($candidates));
+    }
+
+    protected static function guessImageMime(string $filename): string
+    {
+        $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+
+        return match ($ext) {
+            'jpg', 'jpeg' => 'image/jpeg',
+            'gif' => 'image/gif',
+            'webp' => 'image/webp',
+            'svg' => 'image/svg+xml',
+            'ico' => 'image/x-icon',
+            default => 'image/png',
+        };
     }
 
     /**
      * When Power Admin deploys from shared onto a white-label, advisor sites
-     * must call that white-label's API (uploads / public assets), not shared's.
+     * should use that white-label's Laravel API for live content endpoints.
      */
     protected static function actingWhiteLabelApiUrl(): ?string
     {
