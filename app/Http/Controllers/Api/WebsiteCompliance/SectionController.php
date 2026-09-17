@@ -3,7 +3,10 @@
 namespace App\Http\Controllers\Api\WebsiteCompliance;
 
 use App\Http\Controllers\Controller;
+use App\Models\User;
+use App\Models\WebsiteCompliance\Page;
 use App\Models\WebsiteCompliance\Section;
+use App\Models\WebsiteCompliance\Template;
 use App\Models\WebsiteCompliance\TemplateRequest;
 use App\Services\ActivityLogService;
 use App\Services\WebsiteCompliance\AdvisorSectionService;
@@ -12,6 +15,7 @@ use App\Services\WebsiteCompliance\WebsiteComplianceGate;
 use App\Support\WebsiteCompliance\HubTemplateCatalog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class SectionController extends Controller
 {
@@ -137,11 +141,11 @@ class SectionController extends Controller
         $this->gate->assertCan($user, 'wc_edit_sections');
 
         $request->validate([
-            'page_id' => 'required|exists:wc_pages,id',
+            'page_id' => ['required', Rule::exists(Page::class, 'id')],
             'name' => 'required|string',
             'content' => 'nullable|string',
-            'template_id' => 'nullable|exists:wc_templates,id',
-            'advisor_id' => 'nullable|exists:users,id',
+            'template_id' => ['nullable', Rule::exists(Template::class, 'id')],
+            'advisor_id' => ['nullable', Rule::exists(User::class, 'id')],
         ]);
 
         $data = $request->only('page_id', 'name', 'content', 'template_id', 'advisor_id');

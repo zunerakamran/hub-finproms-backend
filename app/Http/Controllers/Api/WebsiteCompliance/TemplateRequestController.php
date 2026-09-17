@@ -365,7 +365,7 @@ class TemplateRequestController extends Controller
 
         $request->validate([
             'sections' => 'required|array|min:1',
-            'sections.*.id' => 'required|exists:wc_sections,id',
+            'sections.*.id' => ['required', Rule::exists(Section::class, 'id')],
             'sections.*.display_name' => 'nullable|string|max:255',
             'sections.*.is_visible' => 'nullable|boolean',
         ]);
@@ -433,7 +433,7 @@ class TemplateRequestController extends Controller
 
         $request->validate([
             'section_edits' => 'required|array|min:1',
-            'section_edits.*.section_id' => 'required|exists:wc_sections,id',
+            'section_edits.*.section_id' => ['required', Rule::exists(Section::class, 'id')],
             'section_edits.*.content' => 'required|string',
         ]);
 

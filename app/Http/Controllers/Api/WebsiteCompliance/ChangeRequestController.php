@@ -33,7 +33,7 @@ class ChangeRequestController extends Controller
         if ($request->has('section_edits') && is_array($request->section_edits)) {
             $request->validate([
                 'section_edits' => 'required|array|min:1',
-                'section_edits.*.section_id' => 'required|exists:wc_sections,id',
+                'section_edits.*.section_id' => ['required', Rule::exists(Section::class, 'id')],
                 'section_edits.*.proposed_content' => 'required|string',
                 'section_edits.*.current_content' => 'nullable|string',
             ]);
@@ -64,7 +64,7 @@ class ChangeRequestController extends Controller
         }
 
         $request->validate([
-            'section_id' => 'required|exists:wc_sections,id',
+            'section_id' => ['required', Rule::exists(Section::class, 'id')],
             'proposed_content' => 'required|string',
             'current_content' => 'nullable|string',
         ]);
@@ -336,7 +336,7 @@ class ChangeRequestController extends Controller
 
         $request->validate([
             'section_edits' => 'required|array|min:1',
-            'section_edits.*.section_id' => 'required|exists:wc_sections,id',
+            'section_edits.*.section_id' => ['required', Rule::exists(Section::class, 'id')],
             'section_edits.*.proposed_content' => 'required|string',
             'section_edits.*.current_content' => 'nullable|string',
         ]);
@@ -357,7 +357,7 @@ class ChangeRequestController extends Controller
 
         $request->validate([
             'section_edits' => 'nullable|array|min:1',
-            'section_edits.*.section_id' => 'required_with:section_edits|exists:wc_sections,id',
+            'section_edits.*.section_id' => ['required_with:section_edits', Rule::exists(Section::class, 'id')],
             'section_edits.*.proposed_content' => 'required_with:section_edits|string',
             'section_edits.*.current_content' => 'nullable|string',
         ]);

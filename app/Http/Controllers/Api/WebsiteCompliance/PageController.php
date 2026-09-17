@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Api\WebsiteCompliance;
 
 use App\Http\Controllers\Controller;
 use App\Models\WebsiteCompliance\Page;
+use App\Models\WebsiteCompliance\Template;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class PageController extends Controller
 {
@@ -58,8 +60,8 @@ class PageController extends Controller
 
         $request->validate([
             'title' => 'required|string',
-            'slug' => 'required|string|unique:wc_pages,slug',
-            'template_id' => 'nullable|exists:wc_templates,id',
+            'slug' => ['required', 'string', Rule::unique(Page::class, 'slug')],
+            'template_id' => ['nullable', Rule::exists(Template::class, 'id')],
         ]);
         $page = Page::create($request->only('title', 'slug', 'template_id'));
 
@@ -73,8 +75,8 @@ class PageController extends Controller
         $page = Page::findOrFail($id);
         $request->validate([
             'title' => 'sometimes|required|string',
-            'slug' => 'sometimes|required|string|unique:wc_pages,slug,'.$id,
-            'template_id' => 'nullable|exists:wc_templates,id',
+            'slug' => ['sometimes', 'required', 'string', Rule::unique(Page::class, 'slug')->ignore($id)],
+            'template_id' => ['nullable', Rule::exists(Template::class, 'id')],
         ]);
         $page->update($request->only('title', 'slug', 'template_id'));
 
