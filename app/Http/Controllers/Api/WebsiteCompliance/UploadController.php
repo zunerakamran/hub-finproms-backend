@@ -51,11 +51,20 @@ class UploadController extends Controller
             }
 
             $filename = time().'_'.Str::random(10).'.'.$extension;
-            $stored = $file->storeAs('uploads', $filename, 'local');
+            $uploadsDir = storage_path('app/uploads');
+            if (! is_dir($uploadsDir)) {
+                mkdir($uploadsDir, 0755, true);
+            }
 
-            if (! $stored) {
+            // Always write to storage/app/uploads — Laravel's "local" disk roots at private/.
+            $target = $uploadsDir.DIRECTORY_SEPARATOR.$filename;
+            if (! @copy($file->getRealPath(), $target)) {
+                $file->move($uploadsDir, $filename);
+            }
+
+            if (! is_file($target)) {
                 return response()->json([
-                    'message' => 'Could not save the image. Check that storage/app is writable.',
+                    'message' => 'Could not save the image. Check that storage/app/uploads is writable.',
                 ], 500);
             }
 
@@ -85,6 +94,7 @@ class UploadController extends Controller
 
         $paths = [
             storage_path('app/uploads/'.$filename),
+            storage_path('app/private/uploads/'.$filename),
             public_path('uploads/'.$filename),
         ];
 

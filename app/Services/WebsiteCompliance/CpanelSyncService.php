@@ -157,7 +157,7 @@ class CpanelSyncService
         }
 
         if (str_starts_with($path, 'data:')) {
-            return $path;
+            return self::sanitizeDataUriImage($path);
         }
 
         $filename = basename(parse_url($path, PHP_URL_PATH) ?: $path);
@@ -167,6 +167,7 @@ class CpanelSyncService
 
         $localPaths = [
             storage_path('app/uploads/'.$filename),
+            storage_path('app/private/uploads/'.$filename),
             public_path('uploads/'.$filename),
         ];
 
@@ -176,35 +177,40 @@ class CpanelSyncService
             }
 
             $size = filesize($local);
-            // Keep payload reasonable for cPanel api.php / MySQL TEXT.
             if ($size === false || $size <= 0 || $size > 450000) {
-                break;
+                continue;
             }
 
-            $mime = mime_content_type($local) ?: self::guessImageMime($filename);
-            $encoded = base64_encode((string) file_get_contents($local));
+            $binary = (string) file_get_contents($local);
+            if (! self::isValidImageBinary($binary)) {
+                Log::warning("cPanel branding: skipped non-image local file {$local}");
+                continue;
+            }
 
+            $mime = self::detectImageMime($binary, $filename);
             Log::info("cPanel branding: embedded {$label} from local file {$filename}");
 
-            return 'data:'.$mime.';base64,'.$encoded;
+            return 'data:'.$mime.';base64,'.base64_encode($binary);
         }
 
-        // Try fetching from storage candidates (this deploy + acting hub).
         foreach (self::uploadApiCandidates() as $base) {
             $url = rtrim($base, '/').'/website-compliance/uploaded-images/'.$filename;
             try {
-                $response = Http::timeout(12)->get($url);
+                $response = Http::timeout(12)->withHeaders(['Accept' => 'image/*,*/*'])->get($url);
                 if (! $response->successful()) {
                     continue;
                 }
                 $body = $response->body();
-                if ($body === '' || strlen($body) > 450000) {
-                    return $url;
+                $contentType = strtolower((string) $response->header('Content-Type'));
+                if (str_contains($contentType, 'text/html') || str_contains($contentType, 'application/json')) {
+                    Log::warning("cPanel branding: skipped HTML/JSON response from {$url}");
+                    continue;
                 }
-                $mime = $response->header('Content-Type') ?: self::guessImageMime($filename);
-                if (! str_starts_with((string) $mime, 'image/') && ! str_contains((string) $mime, 'icon')) {
-                    $mime = self::guessImageMime($filename);
+                if ($body === '' || strlen($body) > 450000 || ! self::isValidImageBinary($body)) {
+                    Log::warning("cPanel branding: skipped invalid image body from {$url}");
+                    continue;
                 }
+                $mime = self::detectImageMime($body, $filename);
                 Log::info("cPanel branding: embedded {$label} from {$url}");
 
                 return 'data:'.$mime.';base64,'.base64_encode($body);
@@ -213,7 +219,85 @@ class CpanelSyncService
             }
         }
 
-        return self::absoluteAssetUrl($path);
+        // Never push a broken absolute URL that resolves to SPA HTML.
+        Log::warning("cPanel branding: could not embed {$label} ({$filename}); omitting from payload");
+
+        return null;
+    }
+
+    public static function isValidImageBinary(string $binary): bool
+    {
+        if (strlen($binary) < 8) {
+            return false;
+        }
+        $trim = ltrim($binary);
+        if ($trim === '' || $trim[0] === '<' || str_starts_with($trim, '{') || str_starts_with(strtolower($trim), '<!doctype')) {
+            return false;
+        }
+        $head = substr($binary, 0, 16);
+        if (str_starts_with($head, "\x89PNG\r\n\x1a\n")) {
+            return true;
+        }
+        if (str_starts_with($head, "\xFF\xD8\xFF")) {
+            return true;
+        }
+        if (str_starts_with($head, 'GIF87a') || str_starts_with($head, 'GIF89a')) {
+            return true;
+        }
+        if (str_starts_with($head, 'RIFF') && str_contains($head, 'WEBP')) {
+            return true;
+        }
+        if (substr($head, 0, 4) === "\x00\x00\x01\x00") {
+            return true;
+        }
+        if (stripos($trim, '<svg') !== false) {
+            return true;
+        }
+
+        return false;
+    }
+
+    public static function sanitizeDataUriImage(string $dataUri): ?string
+    {
+        if (! preg_match('#^data:(image/[a-zA-Z0-9.+-]+|image/x-icon);base64,#i', $dataUri, $m)) {
+            return null;
+        }
+        $comma = strpos($dataUri, ',');
+        if ($comma === false) {
+            return null;
+        }
+        $binary = base64_decode(substr($dataUri, $comma + 1), true);
+        if ($binary === false || ! self::isValidImageBinary($binary)) {
+            return null;
+        }
+        $mime = self::detectImageMime($binary, 'asset.'.(str_contains(strtolower($m[1]), 'jpeg') ? 'jpg' : 'png'));
+
+        return 'data:'.$mime.';base64,'.base64_encode($binary);
+    }
+
+    public static function detectImageMime(string $binary, string $filename = 'asset.png'): string
+    {
+        $head = substr($binary, 0, 16);
+        if (str_starts_with($head, "\x89PNG\r\n\x1a\n")) {
+            return 'image/png';
+        }
+        if (str_starts_with($head, "\xFF\xD8\xFF")) {
+            return 'image/jpeg';
+        }
+        if (str_starts_with($head, 'GIF87a') || str_starts_with($head, 'GIF89a')) {
+            return 'image/gif';
+        }
+        if (str_starts_with($head, 'RIFF') && str_contains($head, 'WEBP')) {
+            return 'image/webp';
+        }
+        if (substr($head, 0, 4) === "\x00\x00\x01\x00") {
+            return 'image/x-icon';
+        }
+        if (stripos(ltrim($binary), '<svg') !== false) {
+            return 'image/svg+xml';
+        }
+
+        return self::guessImageMime($filename);
     }
 
     /**
