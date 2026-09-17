@@ -8,6 +8,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class TemplateRequest extends Model
 {
+    use UsesWcDatabaseContext;
+
     protected $table = 'wc_template_requests';
 
     protected $fillable = [

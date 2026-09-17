@@ -239,6 +239,65 @@ class WhiteLabelControlPlaneTest extends TestCase
         }
     }
 
+    public function test_website_compliance_templates_are_read_from_acting_white_label_database(): void
+    {
+        config([
+            'services.website_compliance.hub_showcase_templates' => [
+                'myhub' => ['template4'],
+                'shared' => [],
+            ],
+        ]);
+
+        [$admin, $hub] = $this->actingPowerAdminOnWiredHub();
+
+        $checklist = $hub->resolvedChecklist();
+        $checklist['module_website_compliance'] = true;
+        $checklist['wc_manage_templates'] = true;
+        $checklist['wc_view_all_deployments'] = true;
+        $roleCaps = is_array($hub->role_capabilities) ? $hub->role_capabilities : [];
+        $roleCaps[User::ROLE_POWER_ADMIN]['wc_manage_templates'] = true;
+        $roleCaps[User::ROLE_POWER_ADMIN]['wc_view_all_deployments'] = true;
+        $hub->forceFill([
+            'checklist' => $checklist,
+            'role_capabilities' => $roleCaps,
+        ])->save();
+
+        $remote = app(WhiteLabelDatabaseService::class);
+        $connection = $remote->connect($hub);
+        try {
+            Schema::connection($connection)->create('wc_templates', function (Blueprint $table) {
+                $table->id();
+                $table->string('name');
+                $table->string('slug')->unique();
+                $table->text('description')->nullable();
+                $table->string('thumbnail_url', 500)->nullable();
+                $table->string('preview_url', 500)->nullable();
+                $table->longText('dummy_content')->nullable();
+                $table->boolean('is_active')->default(true);
+                $table->timestamps();
+            });
+
+            DB::connection($connection)->table('wc_templates')->insert([
+                'name' => 'Template 4 (Complete Financial Centre)',
+                'slug' => 'template4',
+                'description' => 'myhub showcase',
+                'preview_url' => 'https://myhub.fin-proms.com/template4/',
+                'is_active' => 1,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        } finally {
+            $remote->disconnect($hub);
+        }
+
+        $this->assertDatabaseMissing('wc_templates', ['slug' => 'template4']);
+
+        $this->getJson('/api/website-compliance/templates?all=1')
+            ->assertOk()
+            ->assertJsonFragment(['slug' => 'template4'])
+            ->assertJsonFragment(['preview_url' => 'https://myhub.fin-proms.com/template4/']);
+    }
+
     private function actingPowerAdminOnWiredHub(): array
     {
         Hub::query()->create([

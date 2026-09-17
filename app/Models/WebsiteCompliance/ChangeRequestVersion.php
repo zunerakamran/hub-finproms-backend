@@ -8,6 +8,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ChangeRequestVersion extends Model
 {
+    use UsesWcDatabaseContext;
+
     protected $table = 'wc_change_request_versions';
 
     protected $fillable = [

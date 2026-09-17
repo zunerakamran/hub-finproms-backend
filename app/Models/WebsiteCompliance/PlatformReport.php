@@ -8,6 +8,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class PlatformReport extends Model
 {
+    use UsesWcDatabaseContext;
+
     protected $table = 'wc_platform_reports';
 
     protected $fillable = [

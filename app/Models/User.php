@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Database\Factories\UserFactory;
+use App\Support\WebsiteCompliance\WcDatabaseContext;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -65,6 +66,19 @@ class User extends Authenticatable
         self::ROLE_ADVISOR => 'Advisor',
         self::ROLE_USER => 'User',
     ];
+
+    /**
+     * While WC is remounted onto an acting white-label DB, resolve advisors /
+     * editors for wc_* relations from that same database.
+     */
+    public function getConnectionName(): ?string
+    {
+        if (WcDatabaseContext::active()) {
+            return WcDatabaseContext::connection();
+        }
+
+        return $this->connection;
+    }
 
     protected $fillable = [
         'name',

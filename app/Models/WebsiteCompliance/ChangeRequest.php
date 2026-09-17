@@ -10,6 +10,8 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class ChangeRequest extends Model
 {
+    use UsesWcDatabaseContext;
+
     protected $table = 'wc_change_requests';
 
     public const STATUS_PENDING = 'pending';

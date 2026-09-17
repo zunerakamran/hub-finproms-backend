@@ -8,6 +8,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Page extends Model
 {
+    use UsesWcDatabaseContext;
+
     protected $table = 'wc_pages';
 
     protected $fillable = [

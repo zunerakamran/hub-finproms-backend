@@ -134,7 +134,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/general-compliance/requests/{generalComplianceRequest}', [GeneralComplianceController::class, 'show']);
 
     // Website Compliance — authenticated domain (module + capability gated in controllers / hub_can)
-    Route::prefix('website-compliance')->group(function () {
+    // acting_wl_wc_db: when hub switcher is on a white-label, read/write that hub's wc_* tables.
+    Route::prefix('website-compliance')->middleware('acting_wl_wc_db')->group(function () {
         Route::post('/upload-image', [WcUploadController::class, 'uploadImage']);
 
         Route::middleware('hub_can:wc_edit_sections,wc_submit_change_requests,wc_manage_templates,wc_request_deployments,wc_view_all_deployments,wc_publish_live_content')->group(function () {
@@ -400,7 +401,7 @@ Route::middleware('auth:sanctum')->group(function () {
         });
 
         // Website Compliance — queue / assign / review / reports / deployments
-        Route::prefix('website-compliance')->group(function () {
+        Route::prefix('website-compliance')->middleware('acting_wl_wc_db')->group(function () {
             Route::middleware('hub_can:wc_view_all_change_requests,wc_assign_change_requests,wc_review_change_requests')->group(function () {
                 Route::get('/change-requests', [WcChangeRequestController::class, 'index']);
                 Route::get('/change-requests/{id}', [WcChangeRequestController::class, 'show'])->whereNumber('id');
@@ -662,7 +663,7 @@ Route::middleware('auth:sanctum')->group(function () {
         });
 
         // Website Compliance — queue / assign / review / reports / deployments
-        Route::prefix('website-compliance')->group(function () {
+        Route::prefix('website-compliance')->middleware('acting_wl_wc_db')->group(function () {
             Route::middleware('hub_can:wc_view_all_change_requests,wc_assign_change_requests,wc_review_change_requests')->group(function () {
                 Route::get('/change-requests', [WcChangeRequestController::class, 'index']);
                 Route::get('/change-requests/{id}', [WcChangeRequestController::class, 'show'])->whereNumber('id');

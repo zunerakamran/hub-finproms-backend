@@ -8,6 +8,7 @@ use App\Models\WebsiteCompliance\Template;
 use App\Models\WebsiteCompliance\TemplateRequest;
 use App\Support\WebsiteCompliance\HubTemplateCatalog;
 use App\Support\WebsiteCompliance\TemplateDefaultContent;
+use App\Support\WebsiteCompliance\WcDatabaseContext;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -33,7 +34,9 @@ class ShowcaseSectionService
             'refused' => false,
         ];
 
-        if (! Schema::hasTable('wc_templates') || ! Schema::hasTable('wc_sections') || ! Schema::hasTable('wc_pages')) {
+        if (! self::schema()->hasTable('wc_templates')
+            || ! self::schema()->hasTable('wc_sections')
+            || ! self::schema()->hasTable('wc_pages')) {
             return $stats;
         }
 
@@ -143,7 +146,7 @@ class ShowcaseSectionService
             'deleted_requests' => 0,
         ];
 
-        if (! Schema::hasTable('wc_templates')) {
+        if (! self::schema()->hasTable('wc_templates')) {
             return $result;
         }
 
@@ -159,11 +162,11 @@ class ShowcaseSectionService
         foreach ($foreign as $template) {
             $slug = (string) $template->slug;
 
-            if (Schema::hasTable('wc_sections')) {
+            if (self::schema()->hasTable('wc_sections')) {
                 $result['deleted_sections'] += (int) Section::where('template_id', $template->id)->delete();
             }
 
-            if (Schema::hasTable('wc_pages')) {
+            if (self::schema()->hasTable('wc_pages')) {
                 $replacementId = $allowed !== []
                     ? Template::whereIn('slug', $allowed)->value('id')
                     : null;
@@ -172,7 +175,7 @@ class ShowcaseSectionService
                 ]);
             }
 
-            if (Schema::hasTable('wc_template_requests')) {
+            if (self::schema()->hasTable('wc_template_requests')) {
                 $result['deleted_requests'] += (int) TemplateRequest::where('template_name', $slug)->delete();
             }
 
@@ -181,6 +184,13 @@ class ShowcaseSectionService
         }
 
         return $result;
+    }
+
+    private static function schema()
+    {
+        $connection = WcDatabaseContext::connection();
+
+        return $connection ? Schema::connection($connection) : Schema::connection();
     }
 
     public static function contentIsEmpty(mixed $content): bool

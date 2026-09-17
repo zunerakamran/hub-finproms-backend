@@ -18,6 +18,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'admin' => \App\Http\Middleware\EnsureUserIsClientAdmin::class,
             'hub_can' => \App\Http\Middleware\EnsureHubCapability::class,
             'pa_can' => \App\Http\Middleware\EnsurePowerAdminCapability::class,
+            'acting_wl_wc_db' => \App\Http\Middleware\UseActingWhiteLabelWcDatabase::class,
         ]);
 
         // Record successful mutating API requests (posts, imports, settings, etc.).

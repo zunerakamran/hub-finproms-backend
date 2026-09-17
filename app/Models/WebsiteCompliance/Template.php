@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Template extends Model
 {
+    use UsesWcDatabaseContext;
+
     protected $table = 'wc_templates';
 
     protected $fillable = [

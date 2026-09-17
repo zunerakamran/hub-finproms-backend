@@ -2,21 +2,31 @@
 
 namespace App\Support\WebsiteCompliance;
 
+use App\Models\Hub;
+use App\Services\ActingHubService;
+use Throwable;
+
 /**
  * Maps showcase website templates to the hub deploy(s) that own them.
  *
  * Isolation is DB-per-hub: each Laravel deploy only seeds / keeps templates
  * listed for its HUB_SLUG. template4 belongs on myhub; shared must not store it.
+ * When Power Admin acts on a white-label from shared, ownership follows that hub.
  */
 class HubTemplateCatalog
 {
     public static function currentHubSlug(): string
     {
+        $acting = self::actingWhiteLabelHub();
+        if ($acting) {
+            return (string) $acting->slug;
+        }
+
         return (string) config('hub.current_slug', 'shared');
     }
 
     /**
-     * Showcase template slugs allowed on this deploy.
+     * Showcase template slugs allowed on this deploy / acting hub.
      *
      * @return list<string>
      */
@@ -63,6 +73,17 @@ class HubTemplateCatalog
             return rtrim(trim($configured), '/');
         }
 
+        $acting = self::actingWhiteLabelHub();
+        if ($acting) {
+            if (filled($acting->frontend_url)) {
+                return rtrim((string) $acting->frontend_url, '/');
+            }
+            if (filled($acting->api_url)) {
+                // api_url is often https://myhub.../api — strip /api for site root
+                return rtrim(preg_replace('#/api/?$#', '', (string) $acting->api_url) ?: (string) $acting->api_url, '/');
+            }
+        }
+
         return rtrim((string) config('app.url', ''), '/');
     }
 
@@ -76,6 +97,25 @@ class HubTemplateCatalog
     public static function sanitizeSlug(?string $slug): string
     {
         return (string) preg_replace('/[^a-z0-9_-]/i', '', (string) $slug);
+    }
+
+    private static function actingWhiteLabelHub(): ?Hub
+    {
+        try {
+            $user = auth('sanctum')->user() ?? auth()->user();
+            if (! $user) {
+                return null;
+            }
+
+            $acting = app(ActingHubService::class);
+            if (! $acting->isActingOnWhiteLabel($user)) {
+                return null;
+            }
+
+            return $acting->actingHub($user);
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     /**

@@ -9,6 +9,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Section extends Model
 {
+    use UsesWcDatabaseContext;
+
     protected $table = 'wc_sections';
 
     protected $fillable = [

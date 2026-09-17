@@ -308,6 +308,10 @@ Hub ownership (config/services.php hub_showcase_templates):
   shared → (none)
 Override per deploy with WC_SHOWCASE_TEMPLATES=slug1,slug2 if needed.
 
+Power Admin on sharedhub with hub switcher set to myhub reads/writes myhub's
+wc_* tables over the remote DB credentials on the hub registry. Ensure myhub
+has Remote database configured in Power Admin → Hub deploy wiring.
+
 Update preview URL in DB (or re-seed WC templates):
   UPDATE wc_templates SET preview_url='https://myhub.fin-proms.com/template4/'
   WHERE slug='template4';
