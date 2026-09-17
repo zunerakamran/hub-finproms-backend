@@ -399,21 +399,25 @@ class TemplateRequestController extends Controller
                 $updates['display_name'] = $item['display_name'] ?: null;
             }
             if (array_key_exists('is_visible', $item)) {
-                $updates['is_visible'] = (bool) $item['is_visible'];
+                // Avoid PHP (bool)"false" === true — accept real bools and common string forms.
+                $raw = $item['is_visible'];
+                $updates['is_visible'] = ! in_array($raw, [false, 0, '0', 'false', 'no', 'off'], true);
             }
 
-            if (! empty($updates)) {
+            if ($updates !== []) {
                 $section->update($updates);
                 $updated[] = $section->fresh();
             }
         }
 
-        if (! empty($updated)) {
-            CpanelSyncService::pushToTemplateRequestCpanel($templateRequest);
+        $cpanelSynced = false;
+        if ($updated !== []) {
+            $cpanelSynced = CpanelSyncService::pushToTemplateRequestCpanel($templateRequest);
 
             $this->activityLogs->log([
                 'action' => 'wc.template_request.sections_update',
-                'description' => 'Updated '.count($updated).' section(s) for deployment',
+                'description' => 'Updated '.count($updated).' section(s) for deployment'
+                    .($cpanelSynced ? ' (cPanel synced)' : ' (cPanel sync skipped or failed)'),
                 'user' => $user,
                 'subject' => $templateRequest,
                 'request' => $request,
@@ -421,9 +425,12 @@ class TemplateRequestController extends Controller
         }
 
         return response()->json([
-            'message' => 'Section settings saved and synced to the deployed site.',
+            'message' => $cpanelSynced
+                ? 'Section settings saved and synced to the deployed site.'
+                : 'Section settings saved in the hub, but the live advisor site was not updated. Check cPanel domain / API key.',
+            'cpanel_synced' => $cpanelSynced,
             'sections' => $updated,
-        ]);
+        ], $updated !== [] && ! $cpanelSynced ? 502 : 200);
     }
 
     public function publishContent(Request $request, int $id): JsonResponse

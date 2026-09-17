@@ -432,16 +432,29 @@ class CpanelSyncService
         $domain = rtrim((string) $templateRequest->cpanel_domain, '/');
         $slug = preg_replace('/[^a-z0-9_-]/i', '', (string) ($templateRequest->template_name ?: 'template4')) ?: 'template4';
 
-        $origin = preg_replace('#/(template\d+|public)/?$#i', '', $domain) ?: $domain;
+        // Live advisor sites ship the template4-showcase package (not the unused template4 repo).
+        $pathSlugs = array_values(array_unique(array_filter([
+            $slug,
+            $slug === 'template4' || $slug === 'template4showcase' ? 'template4-showcase' : null,
+            $slug === 'template4-showcase' ? 'template4' : null,
+        ])));
 
-        return array_values(array_unique(array_filter([
+        $origin = preg_replace('#/(template[\w-]+|public)/?$#i', '', $domain) ?: $domain;
+
+        $endpoints = [
             "{$domain}/api.php",
             "{$domain}/api.php?action=sync",
-            "{$domain}/{$slug}/api.php",
             "{$domain}/public/api.php",
-            "{$origin}/{$slug}/api.php",
-            "{$origin}/{$slug}/public/api.php",
-        ])));
+        ];
+
+        foreach ($pathSlugs as $pathSlug) {
+            $endpoints[] = "{$domain}/{$pathSlug}/api.php";
+            $endpoints[] = "{$domain}/{$pathSlug}/public/api.php";
+            $endpoints[] = "{$origin}/{$pathSlug}/api.php";
+            $endpoints[] = "{$origin}/{$pathSlug}/public/api.php";
+        }
+
+        return array_values(array_unique(array_filter($endpoints)));
     }
 
     public static function advisorSectionPayload(mixed $advisorId): array
@@ -475,7 +488,8 @@ class CpanelSyncService
                 'name' => $name,
                 'section_key' => $sec->section_key ?: strtolower((string) preg_replace('/[^a-z0-9]/i', '', $name)),
                 'display_name' => $sec->display_name ?: $name,
-                'is_visible' => $sec->is_visible !== false,
+                // Explicit 0/1 — some PHP receivers cast string "false" incorrectly.
+                'is_visible' => $sec->is_visible === false || $sec->is_visible === 0 || $sec->is_visible === '0' ? 0 : 1,
                 'content' => $sec->content,
             ];
         }
@@ -500,7 +514,8 @@ class CpanelSyncService
                 'name' => $name,
                 'section_key' => $sec->section_key ?: strtolower((string) preg_replace('/[^a-z0-9]/i', '', $name)),
                 'display_name' => $sec->display_name ?: $name,
-                'is_visible' => $sec->is_visible !== false,
+                // Explicit 0/1 — some PHP receivers cast string "false" incorrectly.
+                'is_visible' => $sec->is_visible === false || $sec->is_visible === 0 || $sec->is_visible === '0' ? 0 : 1,
                 'content' => $sec->content,
             ];
         }
