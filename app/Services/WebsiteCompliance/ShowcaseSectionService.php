@@ -5,6 +5,8 @@ namespace App\Services\WebsiteCompliance;
 use App\Models\WebsiteCompliance\Page;
 use App\Models\WebsiteCompliance\Section;
 use App\Models\WebsiteCompliance\Template;
+use App\Models\WebsiteCompliance\TemplateRequest;
+use App\Support\WebsiteCompliance\HubTemplateCatalog;
 use App\Support\WebsiteCompliance\TemplateDefaultContent;
 use Illuminate\Support\Facades\Schema;
 
@@ -15,9 +17,10 @@ use Illuminate\Support\Facades\Schema;
 class ShowcaseSectionService
 {
     /**
-     * Sync template4 (or other slug) dummy JSON → wc_templates.dummy_content + wc_sections showcase rows.
+     * Sync template dummy JSON → wc_templates.dummy_content + wc_sections showcase rows.
+     * Refuses to write templates that are not owned by the current HUB_SLUG.
      *
-     * @return array{template_id:int|null,created:int,updated:int,skipped:int,sections:int}
+     * @return array{template_id:int|null,created:int,updated:int,skipped:int,sections:int,refused:bool}
      */
     public static function syncFromDefaults(string $slug = 'template4', bool $overwrite = true): array
     {
@@ -27,19 +30,28 @@ class ShowcaseSectionService
             'updated' => 0,
             'skipped' => 0,
             'sections' => 0,
+            'refused' => false,
         ];
 
         if (! Schema::hasTable('wc_templates') || ! Schema::hasTable('wc_sections') || ! Schema::hasTable('wc_pages')) {
             return $stats;
         }
 
-        $safeSlug = preg_replace('/[^a-z0-9_-]/i', '', $slug) ?: 'template4';
+        $safeSlug = HubTemplateCatalog::sanitizeSlug($slug) ?: 'template4';
+
+        if (! HubTemplateCatalog::allows($safeSlug)) {
+            $stats['refused'] = true;
+
+            return $stats;
+        }
+
         $defaults = TemplateDefaultContent::load($safeSlug);
         if (empty($defaults)) {
             return $stats;
         }
 
         $dummyJson = (string) file_get_contents(TemplateDefaultContent::pathForSlug($safeSlug));
+        $previewUrl = HubTemplateCatalog::previewUrlFor($safeSlug);
 
         $template = Template::firstOrCreate(
             ['slug' => $safeSlug],
@@ -48,7 +60,7 @@ class ShowcaseSectionService
                     ? 'Template 4 (Complete Financial Centre)'
                     : ucfirst(str_replace(['-', '_'], ' ', $safeSlug)),
                 'description' => 'Website Compliance template seeded from '.$safeSlug.'-dummy-content.json',
-                'preview_url' => rtrim((string) config('services.website_compliance.template_preview_base_url', 'https://sharedhub.fin-proms.com'), '/').'/'.$safeSlug.'/',
+                'preview_url' => $previewUrl,
                 'is_active' => true,
                 'dummy_content' => $dummyJson,
             ]
@@ -56,8 +68,7 @@ class ShowcaseSectionService
 
         $template->update([
             'dummy_content' => $dummyJson,
-            'preview_url' => $template->preview_url
-                ?: rtrim((string) config('services.website_compliance.template_preview_base_url', 'https://sharedhub.fin-proms.com'), '/').'/'.$safeSlug.'/',
+            'preview_url' => $previewUrl,
             'is_active' => true,
         ]);
 
@@ -116,6 +127,60 @@ class ShowcaseSectionService
         }
 
         return $stats;
+    }
+
+    /**
+     * Remove wc_templates (and related showcase/advisor sections) that do not
+     * belong to the current hub. Keeps only HubTemplateCatalog::allowedSlugs().
+     *
+     * @return array{deleted_templates:list<string>,deleted_sections:int,deleted_requests:int}
+     */
+    public static function purgeForeignTemplates(): array
+    {
+        $result = [
+            'deleted_templates' => [],
+            'deleted_sections' => 0,
+            'deleted_requests' => 0,
+        ];
+
+        if (! Schema::hasTable('wc_templates')) {
+            return $result;
+        }
+
+        $allowed = HubTemplateCatalog::allowedSlugs();
+        $foreign = Template::query()
+            ->when(
+                $allowed !== [],
+                fn ($q) => $q->whereNotIn('slug', $allowed),
+                fn ($q) => $q // no allowed templates on this hub → purge all catalog rows
+            )
+            ->get();
+
+        foreach ($foreign as $template) {
+            $slug = (string) $template->slug;
+
+            if (Schema::hasTable('wc_sections')) {
+                $result['deleted_sections'] += (int) Section::where('template_id', $template->id)->delete();
+            }
+
+            if (Schema::hasTable('wc_pages')) {
+                $replacementId = $allowed !== []
+                    ? Template::whereIn('slug', $allowed)->value('id')
+                    : null;
+                Page::where('template_id', $template->id)->update([
+                    'template_id' => $replacementId,
+                ]);
+            }
+
+            if (Schema::hasTable('wc_template_requests')) {
+                $result['deleted_requests'] += (int) TemplateRequest::where('template_name', $slug)->delete();
+            }
+
+            $template->delete();
+            $result['deleted_templates'][] = $slug;
+        }
+
+        return $result;
     }
 
     public static function contentIsEmpty(mixed $content): bool

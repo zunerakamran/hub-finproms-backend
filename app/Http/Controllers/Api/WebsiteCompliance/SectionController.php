@@ -9,6 +9,7 @@ use App\Services\ActivityLogService;
 use App\Services\WebsiteCompliance\AdvisorSectionService;
 use App\Services\WebsiteCompliance\CpanelSyncService;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
+use App\Support\WebsiteCompliance\HubTemplateCatalog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -94,7 +95,7 @@ class SectionController extends Controller
             return [
                 $scopedAdvisorId,
                 (int) $tr->id,
-                $tr->template_name ?: 'template4',
+                $tr->template_name ?: HubTemplateCatalog::defaultSlug(),
             ];
         }
 
@@ -119,7 +120,7 @@ class SectionController extends Controller
         return [
             $scopedAdvisorId,
             (int) $active->id,
-            $active->template_name ?: 'template4',
+            $active->template_name ?: HubTemplateCatalog::defaultSlug(),
         ];
     }
 

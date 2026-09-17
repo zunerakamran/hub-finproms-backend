@@ -10,6 +10,7 @@ use App\Services\WebsiteCompliance\AdvisorSectionService;
 use App\Services\WebsiteCompliance\ShowcaseSectionService;
 use App\Services\WebsiteCompliance\TemplatePreviewCaptureService;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
+use App\Support\WebsiteCompliance\HubTemplateCatalog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -27,7 +28,10 @@ class TemplateController extends Controller
         $this->gate->assertModuleEnabled($user);
 
         if (Template::count() === 0) {
-            ShowcaseSectionService::syncFromDefaults('template4', true);
+            $defaultSlug = HubTemplateCatalog::defaultSlug();
+            if ($defaultSlug) {
+                ShowcaseSectionService::syncFromDefaults($defaultSlug, true);
+            }
         }
 
         if ($request->query('all') || $this->gate->can($user, 'wc_manage_templates')) {
@@ -107,6 +111,14 @@ class TemplateController extends Controller
         ]);
 
         $slug = $request->slug ? Str::slug($request->slug) : Str::slug($request->name);
+
+        if (! HubTemplateCatalog::allows($slug) && HubTemplateCatalog::allowedSlugs() !== []) {
+            return response()->json([
+                'message' => "Template slug [{$slug}] is not owned by hub [".HubTemplateCatalog::currentHubSlug().'].',
+                'allowed_templates' => HubTemplateCatalog::allowedSlugs(),
+            ], 422);
+        }
+
         $previewUrl = $request->preview_url ?: $this->defaultPreviewUrl($slug);
         $thumbnailUrl = $request->thumbnail_url;
 
@@ -212,8 +224,6 @@ class TemplateController extends Controller
 
     private function defaultPreviewUrl(string $slug): string
     {
-        $base = rtrim((string) config('services.website_compliance.template_preview_base_url', 'https://sharedhub.fin-proms.com'), '/');
-
-        return $base.'/'.trim($slug, '/').'/';
+        return HubTemplateCatalog::previewUrlFor($slug);
     }
 }

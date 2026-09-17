@@ -46,8 +46,19 @@ return [
         'hub_api_url' => env('WEBSITE_COMPLIANCE_HUB_API_URL'),
         'uploads_origin' => env('WEBSITE_COMPLIANCE_UPLOADS_ORIGIN'),
         'scheduler_secret' => env('SCHEDULER_SECRET'),
-        'template_preview_base_url' => env('TEMPLATE_PREVIEW_BASE_URL', 'https://sharedhub.fin-proms.com'),
+        // Empty = derive from APP_URL (correct for myhub / shared / other white-labels)
+        'template_preview_base_url' => env('TEMPLATE_PREVIEW_BASE_URL'),
         'template_preview_node_binary' => env('TEMPLATE_PREVIEW_NODE_BINARY'),
+        /*
+         | Showcase templates owned by each hub slug (HUB_SLUG).
+         | Only those slugs are seeded / kept in that deploy's wc_* tables.
+         | Optional WC_SHOWCASE_TEMPLATES=slug1,slug2 overrides the map for this deploy.
+         */
+        'hub_showcase_templates' => [
+            'myhub' => ['template4'],
+            'shared' => [],
+        ],
+        'showcase_templates' => env('WC_SHOWCASE_TEMPLATES'),
     ],
 
 ];

@@ -6,6 +6,7 @@ use App\Models\Hub;
 use App\Models\User;
 use App\Services\CapabilitiesMatrixService;
 use App\Services\WebsiteCompliance\ShowcaseSectionService;
+use App\Support\WebsiteCompliance\HubTemplateCatalog;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Schema;
 
@@ -17,8 +18,31 @@ class WebsiteComplianceTemplateSeeder extends Seeder
             return;
         }
 
-        // Always refresh showcase wc_sections + dummy_content from on-disk JSON
-        ShowcaseSectionService::syncFromDefaults('template4', true);
+        // Drop templates that belong to other hubs (e.g. template4 on shared).
+        $purged = ShowcaseSectionService::purgeForeignTemplates();
+        if ($purged['deleted_templates'] !== [] && $this->command) {
+            $this->command->warn(
+                'Purged foreign WC templates for hub ['.HubTemplateCatalog::currentHubSlug().']: '
+                .implode(', ', $purged['deleted_templates'])
+            );
+        }
+
+        $allowed = HubTemplateCatalog::allowedSlugs();
+        if ($allowed === []) {
+            if ($this->command) {
+                $this->command->comment(
+                    'No showcase templates configured for hub ['.HubTemplateCatalog::currentHubSlug().']; skipped seed.'
+                );
+            }
+            $this->enableModuleWithDefaultCapabilities();
+
+            return;
+        }
+
+        foreach ($allowed as $slug) {
+            ShowcaseSectionService::syncFromDefaults($slug, true);
+        }
+
         $this->enableModuleWithDefaultCapabilities();
     }
 

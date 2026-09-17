@@ -5,6 +5,7 @@ namespace App\Services\WebsiteCompliance;
 use App\Models\WebsiteCompliance\Page;
 use App\Models\WebsiteCompliance\Section;
 use App\Models\WebsiteCompliance\Template;
+use App\Support\WebsiteCompliance\HubTemplateCatalog;
 use App\Support\WebsiteCompliance\TemplateDefaultContent;
 use Illuminate\Support\Facades\Log;
 
@@ -25,7 +26,7 @@ class AdvisorSectionService
      */
     public static function ensureForAdvisor(
         int $advisorId,
-        ?string $templateSlug = 'template4',
+        ?string $templateSlug = null,
         bool $overwrite = false,
         ?int $templateRequestId = null
     ): int {
@@ -36,8 +37,9 @@ class AdvisorSectionService
         }
 
         $slug = self::normalizeSlug($templateSlug);
+        $fallbackSlug = HubTemplateCatalog::defaultSlug();
         $template = Template::where('slug', $slug)->first()
-            ?? Template::where('slug', 'template4')->first()
+            ?? ($fallbackSlug ? Template::where('slug', $fallbackSlug)->first() : null)
             ?? Template::first();
 
         if (! $template) {
@@ -277,12 +279,16 @@ class AdvisorSectionService
     private static function normalizeSlug(?string $slug): string
     {
         $raw = strtolower(trim((string) $slug));
-        if ($raw === '' || str_contains($raw, 'template4')) {
-            return 'template4';
+        $fallback = HubTemplateCatalog::defaultSlug() ?? 'template4';
+        if ($raw === '') {
+            return $fallback;
         }
-        $safe = preg_replace('/[^a-z0-9_-]/i', '', $raw);
+        if (str_contains($raw, 'template4')) {
+            return HubTemplateCatalog::allows('template4') ? 'template4' : $fallback;
+        }
+        $safe = HubTemplateCatalog::sanitizeSlug($raw);
 
-        return $safe !== '' ? $safe : 'template4';
+        return $safe !== '' ? $safe : $fallback;
     }
 
     private static function buildPayload(

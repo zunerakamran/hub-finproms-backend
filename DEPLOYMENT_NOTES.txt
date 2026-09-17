@@ -249,37 +249,51 @@ Local dev:
 
 
 ================================================================================
-8. WEBSITE COMPLIANCE — TEMPLATE4 SHOWCASE (shared hub)
+8. WEBSITE COMPLIANCE — TEMPLATE4 SHOWCASE (myhub)
 ================================================================================
-Deploy Desktop/template4-showcase to:
-  https://sharedhub.fin-proms.com/template4/
+template4 is owned by the myhub white-label deploy only.
+Do NOT seed or host it on sharedhub — shared DB must not store template4 rows.
 
+Deploy Desktop/template4-showcase to:
+  https://myhub.fin-proms.com/template4/
+
+----- A) REMOVE from sharedhub (if previously deployed by mistake) -----
+1. cPanel (sharedhub): delete folder public_html/template4/ entirely
+2. On shared Laravel API:
+     cd ~/public_html/api
+     php artisan wc:purge-foreign-templates
+   Or:
+     php artisan db:seed --class=WebsiteComplianceTemplateSeeder --force
+   (with HUB_SLUG=shared this deletes template4 + related wc_sections / requests)
+
+----- B) Deploy to myhub -----
 Local prepare:
   cd Desktop/template4-showcase
-  # config.js DEPLOYMENT_MODE=showcase, UPLOADS_ORIGIN=https://sharedhub.fin-proms.com/api
+  # config.js DEPLOYMENT_MODE=showcase, UPLOADS_ORIGIN=https://myhub.fin-proms.com/api
   npm install
   npm run build
 
-cPanel (sharedhubfp) upload:
+cPanel (myhub) upload:
   Create folder: public_html/template4/
   Upload ALL of dist/* into that folder (index.html, assets/, api.php,
   includes/, data/, .htaccess, cpanel-config.php, etc.)
 
 Edit public_html/template4/cpanel-config.php (showcase mode):
   DEPLOYMENT_MODE = showcase
-  DB_*            = SAME as public_html/api/.env (shared hub Laravel DB)
+  DB_*            = SAME as myhub public_html/api/.env (myhub Laravel DB)
   ADVISOR_ID      = null
-  UPLOADS_ORIGIN  = https://sharedhub.fin-proms.com/api
-  SITE_URL        = https://sharedhub.fin-proms.com/template4
-  LARAVEL_API_URL = https://sharedhub.fin-proms.com/api
+  UPLOADS_ORIGIN  = https://myhub.fin-proms.com/api
+  SITE_URL        = https://myhub.fin-proms.com/template4
+  LARAVEL_API_URL = https://myhub.fin-proms.com/api
 
-Laravel shared hub .env:
-  TEMPLATE_PREVIEW_BASE_URL=https://sharedhub.fin-proms.com
-  WEBSITE_COMPLIANCE_HUB_API_URL=https://sharedhub.fin-proms.com/api
-  WEBSITE_COMPLIANCE_UPLOADS_ORIGIN=https://sharedhub.fin-proms.com/api
+Laravel myhub .env:
+  HUB_SLUG=myhub
+  TEMPLATE_PREVIEW_BASE_URL=https://myhub.fin-proms.com
+  WEBSITE_COMPLIANCE_HUB_API_URL=https://myhub.fin-proms.com/api
+  WEBSITE_COMPLIANCE_UPLOADS_ORIGIN=https://myhub.fin-proms.com/api
 
 After uploading a new backend (or after changing template4-dummy-content.json),
-refresh showcase rows in the shared hub DB:
+refresh showcase rows in the MYHUB DB only:
 
   cd ~/public_html/api
   php artisan wc:seed-showcase-sections
@@ -289,14 +303,19 @@ This overwrites wc_templates.dummy_content + wc_sections where advisor_id IS NUL
 from database/data/website-compliance/template4-dummy-content.json
 (Hero per-slide content, What we do boxes, etc.).
 
+Hub ownership (config/services.php hub_showcase_templates):
+  myhub  → template4
+  shared → (none)
+Override per deploy with WC_SHOWCASE_TEMPLATES=slug1,slug2 if needed.
+
 Update preview URL in DB (or re-seed WC templates):
-  UPDATE wc_templates SET preview_url='https://sharedhub.fin-proms.com/template4/'
+  UPDATE wc_templates SET preview_url='https://myhub.fin-proms.com/template4/'
   WHERE slug='template4';
 
 Smoke tests:
-  https://sharedhub.fin-proms.com/template4/
-  https://sharedhub.fin-proms.com/template4/api.php
-  (api.php should report deployment_mode=showcase)
+  https://myhub.fin-proms.com/template4/
+  https://myhub.fin-proms.com/template4/api.php
+  (api.php should report deployment_mode=showcase, db_name = myhub DB)
 
 Root public_html/.htaccess already skips real directories (!-d), so /template4/
 will not be swallowed by the SPA once the folder exists.

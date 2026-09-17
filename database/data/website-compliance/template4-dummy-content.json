@@ -1,6 +1,6 @@
 {
   "Header": {
-    "logo_url": "logo-dark.png",
+    "logo_url": "logo.png",
     "phone_label": "Requesting a Call:",
     "phone": "(210) 123 451",
     "hours_label": "Sunday - Friday:",
@@ -203,7 +203,7 @@
     "button_url": "#appointment"
   },
   "Footer": {
-    "logo_url": "logo-light.png",
+    "logo_url": "logo.png",
     "about": "We work with a passion of taking challenges and creating new ones in advertising sector.",
     "about_button_text": "ABOUT US",
     "newsletter_heading": "Newsletter",

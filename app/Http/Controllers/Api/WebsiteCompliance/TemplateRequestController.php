@@ -10,6 +10,7 @@ use App\Services\ActivityLogService;
 use App\Services\WebsiteCompliance\AdvisorSectionService;
 use App\Services\WebsiteCompliance\CpanelSyncService;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
+use App\Support\WebsiteCompliance\HubTemplateCatalog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -24,10 +25,20 @@ class TemplateRequestController extends Controller
     {
         AdvisorSectionService::ensureForAdvisor(
             (int) $advisorId,
-            $templateSlug ?: 'template4',
+            $templateSlug ?: HubTemplateCatalog::defaultSlug(),
             (bool) $overwrite,
             $templateRequestId !== null ? (int) $templateRequestId : null
         );
+    }
+
+    private function resolveTemplateName(?string $requested): ?string
+    {
+        $safe = HubTemplateCatalog::sanitizeSlug((string) ($requested ?: ''));
+        if ($safe !== '' && HubTemplateCatalog::allows($safe)) {
+            return $safe;
+        }
+
+        return HubTemplateCatalog::defaultSlug();
     }
 
     /** @return list<string> */
@@ -51,13 +62,21 @@ class TemplateRequestController extends Controller
         $user = $request->user();
         $this->gate->assertCan($user, 'wc_request_deployments');
 
+        $templateName = $this->resolveTemplateName($request->template_name);
+        if (! $templateName) {
+            return response()->json([
+                'message' => 'No showcase template is available on hub ['.HubTemplateCatalog::currentHubSlug().'].',
+                'allowed_templates' => HubTemplateCatalog::allowedSlugs(),
+            ], 422);
+        }
+
         $requestType = $request->request_type
             ?? ($this->gate->can($user, 'wc_deploy_websites') ? 'hub_main_website' : 'advisor_website');
 
         $templateRequest = TemplateRequest::create([
             'advisor_id' => $user->isAdvisor() ? $user->id : null,
             'requested_by_id' => $user->id,
-            'template_name' => $request->template_name ?? 'template4',
+            'template_name' => $templateName,
             'request_type' => $requestType,
             'assigned_advisor_id' => $request->assigned_advisor_id,
             'domain_name' => $request->domain_name,
@@ -147,7 +166,7 @@ class TemplateRequestController extends Controller
         if ($targetAdvisorId) {
             $hubSectionsCreated = AdvisorSectionService::ensureForAdvisor(
                 (int) $targetAdvisorId,
-                $templateRequest->template_name ?: 'template4',
+                $templateRequest->template_name ?: HubTemplateCatalog::defaultSlug(),
                 true,
                 (int) $templateRequest->id
             );
@@ -313,7 +332,7 @@ class TemplateRequestController extends Controller
 
         AdvisorSectionService::ensureForAdvisor(
             (int) $advisorId,
-            $templateRequest->template_name ?: 'template4',
+            $templateRequest->template_name ?: HubTemplateCatalog::defaultSlug(),
             false,
             (int) $templateRequest->id
         );

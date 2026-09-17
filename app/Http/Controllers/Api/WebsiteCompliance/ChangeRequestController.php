@@ -218,7 +218,7 @@ class ChangeRequestController extends Controller
                 return response()->json([
                     'message' => $result['cpanel_synced']
                         ? 'Approved and published to the live advisor site.'
-                        : 'Approved in the hub database, but the live site was not updated. Check Laravel logs and that cpanel_domain points to the live template URL (e.g. https://sharedhub.fin-proms.com/template4)',
+                        : 'Approved in the hub database, but the live site was not updated. Check Laravel logs and that cpanel_domain points to the live template URL (e.g. '.rtrim((string) config('app.url'), '/').'/template4)',
                     'status' => ChangeRequest::STATUS_APPROVED,
                     'cpanel_synced' => $result['cpanel_synced'],
                     'change_request' => $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow'])->toApiArray(),
@@ -258,7 +258,7 @@ class ChangeRequestController extends Controller
         return response()->json([
             'message' => $result['cpanel_synced']
                 ? 'Approved and published to the live advisor site.'
-                : 'Approved in the hub database, but the live site was not updated. Check Laravel logs and that cpanel_domain points to the live template URL (e.g. https://sharedhub.fin-proms.com/template4)',
+                : 'Approved in the hub database, but the live site was not updated. Check Laravel logs and that cpanel_domain points to the live template URL (e.g. '.rtrim((string) config('app.url'), '/').'/template4)',
             'status' => ChangeRequest::STATUS_APPROVED,
             'cpanel_synced' => $result['cpanel_synced'],
             'change_request' => $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow'])->toApiArray(),

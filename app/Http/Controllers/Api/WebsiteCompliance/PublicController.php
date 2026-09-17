@@ -7,6 +7,7 @@ use App\Models\WebsiteCompliance\Page;
 use App\Models\WebsiteCompliance\Section;
 use App\Models\WebsiteCompliance\TemplateRequest;
 use App\Services\WebsiteCompliance\AdvisorSectionService;
+use App\Support\WebsiteCompliance\HubTemplateCatalog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -43,7 +44,7 @@ class PublicController extends Controller
                 $tr = TemplateRequest::find((int) $templateRequestId);
                 AdvisorSectionService::ensureForAdvisor(
                     $advisorIdInt,
-                    $tr?->template_name ?: 'template4',
+                    $tr?->template_name ?: HubTemplateCatalog::defaultSlug(),
                     false,
                     (int) $templateRequestId
                 );
@@ -63,7 +64,7 @@ class PublicController extends Controller
                 if ($active) {
                     AdvisorSectionService::ensureForAdvisor(
                         $advisorIdInt,
-                        $active->template_name ?: 'template4',
+                        $active->template_name ?: HubTemplateCatalog::defaultSlug(),
                         false,
                         (int) $active->id
                     );
