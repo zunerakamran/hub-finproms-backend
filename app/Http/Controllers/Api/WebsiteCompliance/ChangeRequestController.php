@@ -105,17 +105,17 @@ class ChangeRequestController extends Controller
         $this->gate->assertModuleEnabled($user);
 
         $with = ['section', 'editor', 'approver', 'currentVersionRow'];
+        // Pickup/assign write tenantUserIdOrNull; match the same id for scoping.
+        $actorId = $this->gate->tenantUserIdOrNull($user) ?? (int) $user->id;
 
         if ($this->gate->can($user, 'wc_view_all_change_requests')) {
             $requests = ChangeRequest::with($with)->latest()->get();
-        } elseif ($this->gate->can($user, 'wc_assign_change_requests')) {
-            // Assigners need the full inbox/history to route work (even without view-all).
-            $requests = ChangeRequest::with($with)->latest()->get();
         } elseif ($this->gate->can($user, 'wc_review_change_requests')) {
-            // Approvers without view-all: unassigned pending (pickup) + only their own assigned work/history.
+            // Approvers without view-all (even if they also have assign): unassigned pending
+            // for pickup + only requests they themselves picked/were assigned.
             $requests = ChangeRequest::with($with)
-                ->where(function ($q) use ($user) {
-                    $q->where('approver_id', $user->id)
+                ->where(function ($q) use ($actorId) {
+                    $q->where('approver_id', $actorId)
                         ->orWhere(function ($pending) {
                             $pending->where('status', ChangeRequest::STATUS_PENDING)
                                 ->whereNull('approver_id');
@@ -123,9 +123,12 @@ class ChangeRequestController extends Controller
                 })
                 ->latest()
                 ->get();
+        } elseif ($this->gate->can($user, 'wc_assign_change_requests')) {
+            // Assign-only staff (no review): full inbox to route work.
+            $requests = ChangeRequest::with($with)->latest()->get();
         } else {
             $requests = ChangeRequest::with(['section', 'approver', 'currentVersionRow'])
-                ->where('editor_id', $user->id)
+                ->where('editor_id', $actorId)
                 ->latest()
                 ->get();
         }
@@ -146,20 +149,22 @@ class ChangeRequestController extends Controller
             'versions',
         ])->findOrFail($id);
 
-        $isOwner = (int) $changeRequest->editor_id === (int) $user->id;
-        $isAssignee = (int) ($changeRequest->approver_id ?? 0) === (int) $user->id;
+        $actorId = $this->gate->tenantUserIdOrNull($user) ?? (int) $user->id;
+        $isOwner = (int) $changeRequest->editor_id === (int) $actorId;
+        $isAssignee = (int) ($changeRequest->approver_id ?? 0) === (int) $actorId;
         $isUnassignedPending = $changeRequest->status === ChangeRequest::STATUS_PENDING
             && empty($changeRequest->approver_id);
         $canViewAll = $this->gate->can($user, 'wc_view_all_change_requests');
         $canAssign = $this->gate->can($user, 'wc_assign_change_requests');
         $canReview = $this->gate->can($user, 'wc_review_change_requests');
 
-        if (
-            ! $isOwner
-            && ! $canViewAll
-            && ! $canAssign
-            && ! ($canReview && ($isAssignee || $isUnassignedPending))
-        ) {
+        $allowed =
+            $isOwner
+            || $canViewAll
+            || ($canAssign && ! $canReview) // assign-only staff may open any for routing
+            || ($canReview && ($isAssignee || $isUnassignedPending));
+
+        if (! $allowed) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
