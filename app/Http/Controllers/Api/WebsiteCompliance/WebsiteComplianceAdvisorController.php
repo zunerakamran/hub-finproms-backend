@@ -27,7 +27,7 @@ class WebsiteComplianceAdvisorController extends Controller
         if (
             ! $this->gate->can($user, 'wc_request_deployments')
             && ! $this->gate->can($user, 'wc_view_all_deployments')
-            && ! $this->gate->can($user, 'wc_assign_change_requests')
+            && ! $this->gate->can($user, 'wc_assign_website_templates')
             && ! $this->gate->can($user, 'wc_deploy_websites')
         ) {
             return response()->json(['message' => 'Unauthorized'], 403);

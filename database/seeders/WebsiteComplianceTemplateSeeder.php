@@ -60,6 +60,7 @@ class WebsiteComplianceTemplateSeeder extends Seeder
             User::ROLE_FINPROMS_ADMIN => [
                 'wc_view_all_change_requests',
                 'wc_assign_change_requests',
+                'wc_assign_website_templates',
                 'wc_request_deployments',
                 'wc_view_all_deployments',
                 'wc_view_activity_logs',
@@ -71,6 +72,7 @@ class WebsiteComplianceTemplateSeeder extends Seeder
             ],
             User::ROLE_MANAGER => [
                 'wc_assign_change_requests',
+                'wc_assign_website_templates',
                 'wc_view_all_change_requests',
                 'wc_request_deployments',
                 'wc_view_all_deployments',

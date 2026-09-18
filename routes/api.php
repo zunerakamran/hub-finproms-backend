@@ -194,14 +194,14 @@ Route::middleware('auth:sanctum')->group(function () {
         });
 
         Route::get('/template-requests', [WcTemplateRequestController::class, 'index']);
-        Route::middleware('hub_can:wc_request_deployments')->group(function () {
+        Route::middleware('hub_can:wc_request_deployments,wc_assign_website_templates')->group(function () {
             Route::post('/template-requests', [WcTemplateRequestController::class, 'store']);
         });
         Route::middleware('hub_can:wc_deploy_websites')->group(function () {
             Route::post('/template-requests/{id}/deploy', [WcTemplateRequestController::class, 'deploy'])->whereNumber('id');
             Route::post('/template-requests/{id}/reject', [WcTemplateRequestController::class, 'reject'])->whereNumber('id');
         });
-        Route::middleware('hub_can:wc_assign_change_requests')->group(function () {
+        Route::middleware('hub_can:wc_assign_website_templates')->group(function () {
             Route::post('/template-requests/{id}/assign-advisor', [WcTemplateRequestController::class, 'assignAdvisor'])->whereNumber('id');
         });
         Route::get('/template-requests/{id}/sections', [WcTemplateRequestController::class, 'sections'])->whereNumber('id');
@@ -218,7 +218,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/reports', [WcReportController::class, 'index']);
         });
 
-        Route::middleware('hub_can:wc_request_deployments,wc_view_all_deployments,wc_assign_change_requests,wc_deploy_websites')->group(function () {
+        Route::middleware('hub_can:wc_request_deployments,wc_assign_website_templates,wc_view_all_deployments,wc_deploy_websites')->group(function () {
             Route::get('/advisors', [WebsiteComplianceAdvisorController::class, 'advisors']);
         });
         Route::middleware('hub_can:wc_assign_change_requests,wc_view_all_change_requests,wc_review_change_requests')->group(function () {
@@ -443,7 +443,7 @@ Route::middleware('auth:sanctum')->group(function () {
                 Route::post('/reports/summary/refresh', [WcReportController::class, 'refresh']);
                 Route::get('/reports', [WcReportController::class, 'index']);
             });
-            Route::middleware('hub_can:wc_request_deployments,wc_view_all_deployments,wc_assign_change_requests,wc_deploy_websites')->group(function () {
+            Route::middleware('hub_can:wc_request_deployments,wc_assign_website_templates,wc_view_all_deployments,wc_deploy_websites')->group(function () {
                 Route::get('/advisors', [WebsiteComplianceAdvisorController::class, 'advisors']);
             });
             Route::middleware('hub_can:wc_assign_change_requests,wc_view_all_change_requests,wc_review_change_requests')->group(function () {
@@ -705,7 +705,7 @@ Route::middleware('auth:sanctum')->group(function () {
                 Route::post('/reports/summary/refresh', [WcReportController::class, 'refresh']);
                 Route::get('/reports', [WcReportController::class, 'index']);
             });
-            Route::middleware('hub_can:wc_request_deployments,wc_view_all_deployments,wc_assign_change_requests,wc_deploy_websites')->group(function () {
+            Route::middleware('hub_can:wc_request_deployments,wc_assign_website_templates,wc_view_all_deployments,wc_deploy_websites')->group(function () {
                 Route::get('/advisors', [WebsiteComplianceAdvisorController::class, 'advisors']);
             });
             Route::middleware('hub_can:wc_assign_change_requests,wc_view_all_change_requests,wc_review_change_requests')->group(function () {

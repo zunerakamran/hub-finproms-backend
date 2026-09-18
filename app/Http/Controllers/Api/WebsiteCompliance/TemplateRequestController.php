@@ -42,10 +42,17 @@ class TemplateRequestController extends Controller
     public function store(Request $request): JsonResponse
     {
         $user = $request->user();
-        $this->gate->assertCan($user, 'wc_request_deployments');
 
+        if (
+            ! $this->gate->can($user, 'wc_request_deployments')
+            && ! $this->gate->can($user, 'wc_assign_website_templates')
+        ) {
+            $this->gate->assertCan($user, 'wc_request_deployments');
+        }
+
+        // Managers with "Assign website templates" must pick an advisor on create.
         $mustAssignAdvisor = ! $user->isAdvisor()
-            && $this->gate->can($user, 'wc_assign_change_requests');
+            && $this->gate->can($user, 'wc_assign_website_templates');
 
         $request->validate([
             'domain_name' => 'required|string|max:255',
@@ -113,7 +120,10 @@ class TemplateRequestController extends Controller
         // Control-plane operators (and anyone with view-all) see every deployment on the acting hub.
         if ($this->gate->can($user, 'wc_view_all_deployments') || $this->gate->isRemoteControlPlaneOperator($user)) {
             $requests = $query->latest()->get();
-        } elseif ($this->gate->can($user, 'wc_request_deployments')) {
+        } elseif (
+            $this->gate->can($user, 'wc_request_deployments')
+            || $this->gate->can($user, 'wc_assign_website_templates')
+        ) {
             $requests = $query
                 ->where(function ($q) use ($user) {
                     $q->where('advisor_id', $user->id)
@@ -221,7 +231,7 @@ class TemplateRequestController extends Controller
     public function assignAdvisor(Request $request, int $id): JsonResponse
     {
         $user = $request->user();
-        $this->gate->assertCan($user, 'wc_assign_change_requests');
+        $this->gate->assertCan($user, 'wc_assign_website_templates');
 
         $request->validate([
             'assigned_advisor_id' => ['required', Rule::exists(User::class, 'id')],

@@ -121,6 +121,7 @@ class Hub extends Model
         'wc_view_all_change_requests',
         'wc_review_change_requests',
         'wc_request_deployments',
+        'wc_assign_website_templates',
         'wc_view_all_deployments',
         'wc_deploy_websites',
         'wc_manage_templates',
@@ -569,7 +570,7 @@ class Hub extends Model
         ],
         'wc_assign_change_requests' => [
             'label' => 'Assign website change requests',
-            'description' => 'Assign pending website change requests to an approver, and assign advisors to staff-requested site deployments.',
+            'description' => 'Assign pending website change requests to an approver.',
             'group' => self::GROUP_WEBSITE_COMPLIANCE,
             'default_shared' => false,
             'default_white_label' => false,
@@ -590,7 +591,14 @@ class Hub extends Model
         ],
         'wc_request_deployments' => [
             'label' => 'Request website deployments',
-            'description' => 'Request a new showcase / advisor site deployment from a template.',
+            'description' => 'Request a new showcase / advisor site deployment from a template (self-serve).',
+            'group' => self::GROUP_WEBSITE_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'wc_assign_website_templates' => [
+            'label' => 'Assign website templates',
+            'description' => 'Request showcase site deployments and assign them to advisors for content editing.',
             'group' => self::GROUP_WEBSITE_COMPLIANCE,
             'default_shared' => false,
             'default_white_label' => false,
