@@ -201,7 +201,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/template-requests/{id}/deploy', [WcTemplateRequestController::class, 'deploy'])->whereNumber('id');
             Route::post('/template-requests/{id}/reject', [WcTemplateRequestController::class, 'reject'])->whereNumber('id');
         });
-        Route::middleware('hub_can:wc_deploy_websites,wc_request_deployments,wc_assign_change_requests')->group(function () {
+        Route::middleware('hub_can:wc_assign_change_requests')->group(function () {
             Route::post('/template-requests/{id}/assign-advisor', [WcTemplateRequestController::class, 'assignAdvisor'])->whereNumber('id');
         });
         Route::get('/template-requests/{id}/sections', [WcTemplateRequestController::class, 'sections'])->whereNumber('id');

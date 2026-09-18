@@ -23,16 +23,6 @@ class TemplateRequestController extends Controller
         private readonly ActivityLogService $activityLogs
     ) {}
 
-    private function initializeAdvisorSections($advisorId, $templateSlug, $overwrite = false, $templateRequestId = null): void
-    {
-        AdvisorSectionService::ensureForAdvisor(
-            (int) $advisorId,
-            $templateSlug ?: HubTemplateCatalog::defaultSlug(),
-            (bool) $overwrite,
-            $templateRequestId !== null ? (int) $templateRequestId : null
-        );
-    }
-
     private function resolveTemplateName(?string $requested): ?string
     {
         $safe = HubTemplateCatalog::sanitizeSlug((string) ($requested ?: ''));
@@ -51,6 +41,12 @@ class TemplateRequestController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        $user = $request->user();
+        $this->gate->assertCan($user, 'wc_request_deployments');
+
+        $mustAssignAdvisor = ! $user->isAdvisor()
+            && $this->gate->can($user, 'wc_assign_change_requests');
+
         $request->validate([
             'domain_name' => 'required|string|max:255',
             'template_name' => 'nullable|string|max:255',
@@ -59,11 +55,11 @@ class TemplateRequestController extends Controller
             'favicon_url' => 'nullable|string|max:1000',
             'primary_color' => 'nullable|string|max:50',
             'secondary_color' => 'nullable|string|max:50',
-            'assigned_advisor_id' => ['nullable', Rule::exists(User::class, 'id')],
+            'assigned_advisor_id' => [
+                $mustAssignAdvisor ? 'required' : 'nullable',
+                Rule::exists(User::class, 'id'),
+            ],
         ]);
-
-        $user = $request->user();
-        $this->gate->assertCan($user, 'wc_request_deployments');
 
         $templateName = $this->resolveTemplateName($request->template_name);
         if (! $templateName) {
@@ -78,12 +74,16 @@ class TemplateRequestController extends Controller
 
         $tenantUserId = $this->gate->tenantUserIdOrNull($user);
 
+        // Persist the pending request only. Hub sections are created on deploy
+        // (same path for advisor self-request and manager-assigned deployments).
         $templateRequest = TemplateRequest::create([
             'advisor_id' => $user->isAdvisor() ? $tenantUserId : null,
             'requested_by_id' => $tenantUserId,
             'template_name' => $templateName,
             'request_type' => $requestType,
-            'assigned_advisor_id' => $request->assigned_advisor_id,
+            'assigned_advisor_id' => $mustAssignAdvisor || $request->filled('assigned_advisor_id')
+                ? $request->assigned_advisor_id
+                : null,
             'domain_name' => $request->domain_name,
             'logo_url' => CpanelSyncService::absoluteAssetUrl($request->logo_url),
             'favicon_url' => CpanelSyncService::absoluteAssetUrl($request->favicon_url),
@@ -91,11 +91,6 @@ class TemplateRequestController extends Controller
             'secondary_color' => $request->secondary_color ?? '#C8102E',
             'status' => 'pending',
         ]);
-
-        $targetAdvisorId = $templateRequest->assigned_advisor_id ?? $templateRequest->advisor_id;
-        if ($targetAdvisorId) {
-            $this->initializeAdvisorSections($targetAdvisorId, $templateRequest->template_name, false, $templateRequest->id);
-        }
 
         $this->activityLogs->log([
             'action' => 'wc.template_request.submit',
@@ -226,14 +221,7 @@ class TemplateRequestController extends Controller
     public function assignAdvisor(Request $request, int $id): JsonResponse
     {
         $user = $request->user();
-
-        if (
-            ! $this->gate->can($user, 'wc_deploy_websites')
-            && ! $this->gate->can($user, 'wc_request_deployments')
-            && ! $this->gate->can($user, 'wc_assign_change_requests')
-        ) {
-            $this->gate->assertCan($user, 'wc_request_deployments');
-        }
+        $this->gate->assertCan($user, 'wc_assign_change_requests');
 
         $request->validate([
             'assigned_advisor_id' => ['required', Rule::exists(User::class, 'id')],
@@ -252,16 +240,10 @@ class TemplateRequestController extends Controller
             ], 422);
         }
 
+        // Only store the assignment. Sections are created when Power Admin deploys.
         $templateRequest->update([
             'assigned_advisor_id' => $request->assigned_advisor_id,
         ]);
-
-        $this->initializeAdvisorSections(
-            $request->assigned_advisor_id,
-            $templateRequest->template_name,
-            false,
-            (int) $templateRequest->id
-        );
 
         $this->activityLogs->log([
             'action' => 'wc.template_request.assign_advisor',
@@ -326,6 +308,15 @@ class TemplateRequestController extends Controller
                 'template_request' => $templateRequest,
                 'sections' => [],
                 'message' => 'No advisor assigned to this deployment.',
+            ]);
+        }
+
+        // Do not materialize hub sections before Power Admin deploys.
+        if ($templateRequest->status !== 'deployed') {
+            return response()->json([
+                'template_request' => $templateRequest,
+                'sections' => [],
+                'message' => 'Sections are created after this site is deployed.',
             ]);
         }
 

@@ -569,7 +569,7 @@ class Hub extends Model
         ],
         'wc_assign_change_requests' => [
             'label' => 'Assign website change requests',
-            'description' => 'Assign pending website change requests to an approver.',
+            'description' => 'Assign pending website change requests to an approver, and assign advisors to staff-requested site deployments.',
             'group' => self::GROUP_WEBSITE_COMPLIANCE,
             'default_shared' => false,
             'default_white_label' => false,

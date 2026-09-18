@@ -54,6 +54,12 @@ class SectionController extends Controller
 
             [$scopedAdvisorId, $scopedRequestId, $templateSlug] = $resolved;
 
+            // Only materialize sections for deployed sites (created on Power Admin deploy).
+            $deployment = TemplateRequest::find($scopedRequestId);
+            if (! $deployment || $deployment->status !== 'deployed') {
+                return response()->json([]);
+            }
+
             AdvisorSectionService::ensureForAdvisor(
                 (int) $scopedAdvisorId,
                 $templateSlug,

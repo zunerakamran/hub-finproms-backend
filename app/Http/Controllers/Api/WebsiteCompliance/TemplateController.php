@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\WebsiteCompliance;
 use App\Http\Controllers\Controller;
 use App\Models\WebsiteCompliance\Page;
 use App\Models\WebsiteCompliance\Template;
+use App\Models\WebsiteCompliance\TemplateRequest;
 use App\Services\ActivityLogService;
 use App\Services\WebsiteCompliance\AdvisorSectionService;
 use App\Services\WebsiteCompliance\ShowcaseSectionService;
@@ -64,12 +65,15 @@ class TemplateController extends Controller
         if ($advisorId) {
             $templateRequestId = $request->query('template_request_id');
             if ($templateRequestId) {
-                AdvisorSectionService::ensureForAdvisor(
-                    (int) $advisorId,
-                    $template->slug,
-                    false,
-                    (int) $templateRequestId
-                );
+                $deployment = TemplateRequest::find((int) $templateRequestId);
+                if ($deployment && $deployment->status === 'deployed') {
+                    AdvisorSectionService::ensureForAdvisor(
+                        (int) $advisorId,
+                        $template->slug,
+                        false,
+                        (int) $templateRequestId
+                    );
+                }
             }
         }
 
