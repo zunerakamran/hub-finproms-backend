@@ -36,7 +36,7 @@ class WhiteLabelUserService
     {
         $this->assertTarget($hub);
 
-        return $this->remoteDb->run($hub, function (string $connection) use ($search, $role, $perPage, $page) {
+        return $this->remoteDb->run($hub, function (string $connection) use ($hub, $search, $role, $perPage, $page) {
             $query = User::on($connection)->orderBy('name')->orderBy('id');
 
             if ($search) {
@@ -54,7 +54,7 @@ class WhiteLabelUserService
 
             return [
                 'users' => $paginator->getCollection()
-                    ->map(fn (User $user) => $this->serialize($user))
+                    ->map(fn (User $user) => $this->serialize($user, $hub))
                     ->values()
                     ->all(),
                 'meta' => [
@@ -75,7 +75,7 @@ class WhiteLabelUserService
     {
         $this->assertTarget($hub);
 
-        return $this->remoteDb->run($hub, function (string $connection) use ($payload) {
+        return $this->remoteDb->run($hub, function (string $connection) use ($hub, $payload) {
             $this->assertEmailAvailable($connection, (string) $payload['email']);
 
             $user = User::on($connection)->create([
@@ -89,7 +89,7 @@ class WhiteLabelUserService
                 'is_suspended' => $payload['is_suspended'] ?? false,
             ]);
 
-            return $this->serialize($user->fresh());
+            return $this->serialize($user->fresh(), $hub);
         });
     }
 
@@ -100,8 +100,8 @@ class WhiteLabelUserService
     {
         $this->assertTarget($hub);
 
-        return $this->remoteDb->run($hub, function (string $connection) use ($userId) {
-            return $this->serialize($this->findOrFail($connection, $userId));
+        return $this->remoteDb->run($hub, function (string $connection) use ($hub, $userId) {
+            return $this->serialize($this->findOrFail($connection, $userId), $hub);
         });
     }
 
@@ -113,7 +113,7 @@ class WhiteLabelUserService
     {
         $this->assertTarget($hub);
 
-        return $this->remoteDb->run($hub, function (string $connection) use ($userId, $payload) {
+        return $this->remoteDb->run($hub, function (string $connection) use ($hub, $userId, $payload) {
             $user = $this->findOrFail($connection, $userId);
 
             if (array_key_exists('email', $payload)) {
@@ -148,7 +148,7 @@ class WhiteLabelUserService
             }
 
             return [
-                'user' => $this->serialize($user->fresh()),
+                'user' => $this->serialize($user->fresh(), $hub),
                 'password_changed' => $passwordChanged,
                 'newly_suspended' => $newlySuspended,
             ];
@@ -185,17 +185,20 @@ class WhiteLabelUserService
     /**
      * @return array<string, mixed>
      */
-    public function serialize(User $user): array
+    public function serialize(User $user, ?Hub $hub = null): array
     {
+        $hubAllowsUnlimited = $hub ? $hub->givesUnlimitedSubscriberCredits() : false;
+        $unlimited = $user->hasUnlimitedCredits($hubAllowsUnlimited);
+
         return [
             'id' => $user->id,
             'name' => $user->name,
             'email' => $user->email,
             'role' => $user->role,
             'role_label' => $user->role_label,
-            'credits' => (int) $user->credits,
+            'credits' => $unlimited ? 0 : (int) $user->credits,
             'is_advisor' => (bool) $user->is_advisor,
-            'has_unlimited_credits' => (bool) $user->has_unlimited_credits,
+            'has_unlimited_credits' => $unlimited,
             'is_suspended' => (bool) $user->is_suspended,
             'is_discontinued' => (bool) $user->is_discontinued,
             'created_at' => $user->created_at?->toIso8601String(),
