@@ -2,16 +2,19 @@
 
 namespace App\Http\Controllers\Api\WebsiteCompliance;
 
+use App\Jobs\WebsiteCompliance\PublishScheduledChangeRequestJob;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\WebsiteCompliance\ChangeRequest;
 use App\Models\WebsiteCompliance\Section;
 use App\Models\WebsiteCompliance\TemplateRequest;
+use App\Services\ActingHubService;
 use App\Services\ActivityLogService;
 use App\Services\WebsiteCompliance\ChangeRequestPublishService;
 use App\Services\WebsiteCompliance\ChangeRequestWorkflowService;
 use App\Services\WebsiteCompliance\CpanelSyncService;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
+use App\Support\WebsiteCompliance\WcDatabaseContext;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -276,12 +279,32 @@ class ChangeRequestController extends Controller
                 $user
             );
 
+            $hubId = null;
+            if (WcDatabaseContext::active()) {
+                $actingHub = app(ActingHubService::class)->actingHub($user);
+                if ($actingHub->isWhiteLabel()) {
+                    $hubId = (int) $actingHub->id;
+                }
+            }
+
+            // Programmatic timer: delayed queue job fires at scheduled_at (requires queue worker).
+            PublishScheduledChangeRequestJob::dispatch(
+                (int) $changeRequest->id,
+                $hubId,
+                $scheduledAt->toIso8601String(),
+            )->delay($scheduledAt);
+
             $this->activityLogs->log([
                 'action' => 'wc.change_request.schedule',
                 'description' => 'Content approved and scheduled for '.$scheduledAt->toIso8601String(),
                 'user' => $user,
                 'subject' => $changeRequest,
                 'request' => $request,
+                'properties' => [
+                    'scheduled_at' => $scheduledAt->toIso8601String(),
+                    'hub_id' => $hubId,
+                    'dispatch' => 'delayed_job',
+                ],
             ]);
 
             return response()->json([

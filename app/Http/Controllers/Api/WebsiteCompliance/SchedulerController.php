@@ -3,8 +3,7 @@
 namespace App\Http\Controllers\Api\WebsiteCompliance;
 
 use App\Http\Controllers\Controller;
-use App\Models\WebsiteCompliance\ChangeRequest;
-use App\Services\WebsiteCompliance\ChangeRequestPublishService;
+use App\Services\WebsiteCompliance\ScheduledChangeRequestPublisher;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -16,7 +15,7 @@ use Illuminate\Support\Facades\Log;
  */
 class SchedulerController extends Controller
 {
-    public function publishScheduled(Request $request): JsonResponse
+    public function publishScheduled(Request $request, ScheduledChangeRequestPublisher $publisher): JsonResponse
     {
         $secret = config('services.website_compliance.scheduler_secret');
 
@@ -28,70 +27,25 @@ class SchedulerController extends Controller
             return response()->json(['message' => 'Unauthorized'], 401);
         }
 
-        $due = ChangeRequest::with('section')
-            ->where('status', 'scheduled')
-            ->whereNotNull('scheduled_at')
-            ->where('scheduled_at', '<=', now())
-            ->orderBy('scheduled_at')
-            ->get();
+        $result = $publisher->publishDue();
 
-        if ($due->isEmpty()) {
+        if ($result['published'] === 0 && $result['failed'] === 0) {
             return response()->json([
                 'message' => 'No scheduled change requests due for publication.',
                 'published' => 0,
                 'failed' => 0,
-                'now' => now()->toIso8601String(),
+                'hubs_scanned' => $result['hubs_scanned'],
+                'now' => $result['now'],
             ]);
         }
 
-        Log::info('wc publish-scheduled webhook: due change requests found', [
-            'due_count' => $due->count(),
-            'now' => now()->toIso8601String(),
-        ]);
-
-        $published = 0;
-        $failed = 0;
-        $results = [];
-
-        foreach ($due as $changeRequest) {
-            try {
-                $result = ChangeRequestPublishService::publish(
-                    $changeRequest,
-                    $changeRequest->approver_id
-                );
-
-                $published++;
-                Log::info('wc publish-scheduled webhook: published', [
-                    'change_request_id' => $changeRequest->id,
-                    'cpanel_synced' => $result['cpanel_synced'] ?? false,
-                ]);
-
-                $results[] = [
-                    'id' => $changeRequest->id,
-                    'status' => 'published',
-                    'cpanel_synced' => $result['cpanel_synced'] ?? false,
-                ];
-            } catch (\Throwable $e) {
-                $failed++;
-                Log::error('wc publish-scheduled webhook: failed to publish', [
-                    'change_request_id' => $changeRequest->id,
-                    'error' => $e->getMessage(),
-                ]);
-
-                $results[] = [
-                    'id' => $changeRequest->id,
-                    'status' => 'failed',
-                    'error' => $e->getMessage(),
-                ];
-            }
-        }
-
         return response()->json([
-            'message' => "Done. Published: {$published}, failed: {$failed}.",
-            'published' => $published,
-            'failed' => $failed,
-            'results' => $results,
-            'now' => now()->toIso8601String(),
-        ], $failed > 0 ? 207 : 200);
+            'message' => "Done. Published: {$result['published']}, failed: {$result['failed']}.",
+            'published' => $result['published'],
+            'failed' => $result['failed'],
+            'hubs_scanned' => $result['hubs_scanned'],
+            'results' => $result['results'],
+            'now' => $result['now'],
+        ], $result['failed'] > 0 ? 207 : 200);
     }
 }
