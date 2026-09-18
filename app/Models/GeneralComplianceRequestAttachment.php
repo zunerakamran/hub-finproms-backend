@@ -2,12 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\WebsiteCompliance\UsesWcDatabaseContext;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Storage;
 
 class GeneralComplianceRequestAttachment extends Model
 {
+    use UsesWcDatabaseContext;
+
     protected $table = 'general_compliance_request_attachments';
 
     protected $fillable = [

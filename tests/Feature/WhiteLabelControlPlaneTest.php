@@ -452,6 +452,7 @@ class WhiteLabelControlPlaneTest extends TestCase
                 $table->unsignedBigInteger('approver_id')->nullable();
                 $table->longText('proposed_content')->nullable();
                 $table->string('status')->default('pending');
+                $table->unsignedInteger('current_version')->default(1);
                 $table->timestamps();
             });
 
@@ -473,6 +474,37 @@ class WhiteLabelControlPlaneTest extends TestCase
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
+
+            // Stale snapshot must not win over live counts on GET summary.
+            DB::connection($connection)->table('wc_platform_reports')->insert([
+                'templates_total' => 0,
+                'templates_active' => 0,
+                'templates_inactive' => 0,
+                'users_total' => 0,
+                'advisors_count' => 0,
+                'approvers_count' => 0,
+                'managers_count' => 0,
+                'client_admins_count' => 0,
+                'power_admins_count' => 0,
+                'template_requests_total' => 0,
+                'template_requests_pending' => 0,
+                'template_requests_deployed' => 0,
+                'template_requests_rejected' => 0,
+                'template_requests_advisor_website' => 0,
+                'template_requests_hub_main_website' => 0,
+                'template_requests_by_template' => json_encode([]),
+                'change_requests_total' => 0,
+                'change_requests_pending' => 0,
+                'change_requests_under_review' => 0,
+                'change_requests_scheduled' => 0,
+                'change_requests_approved' => 0,
+                'change_requests_rejected' => 0,
+                'change_requests_approved_with_feedback' => 0,
+                'generated_by' => null,
+                'generated_at' => now()->subDay(),
+                'created_at' => now()->subDay(),
+                'updated_at' => now()->subDay(),
+            ]);
         } finally {
             $remote->disconnect($hub);
         }
@@ -488,8 +520,177 @@ class WhiteLabelControlPlaneTest extends TestCase
             ->assertOk()
             ->assertJsonPath('template_requests.total', 1)
             ->assertJsonPath('template_requests.by_status.pending', 1)
-            ->assertJsonPath('users.by_role.advisor', 1)
-            ->assertJsonPath('users.by_role.power_admin', 0);
+            ->assertJsonPath('deployments.total', 1)
+            ->assertJsonPath('deployments.by_status.pending', 1)
+            ->assertJsonPath('templates.total', 1)
+            ->assertJsonPath('templates.active', 1)
+            ->assertJsonPath('deployments.awaiting_advisor', 1)
+            ->assertJsonPath('change_requests.avg_version', 1)
+            ->assertJsonPath('change_requests.resubmitted', 0);
+    }
+
+    public function test_social_media_compliance_reports_are_read_from_acting_white_label_database(): void
+    {
+        [$admin, $hub] = $this->actingPowerAdminOnWiredHub();
+
+        $checklist = $hub->resolvedChecklist();
+        $checklist['module_social_media_compliance'] = true;
+        $roleCaps = is_array($hub->role_capabilities) ? $hub->role_capabilities : [];
+        $roleCaps[User::ROLE_POWER_ADMIN]['smc_view_reports'] = true;
+        $hub->forceFill([
+            'checklist' => $checklist,
+            'role_capabilities' => $roleCaps,
+        ])->save();
+
+        $remote = app(WhiteLabelDatabaseService::class);
+        $connection = $remote->connect($hub);
+        try {
+            Schema::connection($connection)->create('social_media_compliance_requests', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('user_id');
+                $table->unsignedBigInteger('post_id')->nullable();
+                $table->string('name');
+                $table->unsignedInteger('current_version')->default(1);
+                $table->timestamp('submission_date')->useCurrent();
+                $table->unsignedBigInteger('assigned_to')->nullable();
+                $table->timestamp('assigned_date')->nullable();
+                $table->unsignedBigInteger('assigned_by')->nullable();
+                $table->timestamps();
+            });
+
+            Schema::connection($connection)->create('social_media_compliance_request_versions', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('request_id');
+                $table->unsignedTinyInteger('version_number')->default(1);
+                $table->text('description')->nullable();
+                $table->string('image_path', 500)->nullable();
+                $table->string('image_url', 500)->nullable();
+                $table->unsignedBigInteger('submitted_by');
+                $table->timestamp('submitted_at')->useCurrent();
+                $table->string('status', 50)->nullable();
+                $table->text('feedback')->nullable();
+                $table->string('reviewed_by')->nullable();
+                $table->timestamp('reviewed_at')->nullable();
+                $table->timestamps();
+            });
+
+            $requestId = DB::connection($connection)->table('social_media_compliance_requests')->insertGetId([
+                'user_id' => 1,
+                'post_id' => null,
+                'name' => 'WL Advisor',
+                'current_version' => 1,
+                'submission_date' => now(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            DB::connection($connection)->table('social_media_compliance_request_versions')->insert([
+                'request_id' => $requestId,
+                'version_number' => 1,
+                'description' => 'Remote white-label SMC submission',
+                'submitted_by' => 1,
+                'submitted_at' => now(),
+                'status' => 'Pending',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        } finally {
+            $remote->disconnect($hub);
+        }
+
+        $this->assertDatabaseMissing('social_media_compliance_requests', ['name' => 'WL Advisor']);
+
+        $this->getJson('/api/power-admin/social-media-compliance/reports')
+            ->assertOk()
+            ->assertJsonPath('report.summary.total', 1)
+            ->assertJsonPath('report.rows.0.submitted_by', 'WL Advisor')
+            ->assertJsonPath('report.rows.0.status', 'Pending');
+    }
+
+    public function test_general_compliance_reports_are_read_from_acting_white_label_database(): void
+    {
+        [$admin, $hub] = $this->actingPowerAdminOnWiredHub();
+
+        $checklist = $hub->resolvedChecklist();
+        $checklist['module_general_compliance'] = true;
+        $roleCaps = is_array($hub->role_capabilities) ? $hub->role_capabilities : [];
+        $roleCaps[User::ROLE_POWER_ADMIN]['gc_view_reports'] = true;
+        $hub->forceFill([
+            'checklist' => $checklist,
+            'role_capabilities' => $roleCaps,
+        ])->save();
+
+        $remote = app(WhiteLabelDatabaseService::class);
+        $connection = $remote->connect($hub);
+        try {
+            Schema::connection($connection)->create('general_compliance_requests', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('user_id');
+                $table->string('name');
+                $table->unsignedInteger('current_version')->default(1);
+                $table->timestamp('submission_date')->useCurrent();
+                $table->unsignedBigInteger('assigned_to')->nullable();
+                $table->timestamp('assigned_date')->nullable();
+                $table->unsignedBigInteger('assigned_by')->nullable();
+                $table->timestamps();
+            });
+
+            Schema::connection($connection)->create('general_compliance_request_versions', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('request_id');
+                $table->unsignedTinyInteger('version_number')->default(1);
+                $table->text('description')->nullable();
+                $table->unsignedBigInteger('submitted_by');
+                $table->timestamp('submitted_at')->useCurrent();
+                $table->string('status', 50)->nullable();
+                $table->text('feedback')->nullable();
+                $table->string('reviewed_by')->nullable();
+                $table->timestamp('reviewed_at')->nullable();
+                $table->timestamps();
+            });
+
+            Schema::connection($connection)->create('general_compliance_request_attachments', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('version_id');
+                $table->string('original_name');
+                $table->string('file_path', 500)->nullable();
+                $table->string('file_url', 500)->nullable();
+                $table->string('mime_type')->nullable();
+                $table->unsignedBigInteger('size_bytes')->nullable();
+                $table->unsignedInteger('sort_order')->default(0);
+                $table->timestamps();
+            });
+
+            $requestId = DB::connection($connection)->table('general_compliance_requests')->insertGetId([
+                'user_id' => 1,
+                'name' => 'WL GC Advisor',
+                'current_version' => 1,
+                'submission_date' => now(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            DB::connection($connection)->table('general_compliance_request_versions')->insert([
+                'request_id' => $requestId,
+                'version_number' => 1,
+                'description' => 'Remote white-label GC submission',
+                'submitted_by' => 1,
+                'submitted_at' => now(),
+                'status' => 'Pending',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        } finally {
+            $remote->disconnect($hub);
+        }
+
+        $this->assertDatabaseMissing('general_compliance_requests', ['name' => 'WL GC Advisor']);
+
+        $this->getJson('/api/power-admin/general-compliance/reports')
+            ->assertOk()
+            ->assertJsonPath('report.summary.total', 1)
+            ->assertJsonPath('report.rows.0.submitted_by', 'WL GC Advisor')
+            ->assertJsonPath('report.rows.0.status', 'Pending');
     }
 
     private function actingPowerAdminOnWiredHub(): array

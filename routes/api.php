@@ -120,25 +120,31 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/invoices/{invoice}', [InvoiceController::class, 'show']);
 
     // Social Media Compliance — member / role-gated by smc_* capabilities (not hard-coded roles).
-    Route::middleware('hub_can:smc_submit_request')->group(function () {
-        Route::post('/social-media-compliance/requests', [SocialMediaComplianceController::class, 'store']);
-        Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/resubmit', [SocialMediaComplianceController::class, 'resubmit']);
-        Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/confirm-feedback', [SocialMediaComplianceController::class, 'confirmFeedback']);
-    });
+    // acting_wl_wc_db: when hub switcher is on a white-label, read/write that hub's SMC tables.
+    Route::middleware('acting_wl_wc_db')->group(function () {
+        Route::middleware('hub_can:smc_submit_request')->group(function () {
+            Route::post('/social-media-compliance/requests', [SocialMediaComplianceController::class, 'store']);
+            Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/resubmit', [SocialMediaComplianceController::class, 'resubmit']);
+            Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/confirm-feedback', [SocialMediaComplianceController::class, 'confirmFeedback']);
+        });
 
-    // Own history/detail: submit OR view-own (checked in controller against matrix).
-    Route::get('/social-media-compliance/requests/mine', [SocialMediaComplianceController::class, 'mine']);
-    Route::get('/social-media-compliance/requests/{socialMediaComplianceRequest}', [SocialMediaComplianceController::class, 'show']);
+        // Own history/detail: submit OR view-own (checked in controller against matrix).
+        Route::get('/social-media-compliance/requests/mine', [SocialMediaComplianceController::class, 'mine']);
+        Route::get('/social-media-compliance/requests/{socialMediaComplianceRequest}', [SocialMediaComplianceController::class, 'show']);
+    });
 
     // General Compliance — member / role-gated by gc_* capabilities (not hard-coded roles).
-    Route::middleware('hub_can:gc_submit_request')->group(function () {
-        Route::post('/general-compliance/requests', [GeneralComplianceController::class, 'store']);
-        Route::post('/general-compliance/requests/{generalComplianceRequest}/resubmit', [GeneralComplianceController::class, 'resubmit']);
-        Route::post('/general-compliance/requests/{generalComplianceRequest}/confirm-feedback', [GeneralComplianceController::class, 'confirmFeedback']);
-    });
+    // acting_wl_wc_db: when hub switcher is on a white-label, read/write that hub's GC tables.
+    Route::middleware('acting_wl_wc_db')->group(function () {
+        Route::middleware('hub_can:gc_submit_request')->group(function () {
+            Route::post('/general-compliance/requests', [GeneralComplianceController::class, 'store']);
+            Route::post('/general-compliance/requests/{generalComplianceRequest}/resubmit', [GeneralComplianceController::class, 'resubmit']);
+            Route::post('/general-compliance/requests/{generalComplianceRequest}/confirm-feedback', [GeneralComplianceController::class, 'confirmFeedback']);
+        });
 
-    Route::get('/general-compliance/requests/mine', [GeneralComplianceController::class, 'mine']);
-    Route::get('/general-compliance/requests/{generalComplianceRequest}', [GeneralComplianceController::class, 'show']);
+        Route::get('/general-compliance/requests/mine', [GeneralComplianceController::class, 'mine']);
+        Route::get('/general-compliance/requests/{generalComplianceRequest}', [GeneralComplianceController::class, 'show']);
+    });
 
     // Website Compliance — authenticated domain (module + capability gated in controllers / hub_can)
     // acting_wl_wc_db: when hub switcher is on a white-label, read/write that hub's wc_* tables.
@@ -374,47 +380,53 @@ Route::middleware('auth:sanctum')->group(function () {
         });
 
         // Social Media Compliance — queue / assign / review / reports
-        Route::middleware('hub_can:smc_view_all_requests,smc_assign_requests,smc_review_requests')->group(function () {
-            Route::get('/social-media-compliance/requests', [SocialMediaComplianceController::class, 'index']);
-            Route::get('/social-media-compliance/queue', [SocialMediaComplianceController::class, 'index']);
-            Route::get('/social-media-compliance/requests/{socialMediaComplianceRequest}', [SocialMediaComplianceController::class, 'show']);
-        });
-        Route::middleware('hub_can:smc_review_requests')->group(function () {
-            Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/review', [SocialMediaComplianceController::class, 'review']);
-        });
-        Route::middleware('hub_can:smc_assign_requests,smc_review_requests')->group(function () {
-            Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/assign', [SocialMediaComplianceController::class, 'assign']);
-        });
-        Route::middleware('hub_can:smc_assign_requests')->group(function () {
-            Route::get('/social-media-compliance/reviewers', [SocialMediaComplianceController::class, 'reviewers']);
-        });
-        Route::middleware('hub_can:smc_view_reports')->group(function () {
-            Route::get('/social-media-compliance/reports', [SocialMediaComplianceController::class, 'report']);
-            Route::get('/social-media-compliance/reports/export', [SocialMediaComplianceController::class, 'export']);
-            Route::get('/social-media-compliance/charts/approver-workload', [SocialMediaComplianceController::class, 'approverWorkload']);
-            Route::get('/social-media-compliance/charts/advisor-comparison', [SocialMediaComplianceController::class, 'advisorComparison']);
+        // acting_wl_wc_db: when hub switcher is on a white-label, read/write that hub's SMC tables.
+        Route::middleware('acting_wl_wc_db')->group(function () {
+            Route::middleware('hub_can:smc_view_all_requests,smc_assign_requests,smc_review_requests')->group(function () {
+                Route::get('/social-media-compliance/requests', [SocialMediaComplianceController::class, 'index']);
+                Route::get('/social-media-compliance/queue', [SocialMediaComplianceController::class, 'index']);
+                Route::get('/social-media-compliance/requests/{socialMediaComplianceRequest}', [SocialMediaComplianceController::class, 'show']);
+            });
+            Route::middleware('hub_can:smc_review_requests')->group(function () {
+                Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/review', [SocialMediaComplianceController::class, 'review']);
+            });
+            Route::middleware('hub_can:smc_assign_requests,smc_review_requests')->group(function () {
+                Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/assign', [SocialMediaComplianceController::class, 'assign']);
+            });
+            Route::middleware('hub_can:smc_assign_requests')->group(function () {
+                Route::get('/social-media-compliance/reviewers', [SocialMediaComplianceController::class, 'reviewers']);
+            });
+            Route::middleware('hub_can:smc_view_reports')->group(function () {
+                Route::get('/social-media-compliance/reports', [SocialMediaComplianceController::class, 'report']);
+                Route::get('/social-media-compliance/reports/export', [SocialMediaComplianceController::class, 'export']);
+                Route::get('/social-media-compliance/charts/approver-workload', [SocialMediaComplianceController::class, 'approverWorkload']);
+                Route::get('/social-media-compliance/charts/advisor-comparison', [SocialMediaComplianceController::class, 'advisorComparison']);
+            });
         });
 
         // General Compliance — queue / assign / review / reports
-        Route::middleware('hub_can:gc_view_all_requests,gc_assign_requests,gc_review_requests')->group(function () {
-            Route::get('/general-compliance/requests', [GeneralComplianceController::class, 'index']);
-            Route::get('/general-compliance/queue', [GeneralComplianceController::class, 'index']);
-            Route::get('/general-compliance/requests/{generalComplianceRequest}', [GeneralComplianceController::class, 'show']);
-        });
-        Route::middleware('hub_can:gc_review_requests')->group(function () {
-            Route::post('/general-compliance/requests/{generalComplianceRequest}/review', [GeneralComplianceController::class, 'review']);
-        });
-        Route::middleware('hub_can:gc_assign_requests,gc_review_requests')->group(function () {
-            Route::post('/general-compliance/requests/{generalComplianceRequest}/assign', [GeneralComplianceController::class, 'assign']);
-        });
-        Route::middleware('hub_can:gc_assign_requests')->group(function () {
-            Route::get('/general-compliance/reviewers', [GeneralComplianceController::class, 'reviewers']);
-        });
-        Route::middleware('hub_can:gc_view_reports')->group(function () {
-            Route::get('/general-compliance/reports', [GeneralComplianceController::class, 'report']);
-            Route::get('/general-compliance/reports/export', [GeneralComplianceController::class, 'export']);
-            Route::get('/general-compliance/charts/approver-workload', [GeneralComplianceController::class, 'approverWorkload']);
-            Route::get('/general-compliance/charts/advisor-comparison', [GeneralComplianceController::class, 'advisorComparison']);
+        // acting_wl_wc_db: when hub switcher is on a white-label, read/write that hub's GC tables.
+        Route::middleware('acting_wl_wc_db')->group(function () {
+            Route::middleware('hub_can:gc_view_all_requests,gc_assign_requests,gc_review_requests')->group(function () {
+                Route::get('/general-compliance/requests', [GeneralComplianceController::class, 'index']);
+                Route::get('/general-compliance/queue', [GeneralComplianceController::class, 'index']);
+                Route::get('/general-compliance/requests/{generalComplianceRequest}', [GeneralComplianceController::class, 'show']);
+            });
+            Route::middleware('hub_can:gc_review_requests')->group(function () {
+                Route::post('/general-compliance/requests/{generalComplianceRequest}/review', [GeneralComplianceController::class, 'review']);
+            });
+            Route::middleware('hub_can:gc_assign_requests,gc_review_requests')->group(function () {
+                Route::post('/general-compliance/requests/{generalComplianceRequest}/assign', [GeneralComplianceController::class, 'assign']);
+            });
+            Route::middleware('hub_can:gc_assign_requests')->group(function () {
+                Route::get('/general-compliance/reviewers', [GeneralComplianceController::class, 'reviewers']);
+            });
+            Route::middleware('hub_can:gc_view_reports')->group(function () {
+                Route::get('/general-compliance/reports', [GeneralComplianceController::class, 'report']);
+                Route::get('/general-compliance/reports/export', [GeneralComplianceController::class, 'export']);
+                Route::get('/general-compliance/charts/approver-workload', [GeneralComplianceController::class, 'approverWorkload']);
+                Route::get('/general-compliance/charts/advisor-comparison', [GeneralComplianceController::class, 'advisorComparison']);
+            });
         });
 
         // Website Compliance — queue / assign / review / reports / deployments
@@ -637,46 +649,52 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/modules', [HubModulesController::class, 'show']);
         Route::put('/modules', [HubModulesController::class, 'update']);
 
-        Route::middleware('hub_can:smc_view_all_requests,smc_assign_requests,smc_review_requests')->group(function () {
-            Route::get('/social-media-compliance/requests', [SocialMediaComplianceController::class, 'index']);
-            Route::get('/social-media-compliance/queue', [SocialMediaComplianceController::class, 'index']);
-            Route::get('/social-media-compliance/requests/{socialMediaComplianceRequest}', [SocialMediaComplianceController::class, 'show']);
-        });
-        Route::middleware('hub_can:smc_review_requests')->group(function () {
-            Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/review', [SocialMediaComplianceController::class, 'review']);
-        });
-        Route::middleware('hub_can:smc_assign_requests,smc_review_requests')->group(function () {
-            Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/assign', [SocialMediaComplianceController::class, 'assign']);
-        });
-        Route::middleware('hub_can:smc_assign_requests')->group(function () {
-            Route::get('/social-media-compliance/reviewers', [SocialMediaComplianceController::class, 'reviewers']);
-        });
-        Route::middleware('hub_can:smc_view_reports')->group(function () {
-            Route::get('/social-media-compliance/reports', [SocialMediaComplianceController::class, 'report']);
-            Route::get('/social-media-compliance/reports/export', [SocialMediaComplianceController::class, 'export']);
-            Route::get('/social-media-compliance/charts/approver-workload', [SocialMediaComplianceController::class, 'approverWorkload']);
-            Route::get('/social-media-compliance/charts/advisor-comparison', [SocialMediaComplianceController::class, 'advisorComparison']);
+        // Social Media Compliance — acting_wl_wc_db remounts onto selected white-label DB
+        Route::middleware('acting_wl_wc_db')->group(function () {
+            Route::middleware('hub_can:smc_view_all_requests,smc_assign_requests,smc_review_requests')->group(function () {
+                Route::get('/social-media-compliance/requests', [SocialMediaComplianceController::class, 'index']);
+                Route::get('/social-media-compliance/queue', [SocialMediaComplianceController::class, 'index']);
+                Route::get('/social-media-compliance/requests/{socialMediaComplianceRequest}', [SocialMediaComplianceController::class, 'show']);
+            });
+            Route::middleware('hub_can:smc_review_requests')->group(function () {
+                Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/review', [SocialMediaComplianceController::class, 'review']);
+            });
+            Route::middleware('hub_can:smc_assign_requests,smc_review_requests')->group(function () {
+                Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/assign', [SocialMediaComplianceController::class, 'assign']);
+            });
+            Route::middleware('hub_can:smc_assign_requests')->group(function () {
+                Route::get('/social-media-compliance/reviewers', [SocialMediaComplianceController::class, 'reviewers']);
+            });
+            Route::middleware('hub_can:smc_view_reports')->group(function () {
+                Route::get('/social-media-compliance/reports', [SocialMediaComplianceController::class, 'report']);
+                Route::get('/social-media-compliance/reports/export', [SocialMediaComplianceController::class, 'export']);
+                Route::get('/social-media-compliance/charts/approver-workload', [SocialMediaComplianceController::class, 'approverWorkload']);
+                Route::get('/social-media-compliance/charts/advisor-comparison', [SocialMediaComplianceController::class, 'advisorComparison']);
+            });
         });
 
-        Route::middleware('hub_can:gc_view_all_requests,gc_assign_requests,gc_review_requests')->group(function () {
-            Route::get('/general-compliance/requests', [GeneralComplianceController::class, 'index']);
-            Route::get('/general-compliance/queue', [GeneralComplianceController::class, 'index']);
-            Route::get('/general-compliance/requests/{generalComplianceRequest}', [GeneralComplianceController::class, 'show']);
-        });
-        Route::middleware('hub_can:gc_review_requests')->group(function () {
-            Route::post('/general-compliance/requests/{generalComplianceRequest}/review', [GeneralComplianceController::class, 'review']);
-        });
-        Route::middleware('hub_can:gc_assign_requests,gc_review_requests')->group(function () {
-            Route::post('/general-compliance/requests/{generalComplianceRequest}/assign', [GeneralComplianceController::class, 'assign']);
-        });
-        Route::middleware('hub_can:gc_assign_requests')->group(function () {
-            Route::get('/general-compliance/reviewers', [GeneralComplianceController::class, 'reviewers']);
-        });
-        Route::middleware('hub_can:gc_view_reports')->group(function () {
-            Route::get('/general-compliance/reports', [GeneralComplianceController::class, 'report']);
-            Route::get('/general-compliance/reports/export', [GeneralComplianceController::class, 'export']);
-            Route::get('/general-compliance/charts/approver-workload', [GeneralComplianceController::class, 'approverWorkload']);
-            Route::get('/general-compliance/charts/advisor-comparison', [GeneralComplianceController::class, 'advisorComparison']);
+        // General Compliance — acting_wl_wc_db remounts onto selected white-label DB
+        Route::middleware('acting_wl_wc_db')->group(function () {
+            Route::middleware('hub_can:gc_view_all_requests,gc_assign_requests,gc_review_requests')->group(function () {
+                Route::get('/general-compliance/requests', [GeneralComplianceController::class, 'index']);
+                Route::get('/general-compliance/queue', [GeneralComplianceController::class, 'index']);
+                Route::get('/general-compliance/requests/{generalComplianceRequest}', [GeneralComplianceController::class, 'show']);
+            });
+            Route::middleware('hub_can:gc_review_requests')->group(function () {
+                Route::post('/general-compliance/requests/{generalComplianceRequest}/review', [GeneralComplianceController::class, 'review']);
+            });
+            Route::middleware('hub_can:gc_assign_requests,gc_review_requests')->group(function () {
+                Route::post('/general-compliance/requests/{generalComplianceRequest}/assign', [GeneralComplianceController::class, 'assign']);
+            });
+            Route::middleware('hub_can:gc_assign_requests')->group(function () {
+                Route::get('/general-compliance/reviewers', [GeneralComplianceController::class, 'reviewers']);
+            });
+            Route::middleware('hub_can:gc_view_reports')->group(function () {
+                Route::get('/general-compliance/reports', [GeneralComplianceController::class, 'report']);
+                Route::get('/general-compliance/reports/export', [GeneralComplianceController::class, 'export']);
+                Route::get('/general-compliance/charts/approver-workload', [GeneralComplianceController::class, 'approverWorkload']);
+                Route::get('/general-compliance/charts/advisor-comparison', [GeneralComplianceController::class, 'advisorComparison']);
+            });
         });
 
         // Website Compliance — queue / assign / review / reports / deployments

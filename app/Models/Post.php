@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\WebsiteCompliance\UsesWcDatabaseContext;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -10,6 +11,8 @@ use Illuminate\Support\Facades\Storage;
 
 class Post extends Model
 {
+    use UsesWcDatabaseContext;
+
     /** @var array<string, string>|null */
     protected static ?array $typeSlugMap = null;
 

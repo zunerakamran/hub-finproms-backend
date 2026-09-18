@@ -2,12 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\WebsiteCompliance\UsesWcDatabaseContext;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Storage;
 
 class SocialMediaComplianceRequestVersion extends Model
 {
+    use UsesWcDatabaseContext;
+
     protected $table = 'social_media_compliance_request_versions';
 
     protected $fillable = [

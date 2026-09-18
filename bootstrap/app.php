@@ -21,6 +21,12 @@ return Application::configure(basePath: dirname(__DIR__))
             'acting_wl_wc_db' => \App\Http\Middleware\UseActingWhiteLabelWcDatabase::class,
         ]);
 
+        // Remount WL DB before route-model binding so SMC/WC IDs resolve on the acting hub.
+        $middleware->prependToPriorityList(
+            \Illuminate\Routing\Middleware\SubstituteBindings::class,
+            \App\Http\Middleware\UseActingWhiteLabelWcDatabase::class,
+        );
+
         // Record successful mutating API requests (posts, imports, settings, etc.).
         $middleware->appendToGroup('api', [
             \App\Http\Middleware\LogApiActivity::class,

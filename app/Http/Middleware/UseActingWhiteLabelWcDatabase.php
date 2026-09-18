@@ -11,8 +11,9 @@ use InvalidArgumentException;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * While the shared-hub switcher is on a white-label hub, point Website Compliance
- * Eloquent models at that hub's remote database for the rest of the request.
+ * While the shared-hub switcher is on a white-label hub, point Website Compliance,
+ * Social Media Compliance, and General Compliance Eloquent models at that hub's
+ * remote database for the rest of the request (Hub registry / auth stay on shared).
  */
 class UseActingWhiteLabelWcDatabase
 {
