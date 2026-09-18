@@ -48,11 +48,14 @@ class ChangeRequestVersion extends Model
      */
     public function toApiArray(): array
     {
+        $decoded = json_decode((string) $this->proposed_content, true);
+
         return [
             'id' => $this->id,
             'request_id' => $this->request_id,
             'version_number' => $this->version_number,
             'proposed_content' => $this->proposed_content,
+            'section_edits' => is_array($decoded) ? $decoded : null,
             'status' => $this->status,
             'feedback' => $this->feedback,
             'submitted_by' => $this->submitted_by,

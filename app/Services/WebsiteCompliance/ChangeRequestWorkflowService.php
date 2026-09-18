@@ -162,6 +162,8 @@ class ChangeRequestWorkflowService
             throw new HttpException(409, 'Only rejected change requests can be resubmitted.');
         }
 
+        $this->assertEditsWithinPriorVersion($changeRequest, $sectionEdits);
+
         $edits = $this->prepareAndLockEdits($sectionEdits, $user);
         $proposedContent = json_encode($edits);
         $nextVersion = ((int) ($changeRequest->current_version ?: 1)) + 1;
@@ -213,6 +215,8 @@ class ChangeRequestWorkflowService
             throw new HttpException(409, 'Only requests approved with feedback can be confirmed.');
         }
 
+        $nextVersion = ((int) ($changeRequest->current_version ?: 1)) + 1;
+
         if ($sectionEdits !== null) {
             if ($sectionEdits === []) {
                 throw ValidationException::withMessages([
@@ -220,9 +224,10 @@ class ChangeRequestWorkflowService
                 ]);
             }
 
+            $this->assertEditsWithinPriorVersion($changeRequest, $sectionEdits);
+
             $edits = $this->prepareAndLockEdits($sectionEdits, $user);
             $proposedContent = json_encode($edits);
-            $nextVersion = ((int) ($changeRequest->current_version ?: 1)) + 1;
             $primarySectionId = count($edits) === 1 ? $edits[0]['section_id'] : null;
 
             $changeRequest->update([
@@ -242,9 +247,27 @@ class ChangeRequestWorkflowService
                 'submitted_at' => now(),
             ]);
         } else {
+            // Confirm without content changes still creates a new version (match SMC/GC).
+            $proposedContent = $changeRequest->resolvedProposedContent();
+
+            $changeRequest->update([
+                'proposed_content' => $proposedContent,
+                'current_version' => $nextVersion,
+                'feedback' => null,
+            ]);
+
+            ChangeRequestVersion::create([
+                'request_id' => $changeRequest->id,
+                'version_number' => $nextVersion,
+                'proposed_content' => $proposedContent,
+                'status' => ChangeRequest::STATUS_PENDING,
+                'feedback' => null,
+                'submitted_by' => $this->gate->tenantUserIdOrNull($user),
+                'submitted_at' => now(),
+            ]);
+
             // Re-lock briefly so publish unlock path stays consistent.
-            $proposed = $changeRequest->resolvedProposedContent();
-            $decoded = json_decode((string) $proposed, true);
+            $decoded = json_decode((string) $proposedContent, true);
             if (is_array($decoded)) {
                 foreach ($decoded as $editItem) {
                     if (! isset($editItem['section_id'])) {
@@ -263,10 +286,14 @@ class ChangeRequestWorkflowService
 
         $this->activityLogs->log([
             'action' => 'wc.change_request.confirm_feedback',
-            'description' => 'Confirmed approved-with-feedback and published',
+            'description' => 'Confirmed approved-with-feedback and published as version '.$nextVersion,
             'user' => $user,
             'subject' => $changeRequest,
             'request' => $request,
+            'properties' => [
+                'version' => $nextVersion,
+                'revised' => $sectionEdits !== null,
+            ],
         ]);
 
         return [
@@ -296,6 +323,42 @@ class ChangeRequestWorkflowService
         ], true)) {
             throw new HttpException(409, 'This request can no longer be reviewed.');
         }
+    }
+
+    /**
+     * When revising a previous version, only sections from that version may be edited.
+     *
+     * @param  list<array{section_id:int, proposed_content:string, current_content?:string|null}>  $sectionEdits
+     */
+    public function assertEditsWithinPriorVersion(ChangeRequest $changeRequest, array $sectionEdits): void
+    {
+        $allowed = $changeRequest->sectionIdsFromProposedContent();
+        if ($allowed === []) {
+            return;
+        }
+
+        $allowedLookup = array_fill_keys($allowed, true);
+        $invalidIds = [];
+
+        foreach ($sectionEdits as $edit) {
+            $sectionId = (int) ($edit['section_id'] ?? 0);
+            if ($sectionId < 1 || ! isset($allowedLookup[$sectionId])) {
+                $invalidIds[] = $sectionId;
+            }
+        }
+
+        if ($invalidIds === []) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'section_edits' => [
+                'Only sections from the previous version can be edited. New sections are not allowed.',
+            ],
+            'section_edits.*.section_id' => [
+                'Invalid section id(s): '.implode(', ', array_values(array_unique($invalidIds))).'. Allowed: '.implode(', ', $allowed).'.',
+            ],
+        ]);
     }
 
     private function isOriginalEditorOrRemoteOperator(ChangeRequest $changeRequest, User $user): bool

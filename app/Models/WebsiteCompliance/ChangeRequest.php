@@ -112,6 +112,34 @@ class ChangeRequest extends Model
     }
 
     /**
+     * Section IDs included in the current/previous version's proposed content.
+     * Used to restrict resubmit / confirm-feedback edits to that set.
+     *
+     * @return list<int>
+     */
+    public function sectionIdsFromProposedContent(): array
+    {
+        $decoded = json_decode((string) $this->resolvedProposedContent(), true);
+
+        if (is_array($decoded)) {
+            $ids = [];
+            foreach ($decoded as $item) {
+                if (isset($item['section_id'])) {
+                    $ids[] = (int) $item['section_id'];
+                }
+            }
+
+            return array_values(array_unique($ids));
+        }
+
+        if ($this->section_id) {
+            return [(int) $this->section_id];
+        }
+
+        return [];
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function toApiArray(bool $includeVersions = false): array
@@ -129,6 +157,11 @@ class ChangeRequest extends Model
 
         $proposed = $this->resolvedProposedContent();
         $decoded = json_decode((string) $proposed, true);
+        $priorSectionIds = $this->sectionIdsFromProposedContent();
+        $locksToPriorVersion = in_array($this->status, [
+            self::STATUS_REJECTED,
+            self::STATUS_APPROVED_WITH_FEEDBACK,
+        ], true);
 
         $payload = [
             'id' => $this->id,
@@ -139,6 +172,8 @@ class ChangeRequest extends Model
             'current_version' => (int) ($this->current_version ?: 1),
             'proposed_content' => $proposed,
             'section_edits' => is_array($decoded) ? $decoded : null,
+            // When revising a previous version, FE should only show these sections.
+            'editable_section_ids' => $locksToPriorVersion ? $priorSectionIds : null,
             'feedback' => $this->feedback,
             'rejection_reason' => $this->rejection_reason,
             'scheduled_at' => optional($this->scheduled_at)?->toIso8601String(),
