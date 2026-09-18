@@ -413,8 +413,25 @@ class ChangeRequestController extends Controller
     {
         $this->gate->assertModuleEnabled($request->user());
 
-        $changeRequest = ChangeRequest::with(['section', 'currentVersionRow'])->findOrFail($id);
-        $decoded = json_decode((string) $changeRequest->resolvedProposedContent(), true);
+        $changeRequest = ChangeRequest::with(['section', 'currentVersionRow', 'versions'])->findOrFail($id);
+
+        $versionNumber = $request->query('version');
+        $proposedRaw = null;
+
+        if ($versionNumber !== null && $versionNumber !== '') {
+            $versionRow = $changeRequest->versions
+                ->firstWhere('version_number', (int) $versionNumber);
+
+            if (! $versionRow) {
+                return response()->json(['message' => 'Version not found for this change request.'], 404);
+            }
+
+            $proposedRaw = $versionRow->proposed_content;
+        } else {
+            $proposedRaw = $changeRequest->resolvedProposedContent();
+        }
+
+        $decoded = json_decode((string) $proposedRaw, true);
         $branding = $this->resolvePreviewBranding($changeRequest, is_array($decoded) ? $decoded : null);
 
         if (is_array($decoded)) {
@@ -425,20 +442,26 @@ class ChangeRequestController extends Controller
                     'section_id' => $editItem['section_id'] ?? null,
                     'section_name' => $editItem['section_name'] ?? ($sec ? $sec->name : 'Section'),
                     'current_content' => $editItem['current_content'] ?? ($sec ? $sec->content : null),
-                    'proposed_content' => $editItem['proposed_content'],
+                    'proposed_content' => $editItem['proposed_content'] ?? null,
                 ];
             }
 
             return response()->json(array_merge([
                 'is_batch' => true,
                 'edits' => $items,
+                'version_number' => $versionNumber !== null && $versionNumber !== ''
+                    ? (int) $versionNumber
+                    : (int) ($changeRequest->current_version ?: 1),
             ], $branding));
         }
 
         return response()->json(array_merge([
             'is_batch' => false,
             'current_content' => $changeRequest->section ? $changeRequest->section->content : null,
-            'proposed_content' => $changeRequest->resolvedProposedContent(),
+            'proposed_content' => $proposedRaw,
+            'version_number' => $versionNumber !== null && $versionNumber !== ''
+                ? (int) $versionNumber
+                : (int) ($changeRequest->current_version ?: 1),
         ], $branding));
     }
 
