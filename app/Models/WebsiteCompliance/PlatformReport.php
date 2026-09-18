@@ -74,16 +74,21 @@ class PlatformReport extends Model
                 'active' => (int) $this->templates_active,
                 'inactive' => (int) $this->templates_inactive,
             ],
-            'users' => [
-                'total' => (int) $this->users_total,
-                'by_role' => [
-                    'power_admin' => (int) $this->power_admins_count,
-                    'manager' => (int) $this->managers_count,
-                    'client_admin' => (int) $this->client_admins_count,
-                    'approver' => (int) $this->approvers_count,
-                    'advisor' => (int) $this->advisors_count,
+            // Deployments = template requests (pending / live / rejected showcase sites)
+            'deployments' => [
+                'total' => (int) $this->template_requests_total,
+                'by_status' => [
+                    'pending' => (int) $this->template_requests_pending,
+                    'deployed' => (int) $this->template_requests_deployed,
+                    'rejected' => (int) $this->template_requests_rejected,
                 ],
+                'by_type' => [
+                    'advisor_website' => (int) $this->template_requests_advisor_website,
+                    'hub_main_website' => (int) $this->template_requests_hub_main_website,
+                ],
+                'by_template' => $this->template_requests_by_template ?? [],
             ],
+            // Keep legacy key for older clients
             'template_requests' => [
                 'total' => (int) $this->template_requests_total,
                 'by_status' => [

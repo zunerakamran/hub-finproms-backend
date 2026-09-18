@@ -103,6 +103,47 @@ class ReportController extends Controller
             ];
         }
 
+        return $this->enrichWithLiveWcStats($payload);
+    }
+
+    /**
+     * Live WC operational extras (not stored on the snapshot row).
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    protected function enrichWithLiveWcStats(array $payload): array
+    {
+        $crStatus = $payload['change_requests']['by_status'] ?? [];
+        $openCr = (int) ($crStatus['pending'] ?? 0)
+            + (int) ($crStatus['under_review'] ?? 0)
+            + (int) ($crStatus['scheduled'] ?? 0)
+            + (int) ($crStatus['approved_with_feedback'] ?? 0);
+
+        $awaitingAdvisor = TemplateRequest::query()
+            ->where('status', 'pending')
+            ->whereNull('assigned_advisor_id')
+            ->whereNull('advisor_id')
+            ->count();
+
+        $awaitingApprover = ChangeRequest::query()
+            ->where('status', 'pending')
+            ->whereNull('approver_id')
+            ->count();
+
+        $avgVersion = (float) (ChangeRequest::query()->avg(DB::raw('COALESCE(current_version, 1)')) ?: 1);
+        $resubmitted = ChangeRequest::query()
+            ->where('current_version', '>', 1)
+            ->count();
+
+        $payload['deployments']['awaiting_advisor'] = $awaitingAdvisor;
+        $payload['template_requests']['awaiting_advisor'] = $awaitingAdvisor;
+
+        $payload['change_requests']['open'] = $openCr;
+        $payload['change_requests']['awaiting_assignment'] = $awaitingApprover;
+        $payload['change_requests']['avg_version'] = round($avgVersion, 2);
+        $payload['change_requests']['resubmitted'] = $resubmitted;
+
         return $payload;
     }
 
@@ -110,20 +151,6 @@ class ReportController extends Controller
     {
         $templatesTotal = Template::count();
         $templatesActive = Template::where('is_active', true)->count();
-
-        $usersByRoleRaw = User::query()
-            ->select('role', DB::raw('count(*) as total'))
-            ->groupBy('role')
-            ->pluck('total', 'role')
-            ->toArray();
-
-        $advisors = (int) (($usersByRoleRaw['advisor'] ?? 0) + ($usersByRoleRaw['editor'] ?? 0));
-        $approvers = (int) ($usersByRoleRaw['approver'] ?? 0);
-        $managers = (int) ($usersByRoleRaw['manager'] ?? 0);
-        $clientAdmins = (int) ($usersByRoleRaw['client_admin'] ?? 0) + (int) ($usersByRoleRaw['admin'] ?? 0);
-        // Control-plane roles live on shared only — never count them as tenant WC operators.
-        $powerAdmins = 0;
-        $usersTotal = $advisors + $approvers + $managers + $clientAdmins + $powerAdmins;
 
         $templateRequestsByStatus = TemplateRequest::query()
             ->select('status', DB::raw('count(*) as total'))
@@ -158,16 +185,18 @@ class ReportController extends Controller
             ->map(fn ($n) => (int) $n)
             ->toArray();
 
+        // Role census columns remain on the table for backwards compatibility but are no longer
+        // part of the WC report payload — keep zeros so we do not store hub HR data in WC reports.
         return PlatformReport::create([
             'templates_total' => $templatesTotal,
             'templates_active' => $templatesActive,
             'templates_inactive' => max(0, $templatesTotal - $templatesActive),
-            'users_total' => $usersTotal,
-            'advisors_count' => $advisors,
-            'approvers_count' => $approvers,
-            'managers_count' => $managers,
-            'client_admins_count' => $clientAdmins,
-            'power_admins_count' => $powerAdmins,
+            'users_total' => 0,
+            'advisors_count' => 0,
+            'approvers_count' => 0,
+            'managers_count' => 0,
+            'client_admins_count' => 0,
+            'power_admins_count' => 0,
             'template_requests_total' => TemplateRequest::count(),
             'template_requests_pending' => (int) ($templateRequestsByStatus['pending'] ?? 0),
             'template_requests_deployed' => (int) ($templateRequestsByStatus['deployed'] ?? 0),
@@ -182,7 +211,6 @@ class ReportController extends Controller
             'change_requests_approved' => (int) ($changeRequestsByStatus['approved'] ?? 0),
             'change_requests_rejected' => (int) ($changeRequestsByStatus['rejected'] ?? 0),
             'change_requests_approved_with_feedback' => (int) ($changeRequestsByStatus['approved_with_feedback'] ?? 0),
-            // Never store shared PA/FinProms user ids on the white-label users FK.
             'generated_by' => $this->gate->tenantUserIdOrNull($user),
             'generated_at' => now(),
         ]);
