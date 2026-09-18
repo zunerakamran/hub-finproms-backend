@@ -22,6 +22,12 @@ trait CreatesOnActingWhiteLabelHub
             return null;
         }
 
+        // Public member catalog (shared frontend) must always read the deploy hub DB.
+        // Acting-hub scoping is for dashboard management of white-label content only.
+        if ($this->isPublicCatalogRead($request)) {
+            return null;
+        }
+
         $acting = app(ActingHubService::class);
         if (! $acting->isActingOnWhiteLabel($user)) {
             return null;
@@ -32,6 +38,29 @@ trait CreatesOnActingWhiteLabelHub
         } catch (InvalidArgumentException) {
             return null;
         }
+    }
+
+    /**
+     * GET /posts, /bundles, /types, … on the public API — not under client-admin/power-admin.
+     */
+    protected function isPublicCatalogRead(Request $request): bool
+    {
+        if (! in_array(strtoupper($request->method()), ['GET', 'HEAD'], true)) {
+            return false;
+        }
+
+        $path = ltrim($request->path(), '/');
+        if (str_starts_with($path, 'api/')) {
+            $path = substr($path, 4);
+        }
+
+        foreach (['client-admin/', 'power-admin/', 'admin/', 'hub-content/'] as $prefix) {
+            if (str_starts_with($path, $prefix)) {
+                return false;
+            }
+        }
+
+        return (bool) preg_match('#^(posts|bundles|types|categories|tags)(/|$)#', $path);
     }
 
     protected function whiteLabelContent(): WhiteLabelContentService
