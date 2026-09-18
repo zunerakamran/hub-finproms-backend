@@ -107,12 +107,16 @@ class ChangeRequestController extends Controller
         $with = ['section', 'editor', 'approver', 'currentVersionRow'];
         // Pickup/assign write tenantUserIdOrNull; match the same id for scoping.
         $actorId = $this->gate->tenantUserIdOrNull($user) ?? (int) $user->id;
+        // Approver role is always personal-queue scoped. Hub-wide history is for
+        // managers/admins via wc_view_all_change_requests — never for Approver,
+        // even if an older seeder left that flag on for the role.
+        $canViewAll = $this->gate->can($user, 'wc_view_all_change_requests')
+            && (string) $user->role !== User::ROLE_APPROVER;
 
-        if ($this->gate->can($user, 'wc_view_all_change_requests')) {
+        if ($canViewAll) {
             $requests = ChangeRequest::with($with)->latest()->get();
         } elseif ($this->gate->can($user, 'wc_review_change_requests')) {
-            // Approvers without view-all (even if they also have assign): unassigned pending
-            // for pickup + only requests they themselves picked/were assigned.
+            // Approvers: unassigned pending for pickup + only requests they picked.
             $requests = ChangeRequest::with($with)
                 ->where(function ($q) use ($actorId) {
                     $q->where('approver_id', $actorId)
@@ -154,7 +158,8 @@ class ChangeRequestController extends Controller
         $isAssignee = (int) ($changeRequest->approver_id ?? 0) === (int) $actorId;
         $isUnassignedPending = $changeRequest->status === ChangeRequest::STATUS_PENDING
             && empty($changeRequest->approver_id);
-        $canViewAll = $this->gate->can($user, 'wc_view_all_change_requests');
+        $canViewAll = $this->gate->can($user, 'wc_view_all_change_requests')
+            && (string) $user->role !== User::ROLE_APPROVER;
         $canAssign = $this->gate->can($user, 'wc_assign_change_requests');
         $canReview = $this->gate->can($user, 'wc_review_change_requests');
 

@@ -277,11 +277,14 @@ class ChangeRequestWorkflowService
 
     public function assertReviewable(ChangeRequest $changeRequest, User $user): void
     {
+        $canViewAll = $this->gate->can($user, 'wc_view_all_change_requests')
+            && (string) $user->role !== User::ROLE_APPROVER;
+
         if (
-            ! $this->gate->can($user, 'wc_view_all_change_requests')
+            ! $canViewAll
             && ! $this->gate->isRemoteControlPlaneOperator($user)
             && $changeRequest->approver_id !== null
-            && (int) $changeRequest->approver_id !== (int) $user->id
+            && (int) $changeRequest->approver_id !== (int) ($this->gate->tenantUserIdOrNull($user) ?? $user->id)
         ) {
             throw new HttpException(403, 'Unauthorized');
         }

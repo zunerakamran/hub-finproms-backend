@@ -577,7 +577,7 @@ class Hub extends Model
         ],
         'wc_view_all_change_requests' => [
             'label' => 'View all website change requests',
-            'description' => 'See website change requests across the hub (not only own submissions).',
+            'description' => 'See every website change request across the hub (not only requests assigned to you). Leave off for Approvers so they only see work they picked.',
             'group' => self::GROUP_WEBSITE_COMPLIANCE,
             'default_shared' => false,
             'default_white_label' => false,

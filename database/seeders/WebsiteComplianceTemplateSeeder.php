@@ -80,8 +80,9 @@ class WebsiteComplianceTemplateSeeder extends Seeder
                 'wc_view_platform_report',
             ],
             User::ROLE_APPROVER => [
+                // Review only — history/queue stay scoped to requests this approver picked.
+                // Hub-wide visibility requires wc_view_all_change_requests (managers / admins).
                 'wc_review_change_requests',
-                'wc_view_all_change_requests',
             ],
             User::ROLE_ADVISOR => [
                 'wc_edit_sections',
