@@ -104,10 +104,25 @@ class ChangeRequestController extends Controller
         $user = $request->user();
         $this->gate->assertModuleEnabled($user);
 
+        $with = ['section', 'editor', 'approver', 'currentVersionRow'];
+
         if ($this->gate->can($user, 'wc_view_all_change_requests')) {
-            $requests = ChangeRequest::with(['section', 'editor', 'approver', 'currentVersionRow'])->latest()->get();
+            $requests = ChangeRequest::with($with)->latest()->get();
+        } elseif ($this->gate->can($user, 'wc_assign_change_requests')) {
+            // Assigners need the full inbox/history to route work (even without view-all).
+            $requests = ChangeRequest::with($with)->latest()->get();
         } elseif ($this->gate->can($user, 'wc_review_change_requests')) {
-            $requests = ChangeRequest::with(['section', 'editor', 'approver', 'currentVersionRow'])->latest()->get();
+            // Approvers without view-all: unassigned pending (pickup) + only their own assigned work/history.
+            $requests = ChangeRequest::with($with)
+                ->where(function ($q) use ($user) {
+                    $q->where('approver_id', $user->id)
+                        ->orWhere(function ($pending) {
+                            $pending->where('status', ChangeRequest::STATUS_PENDING)
+                                ->whereNull('approver_id');
+                        });
+                })
+                ->latest()
+                ->get();
         } else {
             $requests = ChangeRequest::with(['section', 'approver', 'currentVersionRow'])
                 ->where('editor_id', $user->id)
@@ -131,11 +146,19 @@ class ChangeRequestController extends Controller
             'versions',
         ])->findOrFail($id);
 
+        $isOwner = (int) $changeRequest->editor_id === (int) $user->id;
+        $isAssignee = (int) ($changeRequest->approver_id ?? 0) === (int) $user->id;
+        $isUnassignedPending = $changeRequest->status === ChangeRequest::STATUS_PENDING
+            && empty($changeRequest->approver_id);
+        $canViewAll = $this->gate->can($user, 'wc_view_all_change_requests');
+        $canAssign = $this->gate->can($user, 'wc_assign_change_requests');
+        $canReview = $this->gate->can($user, 'wc_review_change_requests');
+
         if (
-            (int) $changeRequest->editor_id !== (int) $user->id
-            && ! $this->gate->can($user, 'wc_view_all_change_requests')
-            && ! $this->gate->can($user, 'wc_review_change_requests')
-            && ! $this->gate->can($user, 'wc_assign_change_requests')
+            ! $isOwner
+            && ! $canViewAll
+            && ! $canAssign
+            && ! ($canReview && ($isAssignee || $isUnassignedPending))
         ) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
