@@ -49,6 +49,7 @@ class HubController extends Controller
                 // Dashboard menus should follow the acting hub's effective caps.
                 $payload['effective_capabilities'] = $switcher['effective_capabilities'];
                 $payload['acting_hub'] = $switcher['acting_hub'];
+                $payload['role_labels'] = $switcher['role_labels'] ?? $payload['role_labels'];
                 try {
                     $acting = $this->actingHubs->actingHub($user);
                     $payload['acting_checklist'] = $acting->resolvedChecklist();

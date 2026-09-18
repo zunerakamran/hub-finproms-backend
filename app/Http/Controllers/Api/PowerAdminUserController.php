@@ -67,7 +67,7 @@ class PowerAdminUserController extends Controller
             return response()->json([
                 'users' => $listed['users'],
                 'meta' => $listed['meta'],
-                'roles' => $this->roleOptions(),
+                'roles' => $this->roleOptions($hub),
                 'acting_on_white_label' => true,
                 'target_hub' => $this->targetHubPayload($hub),
             ]);
@@ -88,16 +88,17 @@ class PowerAdminUserController extends Controller
         }
 
         $paginator = $query->paginate($perPage);
+        $labelHub = $this->actingHubs->targetHub($request->user());
 
         return response()->json([
-            'users' => $paginator->getCollection()->map(fn (User $user) => $this->serialize($user))->values(),
+            'users' => $paginator->getCollection()->map(fn (User $user) => $this->serialize($user, $labelHub))->values(),
             'meta' => [
                 'current_page' => $paginator->currentPage(),
                 'last_page' => $paginator->lastPage(),
                 'per_page' => $paginator->perPage(),
                 'total' => $paginator->total(),
             ],
-            'roles' => $this->roleOptions(),
+            'roles' => $this->roleOptions($labelHub),
             'acting_on_white_label' => false,
         ]);
     }
@@ -384,13 +385,16 @@ class PowerAdminUserController extends Controller
     /**
      * @return list<array{key: string, label: string}>
      */
-    private function roleOptions(): array
+    private function roleOptions(?Hub $hub = null): array
     {
+        $hub ??= $this->labelHub();
         $roles = [];
         foreach (self::ASSIGNABLE_ROLES as $role) {
             $roles[] = [
                 'key' => $role,
-                'label' => User::ROLE_LABELS[$role] ?? $role,
+                'label' => $hub
+                    ? $hub->roleLabel($role)
+                    : (User::ROLE_LABELS[$role] ?? $role),
             ];
         }
 
@@ -400,9 +404,23 @@ class PowerAdminUserController extends Controller
     /**
      * @return array<string, mixed>
      */
-    private function serialize(User $user): array
+    private function serialize(User $user, ?Hub $hub = null): array
     {
-        return $this->whiteLabelUsers->serialize($user);
+        return $this->whiteLabelUsers->serialize($user, $hub ?? $this->labelHub());
+    }
+
+    private function labelHub(): ?Hub
+    {
+        try {
+            $user = auth()->user();
+            if (! $user) {
+                return null;
+            }
+
+            return $this->actingHubs->targetHub($user);
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**

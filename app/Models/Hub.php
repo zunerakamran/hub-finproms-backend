@@ -380,6 +380,13 @@ class Hub extends Model
             'default_shared' => true,
             'default_white_label' => true,
         ],
+        'dashboard_manage_role_display_names' => [
+            'label' => 'Set role display names',
+            'description' => 'Customize how role names appear in this hub’s UI (shared or white-labelled). Who may edit labels is controlled by this capability.',
+            'group' => self::GROUP_DASHBOARD,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
         'receive_admin_emails' => [
             'label' => 'Receive admin emails',
             'description' => 'Receive all admin notification emails for this hub (registrations, purchases, payments, advisor events, etc.).',
@@ -689,6 +696,7 @@ class Hub extends Model
         'db_password',
         'checklist',
         'role_capabilities',
+        'role_display_names',
         'advisor_billing_renew_day',
         'subscriber_credits',
         'advisor_stripe_subscription_id',
@@ -710,6 +718,7 @@ class Hub extends Model
             'is_active' => 'boolean',
             'checklist' => 'array',
             'role_capabilities' => 'array',
+            'role_display_names' => 'array',
             'advisor_billing_renew_day' => 'integer',
             'subscriber_credits' => 'integer',
             'db_port' => 'integer',
@@ -1218,12 +1227,38 @@ class Hub extends Model
             'frontend_url' => $this->frontendBaseUrl(),
             'branding' => $this->brandingPayload(),
             'checklist' => $checklist,
+            // Frontend should use these labels wherever roles are shown (falls back to defaults).
+            'role_labels' => $this->resolvedRoleLabels(),
             // Frontend should hide Sign up when registration_enabled is false.
             'auth' => [
                 'registration_enabled' => $registrationEnabled,
                 'invite_only' => (bool) ($checklist['private_invite_only'] ?? false),
             ],
         ];
+    }
+
+    /**
+     * Display labels for each role key on this hub (custom overrides + defaults).
+     *
+     * @return array<string, string>
+     */
+    public function resolvedRoleLabels(): array
+    {
+        $overrides = is_array($this->role_display_names) ? $this->role_display_names : [];
+        $labels = [];
+        foreach (User::ROLE_LABELS as $key => $default) {
+            $custom = isset($overrides[$key]) ? trim((string) $overrides[$key]) : '';
+            $labels[$key] = $custom !== '' ? $custom : $default;
+        }
+
+        return $labels;
+    }
+
+    public function roleLabel(string $role): string
+    {
+        $labels = $this->resolvedRoleLabels();
+
+        return $labels[$role] ?? (User::ROLE_LABELS[$role] ?? $role);
     }
 
     /**

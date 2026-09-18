@@ -189,13 +189,16 @@ class WhiteLabelUserService
     {
         $hubAllowsUnlimited = $hub ? $hub->givesUnlimitedSubscriberCredits() : false;
         $unlimited = $user->hasUnlimitedCredits($hubAllowsUnlimited);
+        $roleLabel = $hub
+            ? $hub->roleLabel((string) $user->role)
+            : ($user->role_label ?? (User::ROLE_LABELS[$user->role] ?? (string) $user->role));
 
         return [
             'id' => $user->id,
             'name' => $user->name,
             'email' => $user->email,
             'role' => $user->role,
-            'role_label' => $user->role_label,
+            'role_label' => $roleLabel,
             'credits' => $unlimited ? 0 : (int) $user->credits,
             'is_advisor' => (bool) $user->is_advisor,
             'has_unlimited_credits' => $unlimited,

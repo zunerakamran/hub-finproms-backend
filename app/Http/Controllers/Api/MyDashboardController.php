@@ -42,7 +42,7 @@ class MyDashboardController extends Controller
                 'name' => $user->name,
                 'email' => $user->email,
                 'role' => $user->role,
-                'role_label' => $user->role_label ?? null,
+                'role_label' => $hub->roleLabel((string) $user->role),
             ],
         ];
 

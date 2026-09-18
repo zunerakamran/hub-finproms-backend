@@ -140,7 +140,18 @@ class User extends Authenticatable
 
     public function getRoleLabelAttribute(): string
     {
-        return self::ROLE_LABELS[$this->role] ?? (string) $this->role;
+        try {
+            $hubs = app(\App\Services\HubService::class);
+            $hub = $hubs->current();
+            $authUser = auth()->user();
+            if ($authUser) {
+                $hub = app(\App\Services\ActingHubService::class)->targetHub($authUser);
+            }
+
+            return $hub->roleLabel((string) $this->role);
+        } catch (\Throwable) {
+            return self::ROLE_LABELS[$this->role] ?? (string) $this->role;
+        }
     }
 
     public function isPowerAdmin(): bool

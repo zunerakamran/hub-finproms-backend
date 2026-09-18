@@ -123,7 +123,7 @@ class CapabilitiesMatrixService
         foreach (self::MATRIX_ROLES as $role) {
             $roles[] = [
                 'key' => $role,
-                'label' => User::ROLE_LABELS[$role] ?? $role,
+                'label' => $hub->roleLabel($role),
             ];
         }
 

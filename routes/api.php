@@ -35,6 +35,7 @@ use App\Http\Controllers\Api\PowerAdminPaymentMethodController;
 use App\Http\Controllers\Api\PowerAdminUserController;
 use App\Http\Controllers\Api\PurchaseController;
 use App\Http\Controllers\Api\SettingController;
+use App\Http\Controllers\Api\RoleDisplayNameController;
 use App\Http\Controllers\Api\StripeWebhookController;
 use App\Http\Controllers\Api\SubscriptionController;
 use App\Http\Controllers\Api\SubscriberCreditsController;
@@ -307,6 +308,11 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/settings', [SettingController::class, 'index']);
             // POST accepts multipart logo / favicon uploads (PHP does not populate files on PUT).
             Route::match(['put', 'post'], '/settings', [SettingController::class, 'update']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_role_display_names')->group(function () {
+            Route::get('/role-display-names', [RoleDisplayNameController::class, 'index']);
+            Route::put('/role-display-names', [RoleDisplayNameController::class, 'update']);
         });
 
         Route::get('/advisors', [AdvisorController::class, 'index']);
