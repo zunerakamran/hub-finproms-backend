@@ -550,6 +550,7 @@ class WhiteLabelControlPlaneTest extends TestCase
             $table->json('checklist')->nullable();
             $table->json('role_capabilities')->nullable();
             $table->json('role_display_names')->nullable();
+            $table->json('compliance_status_display_names')->nullable();
             $table->unsignedInteger('subscriber_credits')->nullable();
             $table->unsignedTinyInteger('advisor_billing_renew_day')->nullable();
             $table->timestamps();

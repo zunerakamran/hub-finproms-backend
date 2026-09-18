@@ -36,6 +36,7 @@ use App\Http\Controllers\Api\PowerAdminUserController;
 use App\Http\Controllers\Api\PurchaseController;
 use App\Http\Controllers\Api\SettingController;
 use App\Http\Controllers\Api\RoleDisplayNameController;
+use App\Http\Controllers\Api\ComplianceStatusDisplayNameController;
 use App\Http\Controllers\Api\StripeWebhookController;
 use App\Http\Controllers\Api\SubscriptionController;
 use App\Http\Controllers\Api\SubscriberCreditsController;
@@ -313,6 +314,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:dashboard_manage_role_display_names')->group(function () {
             Route::get('/role-display-names', [RoleDisplayNameController::class, 'index']);
             Route::put('/role-display-names', [RoleDisplayNameController::class, 'update']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_compliance_status_display_names')->group(function () {
+            Route::get('/compliance-status-display-names', [ComplianceStatusDisplayNameController::class, 'index']);
+            Route::put('/compliance-status-display-names', [ComplianceStatusDisplayNameController::class, 'update']);
         });
 
         Route::get('/advisors', [AdvisorController::class, 'index']);

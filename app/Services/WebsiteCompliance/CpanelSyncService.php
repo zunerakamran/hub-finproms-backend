@@ -4,6 +4,7 @@ namespace App\Services\WebsiteCompliance;
 
 use App\Models\WebsiteCompliance\Section;
 use App\Models\WebsiteCompliance\TemplateRequest;
+use App\Support\WebsiteCompliance\BrandColor;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -88,8 +89,8 @@ class CpanelSyncService
             'uploads_origin' => self::storageApiUrl(),
             'site_url' => $siteUrl,
             'laravel_api_url' => $hubApi,
-            'primary_color' => $templateRequest->primary_color,
-            'secondary_color' => $templateRequest->secondary_color,
+            'primary_color' => BrandColor::toHex($templateRequest->primary_color, '#0B1B3D'),
+            'secondary_color' => BrandColor::toHex($templateRequest->secondary_color, '#C8102E'),
             'logo_url' => self::brandingAssetForCpanel($templateRequest->logo_url, 'logo'),
             'favicon_url' => self::brandingAssetForCpanel($templateRequest->favicon_url, 'favicon'),
         ];

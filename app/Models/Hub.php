@@ -30,6 +30,22 @@ class Hub extends Model
     public const GROUP_WEBSITE_COMPLIANCE = 'website_compliance';
 
     /**
+     * Default display labels for compliance statuses (snake_case keys).
+     * Used by SMC / GC / WC — DB may store Title Case (SMC/GC) or snake_case (WC).
+     *
+     * @var array<string, string>
+     */
+    public const COMPLIANCE_STATUS_LABELS = [
+        'pending' => 'Pending',
+        'approved' => 'Approved',
+        'rejected' => 'Rejected',
+        'approved_with_feedback' => 'Approved with Feedback',
+        'under_review' => 'Under review',
+        'scheduled' => 'Scheduled',
+        'deployed' => 'Deployed',
+    ];
+
+    /**
      * @var array<string, string>
      */
     public const CHECKLIST_GROUPS = [
@@ -387,6 +403,13 @@ class Hub extends Model
             'default_shared' => true,
             'default_white_label' => true,
         ],
+        'dashboard_manage_compliance_status_display_names' => [
+            'label' => 'Set compliance status display names',
+            'description' => 'Customize how compliance statuses appear (Pending, Approved, Rejected, Approved with Feedback, and related WC statuses) across Social Media, General, and Website Compliance.',
+            'group' => self::GROUP_DASHBOARD,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
         'receive_admin_emails' => [
             'label' => 'Receive admin emails',
             'description' => 'Receive all admin notification emails for this hub (registrations, purchases, payments, advisor events, etc.).',
@@ -697,6 +720,7 @@ class Hub extends Model
         'checklist',
         'role_capabilities',
         'role_display_names',
+        'compliance_status_display_names',
         'advisor_billing_renew_day',
         'subscriber_credits',
         'advisor_stripe_subscription_id',
@@ -719,6 +743,7 @@ class Hub extends Model
             'checklist' => 'array',
             'role_capabilities' => 'array',
             'role_display_names' => 'array',
+            'compliance_status_display_names' => 'array',
             'advisor_billing_renew_day' => 'integer',
             'subscriber_credits' => 'integer',
             'db_port' => 'integer',
@@ -1229,6 +1254,8 @@ class Hub extends Model
             'checklist' => $checklist,
             // Frontend should use these labels wherever roles are shown (falls back to defaults).
             'role_labels' => $this->resolvedRoleLabels(),
+            // Compliance status wording (Pending / Approved / …) for SMC, GC, and WC.
+            'compliance_status_labels' => $this->resolvedComplianceStatusLabels(),
             // Frontend should hide Sign up when registration_enabled is false.
             'auth' => [
                 'registration_enabled' => $registrationEnabled,
@@ -1259,6 +1286,50 @@ class Hub extends Model
         $labels = $this->resolvedRoleLabels();
 
         return $labels[$role] ?? (User::ROLE_LABELS[$role] ?? $role);
+    }
+
+    /**
+     * Normalize any stored status string to a snake_case map key.
+     */
+    public static function normalizeComplianceStatusKey(string $status): string
+    {
+        $raw = trim($status);
+        if ($raw === '') {
+            return 'pending';
+        }
+
+        $lower = strtolower($raw);
+        $snake = preg_replace('/[\s\-]+/', '_', $lower) ?? $lower;
+        $snake = preg_replace('/_+/', '_', $snake) ?? $snake;
+
+        return $snake;
+    }
+
+    /**
+     * Display labels for compliance statuses on this hub.
+     *
+     * @return array<string, string>
+     */
+    public function resolvedComplianceStatusLabels(): array
+    {
+        $overrides = is_array($this->compliance_status_display_names)
+            ? $this->compliance_status_display_names
+            : [];
+        $labels = [];
+        foreach (self::COMPLIANCE_STATUS_LABELS as $key => $default) {
+            $custom = isset($overrides[$key]) ? trim((string) $overrides[$key]) : '';
+            $labels[$key] = $custom !== '' ? $custom : $default;
+        }
+
+        return $labels;
+    }
+
+    public function complianceStatusLabel(string $status): string
+    {
+        $key = self::normalizeComplianceStatusKey($status);
+        $labels = $this->resolvedComplianceStatusLabels();
+
+        return $labels[$key] ?? (self::COMPLIANCE_STATUS_LABELS[$key] ?? $status);
     }
 
     /**

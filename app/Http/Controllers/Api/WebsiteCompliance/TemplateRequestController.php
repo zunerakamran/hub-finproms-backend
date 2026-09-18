@@ -12,6 +12,7 @@ use App\Services\WebsiteCompliance\AdvisorSectionService;
 use App\Services\WebsiteCompliance\CpanelSyncService;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
 use App\Support\WebsiteCompliance\HubTemplateCatalog;
+use App\Support\WebsiteCompliance\BrandColor;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -94,8 +95,8 @@ class TemplateRequestController extends Controller
             'domain_name' => $request->domain_name,
             'logo_url' => CpanelSyncService::absoluteAssetUrl($request->logo_url),
             'favicon_url' => CpanelSyncService::absoluteAssetUrl($request->favicon_url),
-            'primary_color' => $request->primary_color ?? '#0B1B3D',
-            'secondary_color' => $request->secondary_color ?? '#C8102E',
+            'primary_color' => BrandColor::toHex($request->primary_color ?? null, '#0B1B3D'),
+            'secondary_color' => BrandColor::toHex($request->secondary_color ?? null, '#C8102E'),
             'status' => 'pending',
         ]);
 

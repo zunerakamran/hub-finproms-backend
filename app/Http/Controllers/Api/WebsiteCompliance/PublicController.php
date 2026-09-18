@@ -8,6 +8,7 @@ use App\Models\WebsiteCompliance\Section;
 use App\Models\WebsiteCompliance\TemplateRequest;
 use App\Services\WebsiteCompliance\AdvisorSectionService;
 use App\Services\WebsiteCompliance\CpanelSyncService;
+use App\Support\WebsiteCompliance\BrandColor;
 use App\Support\WebsiteCompliance\HubTemplateCatalog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -189,8 +190,8 @@ class PublicController extends Controller
             : null;
 
         return [
-            'primary_color' => $templateRequest->primary_color ?: self::ADVISOR_PRIMARY,
-            'secondary_color' => $templateRequest->secondary_color ?: self::ADVISOR_SECONDARY,
+            'primary_color' => BrandColor::toHex($templateRequest->primary_color ?: null, self::ADVISOR_PRIMARY),
+            'secondary_color' => BrandColor::toHex($templateRequest->secondary_color ?: null, self::ADVISOR_SECONDARY),
             'logo_url' => CpanelSyncService::absoluteAssetUrl($templateRequest->logo_url),
             'favicon_url' => CpanelSyncService::absoluteAssetUrl($templateRequest->favicon_url),
             'template_request_id' => $templateRequest->id,

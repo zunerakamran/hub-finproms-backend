@@ -282,6 +282,7 @@ class ActingHubService
                 'frontend_url' => $acting->frontendBaseUrl(),
                 'branding' => $acting->brandingPayload(),
                 'role_labels' => $acting->resolvedRoleLabels(),
+                'compliance_status_labels' => $acting->resolvedComplianceStatusLabels(),
             ],
             'is_acting_on_white_label' => $acting->isWhiteLabel(),
             'shared_hub' => [
@@ -291,6 +292,7 @@ class ActingHubService
             ],
             'effective_capabilities' => $this->effectiveCapabilities($user),
             'role_labels' => $acting->resolvedRoleLabels(),
+            'compliance_status_labels' => $acting->resolvedComplianceStatusLabels(),
         ];
     }
 

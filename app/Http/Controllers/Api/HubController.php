@@ -50,6 +50,8 @@ class HubController extends Controller
                 $payload['effective_capabilities'] = $switcher['effective_capabilities'];
                 $payload['acting_hub'] = $switcher['acting_hub'];
                 $payload['role_labels'] = $switcher['role_labels'] ?? $payload['role_labels'];
+                $payload['compliance_status_labels'] = $switcher['compliance_status_labels']
+                    ?? $payload['compliance_status_labels'];
                 try {
                     $acting = $this->actingHubs->actingHub($user);
                     $payload['acting_checklist'] = $acting->resolvedChecklist();

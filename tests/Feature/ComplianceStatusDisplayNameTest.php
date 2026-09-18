@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Models\Hub;
 use App\Models\User;
-use App\Services\CapabilitiesMatrixService;
 use App\Services\WhiteLabelDatabaseService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -13,7 +12,7 @@ use Illuminate\Support\Facades\Schema;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
-class RoleDisplayNameTest extends TestCase
+class ComplianceStatusDisplayNameTest extends TestCase
 {
     use RefreshDatabase;
 
@@ -28,104 +27,61 @@ class RoleDisplayNameTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_hub_endpoint_exposes_default_role_labels(): void
+    public function test_hub_endpoint_exposes_default_compliance_status_labels(): void
     {
         $this->createSharedHub();
 
         $this->getJson('/api/hub')
             ->assertOk()
-            ->assertJsonPath('hub.role_labels.advisor', 'Advisor')
-            ->assertJsonPath('hub.role_labels.client_admin', 'Client Admin');
+            ->assertJsonPath('hub.compliance_status_labels.pending', 'Pending')
+            ->assertJsonPath('hub.compliance_status_labels.approved_with_feedback', 'Approved with Feedback');
     }
 
-    public function test_authorized_role_can_update_display_names_on_shared_hub(): void
+    public function test_authorized_role_can_update_compliance_status_display_names(): void
     {
         $hub = $this->createSharedHub();
-        $admin = User::factory()->powerAdmin()->create();
-        Sanctum::actingAs($admin);
+        Sanctum::actingAs(User::factory()->powerAdmin()->create());
 
-        $response = $this->putJson('/api/client-admin/role-display-names', [
-            'roles' => [
-                'advisor' => 'IFA',
-                'manager' => 'Team Lead',
+        $this->putJson('/api/client-admin/compliance-status-display-names', [
+            'statuses' => [
+                'pending' => 'Awaiting review',
+                'approved_with_feedback' => 'Approved (notes)',
             ],
-        ]);
-
-        $response->assertOk()
-            ->assertJsonPath('role_labels.advisor', 'IFA')
-            ->assertJsonPath('role_labels.manager', 'Team Lead')
-            ->assertJsonPath('role_labels.user', 'User');
-
-        $hub->refresh();
-        $this->assertSame('IFA', $hub->role_display_names['advisor']);
-        $this->assertSame('Team Lead', $hub->role_display_names['manager']);
-
-        $this->getJson('/api/hub')
+        ])
             ->assertOk()
-            ->assertJsonPath('hub.role_labels.advisor', 'IFA');
-    }
-
-    public function test_role_without_capability_cannot_update_display_names(): void
-    {
-        $hub = $this->createSharedHub();
-        $matrix = app(CapabilitiesMatrixService::class);
-        $roleCaps = $matrix->resolvedRoleCapabilities($hub);
-        $roleCaps[User::ROLE_USER]['dashboard_manage_role_display_names'] = false;
-        $hub->role_capabilities = $roleCaps;
-        $hub->save();
-
-        $user = User::factory()->create(['role' => User::ROLE_USER]);
-        Sanctum::actingAs($user);
-
-        $this->putJson('/api/client-admin/role-display-names', [
-            'roles' => ['advisor' => 'IFA'],
-        ])->assertForbidden();
-    }
-
-    public function test_updating_white_label_role_display_names_syncs_to_remote_database(): void
-    {
-        [$admin, $hub] = $this->actingPowerAdminOnWiredHub();
-
-        $response = $this->putJson('/api/client-admin/role-display-names', [
-            'roles' => [
-                'advisor' => 'Partner',
-                'client_admin' => 'Firm Admin',
-            ],
-        ]);
-
-        $response->assertOk()
-            ->assertJsonPath('role_labels.advisor', 'Partner')
-            ->assertJsonPath('hub.slug', 'myhub');
+            ->assertJsonPath('compliance_status_labels.pending', 'Awaiting review')
+            ->assertJsonPath('compliance_status_labels.approved_with_feedback', 'Approved (notes)')
+            ->assertJsonPath('compliance_status_labels.approved', 'Approved');
 
         $hub->refresh();
-        $this->assertSame('Partner', $hub->role_display_names['advisor']);
+        $this->assertSame('Awaiting review', $hub->compliance_status_display_names['pending']);
+        $this->assertSame(
+            'Approved (notes)',
+            $hub->complianceStatusLabel('Approved with Feedback')
+        );
+    }
+
+    public function test_white_label_compliance_status_names_sync_to_remote(): void
+    {
+        [, $hub] = $this->actingPowerAdminOnWiredHub();
+
+        $this->putJson('/api/client-admin/compliance-status-display-names', [
+            'statuses' => [
+                'rejected' => 'Declined',
+            ],
+        ])->assertOk();
 
         $remote = app(WhiteLabelDatabaseService::class);
         $connection = $remote->connect($hub);
         try {
             $row = DB::connection($connection)->table('hubs')->where('slug', 'myhub')->first();
-            $this->assertNotNull($row);
-            $names = is_string($row->role_display_names)
-                ? json_decode($row->role_display_names, true)
-                : (array) $row->role_display_names;
-            $this->assertSame('Partner', $names['advisor'] ?? null);
-            $this->assertSame('Firm Admin', $names['client_admin'] ?? null);
+            $names = is_string($row->compliance_status_display_names)
+                ? json_decode($row->compliance_status_display_names, true)
+                : (array) $row->compliance_status_display_names;
+            $this->assertSame('Declined', $names['rejected'] ?? null);
         } finally {
             $remote->disconnect($hub);
         }
-    }
-
-    public function test_capabilities_matrix_uses_custom_role_labels(): void
-    {
-        $hub = $this->createSharedHub([
-            'role_display_names' => ['approver' => 'Compliance Officer'],
-        ]);
-        $admin = User::factory()->powerAdmin()->create();
-        Sanctum::actingAs($admin);
-
-        $this->getJson('/api/power-admin/capabilities/matrix?hub_id='.$hub->id)
-            ->assertOk()
-            ->assertJsonFragment(['key' => 'approver', 'label' => 'Compliance Officer']);
     }
 
     private function createSharedHub(array $extra = []): Hub
@@ -154,7 +110,7 @@ class RoleDisplayNameTest extends TestCase
 
     private function makeWiredWhiteLabelHub(): Hub
     {
-        $this->remoteSqlitePath = sys_get_temp_dir().DIRECTORY_SEPARATOR.'wl-roles-'.uniqid('', true).'.sqlite';
+        $this->remoteSqlitePath = sys_get_temp_dir().DIRECTORY_SEPARATOR.'wl-status-'.uniqid('', true).'.sqlite';
         touch($this->remoteSqlitePath);
 
         $hub = Hub::query()->create([

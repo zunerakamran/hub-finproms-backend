@@ -62,6 +62,7 @@ class WhiteLabelHubSyncService
                     'checklist' => json_encode($hub->resolvedChecklist()),
                     'role_capabilities' => json_encode($roleCaps),
                     'role_display_names' => json_encode($hub->role_display_names),
+                    'compliance_status_display_names' => json_encode($hub->compliance_status_display_names),
                     'subscriber_credits' => $hub->subscriber_credits,
                     'advisor_billing_renew_day' => $hub->advisor_billing_renew_day,
                     'updated_at' => $now,
