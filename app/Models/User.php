@@ -94,6 +94,7 @@ class User extends Authenticatable
         'role',
         'credits',
         'is_advisor',
+        'allows_admin_staff_acting',
         'has_unlimited_credits',
         'is_suspended',
         'is_discontinued',
@@ -122,6 +123,7 @@ class User extends Authenticatable
             'password' => 'hashed',
             'credits' => 'integer',
             'is_advisor' => 'boolean',
+            'allows_admin_staff_acting' => 'boolean',
             'has_unlimited_credits' => 'boolean',
             'is_suspended' => 'boolean',
             'is_discontinued' => 'boolean',
@@ -197,6 +199,14 @@ class User extends Authenticatable
     public function isAdvisor(): bool
     {
         return $this->role === self::ROLE_ADVISOR || (bool) $this->is_advisor;
+    }
+
+    /**
+     * Whether Admin-staff in the same firm may work on behalf of this advisor.
+     */
+    public function allowsAdminStaffActing(): bool
+    {
+        return $this->isAdvisor() && (bool) $this->allows_admin_staff_acting;
     }
 
     public function isAdminStaff(): bool

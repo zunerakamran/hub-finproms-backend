@@ -114,6 +114,7 @@ class PowerAdminUserController extends Controller
         $hub = $this->actingWhiteLabelHub($request);
         $validated = $this->validatedPayload($request, null, skipUnique: $hub !== null);
         $validated = $this->normalizeFirmForRole($validated);
+        $validated = $this->normalizeAdminStaffPermission($validated);
 
         if ($hub = $this->actingWhiteLabelHub($request)) {
             try {
@@ -145,6 +146,7 @@ class PowerAdminUserController extends Controller
             'role' => $validated['role'],
             'credits' => $validated['credits'] ?? 0,
             'is_advisor' => $validated['is_advisor'] ?? ($validated['role'] === User::ROLE_ADVISOR),
+            'allows_admin_staff_acting' => (bool) ($validated['allows_admin_staff_acting'] ?? false),
             'has_unlimited_credits' => $validated['has_unlimited_credits'] ?? false,
             'is_suspended' => $validated['is_suspended'] ?? false,
             'firm_id' => $validated['firm_id'] ?? null,
@@ -207,6 +209,7 @@ class PowerAdminUserController extends Controller
 
             $validated = $this->validatedPayload($request, $current, skipUnique: true);
             $validated = $this->normalizeFirmForRole($validated, $existing['role'] ?? null);
+            $validated = $this->normalizeAdminStaffPermission($validated, $current);
 
             if (array_key_exists('role', $validated) && $validated['role'] !== $existing['role']) {
                 $this->assertCanChangeRoleOnHub($request, $hub, $existing, $validated['role']);
@@ -239,6 +242,7 @@ class PowerAdminUserController extends Controller
         $model = User::query()->findOrFail($user);
         $validated = $this->validatedPayload($request, $model);
         $validated = $this->normalizeFirmForRole($validated, $model->role);
+        $validated = $this->normalizeAdminStaffPermission($validated, $model);
 
         if (array_key_exists('role', $validated) && $validated['role'] !== $model->role) {
             $this->assertCanChangeRole($request, $model, $validated['role']);
@@ -354,10 +358,38 @@ class PowerAdminUserController extends Controller
             'role' => [$user ? 'sometimes' : 'required', 'string', Rule::in(self::ASSIGNABLE_ROLES)],
             'credits' => ['sometimes', 'integer', 'min:0'],
             'is_advisor' => ['sometimes', 'boolean'],
+            'allows_admin_staff_acting' => ['sometimes', 'boolean'],
             'has_unlimited_credits' => ['sometimes', 'boolean'],
             'is_suspended' => ['sometimes', 'boolean'],
             'firm_id' => $firmRules,
         ]);
+    }
+
+    /**
+     * Permission flag only applies to advisors; clear it for everyone else.
+     *
+     * @param  array<string, mixed>  $validated
+     * @return array<string, mixed>
+     */
+    private function normalizeAdminStaffPermission(array $validated, ?User $existing = null): array
+    {
+        $role = $validated['role'] ?? $existing?->role;
+        $isAdvisor = ($role === User::ROLE_ADVISOR)
+            || (bool) ($validated['is_advisor'] ?? $existing?->is_advisor ?? false);
+
+        if (! $isAdvisor) {
+            $validated['allows_admin_staff_acting'] = false;
+
+            return $validated;
+        }
+
+        if (array_key_exists('allows_admin_staff_acting', $validated)) {
+            $validated['allows_admin_staff_acting'] = (bool) $validated['allows_admin_staff_acting'];
+        } elseif ($existing === null) {
+            $validated['allows_admin_staff_acting'] = false;
+        }
+
+        return $validated;
     }
 
     /**

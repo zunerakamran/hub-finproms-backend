@@ -39,6 +39,7 @@ class ActingAdvisorService
         return User::query()
             ->where('firm_id', $staff->firm_id)
             ->where('id', '!=', $staff->id)
+            ->where('allows_admin_staff_acting', true)
             ->where(function ($q) {
                 $q->where('role', User::ROLE_ADVISOR)
                     ->orWhere('is_advisor', true);
@@ -51,7 +52,7 @@ class ActingAdvisorService
             })
             ->orderBy('name')
             ->orderBy('id')
-            ->get(['id', 'name', 'email', 'role', 'is_advisor', 'firm_id']);
+            ->get(['id', 'name', 'email', 'role', 'is_advisor', 'firm_id', 'allows_admin_staff_acting']);
     }
 
     public function actingAdvisor(User $staff): ?User
@@ -158,7 +159,7 @@ class ActingAdvisorService
 
         if (! $this->isEligibleAdvisor($staff, $advisor)) {
             throw ValidationException::withMessages([
-                'acting_advisor_id' => 'You can only work on behalf of advisors in your firm.',
+                'acting_advisor_id' => 'You can only work on behalf of advisors in your firm who have allowed Admin-staff access.',
             ]);
         }
 
@@ -185,6 +186,10 @@ class ActingAdvisorService
         }
 
         if (! $advisor->isAdvisor()) {
+            return false;
+        }
+
+        if (! $advisor->allowsAdminStaffActing()) {
             return false;
         }
 
