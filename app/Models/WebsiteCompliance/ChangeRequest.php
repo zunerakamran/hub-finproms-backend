@@ -146,7 +146,8 @@ class ChangeRequest extends Model
     {
         $this->loadMissing([
             'currentVersionRow',
-            'editor:id,name,email',
+            'editor:id,name,email,firm_id',
+            'editor.firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
             'approver:id,name,email',
             'section:id,name,display_name,advisor_id',
         ]);
@@ -183,6 +184,19 @@ class ChangeRequest extends Model
                 'id' => $this->editor->id,
                 'name' => $this->editor->name,
                 'email' => $this->editor->email,
+                'firm_id' => $this->editor->firm_id ? (int) $this->editor->firm_id : null,
+                'firm' => $this->editor->firm ? [
+                    'id' => (int) $this->editor->firm->id,
+                    'name' => $this->editor->firm->name,
+                    'is_central' => (bool) $this->editor->firm->is_central,
+                    'compliance_visibility' => [
+                        'visible_to_own' => (bool) $this->editor->firm->compliance_visible_to_own,
+                        'visible_to_central' => (bool) $this->editor->firm->compliance_visible_to_central,
+                        'visible_to_firm_id' => $this->editor->firm->compliance_visible_to_firm_id
+                            ? (int) $this->editor->firm->compliance_visible_to_firm_id
+                            : null,
+                    ],
+                ] : null,
             ] : null,
             'approver' => $this->approver ? [
                 'id' => $this->approver->id,

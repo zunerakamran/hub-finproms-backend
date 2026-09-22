@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Firm;
 use App\Models\GeneralComplianceRequest;
 use App\Models\GeneralComplianceRequestAttachment;
 use App\Models\GeneralComplianceRequestVersion;
@@ -43,7 +44,7 @@ class GeneralComplianceService
      *
      * @return Collection<int, User>
      */
-    public function reviewersForHub(Hub $hub): Collection
+    public function reviewersForHub(Hub $hub, ?Firm $submitterFirm = null, bool $filterByFirm = false): Collection
     {
         $roles = array_values(array_filter(
             CapabilitiesMatrixService::MATRIX_ROLES,
@@ -54,7 +55,8 @@ class GeneralComplianceService
             return collect();
         }
 
-        return User::query()
+        $reviewers = User::query()
+            ->with('firm:id,name,is_central')
             ->whereIn('role', $roles)
             ->where(function ($q) {
                 $q->where('is_suspended', false)->orWhereNull('is_suspended');
@@ -63,7 +65,13 @@ class GeneralComplianceService
                 $q->where('is_discontinued', false)->orWhereNull('is_discontinued');
             })
             ->orderBy('name')
-            ->get(['id', 'name', 'email', 'role']);
+            ->get(['id', 'name', 'email', 'role', 'firm_id']);
+
+        if ($filterByFirm) {
+            return $this->firmVisibility->filterAssigneesForSubmitterFirm($reviewers, $submitterFirm);
+        }
+
+        return $reviewers;
     }
 
     /**
@@ -336,6 +344,13 @@ class GeneralComplianceService
                 ]);
             }
 
+            $compliance->loadMissing('user.firm');
+            if (! $this->firmVisibility->userIsEligibleAssignee($approver, $compliance->user?->firm)) {
+                throw ValidationException::withMessages([
+                    'assigned_to' => 'Selected reviewer is not allowed for this request’s firm visibility settings.',
+                ]);
+            }
+
             $compliance->update([
                 'assigned_to' => $approver->id,
                 'assigned_date' => now(),
@@ -574,7 +589,12 @@ class GeneralComplianceService
             || $this->matrix->roleCan($hub, (string) $actor->role, 'gc_submit_request');
 
         $query = GeneralComplianceRequest::query()
-            ->with(['currentVersionRow.attachments', 'assignee:id,name,email', 'user:id,name,email,firm_id'])
+            ->with([
+                'currentVersionRow.attachments',
+                'assignee:id,name,email',
+                'user:id,name,email,firm_id',
+                'user.firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
+            ])
             ->orderByDesc('id');
 
         if ($canViewAll) {

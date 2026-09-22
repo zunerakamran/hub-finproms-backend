@@ -200,6 +200,69 @@ class FirmComplianceVisibilityService
         ]);
     }
 
+    /**
+     * Firm IDs whose staff may be assigned to compliance work from $submitterFirm,
+     * based on that firm's visibility settings.
+     *
+     * @return list<int>
+     */
+    public function assigneeFirmIdsForSubmitterFirm(?Firm $submitterFirm): array
+    {
+        if (! $submitterFirm) {
+            return [];
+        }
+
+        $ids = [];
+
+        if ($submitterFirm->compliance_visible_to_own) {
+            $ids[] = (int) $submitterFirm->id;
+        }
+
+        if ($submitterFirm->compliance_visible_to_central) {
+            $centralId = Firm::query()->where('is_central', true)->value('id');
+            if ($centralId) {
+                $ids[] = (int) $centralId;
+            }
+        }
+
+        if ($submitterFirm->compliance_visible_to_firm_id) {
+            $ids[] = (int) $submitterFirm->compliance_visible_to_firm_id;
+        }
+
+        return array_values(array_unique($ids));
+    }
+
+    /**
+     * Whether $candidate may be assigned to a request from $submitterFirm.
+     * Power Admin / FinProms Admin are always eligible.
+     */
+    public function userIsEligibleAssignee(User $candidate, ?Firm $submitterFirm): bool
+    {
+        if ($this->actorBypassesFirmScope($candidate)) {
+            return true;
+        }
+
+        $candidateFirmId = $candidate->firm_id ? (int) $candidate->firm_id : null;
+        if ($candidateFirmId === null) {
+            return false;
+        }
+
+        return in_array($candidateFirmId, $this->assigneeFirmIdsForSubmitterFirm($submitterFirm), true);
+    }
+
+    /**
+     * Filter a collection of candidate assignees for a submitter firm.
+     *
+     * @param  \Illuminate\Support\Collection<int, User>  $candidates
+     * @return \Illuminate\Support\Collection<int, User>
+     */
+    public function filterAssigneesForSubmitterFirm($candidates, ?Firm $submitterFirm)
+    {
+        return $candidates
+            ->filter(fn (User $user) => $this->userIsEligibleAssignee($user, $submitterFirm))
+            ->values();
+    }
+
     private function qualifySubmitterKey(string $userRelation): string
     {
         return match ($userRelation) {

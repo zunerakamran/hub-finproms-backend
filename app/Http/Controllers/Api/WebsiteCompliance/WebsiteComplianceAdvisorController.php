@@ -75,17 +75,31 @@ class WebsiteComplianceAdvisorController extends Controller
             return response()->json([]);
         }
 
+        $reviewers = User::query()
+            ->with('firm:id,name,is_central')
+            ->whereIn('role', $roles)
+            ->where(function ($q) {
+                $q->where('is_suspended', false)->orWhereNull('is_suspended');
+            })
+            ->where(function ($q) {
+                $q->where('is_discontinued', false)->orWhereNull('is_discontinued');
+            })
+            ->orderBy('name')
+            ->get(['id', 'name', 'email', 'role', 'firm_id']);
+
         return response()->json(
-            User::query()
-                ->whereIn('role', $roles)
-                ->where(function ($q) {
-                    $q->where('is_suspended', false)->orWhereNull('is_suspended');
-                })
-                ->where(function ($q) {
-                    $q->where('is_discontinued', false)->orWhereNull('is_discontinued');
-                })
-                ->orderBy('name')
-                ->get(['id', 'name', 'email', 'role'])
+            $reviewers->map(fn (User $u) => [
+                'id' => $u->id,
+                'name' => $u->name,
+                'email' => $u->email,
+                'role' => $u->role,
+                'firm_id' => $u->firm_id ? (int) $u->firm_id : null,
+                'firm' => $u->firm ? [
+                    'id' => (int) $u->firm->id,
+                    'name' => $u->firm->name,
+                    'is_central' => (bool) $u->firm->is_central,
+                ] : null,
+            ])->values()
         );
     }
 }

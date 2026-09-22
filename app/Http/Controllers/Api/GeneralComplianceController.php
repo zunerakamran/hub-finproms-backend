@@ -45,7 +45,18 @@ class GeneralComplianceController extends Controller
         $this->compliance->assertModuleEnabled($hub);
 
         return response()->json([
-            'data' => $this->compliance->reviewersForHub($hub)->values(),
+            'data' => $this->compliance->reviewersForHub($hub)->map(fn (User $u) => [
+                'id' => $u->id,
+                'name' => $u->name,
+                'email' => $u->email,
+                'role' => $u->role,
+                'firm_id' => $u->firm_id ? (int) $u->firm_id : null,
+                'firm' => $u->firm ? [
+                    'id' => (int) $u->firm->id,
+                    'name' => $u->firm->name,
+                    'is_central' => (bool) $u->firm->is_central,
+                ] : null,
+            ])->values(),
         ]);
     }
 

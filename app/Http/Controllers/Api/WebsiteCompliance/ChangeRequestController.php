@@ -109,7 +109,13 @@ class ChangeRequestController extends Controller
         $user = $request->user();
         $this->gate->assertModuleEnabled($user);
 
-        $with = ['section', 'editor.firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id', 'approver', 'currentVersionRow'];
+        $with = [
+            'section',
+            'editor:id,name,email,firm_id',
+            'editor.firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
+            'approver',
+            'currentVersionRow',
+        ];
         // Pickup/assign write tenantUserIdOrNull; match the same id for scoping.
         $actorId = $this->gate->tenantUserIdOrNull($user) ?? (int) $user->id;
         // Approver role is always personal-queue scoped. Hub-wide history is for
@@ -281,7 +287,7 @@ class ChangeRequestController extends Controller
             'approver_id' => ['required', Rule::exists(User::class, 'id')],
         ]);
 
-        $changeRequest = ChangeRequest::with('editor:id,firm_id')->findOrFail($id);
+        $changeRequest = ChangeRequest::with('editor.firm')->findOrFail($id);
 
         $this->firmVisibility->assertActorCanActOnRequest(
             $user,
@@ -289,6 +295,16 @@ class ChangeRequestController extends Controller
             $changeRequest->editor?->firm_id ? (int) $changeRequest->editor->firm_id : null,
             $changeRequest->approver_id ? (int) $changeRequest->approver_id : null
         );
+
+        $approver = User::query()->findOrFail((int) $request->approver_id);
+        if (! $this->firmVisibility->userIsEligibleAssignee($approver, $changeRequest->editor?->firm)) {
+            return response()->json([
+                'message' => 'Selected reviewer is not allowed for this request’s firm visibility settings.',
+                'errors' => [
+                    'approver_id' => ['Selected reviewer is not allowed for this request’s firm visibility settings.'],
+                ],
+            ], 422);
+        }
 
         $changeRequest->update([
             'approver_id' => $request->approver_id,

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Firm;
 use App\Models\SocialMediaComplianceRequest;
 use App\Models\SocialMediaComplianceRequestVersion;
 use App\Models\Hub;
@@ -37,7 +38,7 @@ class SocialMediaComplianceService
      *
      * @return Collection<int, User>
      */
-    public function reviewersForHub(Hub $hub): Collection
+    public function reviewersForHub(Hub $hub, ?Firm $submitterFirm = null, bool $filterByFirm = false): Collection
     {
         $roles = array_values(array_filter(
             CapabilitiesMatrixService::MATRIX_ROLES,
@@ -48,7 +49,8 @@ class SocialMediaComplianceService
             return collect();
         }
 
-        return User::query()
+        $reviewers = User::query()
+            ->with('firm:id,name,is_central')
             ->whereIn('role', $roles)
             ->where(function ($q) {
                 $q->where('is_suspended', false)->orWhereNull('is_suspended');
@@ -57,7 +59,13 @@ class SocialMediaComplianceService
                 $q->where('is_discontinued', false)->orWhereNull('is_discontinued');
             })
             ->orderBy('name')
-            ->get(['id', 'name', 'email', 'role']);
+            ->get(['id', 'name', 'email', 'role', 'firm_id']);
+
+        if ($filterByFirm) {
+            return $this->firmVisibility->filterAssigneesForSubmitterFirm($reviewers, $submitterFirm);
+        }
+
+        return $reviewers;
     }
 
     /**
@@ -332,6 +340,13 @@ class SocialMediaComplianceService
                 ]);
             }
 
+            $compliance->loadMissing('user.firm');
+            if (! $this->firmVisibility->userIsEligibleAssignee($approver, $compliance->user?->firm)) {
+                throw ValidationException::withMessages([
+                    'assigned_to' => 'Selected reviewer is not allowed for this request’s firm visibility settings.',
+                ]);
+            }
+
             $compliance->update([
                 'assigned_to' => $approver->id,
                 'assigned_date' => now(),
@@ -570,7 +585,13 @@ class SocialMediaComplianceService
             || $this->matrix->roleCan($hub, (string) $actor->role, 'smc_submit_request');
 
         $query = SocialMediaComplianceRequest::query()
-            ->with(['currentVersionRow', 'assignee:id,name,email', 'post:id,title,type', 'user:id,name,email,firm_id'])
+            ->with([
+                'currentVersionRow',
+                'assignee:id,name,email',
+                'post:id,title,type',
+                'user:id,name,email,firm_id',
+                'user.firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
+            ])
             ->orderByDesc('id');
 
         if ($canViewAll) {

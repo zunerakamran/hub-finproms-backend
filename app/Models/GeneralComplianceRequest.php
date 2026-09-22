@@ -91,7 +91,8 @@ class GeneralComplianceRequest extends Model
         $this->loadMissing([
             'currentVersionRow.attachments',
             'assignee:id,name,email',
-            'user:id,name,email',
+            'user:id,name,email,firm_id',
+            'user.firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
         ]);
 
         $version = $this->currentVersionRow;
@@ -113,6 +114,19 @@ class GeneralComplianceRequest extends Model
                 'id' => $this->user->id,
                 'name' => $this->user->name,
                 'email' => $this->user->email,
+                'firm_id' => $this->user->firm_id ? (int) $this->user->firm_id : null,
+                'firm' => $this->user->firm ? [
+                    'id' => (int) $this->user->firm->id,
+                    'name' => $this->user->firm->name,
+                    'is_central' => (bool) $this->user->firm->is_central,
+                    'compliance_visibility' => [
+                        'visible_to_own' => (bool) $this->user->firm->compliance_visible_to_own,
+                        'visible_to_central' => (bool) $this->user->firm->compliance_visible_to_central,
+                        'visible_to_firm_id' => $this->user->firm->compliance_visible_to_firm_id
+                            ? (int) $this->user->firm->compliance_visible_to_firm_id
+                            : null,
+                    ],
+                ] : null,
             ] : null,
             'description' => $version?->description,
             'attachments' => $version

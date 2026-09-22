@@ -200,4 +200,47 @@ class FirmComplianceVisibilityTest extends TestCase
         // Assigned work is always visible even across firms.
         $this->assertTrue($visibility->actorCanViewRequest($admin, 2, $firmY->id, $admin->id));
     }
+
+    public function test_assignee_dropdown_respects_submitter_firm_visibility(): void
+    {
+        $central = Firm::central();
+        $acme = Firm::query()->create([
+            'name' => 'Acme',
+            'compliance_visible_to_own' => true,
+            'compliance_visible_to_central' => true,
+            'compliance_visible_to_firm_id' => null,
+        ]);
+        $other = Firm::query()->create([
+            'name' => 'Other',
+            'compliance_visible_to_own' => true,
+        ]);
+
+        $visibility = app(FirmComplianceVisibilityService::class);
+
+        $this->assertEqualsCanonicalizing(
+            array_values(array_filter([(int) $acme->id, $central?->id ? (int) $central->id : null])),
+            $visibility->assigneeFirmIdsForSubmitterFirm($acme)
+        );
+
+        $acmeReviewer = User::factory()->create([
+            'role' => User::ROLE_APPROVER,
+            'firm_id' => $acme->id,
+        ]);
+        $otherReviewer = User::factory()->create([
+            'role' => User::ROLE_APPROVER,
+            'firm_id' => $other->id,
+        ]);
+        $centralReviewer = User::factory()->create([
+            'role' => User::ROLE_APPROVER,
+            'firm_id' => $central->id,
+        ]);
+        $power = User::factory()->powerAdmin()->create(['firm_id' => null]);
+
+        $this->assertTrue($visibility->userIsEligibleAssignee($acmeReviewer, $acme));
+        $this->assertTrue($visibility->userIsEligibleAssignee($centralReviewer, $acme));
+        $this->assertTrue($visibility->userIsEligibleAssignee($power, $acme));
+        $this->assertFalse($visibility->userIsEligibleAssignee($otherReviewer, $acme));
+        $this->assertFalse($visibility->userIsEligibleAssignee($otherReviewer, null));
+        $this->assertTrue($visibility->userIsEligibleAssignee($power, null));
+    }
 }
