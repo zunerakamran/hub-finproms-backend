@@ -94,6 +94,7 @@ class User extends Authenticatable
         'stripe_customer_id',
         'stripe_payment_method_id',
         'acting_hub_id',
+        'firm_id',
     ];
 
     protected $hidden = [
@@ -244,6 +245,11 @@ class User extends Authenticatable
     public function purchases(): HasMany
     {
         return $this->hasMany(PostPurchase::class);
+    }
+
+    public function firm(): BelongsTo
+    {
+        return $this->belongsTo(Firm::class);
     }
 
     public function actingHub(): BelongsTo

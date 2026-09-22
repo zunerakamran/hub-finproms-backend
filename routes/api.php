@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\AdvisorPaymentCardController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BundleController;
 use App\Http\Controllers\Api\CategoryController;
+use App\Http\Controllers\Api\FirmController;
 use App\Http\Controllers\Api\SocialMediaComplianceController;
 use App\Http\Controllers\Api\GeneralComplianceController;
 use App\Http\Controllers\Api\WebsiteCompliance\ChangeRequestController as WcChangeRequestController;
@@ -289,6 +290,13 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/categories', [CategoryController::class, 'store']);
             Route::put('/categories/{category}', [CategoryController::class, 'update']);
             Route::delete('/categories/{category}', [CategoryController::class, 'destroy']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_firms')->group(function () {
+            Route::get('/firms', [FirmController::class, 'index']);
+            Route::post('/firms', [FirmController::class, 'store']);
+            Route::put('/firms/{firm}', [FirmController::class, 'update']);
+            Route::delete('/firms/{firm}', [FirmController::class, 'destroy']);
         });
 
         Route::middleware('hub_can:dashboard_manage_types')->group(function () {
@@ -626,6 +634,13 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/categories', [CategoryController::class, 'store']);
             Route::put('/categories/{category}', [CategoryController::class, 'update']);
             Route::delete('/categories/{category}', [CategoryController::class, 'destroy']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_firms')->group(function () {
+            Route::get('/firms', [FirmController::class, 'index']);
+            Route::post('/firms', [FirmController::class, 'store']);
+            Route::put('/firms/{firm}', [FirmController::class, 'update']);
+            Route::delete('/firms/{firm}', [FirmController::class, 'destroy']);
         });
 
         Route::middleware('hub_can:dashboard_manage_types')->group(function () {

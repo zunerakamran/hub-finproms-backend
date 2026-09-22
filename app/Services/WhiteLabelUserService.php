@@ -37,7 +37,7 @@ class WhiteLabelUserService
         $this->assertTarget($hub);
 
         return $this->remoteDb->run($hub, function (string $connection) use ($hub, $search, $role, $perPage, $page) {
-            $query = User::on($connection)->orderBy('name')->orderBy('id');
+            $query = User::on($connection)->with('firm:id,name')->orderBy('name')->orderBy('id');
 
             if ($search) {
                 $term = '%'.$search.'%';
@@ -87,6 +87,7 @@ class WhiteLabelUserService
                 'is_advisor' => $payload['is_advisor'] ?? ($payload['role'] === User::ROLE_ADVISOR),
                 'has_unlimited_credits' => $payload['has_unlimited_credits'] ?? false,
                 'is_suspended' => $payload['is_suspended'] ?? false,
+                'firm_id' => $this->resolveFirmId($connection, $payload['firm_id'] ?? null),
             ]);
 
             return $this->serialize($user->fresh(), $hub);
@@ -129,6 +130,10 @@ class WhiteLabelUserService
 
             if (($fill['role'] ?? null) === User::ROLE_ADVISOR && ! array_key_exists('is_advisor', $fill)) {
                 $fill['is_advisor'] = true;
+            }
+
+            if (array_key_exists('firm_id', $fill)) {
+                $fill['firm_id'] = $this->resolveFirmId($connection, $fill['firm_id']);
             }
 
             $user->fill($fill);
@@ -204,9 +209,48 @@ class WhiteLabelUserService
             'has_unlimited_credits' => $unlimited,
             'is_suspended' => (bool) $user->is_suspended,
             'is_discontinued' => (bool) $user->is_discontinued,
+            'firm_id' => $user->firm_id ? (int) $user->firm_id : null,
+            'firm' => $this->serializeFirm($user),
             'created_at' => $user->created_at?->toIso8601String(),
             'updated_at' => $user->updated_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * @return array{id: int, name: string}|null
+     */
+    private function serializeFirm(User $user): ?array
+    {
+        if (! $user->firm_id) {
+            return null;
+        }
+
+        $firm = $user->relationLoaded('firm') ? $user->firm : $user->firm()->first();
+        if (! $firm) {
+            return null;
+        }
+
+        return [
+            'id' => (int) $firm->id,
+            'name' => (string) $firm->name,
+        ];
+    }
+
+    private function resolveFirmId(string $connection, mixed $firmId): ?int
+    {
+        if ($firmId === null || $firmId === '') {
+            return null;
+        }
+
+        $id = (int) $firmId;
+        $exists = DB::connection($connection)->table('firms')->where('id', $id)->exists();
+        if (! $exists) {
+            throw ValidationException::withMessages([
+                'firm_id' => 'The selected firm is invalid on this hub.',
+            ]);
+        }
+
+        return $id;
     }
 
     private function findOrFail(string $connection, int $userId): User

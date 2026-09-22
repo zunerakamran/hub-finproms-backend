@@ -3,11 +3,13 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Firm;
 use App\Models\Hub;
 use App\Models\User;
 use App\Services\ActingHubService;
 use App\Services\AdminNewUserRegistrationMailService;
 use App\Services\FunctionalMailService;
+use App\Services\WhiteLabelFirmService;
 use App\Services\WhiteLabelUserService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -38,7 +40,8 @@ class PowerAdminUserController extends Controller
         private readonly AdminNewUserRegistrationMailService $adminNewUserMail,
         private readonly FunctionalMailService $functionalMail,
         private readonly ActingHubService $actingHubs,
-        private readonly WhiteLabelUserService $whiteLabelUsers
+        private readonly WhiteLabelUserService $whiteLabelUsers,
+        private readonly WhiteLabelFirmService $whiteLabelFirms
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -68,12 +71,13 @@ class PowerAdminUserController extends Controller
                 'users' => $listed['users'],
                 'meta' => $listed['meta'],
                 'roles' => $this->roleOptions($hub),
+                'firms' => $this->firmOptions($hub),
                 'acting_on_white_label' => true,
                 'target_hub' => $this->targetHubPayload($hub),
             ]);
         }
 
-        $query = User::query()->orderBy('name')->orderBy('id');
+        $query = User::query()->with('firm:id,name')->orderBy('name')->orderBy('id');
 
         if (! empty($validated['q'])) {
             $term = '%'.$validated['q'].'%';
@@ -99,6 +103,7 @@ class PowerAdminUserController extends Controller
                 'total' => $paginator->total(),
             ],
             'roles' => $this->roleOptions($labelHub),
+            'firms' => $this->firmOptions(),
             'acting_on_white_label' => false,
         ]);
     }
@@ -125,6 +130,7 @@ class PowerAdminUserController extends Controller
                 'message' => 'User created on '.$hub->name.' (white-label database).',
                 'user' => $user,
                 'roles' => $this->roleOptions(),
+                'firms' => $this->firmOptions($hub),
                 'acting_on_white_label' => true,
                 'target_hub' => $this->targetHubPayload($hub),
             ], 201);
@@ -139,6 +145,7 @@ class PowerAdminUserController extends Controller
             'is_advisor' => $validated['is_advisor'] ?? ($validated['role'] === User::ROLE_ADVISOR),
             'has_unlimited_credits' => $validated['has_unlimited_credits'] ?? false,
             'is_suspended' => $validated['is_suspended'] ?? false,
+            'firm_id' => $validated['firm_id'] ?? null,
         ]);
 
         $this->adminNewUserMail->send($user);
@@ -146,8 +153,9 @@ class PowerAdminUserController extends Controller
 
         return response()->json([
             'message' => 'User created successfully.',
-            'user' => $this->serialize($user->fresh()),
+            'user' => $this->serialize($user->fresh('firm')),
             'roles' => $this->roleOptions(),
+            'firms' => $this->firmOptions(),
             'acting_on_white_label' => false,
         ], 201);
     }
@@ -164,16 +172,18 @@ class PowerAdminUserController extends Controller
             return response()->json([
                 'user' => $payload,
                 'roles' => $this->roleOptions(),
+                'firms' => $this->firmOptions($hub),
                 'acting_on_white_label' => true,
                 'target_hub' => $this->targetHubPayload($hub),
             ]);
         }
 
-        $model = User::query()->findOrFail($user);
+        $model = User::query()->with('firm:id,name')->findOrFail($user);
 
         return response()->json([
             'user' => $this->serialize($model),
             'roles' => $this->roleOptions(),
+            'firms' => $this->firmOptions(),
             'acting_on_white_label' => false,
         ]);
     }
@@ -217,6 +227,7 @@ class PowerAdminUserController extends Controller
                 'message' => 'User updated on '.$hub->name.'.',
                 'user' => $updated['user'],
                 'roles' => $this->roleOptions(),
+                'firms' => $this->firmOptions($hub),
                 'acting_on_white_label' => true,
                 'target_hub' => $this->targetHubPayload($hub),
             ]);
@@ -257,8 +268,9 @@ class PowerAdminUserController extends Controller
 
         return response()->json([
             'message' => 'User updated successfully.',
-            'user' => $this->serialize($model->fresh()),
+            'user' => $this->serialize($model->fresh('firm')),
             'roles' => $this->roleOptions(),
+            'firms' => $this->firmOptions(),
             'acting_on_white_label' => false,
         ]);
     }
@@ -322,6 +334,11 @@ class PowerAdminUserController extends Controller
             ? ['sometimes', 'nullable', 'string', Password::defaults()]
             : ['required', 'string', Password::defaults()];
 
+        $firmRules = [$user ? 'sometimes' : 'nullable', 'nullable', 'integer'];
+        if (! $skipUnique) {
+            $firmRules[] = Rule::exists('firms', 'id');
+        }
+
         return $request->validate([
             'name' => [$user ? 'sometimes' : 'required', 'string', 'max:255'],
             'email' => $emailRules,
@@ -331,7 +348,32 @@ class PowerAdminUserController extends Controller
             'is_advisor' => ['sometimes', 'boolean'],
             'has_unlimited_credits' => ['sometimes', 'boolean'],
             'is_suspended' => ['sometimes', 'boolean'],
+            'firm_id' => $firmRules,
         ]);
+    }
+
+    /**
+     * @return list<array{id: int, name: string}>
+     */
+    private function firmOptions(?Hub $hub = null): array
+    {
+        if ($hub && $hub->isWhiteLabel()) {
+            try {
+                return $this->whiteLabelFirms->options($hub);
+            } catch (InvalidArgumentException) {
+                return [];
+            }
+        }
+
+        return Firm::query()
+            ->orderBy('name')
+            ->get(['id', 'name'])
+            ->map(fn (Firm $firm) => [
+                'id' => $firm->id,
+                'name' => $firm->name,
+            ])
+            ->values()
+            ->all();
     }
 
     private function assertCanChangeRole(Request $request, User $user, string $newRole): void

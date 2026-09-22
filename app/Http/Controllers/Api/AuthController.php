@@ -267,6 +267,7 @@ class AuthController extends Controller
     {
         /** @var User $user */
         $user = $request->user();
+        $user->load('firm:id,name');
 
         $payload = [
             'user' => $user,

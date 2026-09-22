@@ -34,7 +34,7 @@ class AdvisorController extends Controller
 
         if ($this->shouldUseRemote($request, $hub)) {
             $payload = $this->remoteDb->run($hub, function (string $connection) use ($status, $perPage) {
-                $query = User::on($connection)->where('is_advisor', true);
+                $query = User::on($connection)->with('firm:id,name')->where('is_advisor', true);
 
                 if ($status === 'discontinued') {
                     $query->where('is_discontinued', true);
@@ -48,7 +48,7 @@ class AdvisorController extends Controller
             return response()->json($payload);
         }
 
-        $query = User::query()->where('is_advisor', true);
+        $query = User::query()->with('firm:id,name')->where('is_advisor', true);
 
         if ($status === 'discontinued') {
             $query->where('is_discontinued', true);

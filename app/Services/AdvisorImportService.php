@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Firm;
 use App\Models\Hub;
 use App\Models\User;
 use App\Models\UserSubscription;
@@ -39,8 +40,8 @@ class AdvisorImportService
      * Classify rows without creating users. Used when payment is required first.
      *
      * @return array{
-     *   pending: list<array{action: string, name: string, email: string, password: string}>,
-     *   preview: array{created: list<array{name: string, email: string}>, updated: list<array{name: string, email: string}>, reactivated: list<array{name: string, email: string}>},
+     *   pending: list<array{action: string, name: string, email: string, password: string, firm_id: ?int, firm: ?string}>,
+     *   preview: array{created: list<array{name: string, email: string, firm: ?string}>, updated: list<array{name: string, email: string, firm: ?string}>, reactivated: list<array{name: string, email: string, firm: ?string}>},
      *   skipped: list<array{row: int, email: ?string, reason: string}>,
      *   summary: array{total_rows: int, created: int, updated: int, reactivated: int, skipped: int, billable_batch: int}
      * }
@@ -53,7 +54,7 @@ class AdvisorImportService
 
         if ($rows === []) {
             throw new RuntimeException(
-                'No advisor rows were found. Make sure the first non-empty row contains headers like name, email, password.'
+                'No advisor rows were found. Make sure the first non-empty row contains headers like name, email, password, firm.'
             );
         }
 
@@ -68,6 +69,7 @@ class AdvisorImportService
             $name = trim((string) ($row['name'] ?? ''));
             $email = strtolower(trim((string) ($row['email'] ?? '')));
             $password = trim((string) ($row['password'] ?? ''));
+            $firmName = trim((string) ($row['firm'] ?? ''));
 
             if ($email === '' && $name === '') {
                 continue;
@@ -85,6 +87,32 @@ class AdvisorImportService
             if ($name === '') {
                 $name = Str::before($email, '@');
             }
+
+            $firmId = null;
+            if ($firmName === '') {
+                $skipped[] = [
+                    'row' => $rowNumber,
+                    'email' => $email,
+                    'reason' => 'Firm is required.',
+                ];
+                continue;
+            }
+
+            $firm = Firm::on($connection)
+                ->whereRaw('LOWER(name) = ?', [strtolower($firmName)])
+                ->first();
+
+            if (! $firm) {
+                $skipped[] = [
+                    'row' => $rowNumber,
+                    'email' => $email,
+                    'reason' => 'Unknown firm "'.$firmName.'". Add the firm first, then re-import.',
+                ];
+                continue;
+            }
+
+            $firmId = (int) $firm->id;
+            $resolvedFirmName = (string) $firm->name;
 
             $user = User::on($connection)->where('email', $email)->first();
 
@@ -105,12 +133,14 @@ class AdvisorImportService
                     'name' => $name,
                     'email' => $email,
                     'password' => '',
+                    'firm_id' => $firmId,
+                    'firm' => $resolvedFirmName,
                 ];
 
                 if ($action === 'reactivate') {
-                    $previewReactivated[] = ['name' => $name, 'email' => $email];
+                    $previewReactivated[] = ['name' => $name, 'email' => $email, 'firm' => $resolvedFirmName];
                 } else {
-                    $previewUpdated[] = ['name' => $name, 'email' => $email];
+                    $previewUpdated[] = ['name' => $name, 'email' => $email, 'firm' => $resolvedFirmName];
                 }
 
                 continue;
@@ -121,8 +151,10 @@ class AdvisorImportService
                 'name' => $name,
                 'email' => $email,
                 'password' => $password,
+                'firm_id' => $firmId,
+                'firm' => $resolvedFirmName,
             ];
-            $previewCreated[] = ['name' => $name, 'email' => $email];
+            $previewCreated[] = ['name' => $name, 'email' => $email, 'firm' => $resolvedFirmName];
         }
 
         return [
@@ -147,12 +179,12 @@ class AdvisorImportService
     /**
      * Apply a previously staged import plan (after payment method is chosen).
      *
-     * @param  list<array{action: string, name: string, email: string, password?: string}>  $pending
+     * @param  list<array{action: string, name: string, email: string, password?: string, firm_id?: ?int}>  $pending
      * @param  list<array{row: int, email: ?string, reason: string}>  $skipped
      * @return array{
-     *   created: list<array{name: string, email: string, temporary_password: ?string}>,
-     *   updated: list<array{name: string, email: string}>,
-     *   reactivated: list<array{name: string, email: string}>,
+     *   created: list<array{name: string, email: string, temporary_password: ?string, firm: ?string}>,
+     *   updated: list<array{name: string, email: string, firm: ?string}>,
+     *   reactivated: list<array{name: string, email: string, firm: ?string}>,
      *   skipped: list<array{row: int, email: ?string, reason: string}>,
      *   summary: array{total_rows: int, created: int, updated: int, reactivated: int, skipped: int, billable_batch: int}
      * }
@@ -175,6 +207,9 @@ class AdvisorImportService
             $name = trim((string) ($row['name'] ?? ''));
             $email = strtolower(trim((string) ($row['email'] ?? '')));
             $password = trim((string) ($row['password'] ?? ''));
+            $firmId = isset($row['firm_id']) && $row['firm_id'] !== null && $row['firm_id'] !== ''
+                ? (int) $row['firm_id']
+                : null;
 
             if ($email === '' || ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
                 $skipped[] = [
@@ -189,12 +224,22 @@ class AdvisorImportService
                 $name = Str::before($email, '@');
             }
 
+            if ($firmId === null) {
+                $skipped[] = [
+                    'row' => $index + 1,
+                    'email' => $email,
+                    'reason' => 'Firm is required.',
+                ];
+                continue;
+            }
+
             try {
                 $result = DB::connection($connection)->transaction(function () use (
                     $action,
                     $name,
                     $email,
                     $password,
+                    $firmId,
                     $hub,
                     $connection
                 ) {
@@ -218,6 +263,7 @@ class AdvisorImportService
                             'is_suspended' => false,
                             'is_discontinued' => false,
                             'discontinued_at' => null,
+                            'firm_id' => $firmId,
                         ]);
                         $user->save();
                         $this->ensureAdvisorSubscription($user);
@@ -227,7 +273,7 @@ class AdvisorImportService
 
                         return [
                             'status' => $wasInactive ? 'reactivated' : 'updated',
-                            'user' => $user->fresh(),
+                            'user' => $user->fresh('firm'),
                         ];
                     }
 
@@ -250,6 +296,7 @@ class AdvisorImportService
                         'has_unlimited_credits' => false,
                         'is_suspended' => false,
                         'is_discontinued' => false,
+                        'firm_id' => $firmId,
                     ]);
 
                     $this->ensureAdvisorSubscription($user);
@@ -257,7 +304,7 @@ class AdvisorImportService
 
                     return [
                         'status' => 'created',
-                        'user' => $user->fresh(),
+                        'user' => $user->fresh('firm'),
                         'temporary_password' => $temporaryPassword,
                     ];
                 });
@@ -279,11 +326,14 @@ class AdvisorImportService
                 continue;
             }
 
+            $firmLabel = $result['user']->firm?->name ?? ($row['firm'] ?? null);
+
             if ($result['status'] === 'created') {
                 $created[] = [
                     'name' => $result['user']->name,
                     'email' => $result['user']->email,
                     'temporary_password' => $result['temporary_password'],
+                    'firm' => $firmLabel,
                 ];
                 app(FunctionalMailService::class)->advisorInvite(
                     $result['user'],
@@ -293,12 +343,14 @@ class AdvisorImportService
                 $reactivated[] = [
                     'name' => $result['user']->name,
                     'email' => $result['user']->email,
+                    'firm' => $firmLabel,
                 ];
                 app(FunctionalMailService::class)->advisorReactivated($result['user']);
             } else {
                 $updated[] = [
                     'name' => $result['user']->name,
                     'email' => $result['user']->email,
+                    'firm' => $firmLabel,
                 ];
             }
         }
@@ -481,6 +533,7 @@ class AdvisorImportService
                     'name' => $assoc['name'] ?? $assoc['full_name'] ?? $assoc['advisor_name'] ?? '',
                     'email' => $assoc['email'] ?? $assoc['email_address'] ?? '',
                     'password' => $assoc['password'] ?? $assoc['temporary_password'] ?? '',
+                    'firm' => $assoc['firm'] ?? $assoc['firm_name'] ?? $assoc['company'] ?? '',
                 ];
 
                 $rows[] = $row;
@@ -566,6 +619,7 @@ class AdvisorImportService
                 'name' => $assoc['name'] ?? $assoc['full_name'] ?? $assoc['advisor_name'] ?? '',
                 'email' => $assoc['email'] ?? $assoc['email_address'] ?? '',
                 'password' => $assoc['password'] ?? $assoc['temporary_password'] ?? '',
+                'firm' => $assoc['firm'] ?? $assoc['firm_name'] ?? $assoc['company'] ?? '',
             ];
         }
 
@@ -603,9 +657,9 @@ class AdvisorImportService
     public function templateCsv(): string
     {
         $lines = [
-            'name,email,password',
-            'Jane Advisor,jane@example.com,',
-            'John Advisor,john@example.com,OptionalPassword123',
+            'name,email,password,firm',
+            'Jane Advisor,jane@example.com,,Acme Wealth',
+            'John Advisor,john@example.com,OptionalPassword123,Acme Wealth',
         ];
 
         return implode("\n", $lines)."\n";

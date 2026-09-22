@@ -483,6 +483,7 @@ class CapabilitiesMatrixService
             'dashboard_manage_bundles',
             'dashboard_manage_types',
             'dashboard_manage_categories',
+            'dashboard_manage_firms',
             'dashboard_manage_tags',
             'dashboard_manage_subscriber_credits',
             'dashboard_manage_modules',
