@@ -185,7 +185,6 @@ class Hub extends Model
         'dashboard_manage_advisor_pricing',
         'dashboard_manage_advisor_renewal',
         'dashboard_manage_subscriber_credits',
-        'dashboard_manage_firms',
     ];
 
     /**
@@ -378,9 +377,9 @@ class Hub extends Model
         ],
         'dashboard_manage_firms' => [
             'label' => 'Manage firms',
-            'description' => 'Hub admin can add and manage firms assigned to users (private hubs).',
+            'description' => 'Hub admin can add and manage firms assigned to users. Public self-registration does not ask for a firm.',
             'group' => self::GROUP_DASHBOARD,
-            'default_shared' => false,
+            'default_shared' => true,
             'default_white_label' => true,
         ],
         'dashboard_manage_tags' => [

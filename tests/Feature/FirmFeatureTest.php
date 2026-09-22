@@ -17,11 +17,9 @@ class FirmFeatureTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function createPrivateSharedHub(): Hub
+    private function createSharedHub(array $checklistOverrides = []): Hub
     {
-        $checklist = Hub::defaultChecklist(Hub::TYPE_SHARED);
-        $checklist['private_invite_only'] = true;
-        $checklist['public_subscribe'] = false;
+        $checklist = array_merge(Hub::defaultChecklist(Hub::TYPE_SHARED), $checklistOverrides);
 
         $hub = Hub::query()->create([
             'name' => 'Shared Hub',
@@ -48,7 +46,7 @@ class FirmFeatureTest extends TestCase
 
     public function test_power_admin_can_crud_firms_when_capability_enabled(): void
     {
-        $hub = $this->createPrivateSharedHub();
+        $hub = $this->createSharedHub();
         $this->enableManageFirms($hub);
 
         $admin = User::factory()->powerAdmin()->create();
@@ -71,7 +69,7 @@ class FirmFeatureTest extends TestCase
 
     public function test_user_create_assigns_firm_and_lists_firms_for_dropdown(): void
     {
-        $this->createPrivateSharedHub();
+        $this->createSharedHub();
         $firm = Firm::query()->create(['name' => 'Northstar']);
         $admin = User::factory()->powerAdmin()->create();
         Sanctum::actingAs($admin);
@@ -117,7 +115,10 @@ class FirmFeatureTest extends TestCase
 
     public function test_advisor_import_assigns_firm_from_sheet(): void
     {
-        $this->createPrivateSharedHub();
+        $this->createSharedHub([
+            'private_invite_only' => true,
+            'public_subscribe' => false,
+        ]);
         $firm = Firm::query()->create(['name' => 'Acme Wealth']);
 
         $csv = "name,email,password,firm\nJane Advisor,jane.firm@example.com,,Acme Wealth\n";
@@ -133,7 +134,10 @@ class FirmFeatureTest extends TestCase
 
     public function test_advisor_import_skips_unknown_firm(): void
     {
-        $this->createPrivateSharedHub();
+        $this->createSharedHub([
+            'private_invite_only' => true,
+            'public_subscribe' => false,
+        ]);
 
         $csv = "name,email,password,firm\nJane Advisor,jane.missing@example.com,,Missing Firm\n";
         $file = UploadedFile::fake()->createWithContent('advisors.csv', $csv);
