@@ -366,11 +366,13 @@ class PowerAdminUserController extends Controller
         }
 
         return Firm::query()
+            ->orderByDesc('is_central')
             ->orderBy('name')
-            ->get(['id', 'name'])
+            ->get(['id', 'name', 'is_central'])
             ->map(fn (Firm $firm) => [
                 'id' => $firm->id,
                 'name' => $firm->name,
+                'is_central' => $firm->isCentral(),
             ])
             ->values()
             ->all();

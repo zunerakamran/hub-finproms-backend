@@ -35,6 +35,8 @@ class FirmController extends Controller
             ]));
         }
 
+        Firm::central();
+
         $counts = User::query()
             ->whereNotNull('firm_id')
             ->selectRaw('firm_id, COUNT(*) as users_count')
@@ -42,17 +44,16 @@ class FirmController extends Controller
             ->pluck('users_count', 'firm_id');
 
         $firms = Firm::query()
+            ->with('complianceVisibleToFirm:id,name')
+            ->orderByDesc('is_central')
             ->orderBy('name')
-            ->get(['id', 'name'])
-            ->map(fn (Firm $firm) => [
-                'id' => $firm->id,
-                'name' => $firm->name,
-                'users_count' => (int) ($counts[$firm->id] ?? 0),
-            ])
+            ->get()
+            ->map(fn (Firm $firm) => $firm->toApiArray((int) ($counts[$firm->id] ?? 0)))
             ->values();
 
         return response()->json([
             'firms' => $firms,
+            'central_firm_id' => Firm::query()->where('is_central', true)->value('id'),
             'acting_on_white_label' => false,
         ]);
     }
@@ -60,9 +61,7 @@ class FirmController extends Controller
     public function store(Request $request): JsonResponse
     {
         if ($hub = $this->actingWhiteLabelHub($request)) {
-            $validated = $request->validate([
-                'name' => ['required', 'string', 'max:255'],
-            ]);
+            $validated = $this->validatedFirmPayload($request, null, skipUnique: true);
 
             try {
                 $firm = $this->whiteLabelFirms->create($hub, $validated);
@@ -78,17 +77,19 @@ class FirmController extends Controller
             ], 201);
         }
 
-        $validated = $request->validate([
-            'name' => ['required', 'string', 'max:255', 'unique:firms,name'],
-        ]);
+        $validated = $this->validatedFirmPayload($request);
 
         $firm = Firm::query()->create([
             'name' => trim($validated['name']),
+            'is_central' => false,
+            'compliance_visible_to_own' => $validated['compliance_visible_to_own'] ?? true,
+            'compliance_visible_to_central' => $validated['compliance_visible_to_central'] ?? false,
+            'compliance_visible_to_firm_id' => $validated['compliance_visible_to_firm_id'] ?? null,
         ]);
 
         return response()->json([
             'message' => 'Firm created successfully.',
-            'firm' => $firm,
+            'firm' => $firm->load('complianceVisibleToFirm:id,name')->toApiArray(),
             'acting_on_white_label' => false,
         ], 201);
     }
@@ -96,9 +97,7 @@ class FirmController extends Controller
     public function update(Request $request, int $firm): JsonResponse
     {
         if ($hub = $this->actingWhiteLabelHub($request)) {
-            $validated = $request->validate([
-                'name' => ['required', 'string', 'max:255'],
-            ]);
+            $validated = $this->validatedFirmPayload($request, null, skipUnique: true);
 
             try {
                 $updated = $this->whiteLabelFirms->update($hub, $firm, $validated);
@@ -117,23 +116,35 @@ class FirmController extends Controller
         }
 
         $model = Firm::query()->findOrFail($firm);
+        $validated = $this->validatedFirmPayload($request, $model);
 
-        $validated = $request->validate([
-            'name' => [
-                'required',
-                'string',
-                'max:255',
-                Rule::unique('firms', 'name')->ignore($model->id),
-            ],
-        ]);
+        if (array_key_exists('compliance_visible_to_firm_id', $validated)
+            && $validated['compliance_visible_to_firm_id'] !== null
+            && (int) $validated['compliance_visible_to_firm_id'] === (int) $model->id) {
+            return response()->json([
+                'message' => 'A firm cannot select itself as the other visibility firm. Use “own firm” instead.',
+            ], 422);
+        }
 
-        $model->update([
+        $payload = [
             'name' => trim($validated['name']),
-        ]);
+        ];
+
+        if (array_key_exists('compliance_visible_to_own', $validated)) {
+            $payload['compliance_visible_to_own'] = (bool) $validated['compliance_visible_to_own'];
+        }
+        if (array_key_exists('compliance_visible_to_central', $validated)) {
+            $payload['compliance_visible_to_central'] = (bool) $validated['compliance_visible_to_central'];
+        }
+        if (array_key_exists('compliance_visible_to_firm_id', $validated)) {
+            $payload['compliance_visible_to_firm_id'] = $validated['compliance_visible_to_firm_id'];
+        }
+
+        $model->update($payload);
 
         return response()->json([
             'message' => 'Firm updated successfully.',
-            'firm' => $model->fresh(),
+            'firm' => $model->fresh()->load('complianceVisibleToFirm:id,name')->toApiArray(),
             'acting_on_white_label' => false,
         ]);
     }
@@ -157,6 +168,13 @@ class FirmController extends Controller
         }
 
         $model = Firm::query()->findOrFail($firm);
+
+        if ($model->isCentral()) {
+            return response()->json([
+                'message' => 'The Central / Network firm cannot be deleted. You can rename it instead.',
+            ], 422);
+        }
+
         $inUse = User::query()->where('firm_id', $model->id)->exists();
 
         if ($inUse) {
@@ -170,6 +188,33 @@ class FirmController extends Controller
         return response()->json([
             'message' => 'Firm deleted successfully.',
             'acting_on_white_label' => false,
+        ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function validatedFirmPayload(Request $request, ?Firm $firm = null, bool $skipUnique = false): array
+    {
+        $nameRules = ['required', 'string', 'max:255'];
+        if (! $skipUnique) {
+            $unique = Rule::unique('firms', 'name');
+            if ($firm) {
+                $unique = $unique->ignore($firm->id);
+            }
+            $nameRules[] = $unique;
+        }
+
+        $otherFirmRules = ['sometimes', 'nullable', 'integer'];
+        if (! $skipUnique) {
+            $otherFirmRules[] = Rule::exists('firms', 'id');
+        }
+
+        return $request->validate([
+            'name' => $nameRules,
+            'compliance_visible_to_own' => ['sometimes', 'boolean'],
+            'compliance_visible_to_central' => ['sometimes', 'boolean'],
+            'compliance_visible_to_firm_id' => $otherFirmRules,
         ]);
     }
 }

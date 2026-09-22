@@ -10,6 +10,7 @@ use App\Models\WebsiteCompliance\Section;
 use App\Models\WebsiteCompliance\TemplateRequest;
 use App\Services\ActingHubService;
 use App\Services\ActivityLogService;
+use App\Services\FirmComplianceVisibilityService;
 use App\Services\WebsiteCompliance\ChangeRequestPublishService;
 use App\Services\WebsiteCompliance\ChangeRequestWorkflowService;
 use App\Services\WebsiteCompliance\CpanelSyncService;
@@ -25,7 +26,8 @@ class ChangeRequestController extends Controller
     public function __construct(
         private readonly WebsiteComplianceGate $gate,
         private readonly ActivityLogService $activityLogs,
-        private readonly ChangeRequestWorkflowService $workflow
+        private readonly ChangeRequestWorkflowService $workflow,
+        private readonly FirmComplianceVisibilityService $firmVisibility
     ) {}
 
     public function store(Request $request): JsonResponse
@@ -107,7 +109,7 @@ class ChangeRequestController extends Controller
         $user = $request->user();
         $this->gate->assertModuleEnabled($user);
 
-        $with = ['section', 'editor', 'approver', 'currentVersionRow'];
+        $with = ['section', 'editor.firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id', 'approver', 'currentVersionRow'];
         // Pickup/assign write tenantUserIdOrNull; match the same id for scoping.
         $actorId = $this->gate->tenantUserIdOrNull($user) ?? (int) $user->id;
         // Approver role is always personal-queue scoped. Hub-wide history is for
@@ -117,10 +119,12 @@ class ChangeRequestController extends Controller
             && (string) $user->role !== User::ROLE_APPROVER;
 
         if ($canViewAll) {
-            $requests = ChangeRequest::with($with)->latest()->get();
+            $query = ChangeRequest::with($with)->latest();
+            $this->firmVisibility->scopeQueryForActor($query, $user, 'editor', 'approver_id');
+            $requests = $query->get();
         } elseif ($this->gate->can($user, 'wc_review_change_requests')) {
             // Approvers: unassigned pending for pickup + only requests they picked.
-            $requests = ChangeRequest::with($with)
+            $query = ChangeRequest::with($with)
                 ->where(function ($q) use ($actorId) {
                     $q->where('approver_id', $actorId)
                         ->orWhere(function ($pending) {
@@ -128,11 +132,14 @@ class ChangeRequestController extends Controller
                                 ->whereNull('approver_id');
                         });
                 })
-                ->latest()
-                ->get();
+                ->latest();
+            $this->firmVisibility->scopeQueryForActor($query, $user, 'editor', 'approver_id');
+            $requests = $query->get();
         } elseif ($this->gate->can($user, 'wc_assign_change_requests')) {
             // Assign-only staff (no review): full inbox to route work.
-            $requests = ChangeRequest::with($with)->latest()->get();
+            $query = ChangeRequest::with($with)->latest();
+            $this->firmVisibility->scopeQueryForActor($query, $user, 'editor', 'approver_id');
+            $requests = $query->get();
         } else {
             $requests = ChangeRequest::with(['section', 'approver', 'currentVersionRow'])
                 ->where('editor_id', $actorId)
@@ -150,7 +157,7 @@ class ChangeRequestController extends Controller
 
         $changeRequest = ChangeRequest::with([
             'section',
-            'editor',
+            'editor.firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
             'approver',
             'currentVersionRow',
             'versions',
@@ -168,9 +175,24 @@ class ChangeRequestController extends Controller
 
         $allowed =
             $isOwner
-            || $canViewAll
-            || ($canAssign && ! $canReview) // assign-only staff may open any for routing
-            || ($canReview && ($isAssignee || $isUnassignedPending));
+            || ($canReview && $isAssignee)
+            || ($canReview && $isUnassignedPending)
+            || (($canViewAll || ($canAssign && ! $canReview)) && $this->firmVisibility->actorCanViewRequest(
+                $user,
+                $changeRequest->editor_id ? (int) $changeRequest->editor_id : null,
+                $changeRequest->editor?->firm_id ? (int) $changeRequest->editor->firm_id : null,
+                $changeRequest->approver_id ? (int) $changeRequest->approver_id : null
+            ));
+
+        // Reviewers may only open unassigned pending when firm visibility allows.
+        if ($allowed && $canReview && $isUnassignedPending && ! $isOwner && ! $isAssignee) {
+            $allowed = $this->firmVisibility->actorCanViewRequest(
+                $user,
+                $changeRequest->editor_id ? (int) $changeRequest->editor_id : null,
+                $changeRequest->editor?->firm_id ? (int) $changeRequest->editor->firm_id : null,
+                null
+            );
+        }
 
         if (! $allowed) {
             return response()->json(['message' => 'Unauthorized'], 403);

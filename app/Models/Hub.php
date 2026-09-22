@@ -19,7 +19,16 @@ class Hub extends Model
 
     public const GROUP_GENERAL = 'general';
 
+    /** @deprecated Prefer the split dashboard_* groups; kept for legacy comparisons. */
     public const GROUP_DASHBOARD = 'dashboard';
+
+    public const GROUP_DASHBOARD_CONTENT = 'dashboard_content';
+
+    public const GROUP_DASHBOARD_FIRMS = 'dashboard_firms';
+
+    public const GROUP_DASHBOARD_ADVISORS = 'dashboard_advisors';
+
+    public const GROUP_DASHBOARD_HUB = 'dashboard_hub';
 
     public const GROUP_ADMIN_EMAILS = 'admin_emails';
 
@@ -51,13 +60,30 @@ class Hub extends Model
     public const CHECKLIST_GROUPS = [
         self::GROUP_BEHAVIOUR => 'Functionalities',
         self::GROUP_MODULES => 'Modules',
-        self::GROUP_MEMBER => 'User capabilities',
-        self::GROUP_GENERAL => 'General options (dashboard)',
+        self::GROUP_MEMBER => '1. Member catalog',
+        self::GROUP_GENERAL => '2. Member personal dashboard',
+        self::GROUP_DASHBOARD_CONTENT => '3. Content catalog',
+        self::GROUP_DASHBOARD_FIRMS => '4. Firms',
+        self::GROUP_DASHBOARD_ADVISORS => '5. Advisors & private billing',
+        self::GROUP_DASHBOARD_HUB => '6. Hub operations',
         self::GROUP_DASHBOARD => 'Hub-admin dashboard',
-        self::GROUP_ADMIN_EMAILS => 'Admin emails',
-        self::GROUP_SOCIAL_MEDIA_COMPLIANCE => 'Social Media Compliance',
-        self::GROUP_GENERAL_COMPLIANCE => 'General Compliance',
-        self::GROUP_WEBSITE_COMPLIANCE => 'Website Compliance',
+        self::GROUP_ADMIN_EMAILS => '7. Admin emails',
+        self::GROUP_SOCIAL_MEDIA_COMPLIANCE => '8. Social Media Compliance',
+        self::GROUP_GENERAL_COMPLIANCE => '9. General Compliance',
+        self::GROUP_WEBSITE_COMPLIANCE => '10. Website Compliance',
+    ];
+
+    /**
+     * Hub-admin dashboard capability groups (formerly a single mixed "dashboard" bucket).
+     *
+     * @var list<string>
+     */
+    public const DASHBOARD_CAPABILITY_GROUPS = [
+        self::GROUP_DASHBOARD_CONTENT,
+        self::GROUP_DASHBOARD_FIRMS,
+        self::GROUP_DASHBOARD_ADVISORS,
+        self::GROUP_DASHBOARD_HUB,
+        self::GROUP_DASHBOARD, // legacy keys if any remain
     ];
 
     /**
@@ -78,12 +104,20 @@ class Hub extends Model
     public const CAPABILITY_GROUPS = [
         self::GROUP_MEMBER,
         self::GROUP_GENERAL,
-        self::GROUP_DASHBOARD,
+        self::GROUP_DASHBOARD_CONTENT,
+        self::GROUP_DASHBOARD_FIRMS,
+        self::GROUP_DASHBOARD_ADVISORS,
+        self::GROUP_DASHBOARD_HUB,
         self::GROUP_ADMIN_EMAILS,
         self::GROUP_SOCIAL_MEDIA_COMPLIANCE,
         self::GROUP_GENERAL_COMPLIANCE,
         self::GROUP_WEBSITE_COMPLIANCE,
     ];
+
+    public static function isDashboardCapabilityGroup(?string $group): bool
+    {
+        return in_array($group, self::DASHBOARD_CAPABILITY_GROUPS, true);
+    }
 
     /**
      * Hub module functionality keys (enabled per hub on the Modules checklist).
@@ -346,158 +380,166 @@ class Hub extends Model
             'default_white_label' => true,
         ],
 
-        // --- Hub-admin dashboard capabilities ---
+        // --- 3. Content catalog ---
         'dashboard_manage_posts' => [
             'label' => 'Manage posts / reels',
             'description' => 'Hub admin can create and edit posts/reels.',
-            'group' => self::GROUP_DASHBOARD,
+            'group' => self::GROUP_DASHBOARD_CONTENT,
             'default_shared' => true,
             'default_white_label' => true,
         ],
         'dashboard_manage_bundles' => [
             'label' => 'Manage post bundles',
             'description' => 'Create bundles of posts/reels (existing or new), with description and total credits.',
-            'group' => self::GROUP_DASHBOARD,
+            'group' => self::GROUP_DASHBOARD_CONTENT,
             'default_shared' => true,
             'default_white_label' => true,
         ],
         'dashboard_manage_types' => [
             'label' => 'Manage types',
             'description' => 'Hub admin can manage content types.',
-            'group' => self::GROUP_DASHBOARD,
+            'group' => self::GROUP_DASHBOARD_CONTENT,
             'default_shared' => true,
             'default_white_label' => true,
         ],
         'dashboard_manage_categories' => [
             'label' => 'Manage categories',
             'description' => 'Hub admin can manage categories.',
-            'group' => self::GROUP_DASHBOARD,
-            'default_shared' => true,
-            'default_white_label' => true,
-        ],
-        'dashboard_manage_firms' => [
-            'label' => 'Manage firms',
-            'description' => 'Hub admin can add and manage firms assigned to users. Public self-registration does not ask for a firm.',
-            'group' => self::GROUP_DASHBOARD,
+            'group' => self::GROUP_DASHBOARD_CONTENT,
             'default_shared' => true,
             'default_white_label' => true,
         ],
         'dashboard_manage_tags' => [
             'label' => 'Manage tags',
             'description' => 'Hub admin can manage tags.',
-            'group' => self::GROUP_DASHBOARD,
+            'group' => self::GROUP_DASHBOARD_CONTENT,
             'default_shared' => true,
             'default_white_label' => true,
         ],
-        'dashboard_manage_plans' => [
-            'label' => 'Manage subscription plans',
-            'description' => 'Hub admin and Power Admin (when enabled) can manage subscription plans.',
-            'group' => self::GROUP_DASHBOARD,
-            'default_shared' => true,
-            'default_white_label' => false,
-        ],
-        'dashboard_manage_settings' => [
-            'label' => 'Manage settings',
-            'description' => 'Hub admin can manage hub settings: NEW banner, logo, favicon, color scheme, and application name.',
-            'group' => self::GROUP_DASHBOARD,
+
+        // --- 4. Firms ---
+        'dashboard_manage_firms' => [
+            'label' => 'Manage firms',
+            'description' => 'Add/manage firms and set which firm (own, Central/Network, or another) may review, approve, and see reports for each firm’s compliance requests. Public self-registration does not ask for a firm.',
+            'group' => self::GROUP_DASHBOARD_FIRMS,
             'default_shared' => true,
             'default_white_label' => true,
         ],
-        'dashboard_manage_role_display_names' => [
-            'label' => 'Set role display names',
-            'description' => 'Customize how role names appear in this hub’s UI (shared or white-labelled). Who may edit labels is controlled by this capability.',
-            'group' => self::GROUP_DASHBOARD,
-            'default_shared' => true,
-            'default_white_label' => true,
-        ],
-        'dashboard_manage_compliance_status_display_names' => [
-            'label' => 'Set compliance status display names',
-            'description' => 'Customize how compliance statuses appear (Pending, Approved, Rejected, Approved with Feedback, and related WC statuses) across Social Media, General, and Website Compliance.',
-            'group' => self::GROUP_DASHBOARD,
-            'default_shared' => true,
-            'default_white_label' => true,
-        ],
-        'receive_admin_emails' => [
-            'label' => 'Receive admin emails',
-            'description' => 'Receive all admin notification emails for this hub (registrations, purchases, payments, advisor events, etc.).',
-            'group' => self::GROUP_ADMIN_EMAILS,
-            'default_shared' => true,
-            'default_white_label' => true,
-        ],
-        'dashboard_bank_transfers' => [
-            'label' => 'Confirm bank transfers',
-            'description' => 'Hub admin can confirm pending bank transfers.',
-            'group' => self::GROUP_DASHBOARD,
-            'default_shared' => true,
-            'default_white_label' => false,
-        ],
+
+        // --- 5. Advisors & private billing ---
         'advisor_excel_import' => [
             'label' => 'Import advisors (Excel/CSV)',
             'description' => 'Hub admin and Power Admin (when enabled) can import advisors from an Excel/CSV sheet.',
-            'group' => self::GROUP_DASHBOARD,
+            'group' => self::GROUP_DASHBOARD_ADVISORS,
             'default_shared' => false,
             'default_white_label' => true,
         ],
         'advisor_discontinue' => [
             'label' => 'Discontinue advisors',
             'description' => 'End an imported advisor\'s access permanently (until re-imported). Separate from Excel import.',
-            'group' => self::GROUP_DASHBOARD,
+            'group' => self::GROUP_DASHBOARD_ADVISORS,
             'default_shared' => false,
             'default_white_label' => true,
         ],
         'dashboard_view_advisor_invoices' => [
             'label' => 'View advisor billing invoices',
             'description' => 'See invoices for private hub advisor subscriber billing (rate × advisors).',
-            'group' => self::GROUP_DASHBOARD,
+            'group' => self::GROUP_DASHBOARD_ADVISORS,
             'default_shared' => false,
-            'default_white_label' => true,
-        ],
-        'dashboard_view_activity_logs' => [
-            'label' => 'View activity logs / report',
-            'description' => 'See the audit trail of user activity and the activity report for this hub. Who can open the report is controlled by this capability.',
-            'group' => self::GROUP_DASHBOARD,
-            'default_shared' => true,
             'default_white_label' => true,
         ],
         'dashboard_manage_advisor_pricing' => [
             'label' => 'Set advisor billing rates / quotas',
             'description' => 'Configure pricing tiers (rate per advisor) used for private hub billing (rate × advisors).',
-            'group' => self::GROUP_DASHBOARD,
+            'group' => self::GROUP_DASHBOARD_ADVISORS,
             'default_shared' => false,
             'default_white_label' => true,
         ],
         'dashboard_manage_advisor_renewal' => [
             'label' => 'Set advisor billing auto-renew date',
             'description' => 'Choose the monthly auto-renew day for private hub advisor billing (Power Admin / FinProms admin).',
-            'group' => self::GROUP_DASHBOARD,
+            'group' => self::GROUP_DASHBOARD_ADVISORS,
             'default_shared' => false,
             'default_white_label' => true,
         ],
         'dashboard_manage_subscriber_credits' => [
             'label' => 'Set subscriber credits (private hub)',
             'description' => 'Set unlimited or a fixed credit allotment for Excel-imported private-hub subscribers (applied on import and autorenew). Private-hub only — inactive while the hub is public.',
-            'group' => self::GROUP_DASHBOARD,
+            'group' => self::GROUP_DASHBOARD_ADVISORS,
             'default_shared' => false,
+            'default_white_label' => true,
+        ],
+
+        // --- 6. Hub operations ---
+        'dashboard_manage_plans' => [
+            'label' => 'Manage subscription plans',
+            'description' => 'Hub admin and Power Admin (when enabled) can manage subscription plans.',
+            'group' => self::GROUP_DASHBOARD_HUB,
+            'default_shared' => true,
+            'default_white_label' => false,
+        ],
+        'dashboard_manage_settings' => [
+            'label' => 'Manage settings',
+            'description' => 'Hub admin can manage hub settings: NEW banner, logo, favicon, color scheme, and application name.',
+            'group' => self::GROUP_DASHBOARD_HUB,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'dashboard_manage_role_display_names' => [
+            'label' => 'Set role display names',
+            'description' => 'Customize how role names appear in this hub’s UI (shared or white-labelled). Who may edit labels is controlled by this capability.',
+            'group' => self::GROUP_DASHBOARD_HUB,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'dashboard_manage_compliance_status_display_names' => [
+            'label' => 'Set compliance status display names',
+            'description' => 'Customize how compliance statuses appear (Pending, Approved, Rejected, Approved with Feedback, and related WC statuses) across Social Media, General, and Website Compliance.',
+            'group' => self::GROUP_DASHBOARD_HUB,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'dashboard_bank_transfers' => [
+            'label' => 'Confirm bank transfers',
+            'description' => 'Hub admin can confirm pending bank transfers.',
+            'group' => self::GROUP_DASHBOARD_HUB,
+            'default_shared' => true,
+            'default_white_label' => false,
+        ],
+        'dashboard_view_activity_logs' => [
+            'label' => 'View activity logs / report',
+            'description' => 'See the audit trail of user activity and the activity report for this hub. Who can open the report is controlled by this capability.',
+            'group' => self::GROUP_DASHBOARD_HUB,
+            'default_shared' => true,
             'default_white_label' => true,
         ],
         'dashboard_ai_content' => [
             'label' => 'AI content generation',
             'description' => 'Hub admin (typically FinProms admin on shared) can generate AI posts (future).',
-            'group' => self::GROUP_DASHBOARD,
+            'group' => self::GROUP_DASHBOARD_HUB,
             'default_shared' => true,
             'default_white_label' => false,
         ],
         'dashboard_control_white_label_hubs' => [
             'label' => 'Control white labelled hubs',
             'description' => 'On the shared hub dashboard, unlocks a hub switcher. Selecting a white-label hub shows that hub’s dashboard tools (based on its Capabilities matrix). Creating users / posts / types / categories / tags / bundles while that hub is selected writes only to that hub’s own database — not the shared catalog.',
-            'group' => self::GROUP_DASHBOARD,
+            'group' => self::GROUP_DASHBOARD_HUB,
             'default_shared' => true,
             'default_white_label' => false,
         ],
         'dashboard_manage_modules' => [
             'label' => 'Manage hub modules',
             'description' => 'Enable or disable product modules for this hub (Social Media, General, and Website Compliance). Related capability sections stay blurred while a module is off.',
-            'group' => self::GROUP_DASHBOARD,
+            'group' => self::GROUP_DASHBOARD_HUB,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+
+        // --- 7. Admin emails ---
+        'receive_admin_emails' => [
+            'label' => 'Receive admin emails',
+            'description' => 'Receive all admin notification emails for this hub (registrations, purchases, payments, advisor events, etc.).',
+            'group' => self::GROUP_ADMIN_EMAILS,
             'default_shared' => true,
             'default_white_label' => true,
         ],

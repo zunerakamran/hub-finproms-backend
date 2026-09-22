@@ -44,7 +44,7 @@ class CapabilitiesMatrixService
         $meta = Hub::CHECKLIST_DEFINITIONS[$key] ?? null;
         $group = $meta['group'] ?? null;
 
-        if ($group === Hub::GROUP_DASHBOARD || $group === Hub::GROUP_ADMIN_EMAILS) {
+        if (Hub::isDashboardCapabilityGroup($group) || $group === Hub::GROUP_ADMIN_EMAILS) {
             // Auto-renew date stays limited to Power Admin + FinProms admin.
             if ($key === 'dashboard_manage_advisor_renewal') {
                 return [
@@ -147,7 +147,7 @@ class CapabilitiesMatrixService
                 'label' => $meta['label'],
                 'description' => $meta['description'],
                 'group' => 'power_admin',
-                'group_label' => 'Power Admin (platform)',
+                'group_label' => '0. Power Admin (platform)',
                 'requires_private' => false,
                 'inactive' => false,
                 'cells' => $cells,
@@ -512,7 +512,7 @@ class CapabilitiesMatrixService
             foreach (array_keys($matrix[$role] ?? []) as $key) {
                 $meta = Hub::CHECKLIST_DEFINITIONS[$key] ?? null;
                 $group = $meta['group'] ?? null;
-                if ($group === Hub::GROUP_DASHBOARD || $group === Hub::GROUP_ADMIN_EMAILS) {
+                if (Hub::isDashboardCapabilityGroup($group) || $group === Hub::GROUP_ADMIN_EMAILS) {
                     $matrix[$role][$key] = false;
                 }
             }
@@ -556,7 +556,7 @@ class CapabilitiesMatrixService
 
         foreach (Hub::CHECKLIST_DEFINITIONS as $key => $meta) {
             $group = $meta['group'] ?? null;
-            if ($group !== Hub::GROUP_DASHBOARD
+            if (! Hub::isDashboardCapabilityGroup($group)
                 && $group !== Hub::GROUP_SOCIAL_MEDIA_COMPLIANCE
                 && $group !== Hub::GROUP_GENERAL_COMPLIANCE
                 && $group !== Hub::GROUP_WEBSITE_COMPLIANCE
@@ -596,7 +596,7 @@ class CapabilitiesMatrixService
             foreach ([User::ROLE_APPROVER, User::ROLE_ADVISOR, User::ROLE_USER] as $role) {
                 foreach (Hub::CHECKLIST_DEFINITIONS as $key => $meta) {
                     $group = $meta['group'] ?? null;
-                    if ($group === Hub::GROUP_DASHBOARD || $group === Hub::GROUP_ADMIN_EMAILS) {
+                    if (Hub::isDashboardCapabilityGroup($group) || $group === Hub::GROUP_ADMIN_EMAILS) {
                         $defaults[$role][$key] = false;
                     }
                 }

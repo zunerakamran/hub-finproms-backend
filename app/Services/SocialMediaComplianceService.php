@@ -19,7 +19,8 @@ class SocialMediaComplianceService
     public function __construct(
         private readonly CapabilitiesMatrixService $matrix,
         private readonly SocialMediaComplianceMailService $mail,
-        private readonly ActivityLogService $activityLogs
+        private readonly ActivityLogService $activityLogs,
+        private readonly FirmComplianceVisibilityService $firmVisibility
     ) {}
 
     public function assertModuleEnabled(Hub $hub): void
@@ -452,11 +453,11 @@ class SocialMediaComplianceService
             || $this->matrix->roleCan($hub, (string) $actor->role, 'smc_submit_request');
 
         $query = SocialMediaComplianceRequest::query()
-            ->with(['currentVersionRow', 'assignee:id,name,email', 'post:id,title,type', 'user:id,name,email'])
+            ->with(['currentVersionRow', 'assignee:id,name,email', 'post:id,title,type', 'user:id,name,email,firm_id'])
             ->orderByDesc('id');
 
         if ($canViewAll) {
-            // Full queue
+            // Full queue, then firm-visibility scope below.
         } elseif ($canReview) {
             // Own assignments + unassigned (so reviewers can pick up / assign to themselves).
             $query->where(function ($q) use ($actor) {
@@ -470,6 +471,10 @@ class SocialMediaComplianceService
             ]);
         }
 
+        if ($canViewAll || $canReview) {
+            $this->firmVisibility->scopeQueryForActor($query, $actor, 'user', 'assigned_to');
+        }
+
         $this->applyFilters($query, $filters);
 
         $perPage = max(1, min(100, (int) ($filters['per_page'] ?? 20)));
@@ -481,13 +486,17 @@ class SocialMediaComplianceService
      * @param  array<string, mixed>  $filters
      * @return array{summary: array<string, mixed>, rows: list<array<string, mixed>>}
      */
-    public function report(Hub $hub, array $filters = []): array
+    public function report(Hub $hub, array $filters = [], ?User $actor = null): array
     {
         $this->assertModuleEnabled($hub);
 
         $query = SocialMediaComplianceRequest::query()
-            ->with(['currentVersionRow', 'assignee:id,name,email', 'user:id,name,email', 'post:id,title'])
+            ->with(['currentVersionRow', 'assignee:id,name,email', 'user:id,name,email,firm_id', 'post:id,title'])
             ->orderByDesc('id');
+
+        if ($actor) {
+            $this->firmVisibility->scopeQueryForActor($query, $actor, 'user', 'assigned_to');
+        }
 
         $this->applyFilters($query, $filters);
 

@@ -9,6 +9,7 @@ use App\Models\Hub;
 use App\Services\ActingHubService;
 use App\Services\ActivityLogService;
 use App\Services\CapabilitiesMatrixService;
+use App\Services\FirmComplianceVisibilityService;
 use App\Services\SocialMediaComplianceService;
 use App\Services\HubService;
 use Illuminate\Http\JsonResponse;
@@ -22,7 +23,8 @@ class SocialMediaComplianceController extends Controller
         private readonly HubService $hubs,
         private readonly CapabilitiesMatrixService $matrix,
         private readonly ActivityLogService $activityLogs,
-        private readonly ActingHubService $actingHubs
+        private readonly ActingHubService $actingHubs,
+        private readonly FirmComplianceVisibilityService $firmVisibility
     ) {}
 
     /**
@@ -246,7 +248,7 @@ class SocialMediaComplianceController extends Controller
         $hub = $this->smcHub($user);
         $filters = $this->listFilters($request);
 
-        $report = $this->compliance->report($hub, $filters);
+        $report = $this->compliance->report($hub, $filters, $user);
 
         $this->activityLogs->log([
             'action' => 'smc.reports.view',
@@ -275,7 +277,7 @@ class SocialMediaComplianceController extends Controller
         $user = $request->user();
         $hub = $this->smcHub($user);
         $filters = $this->listFilters($request);
-        $report = $this->compliance->report($hub, $filters);
+        $report = $this->compliance->report($hub, $filters, $user);
 
         $this->activityLogs->log([
             'action' => 'smc.reports.export',
@@ -401,7 +403,20 @@ class SocialMediaComplianceController extends Controller
         $canReviewAssigned = $this->matrix->roleCan($hub, $role, 'smc_review_requests')
             && (int) $compliance->assigned_to === (int) $user->id;
 
-        if (($isOwner && $canOwn) || $canAll || $canReviewAssigned) {
+        $allowed = ($isOwner && $canOwn) || $canReviewAssigned;
+        if ($canAll) {
+            if (! $compliance->relationLoaded('user')) {
+                $compliance->load('user:id,firm_id');
+            }
+            $allowed = $allowed || $this->firmVisibility->actorCanViewRequest(
+                $user,
+                (int) $compliance->user_id,
+                $compliance->user?->firm_id ? (int) $compliance->user->firm_id : null,
+                $compliance->assigned_to ? (int) $compliance->assigned_to : null
+            );
+        }
+
+        if ($allowed) {
             return;
         }
 

@@ -25,7 +25,8 @@ class GeneralComplianceService
     public function __construct(
         private readonly CapabilitiesMatrixService $matrix,
         private readonly GeneralComplianceMailService $mail,
-        private readonly ActivityLogService $activityLogs
+        private readonly ActivityLogService $activityLogs,
+        private readonly FirmComplianceVisibilityService $firmVisibility
     ) {}
 
     public function assertModuleEnabled(Hub $hub): void
@@ -456,11 +457,11 @@ class GeneralComplianceService
             || $this->matrix->roleCan($hub, (string) $actor->role, 'gc_submit_request');
 
         $query = GeneralComplianceRequest::query()
-            ->with(['currentVersionRow.attachments', 'assignee:id,name,email', 'user:id,name,email'])
+            ->with(['currentVersionRow.attachments', 'assignee:id,name,email', 'user:id,name,email,firm_id'])
             ->orderByDesc('id');
 
         if ($canViewAll) {
-            // Full queue
+            // Full queue, then firm-visibility scope below.
         } elseif ($canReview) {
             // Own assignments + unassigned (so reviewers can pick up / assign to themselves).
             $query->where(function ($q) use ($actor) {
@@ -474,6 +475,10 @@ class GeneralComplianceService
             ]);
         }
 
+        if ($canViewAll || $canReview) {
+            $this->firmVisibility->scopeQueryForActor($query, $actor, 'user', 'assigned_to');
+        }
+
         $this->applyFilters($query, $filters);
 
         $perPage = max(1, min(100, (int) ($filters['per_page'] ?? 20)));
@@ -485,13 +490,17 @@ class GeneralComplianceService
      * @param  array<string, mixed>  $filters
      * @return array{summary: array<string, mixed>, rows: list<array<string, mixed>>}
      */
-    public function report(Hub $hub, array $filters = []): array
+    public function report(Hub $hub, array $filters = [], ?User $actor = null): array
     {
         $this->assertModuleEnabled($hub);
 
         $query = GeneralComplianceRequest::query()
-            ->with(['currentVersionRow.attachments', 'assignee:id,name,email', 'user:id,name,email'])
+            ->with(['currentVersionRow.attachments', 'assignee:id,name,email', 'user:id,name,email,firm_id'])
             ->orderByDesc('id');
+
+        if ($actor) {
+            $this->firmVisibility->scopeQueryForActor($query, $actor, 'user', 'assigned_to');
+        }
 
         $this->applyFilters($query, $filters);
 
