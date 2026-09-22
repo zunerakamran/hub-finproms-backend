@@ -598,8 +598,8 @@ class ChangeRequestController extends Controller
 
         if (! $templateRequest) {
             return [
-                'primary_color' => '#0f5c45',
-                'secondary_color' => '#0a3f30',
+                'primary_color' => null,
+                'secondary_color' => null,
                 'logo_url' => null,
                 'favicon_url' => null,
                 'template_request_id' => null,
@@ -613,9 +613,12 @@ class ChangeRequestController extends Controller
             ? rtrim((string) $templateRequest->cpanel_domain, '/')
             : null;
 
+        // Only pass colours that were actually saved on the deployment.
+        // Invented defaults (hub greens / showcase navy-red) override the
+        // template's own CSS in iframe previews.
         return [
-            'primary_color' => $templateRequest->primary_color ?: '#0B1B3D',
-            'secondary_color' => $templateRequest->secondary_color ?: '#C8102E',
+            'primary_color' => $templateRequest->primary_color ?: null,
+            'secondary_color' => $templateRequest->secondary_color ?: null,
             'logo_url' => CpanelSyncService::absoluteAssetUrl($templateRequest->logo_url),
             'favicon_url' => CpanelSyncService::absoluteAssetUrl($templateRequest->favicon_url),
             'template_request_id' => $templateRequest->id,
