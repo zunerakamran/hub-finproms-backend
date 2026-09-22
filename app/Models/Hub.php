@@ -60,17 +60,35 @@ class Hub extends Model
     public const CHECKLIST_GROUPS = [
         self::GROUP_BEHAVIOUR => 'Functionalities',
         self::GROUP_MODULES => 'Modules',
-        self::GROUP_MEMBER => '1. Member catalog',
-        self::GROUP_GENERAL => '2. Member personal dashboard',
-        self::GROUP_DASHBOARD_CONTENT => '3. Content catalog',
-        self::GROUP_DASHBOARD_FIRMS => '4. Firms',
-        self::GROUP_DASHBOARD_ADVISORS => '5. Advisors & private billing',
-        self::GROUP_DASHBOARD_HUB => '6. Hub operations',
+        self::GROUP_MEMBER => 'Member catalog',
+        self::GROUP_GENERAL => 'Member personal dashboard',
+        self::GROUP_DASHBOARD_CONTENT => 'Content catalog',
+        self::GROUP_DASHBOARD_FIRMS => 'Firms',
+        self::GROUP_DASHBOARD_ADVISORS => 'Advisors & private billing',
+        self::GROUP_DASHBOARD_HUB => 'Hub operations',
         self::GROUP_DASHBOARD => 'Hub-admin dashboard',
-        self::GROUP_ADMIN_EMAILS => '7. Admin emails',
-        self::GROUP_SOCIAL_MEDIA_COMPLIANCE => '8. Social Media Compliance',
-        self::GROUP_GENERAL_COMPLIANCE => '9. General Compliance',
-        self::GROUP_WEBSITE_COMPLIANCE => '10. Website Compliance',
+        self::GROUP_ADMIN_EMAILS => 'Admin emails',
+        self::GROUP_SOCIAL_MEDIA_COMPLIANCE => 'Social Media Compliance',
+        self::GROUP_GENERAL_COMPLIANCE => 'General Compliance',
+        self::GROUP_WEBSITE_COMPLIANCE => 'Website Compliance',
+    ];
+
+    /**
+     * Display order for Capabilities matrix sections (Power Admin column is prepended in the service).
+     *
+     * @var list<string>
+     */
+    public const MATRIX_GROUP_ORDER = [
+        self::GROUP_MEMBER,
+        self::GROUP_GENERAL,
+        self::GROUP_DASHBOARD_CONTENT,
+        self::GROUP_DASHBOARD_FIRMS,
+        self::GROUP_DASHBOARD_ADVISORS,
+        self::GROUP_DASHBOARD_HUB,
+        self::GROUP_ADMIN_EMAILS,
+        self::GROUP_SOCIAL_MEDIA_COMPLIANCE,
+        self::GROUP_GENERAL_COMPLIANCE,
+        self::GROUP_WEBSITE_COMPLIANCE,
     ];
 
     /**

@@ -131,6 +131,7 @@ class CapabilitiesMatrixService
         $behaviour = [];
 
         $rows = [];
+        $paIndex = 0;
 
         // Power Admin platform rows
         foreach (PowerAdminCapabilitiesService::DEFINITIONS as $key => $meta) {
@@ -147,7 +148,9 @@ class CapabilitiesMatrixService
                 'label' => $meta['label'],
                 'description' => $meta['description'],
                 'group' => 'power_admin',
-                'group_label' => '0. Power Admin (platform)',
+                'group_label' => 'Power Admin (platform)',
+                'group_sort' => -1,
+                'row_sort' => $paIndex++,
                 'requires_private' => false,
                 'inactive' => false,
                 'cells' => $cells,
@@ -158,6 +161,14 @@ class CapabilitiesMatrixService
         $gcModuleOn = $hub->hasGeneralComplianceModule();
         $wcModuleOn = $hub->hasWebsiteComplianceModule();
 
+        $groupSort = [];
+        foreach (Hub::MATRIX_GROUP_ORDER as $index => $groupKey) {
+            $groupSort[$groupKey] = $index;
+        }
+        // Legacy bucket, if any rows still use it, sits after hub ops / before admin emails.
+        $groupSort[Hub::GROUP_DASHBOARD] = count(Hub::MATRIX_GROUP_ORDER);
+
+        $rowIndex = 0;
         // Member + dashboard + compliance rows (per hub, per role)
         foreach (Hub::CHECKLIST_DEFINITIONS as $key => $meta) {
             $group = $meta['group'] ?? Hub::GROUP_BEHAVIOUR;
@@ -229,6 +240,8 @@ class CapabilitiesMatrixService
                 'description' => $meta['description'],
                 'group' => $group,
                 'group_label' => Hub::CHECKLIST_GROUPS[$group] ?? $group,
+                'group_sort' => $groupSort[$group] ?? 999,
+                'row_sort' => $rowIndex++,
                 'requires_private' => $requiresPrivate,
                 'requires_public' => $requiresPublic,
                 'requires_module' => $requiresModule,
@@ -237,6 +250,26 @@ class CapabilitiesMatrixService
                 'cells' => $cells,
             ];
         }
+
+        usort($rows, function (array $a, array $b): int {
+            $sortA = (int) ($a['group_sort'] ?? 999);
+            $sortB = (int) ($b['group_sort'] ?? 999);
+            if ($sortA !== $sortB) {
+                return $sortA <=> $sortB;
+            }
+
+            return ((int) ($a['row_sort'] ?? 0)) <=> ((int) ($b['row_sort'] ?? 0));
+        });
+
+        foreach ($rows as &$row) {
+            unset($row['row_sort']);
+        }
+        unset($row);
+
+        $groupOrder = array_values(array_unique(array_map(
+            fn (array $row) => (string) $row['group'],
+            $rows
+        )));
 
         return [
             'hub' => [
@@ -257,6 +290,7 @@ class CapabilitiesMatrixService
             ],
             'private_capability_keys' => Hub::PRIVATE_CAPABILITY_KEYS,
             'public_capability_keys' => Hub::PUBLIC_CAPABILITY_KEYS,
+            'group_order' => $groupOrder,
             'social_media_compliance_capability_keys' => Hub::SOCIAL_MEDIA_COMPLIANCE_CAPABILITY_KEYS,
             'general_compliance_capability_keys' => Hub::GENERAL_COMPLIANCE_CAPABILITY_KEYS,
             'website_compliance_capability_keys' => Hub::WEBSITE_COMPLIANCE_CAPABILITY_KEYS,
