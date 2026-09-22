@@ -255,10 +255,10 @@ class PublicController extends Controller
         $contentType = (string) ($upstream->header('Content-Type') ?: 'application/octet-stream');
         $body = $upstream->body();
 
-        // Stamp live advisor brand colours into HTML so section preview never
-        // flashes showcase red (#C8102E) before api.php / postMessage runs.
+        // Stamp advisor brand colours into HTML so section preview never
+        // flashes showcase defaults before api.php / postMessage runs.
         if ($upstream->successful() && str_contains(strtolower($contentType), 'text/html')) {
-            $body = $this->injectEmbedBranding($body, $base);
+            $body = $this->injectEmbedBranding($body, $base, $templateRequest);
         }
 
         // Drop framing headers from upstream; allow the hub (and any parent) to embed.
@@ -270,8 +270,9 @@ class PublicController extends Controller
 
     /**
      * Fetch advisor api.php colours and inject CSS + window bootstrap into HTML.
+     * Falls back to TemplateRequest colours when api.php is unreachable.
      */
-    private function injectEmbedBranding(string $html, string $siteBase): string
+    private function injectEmbedBranding(string $html, string $siteBase, ?TemplateRequest $templateRequest = null): string
     {
         $primary = null;
         $secondary = null;
@@ -291,12 +292,19 @@ class PublicController extends Controller
             // Best-effort only.
         }
 
+        if (! $primary && filled($templateRequest?->primary_color)) {
+            $primary = (string) $templateRequest->primary_color;
+        }
+        if (! $secondary && filled($templateRequest?->secondary_color)) {
+            $secondary = (string) $templateRequest->secondary_color;
+        }
+
         if (! $primary && ! $secondary) {
             return $html;
         }
 
-        $primary = $primary ?: '#0B1B3D';
-        $secondary = $secondary ?: '#0E6870';
+        $primary = $primary ?: ($secondary ?: '#0B1B3D');
+        $secondary = $secondary ?: $primary;
         $primaryJson = json_encode($primary);
         $secondaryJson = json_encode($secondary);
 
