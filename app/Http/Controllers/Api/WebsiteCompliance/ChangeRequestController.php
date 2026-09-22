@@ -117,8 +117,9 @@ class ChangeRequestController extends Controller
         // even if an older seeder left that flag on for the role.
         $canViewAll = $this->gate->can($user, 'wc_view_all_change_requests')
             && (string) $user->role !== User::ROLE_APPROVER;
+        $canChangeStatus = $this->gate->can($user, 'wc_change_request_status');
 
-        if ($canViewAll) {
+        if ($canViewAll || $canChangeStatus) {
             $query = ChangeRequest::with($with)->latest();
             $this->firmVisibility->scopeQueryForActor($query, $user, 'editor', 'approver_id');
             $requests = $query->get();
@@ -172,12 +173,13 @@ class ChangeRequestController extends Controller
             && (string) $user->role !== User::ROLE_APPROVER;
         $canAssign = $this->gate->can($user, 'wc_assign_change_requests');
         $canReview = $this->gate->can($user, 'wc_review_change_requests');
+        $canChangeStatus = $this->gate->can($user, 'wc_change_request_status');
 
         $allowed =
             $isOwner
             || ($canReview && $isAssignee)
             || ($canReview && $isUnassignedPending)
-            || (($canViewAll || ($canAssign && ! $canReview)) && $this->firmVisibility->actorCanViewRequest(
+            || (($canViewAll || $canChangeStatus || ($canAssign && ! $canReview)) && $this->firmVisibility->actorCanViewRequest(
                 $user,
                 $changeRequest->editor_id ? (int) $changeRequest->editor_id : null,
                 $changeRequest->editor?->firm_id ? (int) $changeRequest->editor->firm_id : null,
@@ -199,6 +201,36 @@ class ChangeRequestController extends Controller
         }
 
         return response()->json($changeRequest->toApiArray(true));
+    }
+
+    public function changeStatus(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        $this->gate->assertCan($user, 'wc_change_request_status');
+
+        $validated = $request->validate([
+            'status' => [
+                'required',
+                'string',
+                Rule::in([
+                    ChangeRequest::STATUS_PENDING,
+                    ChangeRequest::STATUS_UNDER_REVIEW,
+                    ChangeRequest::STATUS_REJECTED,
+                    ChangeRequest::STATUS_APPROVED_WITH_FEEDBACK,
+                ]),
+            ],
+            'comment' => ['nullable', 'string', 'max:10000'],
+        ]);
+
+        $changeRequest = ChangeRequest::with(['editor:id,firm_id', 'currentVersionRow', 'section'])
+            ->findOrFail($id);
+
+        $updated = $this->workflow->changeStatus($changeRequest, $user, $validated, $request);
+
+        return response()->json([
+            'message' => 'Status updated.',
+            'change_request' => $updated->toApiArray(true),
+        ]);
     }
 
     public function assign(Request $request, int $id): JsonResponse

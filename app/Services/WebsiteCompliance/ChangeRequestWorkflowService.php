@@ -152,6 +152,121 @@ class ChangeRequestWorkflowService
     }
 
     /**
+     * Manager-style status override: creates a new version with the chosen status + comment.
+     * Content is copied from the current version. Not allowed when published or scheduled.
+     *
+     * @param  array{status: string, comment?: ?string}  $data
+     */
+    public function changeStatus(
+        ChangeRequest $changeRequest,
+        User $user,
+        array $data,
+        ?Request $request = null
+    ): ChangeRequest {
+        if (! $this->gate->can($user, 'wc_change_request_status')) {
+            throw new HttpException(403, 'You do not have permission to change website compliance request status.');
+        }
+
+        if (! $changeRequest->relationLoaded('editor')) {
+            $changeRequest->load('editor:id,firm_id');
+        }
+
+        $this->firmVisibility->assertActorCanActOnRequest(
+            $user,
+            $changeRequest->editor_id ? (int) $changeRequest->editor_id : null,
+            $changeRequest->editor?->firm_id ? (int) $changeRequest->editor->firm_id : null,
+            $changeRequest->approver_id ? (int) $changeRequest->approver_id : null
+        );
+
+        $currentStatus = (string) $changeRequest->status;
+        if (in_array($currentStatus, [
+            ChangeRequest::STATUS_APPROVED,
+            ChangeRequest::STATUS_SCHEDULED,
+        ], true)) {
+            throw ValidationException::withMessages([
+                'status' => 'Status cannot be changed once content is scheduled or published to the website.',
+            ]);
+        }
+
+        $allowedTargets = [
+            ChangeRequest::STATUS_PENDING,
+            ChangeRequest::STATUS_UNDER_REVIEW,
+            ChangeRequest::STATUS_REJECTED,
+            ChangeRequest::STATUS_APPROVED_WITH_FEEDBACK,
+        ];
+
+        $status = (string) ($data['status'] ?? '');
+        if (! in_array($status, $allowedTargets, true)) {
+            throw ValidationException::withMessages([
+                'status' => 'Invalid status. Use pending, under_review, rejected, or approved_with_feedback.',
+            ]);
+        }
+
+        $current = $changeRequest->currentVersionRow
+            ?? $changeRequest->versions()->orderByDesc('version_number')->first();
+        if (! $current) {
+            throw ValidationException::withMessages([
+                'version' => 'Current version is missing.',
+            ]);
+        }
+
+        $comment = trim((string) ($data['comment'] ?? ''));
+        $nextVersion = ((int) ($changeRequest->current_version ?: 1)) + 1;
+        $proposedContent = $current->proposed_content ?? $changeRequest->proposed_content;
+
+        if (in_array($status, [
+            ChangeRequest::STATUS_REJECTED,
+            ChangeRequest::STATUS_APPROVED_WITH_FEEDBACK,
+            ChangeRequest::STATUS_PENDING,
+        ], true)) {
+            $changeRequest->loadMissing('section');
+            $this->unlockSectionsFromProposedContent(
+                (string) $proposedContent,
+                $changeRequest->section
+            );
+        }
+
+        $changeRequest->update([
+            'proposed_content' => $proposedContent,
+            'status' => $status,
+            'current_version' => $nextVersion,
+            'feedback' => $comment !== '' ? $comment : null,
+            'rejection_reason' => $status === ChangeRequest::STATUS_REJECTED
+                ? ($comment !== '' ? $comment : $changeRequest->rejection_reason)
+                : null,
+            'scheduled_at' => null,
+        ]);
+
+        ChangeRequestVersion::create([
+            'request_id' => $changeRequest->id,
+            'version_number' => $nextVersion,
+            'proposed_content' => $proposedContent,
+            'status' => $status,
+            'feedback' => $comment !== '' ? $comment : null,
+            'submitted_by' => $current->submitted_by,
+            'submitted_at' => $current->submitted_at ?? now(),
+            'reviewed_by' => $user->name ?: (string) $user->id,
+            'reviewed_at' => now(),
+        ]);
+
+        $this->activityLogs->log([
+            'action' => 'wc.change_request.change_status',
+            'description' => 'Changed website compliance request status to '.$status.' (v'.$nextVersion.')',
+            'user' => $user,
+            'subject' => $changeRequest,
+            'request' => $request,
+            'properties' => [
+                'status' => $status,
+                'version' => $nextVersion,
+                'has_comment' => $comment !== '',
+                'previous_status' => $currentStatus,
+            ],
+        ]);
+
+        return $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow', 'versions']);
+    }
+
+    /**
      * @param  list<array{section_id:int, proposed_content:string, current_content?:string|null}>  $sectionEdits
      */
     public function resubmit(ChangeRequest $changeRequest, User $user, array $sectionEdits, ?Request $request = null): ChangeRequest

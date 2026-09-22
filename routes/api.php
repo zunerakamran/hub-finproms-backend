@@ -198,6 +198,10 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/change-requests/{id}/approve-with-feedback', [WcChangeRequestController::class, 'approveWithFeedback'])->whereNumber('id');
         });
 
+        Route::middleware('hub_can:wc_change_request_status')->group(function () {
+            Route::post('/change-requests/{id}/change-status', [WcChangeRequestController::class, 'changeStatus'])->whereNumber('id');
+        });
+
         Route::middleware('hub_can:wc_assign_change_requests')->group(function () {
             Route::post('/change-requests/{id}/assign-to-approver', [WcChangeRequestController::class, 'assignToApprover'])->whereNumber('id');
         });
@@ -390,13 +394,16 @@ Route::middleware('auth:sanctum')->group(function () {
         // Social Media Compliance — queue / assign / review / reports
         // acting_wl_wc_db: when hub switcher is on a white-label, read/write that hub's SMC tables.
         Route::middleware('acting_wl_wc_db')->group(function () {
-            Route::middleware('hub_can:smc_view_all_requests,smc_assign_requests,smc_review_requests')->group(function () {
+            Route::middleware('hub_can:smc_view_all_requests,smc_assign_requests,smc_review_requests,smc_change_request_status')->group(function () {
                 Route::get('/social-media-compliance/requests', [SocialMediaComplianceController::class, 'index']);
                 Route::get('/social-media-compliance/queue', [SocialMediaComplianceController::class, 'index']);
                 Route::get('/social-media-compliance/requests/{socialMediaComplianceRequest}', [SocialMediaComplianceController::class, 'show']);
             });
             Route::middleware('hub_can:smc_review_requests')->group(function () {
                 Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/review', [SocialMediaComplianceController::class, 'review']);
+            });
+            Route::middleware('hub_can:smc_change_request_status')->group(function () {
+                Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/change-status', [SocialMediaComplianceController::class, 'changeStatus']);
             });
             Route::middleware('hub_can:smc_assign_requests,smc_review_requests')->group(function () {
                 Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/assign', [SocialMediaComplianceController::class, 'assign']);
@@ -415,13 +422,16 @@ Route::middleware('auth:sanctum')->group(function () {
         // General Compliance — queue / assign / review / reports
         // acting_wl_wc_db: when hub switcher is on a white-label, read/write that hub's GC tables.
         Route::middleware('acting_wl_wc_db')->group(function () {
-            Route::middleware('hub_can:gc_view_all_requests,gc_assign_requests,gc_review_requests')->group(function () {
+            Route::middleware('hub_can:gc_view_all_requests,gc_assign_requests,gc_review_requests,gc_change_request_status')->group(function () {
                 Route::get('/general-compliance/requests', [GeneralComplianceController::class, 'index']);
                 Route::get('/general-compliance/queue', [GeneralComplianceController::class, 'index']);
                 Route::get('/general-compliance/requests/{generalComplianceRequest}', [GeneralComplianceController::class, 'show']);
             });
             Route::middleware('hub_can:gc_review_requests')->group(function () {
                 Route::post('/general-compliance/requests/{generalComplianceRequest}/review', [GeneralComplianceController::class, 'review']);
+            });
+            Route::middleware('hub_can:gc_change_request_status')->group(function () {
+                Route::post('/general-compliance/requests/{generalComplianceRequest}/change-status', [GeneralComplianceController::class, 'changeStatus']);
             });
             Route::middleware('hub_can:gc_assign_requests,gc_review_requests')->group(function () {
                 Route::post('/general-compliance/requests/{generalComplianceRequest}/assign', [GeneralComplianceController::class, 'assign']);
@@ -439,7 +449,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Website Compliance — queue / assign / review / reports / deployments
         Route::prefix('website-compliance')->middleware('acting_wl_wc_db')->group(function () {
-            Route::middleware('hub_can:wc_view_all_change_requests,wc_assign_change_requests,wc_review_change_requests')->group(function () {
+            Route::middleware('hub_can:wc_view_all_change_requests,wc_assign_change_requests,wc_review_change_requests,wc_change_request_status')->group(function () {
                 Route::get('/change-requests', [WcChangeRequestController::class, 'index']);
                 Route::get('/change-requests/{id}', [WcChangeRequestController::class, 'show'])->whereNumber('id');
                 Route::get('/change-requests/{id}/preview', [WcChangeRequestController::class, 'preview'])->whereNumber('id');
@@ -447,6 +457,9 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::middleware('hub_can:wc_submit_change_requests')->group(function () {
                 Route::post('/change-requests/{id}/resubmit', [WcChangeRequestController::class, 'resubmit'])->whereNumber('id');
                 Route::post('/change-requests/{id}/confirm-feedback', [WcChangeRequestController::class, 'confirmFeedback'])->whereNumber('id');
+            });
+            Route::middleware('hub_can:wc_change_request_status')->group(function () {
+                Route::post('/change-requests/{id}/change-status', [WcChangeRequestController::class, 'changeStatus'])->whereNumber('id');
             });
             Route::middleware('hub_can:wc_review_change_requests')->group(function () {
                 Route::post('/change-requests/{id}/assign', [WcChangeRequestController::class, 'assign'])->whereNumber('id');
@@ -666,13 +679,16 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Social Media Compliance — acting_wl_wc_db remounts onto selected white-label DB
         Route::middleware('acting_wl_wc_db')->group(function () {
-            Route::middleware('hub_can:smc_view_all_requests,smc_assign_requests,smc_review_requests')->group(function () {
+            Route::middleware('hub_can:smc_view_all_requests,smc_assign_requests,smc_review_requests,smc_change_request_status')->group(function () {
                 Route::get('/social-media-compliance/requests', [SocialMediaComplianceController::class, 'index']);
                 Route::get('/social-media-compliance/queue', [SocialMediaComplianceController::class, 'index']);
                 Route::get('/social-media-compliance/requests/{socialMediaComplianceRequest}', [SocialMediaComplianceController::class, 'show']);
             });
             Route::middleware('hub_can:smc_review_requests')->group(function () {
                 Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/review', [SocialMediaComplianceController::class, 'review']);
+            });
+            Route::middleware('hub_can:smc_change_request_status')->group(function () {
+                Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/change-status', [SocialMediaComplianceController::class, 'changeStatus']);
             });
             Route::middleware('hub_can:smc_assign_requests,smc_review_requests')->group(function () {
                 Route::post('/social-media-compliance/requests/{socialMediaComplianceRequest}/assign', [SocialMediaComplianceController::class, 'assign']);
@@ -690,13 +706,16 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // General Compliance — acting_wl_wc_db remounts onto selected white-label DB
         Route::middleware('acting_wl_wc_db')->group(function () {
-            Route::middleware('hub_can:gc_view_all_requests,gc_assign_requests,gc_review_requests')->group(function () {
+            Route::middleware('hub_can:gc_view_all_requests,gc_assign_requests,gc_review_requests,gc_change_request_status')->group(function () {
                 Route::get('/general-compliance/requests', [GeneralComplianceController::class, 'index']);
                 Route::get('/general-compliance/queue', [GeneralComplianceController::class, 'index']);
                 Route::get('/general-compliance/requests/{generalComplianceRequest}', [GeneralComplianceController::class, 'show']);
             });
             Route::middleware('hub_can:gc_review_requests')->group(function () {
                 Route::post('/general-compliance/requests/{generalComplianceRequest}/review', [GeneralComplianceController::class, 'review']);
+            });
+            Route::middleware('hub_can:gc_change_request_status')->group(function () {
+                Route::post('/general-compliance/requests/{generalComplianceRequest}/change-status', [GeneralComplianceController::class, 'changeStatus']);
             });
             Route::middleware('hub_can:gc_assign_requests,gc_review_requests')->group(function () {
                 Route::post('/general-compliance/requests/{generalComplianceRequest}/assign', [GeneralComplianceController::class, 'assign']);
@@ -714,7 +733,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Website Compliance — queue / assign / review / reports / deployments
         Route::prefix('website-compliance')->middleware('acting_wl_wc_db')->group(function () {
-            Route::middleware('hub_can:wc_view_all_change_requests,wc_assign_change_requests,wc_review_change_requests')->group(function () {
+            Route::middleware('hub_can:wc_view_all_change_requests,wc_assign_change_requests,wc_review_change_requests,wc_change_request_status')->group(function () {
                 Route::get('/change-requests', [WcChangeRequestController::class, 'index']);
                 Route::get('/change-requests/{id}', [WcChangeRequestController::class, 'show'])->whereNumber('id');
                 Route::get('/change-requests/{id}/preview', [WcChangeRequestController::class, 'preview'])->whereNumber('id');
@@ -722,6 +741,9 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::middleware('hub_can:wc_submit_change_requests')->group(function () {
                 Route::post('/change-requests/{id}/resubmit', [WcChangeRequestController::class, 'resubmit'])->whereNumber('id');
                 Route::post('/change-requests/{id}/confirm-feedback', [WcChangeRequestController::class, 'confirmFeedback'])->whereNumber('id');
+            });
+            Route::middleware('hub_can:wc_change_request_status')->group(function () {
+                Route::post('/change-requests/{id}/change-status', [WcChangeRequestController::class, 'changeStatus'])->whereNumber('id');
             });
             Route::middleware('hub_can:wc_review_change_requests')->group(function () {
                 Route::post('/change-requests/{id}/assign', [WcChangeRequestController::class, 'assign'])->whereNumber('id');

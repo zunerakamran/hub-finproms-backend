@@ -460,6 +460,102 @@ class SocialMediaComplianceService
     }
 
     /**
+     * Manager-style status override: creates a new version with the chosen status + comment.
+     * Content (description / image) is copied from the current version.
+     *
+     * @param  array{status: string, comment?: ?string}  $data
+     */
+    public function changeStatus(
+        Hub $hub,
+        User $actor,
+        SocialMediaComplianceRequest $compliance,
+        array $data,
+        $request = null
+    ): SocialMediaComplianceRequest {
+        $this->assertModuleEnabled($hub);
+
+        if (! $this->matrix->roleCan($hub, (string) $actor->role, 'smc_change_request_status')) {
+            throw ValidationException::withMessages([
+                'capability' => 'You do not have permission to change social media compliance request status.',
+            ]);
+        }
+
+        if (! $compliance->relationLoaded('user')) {
+            $compliance->load('user:id,firm_id');
+        }
+        $this->firmVisibility->assertActorCanActOnRequest(
+            $actor,
+            (int) $compliance->user_id,
+            $compliance->user?->firm_id ? (int) $compliance->user->firm_id : null,
+            $compliance->assigned_to ? (int) $compliance->assigned_to : null
+        );
+
+        $status = (string) $data['status'];
+        if (! in_array($status, SocialMediaComplianceRequest::STATUSES, true)) {
+            throw ValidationException::withMessages([
+                'status' => 'Invalid status.',
+            ]);
+        }
+
+        $current = $compliance->currentVersionRow;
+        if (! $current) {
+            throw ValidationException::withMessages([
+                'version' => 'Current version is missing.',
+            ]);
+        }
+
+        $comment = trim((string) ($data['comment'] ?? ''));
+        $newVersion = (int) $compliance->current_version + 1;
+
+        DB::transaction(function () use ($compliance, $actor, $current, $newVersion, $status, $comment) {
+            $compliance->update(['current_version' => $newVersion]);
+
+            SocialMediaComplianceRequestVersion::query()->create([
+                'request_id' => $compliance->id,
+                'version_number' => $newVersion,
+                'description' => $current->description,
+                'image_path' => $current->image_path,
+                'image_url' => $current->image_url,
+                'submitted_by' => $current->submitted_by,
+                'submitted_at' => $current->submitted_at ?? now(),
+                'status' => $status,
+                'feedback' => $comment,
+                'reviewed_by' => $actor->name,
+                'reviewed_at' => now(),
+            ]);
+        });
+
+        $compliance = $compliance->fresh(['currentVersionRow', 'user', 'post', 'assignee']);
+
+        if ($compliance->user) {
+            $this->mail->notifyStatusUpdated(
+                $compliance,
+                $compliance->user,
+                $status,
+                $comment,
+                $actor->name
+            );
+        }
+
+        $this->activityLogs->log([
+            'action' => 'smc.change_status',
+            'description' => 'Changed status of social media compliance request #'.$compliance->id.' → '.$status.' (v'.$newVersion.')',
+            'user' => $actor,
+            'hub' => $hub,
+            'subject' => $compliance,
+            'request' => $request,
+            'status_code' => 200,
+            'properties' => [
+                'status' => $status,
+                'version' => $newVersion,
+                'has_comment' => $comment !== '',
+            ],
+        ]);
+
+        return $compliance;
+    }
+
+    /**
      * @param  array<string, mixed>  $filters
      */
     public function listForActor(Hub $hub, User $actor, array $filters = []): LengthAwarePaginator
@@ -467,7 +563,8 @@ class SocialMediaComplianceService
         $this->assertModuleEnabled($hub);
 
         $canViewAll = $this->matrix->roleCan($hub, (string) $actor->role, 'smc_view_all_requests')
-            || $this->matrix->roleCan($hub, (string) $actor->role, 'smc_assign_requests');
+            || $this->matrix->roleCan($hub, (string) $actor->role, 'smc_assign_requests')
+            || $this->matrix->roleCan($hub, (string) $actor->role, 'smc_change_request_status');
         $canReview = $this->matrix->roleCan($hub, (string) $actor->role, 'smc_review_requests');
         $canViewOwn = $this->matrix->roleCan($hub, (string) $actor->role, 'smc_view_own_requests')
             || $this->matrix->roleCan($hub, (string) $actor->role, 'smc_submit_request');

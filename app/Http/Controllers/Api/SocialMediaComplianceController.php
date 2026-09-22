@@ -241,6 +241,31 @@ class SocialMediaComplianceController extends Controller
         ]);
     }
 
+    public function changeStatus(Request $request, SocialMediaComplianceRequest $socialMediaComplianceRequest): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $hub = $this->smcHub($user);
+
+        $validated = $request->validate([
+            'status' => ['required', 'string', 'in:'.implode(',', SocialMediaComplianceRequest::STATUSES)],
+            'comment' => ['nullable', 'string', 'max:10000'],
+        ]);
+
+        $compliance = $this->compliance->changeStatus(
+            $hub,
+            $user,
+            $socialMediaComplianceRequest,
+            $validated,
+            $request
+        );
+
+        return response()->json([
+            'message' => 'Status updated.',
+            'data' => $compliance->toApiArray(includeVersions: true),
+        ]);
+    }
+
     public function report(Request $request): JsonResponse
     {
         /** @var User $user */
@@ -399,14 +424,15 @@ class SocialMediaComplianceController extends Controller
         $canOwn = $this->matrix->roleCan($hub, $role, 'smc_view_own_requests')
             || $this->matrix->roleCan($hub, $role, 'smc_submit_request');
         $canAll = $this->matrix->roleCan($hub, $role, 'smc_view_all_requests')
-            || $this->matrix->roleCan($hub, $role, 'smc_assign_requests');
+            || $this->matrix->roleCan($hub, $role, 'smc_assign_requests')
+            || $this->matrix->roleCan($hub, $role, 'smc_change_request_status');
         $canReview = $this->matrix->roleCan($hub, $role, 'smc_review_requests');
         $isAssignee = (int) ($compliance->assigned_to ?? 0) === (int) $user->id;
         $isUnassigned = empty($compliance->assigned_to);
 
         $allowed = ($isOwner && $canOwn) || ($canReview && $isAssignee);
 
-        // view-all / assign / review-pickup still respect firm visibility for
+        // view-all / assign / change-status / review-pickup still respect firm visibility for
         // manager, client_admin, and other firm-scoped roles.
         if ($canAll || ($canReview && $isUnassigned)) {
             if (! $compliance->relationLoaded('user')) {

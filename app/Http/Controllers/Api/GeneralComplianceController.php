@@ -254,6 +254,31 @@ class GeneralComplianceController extends Controller
         ]);
     }
 
+    public function changeStatus(Request $request, GeneralComplianceRequest $generalComplianceRequest): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $hub = $this->gcHub($user);
+
+        $validated = $request->validate([
+            'status' => ['required', 'string', 'in:'.implode(',', GeneralComplianceRequest::STATUSES)],
+            'comment' => ['nullable', 'string', 'max:10000'],
+        ]);
+
+        $compliance = $this->compliance->changeStatus(
+            $hub,
+            $user,
+            $generalComplianceRequest,
+            $validated,
+            $request
+        );
+
+        return response()->json([
+            'message' => 'Status updated.',
+            'data' => $compliance->toApiArray(includeVersions: true),
+        ]);
+    }
+
     public function report(Request $request): JsonResponse
     {
         /** @var User $user */
@@ -412,7 +437,8 @@ class GeneralComplianceController extends Controller
         $canOwn = $this->matrix->roleCan($hub, $role, 'gc_view_own_requests')
             || $this->matrix->roleCan($hub, $role, 'gc_submit_request');
         $canAll = $this->matrix->roleCan($hub, $role, 'gc_view_all_requests')
-            || $this->matrix->roleCan($hub, $role, 'gc_assign_requests');
+            || $this->matrix->roleCan($hub, $role, 'gc_assign_requests')
+            || $this->matrix->roleCan($hub, $role, 'gc_change_request_status');
         $canReview = $this->matrix->roleCan($hub, $role, 'gc_review_requests');
         $isAssignee = (int) ($compliance->assigned_to ?? 0) === (int) $user->id;
         $isUnassigned = empty($compliance->assigned_to);

@@ -158,6 +158,7 @@ class Hub extends Model
         'smc_view_own_requests',
         'smc_assign_requests',
         'smc_review_requests',
+        'smc_change_request_status',
         'smc_view_all_requests',
         'smc_view_reports',
     ];
@@ -172,6 +173,7 @@ class Hub extends Model
         'gc_view_own_requests',
         'gc_assign_requests',
         'gc_review_requests',
+        'gc_change_request_status',
         'gc_view_all_requests',
         'gc_view_reports',
     ];
@@ -188,6 +190,7 @@ class Hub extends Model
         'wc_assign_change_requests',
         'wc_view_all_change_requests',
         'wc_review_change_requests',
+        'wc_change_request_status',
         'wc_request_deployments',
         'wc_assign_website_templates',
         'wc_view_all_deployments',
@@ -591,6 +594,13 @@ class Hub extends Model
             'default_shared' => false,
             'default_white_label' => false,
         ],
+        'smc_change_request_status' => [
+            'label' => 'Change social media compliance request status',
+            'description' => 'Override a request’s status by creating a new version with an optional comment (typically for managers). Respects firm visibility.',
+            'group' => self::GROUP_SOCIAL_MEDIA_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
         'smc_view_all_requests' => [
             'label' => 'View all social media compliance requests',
             'description' => 'See the full social media compliance queue for the hub (not only assigned requests).',
@@ -631,6 +641,13 @@ class Hub extends Model
         'gc_review_requests' => [
             'label' => 'Review general compliance requests',
             'description' => 'Set status and feedback on general compliance requests (Pending / Approved / Rejected / Approved with Feedback).',
+            'group' => self::GROUP_GENERAL_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'gc_change_request_status' => [
+            'label' => 'Change general compliance request status',
+            'description' => 'Override a request’s status by creating a new version with an optional comment (typically for managers). Respects firm visibility.',
             'group' => self::GROUP_GENERAL_COMPLIANCE,
             'default_shared' => false,
             'default_white_label' => false,
@@ -682,6 +699,13 @@ class Hub extends Model
         'wc_review_change_requests' => [
             'label' => 'Review website change requests',
             'description' => 'Approve, reject, or schedule submitted website content changes.',
+            'group' => self::GROUP_WEBSITE_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'wc_change_request_status' => [
+            'label' => 'Change website compliance request status',
+            'description' => 'Override a change request’s status by creating a new version with an optional comment (typically for managers). Not allowed once content is scheduled or published. Respects firm visibility.',
             'group' => self::GROUP_WEBSITE_COMPLIANCE,
             'default_shared' => false,
             'default_white_label' => false,
