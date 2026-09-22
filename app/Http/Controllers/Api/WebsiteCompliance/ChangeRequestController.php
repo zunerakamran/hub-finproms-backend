@@ -610,7 +610,7 @@ class ChangeRequestController extends Controller
         }
 
         $siteUrl = $templateRequest->cpanel_domain
-            ? rtrim((string) $templateRequest->cpanel_domain, '/')
+            ? CpanelSyncService::normalizeAdvisorSiteUrl($templateRequest->cpanel_domain)
             : null;
 
         // Only pass colours that were actually saved on the deployment.
@@ -625,7 +625,7 @@ class ChangeRequestController extends Controller
             'advisor_id' => $section?->advisor_id
                 ?? $templateRequest->advisor_id
                 ?? $templateRequest->assigned_advisor_id,
-            'site_url' => $siteUrl,
+            'site_url' => $siteUrl !== '' ? $siteUrl : null,
             'template_name' => $templateRequest->template_name,
         ];
     }

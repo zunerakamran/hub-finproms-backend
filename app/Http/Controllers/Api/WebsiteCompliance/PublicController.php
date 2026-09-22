@@ -186,7 +186,7 @@ class PublicController extends Controller
         }
 
         $siteUrl = $templateRequest->cpanel_domain
-            ? rtrim((string) $templateRequest->cpanel_domain, '/')
+            ? CpanelSyncService::normalizeAdvisorSiteUrl($templateRequest->cpanel_domain)
             : null;
 
         return [
@@ -196,7 +196,7 @@ class PublicController extends Controller
             'favicon_url' => CpanelSyncService::absoluteAssetUrl($templateRequest->favicon_url),
             'template_request_id' => $templateRequest->id,
             'advisor_id' => $templateRequest->advisor_id ?? $templateRequest->assigned_advisor_id,
-            'site_url' => $siteUrl,
+            'site_url' => $siteUrl !== '' ? $siteUrl : null,
             'template_name' => $templateRequest->template_name,
         ];
     }

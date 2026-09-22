@@ -570,6 +570,17 @@ class CapabilitiesMatrixService
             }
         }
 
+        // Change-status overrides default ON for managers (firm-scoped in services).
+        foreach ([
+            'smc_change_request_status',
+            'gc_change_request_status',
+            'wc_change_request_status',
+        ] as $key) {
+            if (isset($matrix[User::ROLE_MANAGER][$key])) {
+                $matrix[User::ROLE_MANAGER][$key] = true;
+            }
+        }
+
         return $matrix;
     }
 
