@@ -33,6 +33,7 @@ class PowerAdminUserController extends Controller
         User::ROLE_MANAGER,
         User::ROLE_APPROVER,
         User::ROLE_ADVISOR,
+        User::ROLE_ADMIN_STAFF,
         User::ROLE_USER,
     ];
 
@@ -253,6 +254,10 @@ class PowerAdminUserController extends Controller
         // Keep Excel-style advisor flags coherent when role is set to advisor.
         if (($payload['role'] ?? null) === User::ROLE_ADVISOR && ! array_key_exists('is_advisor', $payload)) {
             $payload['is_advisor'] = true;
+        }
+
+        if (array_key_exists('role', $payload) && $payload['role'] !== User::ROLE_ADMIN_STAFF) {
+            $payload['acting_advisor_id'] = null;
         }
 
         $model->fill($payload);

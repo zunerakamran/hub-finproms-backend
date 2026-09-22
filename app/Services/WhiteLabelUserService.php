@@ -132,6 +132,10 @@ class WhiteLabelUserService
                 $fill['is_advisor'] = true;
             }
 
+            if (array_key_exists('role', $fill) && $fill['role'] !== User::ROLE_ADMIN_STAFF) {
+                $fill['acting_advisor_id'] = null;
+            }
+
             if (array_key_exists('firm_id', $fill)) {
                 $fill['firm_id'] = $this->resolveFirmId($connection, $fill['firm_id']);
             }

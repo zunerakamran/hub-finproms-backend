@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\GeneralComplianceRequest;
 use App\Models\Hub;
 use App\Models\User;
+use App\Services\ActingAdvisorService;
 use App\Services\ActingHubService;
 use App\Services\ActivityLogService;
 use App\Services\CapabilitiesMatrixService;
@@ -24,7 +25,8 @@ class GeneralComplianceController extends Controller
         private readonly CapabilitiesMatrixService $matrix,
         private readonly ActivityLogService $activityLogs,
         private readonly ActingHubService $actingHubs,
-        private readonly FirmComplianceVisibilityService $firmVisibility
+        private readonly FirmComplianceVisibilityService $firmVisibility,
+        private readonly ActingAdvisorService $actingAdvisors
     ) {}
 
     /**
@@ -103,11 +105,23 @@ class GeneralComplianceController extends Controller
 
         $filters = $this->listFilters($request);
 
-        $paginator = GeneralComplianceRequest::query()
-            ->with(['currentVersionRow.attachments', 'assignee:id,name,email', 'user:id,name,email'])
-            ->where('user_id', $user->id)
-            ->orderByDesc('id')
-            ->paginate(max(1, min(100, (int) ($filters['per_page'] ?? 20))));
+        $subject = $this->actingAdvisors->subjectOrNull($user);
+        $query = GeneralComplianceRequest::query()
+            ->with([
+                'currentVersionRow.attachments',
+                'assignee:id,name,email',
+                'user:id,name,email',
+                'onBehalfBy:id,name,email',
+            ])
+            ->orderByDesc('id');
+
+        if (! $subject) {
+            $query->whereRaw('1 = 0');
+        } else {
+            $query->where('user_id', $subject->id);
+        }
+
+        $paginator = $query->paginate(max(1, min(100, (int) ($filters['per_page'] ?? 20))));
 
         return response()->json([
             'data' => collect($paginator->items())->map(

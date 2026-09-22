@@ -21,7 +21,8 @@ class SocialMediaComplianceService
         private readonly CapabilitiesMatrixService $matrix,
         private readonly SocialMediaComplianceMailService $mail,
         private readonly ActivityLogService $activityLogs,
-        private readonly FirmComplianceVisibilityService $firmVisibility
+        private readonly FirmComplianceVisibilityService $firmVisibility,
+        private readonly ActingAdvisorService $actingAdvisors
     ) {}
 
     public function assertModuleEnabled(Hub $hub): void
@@ -79,11 +80,16 @@ class SocialMediaComplianceService
     {
         $this->assertModuleEnabled($hub);
 
+        $subject = $this->actingAdvisors->requireSubject($user);
+        $onBehalfById = $this->actingAdvisors->onBehalfById($user, $subject);
+
         $post = Post::query()->findOrFail((int) $data['post_id']);
 
-        if (! $user->hasPurchased($post)) {
+        if (! $subject->hasPurchased($post)) {
             throw ValidationException::withMessages([
-                'post_id' => 'You can only submit posts you have purchased for social media compliance.',
+                'post_id' => $onBehalfById
+                    ? 'You can only submit posts the selected advisor has purchased for social media compliance.'
+                    : 'You can only submit posts you have purchased for social media compliance.',
             ]);
         }
 
@@ -96,13 +102,14 @@ class SocialMediaComplianceService
 
         [$imagePath, $imageUrl] = $this->resolveImage($data['image'] ?? null, $post);
 
-        $compliance = DB::transaction(function () use ($user, $post, $description, $imagePath, $imageUrl) {
+        $compliance = DB::transaction(function () use ($subject, $user, $onBehalfById, $post, $description, $imagePath, $imageUrl) {
             $compliance = SocialMediaComplianceRequest::query()->create([
-                'user_id' => $user->id,
+                'user_id' => $subject->id,
                 'post_id' => $post->id,
-                'name' => $user->name,
+                'name' => $subject->name,
                 'current_version' => 1,
                 'submission_date' => now(),
+                'on_behalf_by_user_id' => $onBehalfById,
             ]);
 
             SocialMediaComplianceRequestVersion::query()->create([
@@ -115,16 +122,18 @@ class SocialMediaComplianceService
                 'submitted_at' => now(),
                 'status' => SocialMediaComplianceRequest::STATUS_PENDING,
                 'feedback' => '',
+                'on_behalf_by_user_id' => $onBehalfById,
             ]);
 
-            return $compliance->fresh(['currentVersionRow', 'post', 'user']);
+            return $compliance->fresh(['currentVersionRow', 'post', 'user', 'onBehalfBy']);
         });
 
-        $this->mail->notifyRequestSubmitted($compliance, $user);
+        $this->mail->notifyRequestSubmitted($compliance, $subject);
 
         $this->activityLogs->log([
             'action' => 'smc.submit',
-            'description' => 'Submitted social media compliance request #'.$compliance->id.' for post #'.$post->id,
+            'description' => 'Submitted social media compliance request #'.$compliance->id.' for post #'.$post->id
+                .($onBehalfById ? ' on behalf of user #'.$subject->id : ''),
             'user' => $user,
             'hub' => $hub,
             'subject' => $compliance,
@@ -134,6 +143,7 @@ class SocialMediaComplianceService
                 'post_id' => $post->id,
                 'version' => 1,
                 'status' => SocialMediaComplianceRequest::STATUS_PENDING,
+                'on_behalf_of_user_id' => $onBehalfById ? $subject->id : null,
             ],
         ]);
 
@@ -169,9 +179,13 @@ class SocialMediaComplianceService
         }
 
         $newVersion = (int) $compliance->current_version + 1;
+        $onBehalfById = $this->actingAdvisors->onBehalfById($user, $this->actingAdvisors->requireSubject($user));
 
-        DB::transaction(function () use ($compliance, $user, $description, $imagePath, $imageUrl, $newVersion) {
-            $compliance->update(['current_version' => $newVersion]);
+        DB::transaction(function () use ($compliance, $user, $description, $imagePath, $imageUrl, $newVersion, $onBehalfById) {
+            $compliance->update([
+                'current_version' => $newVersion,
+                'on_behalf_by_user_id' => $onBehalfById ?? $compliance->on_behalf_by_user_id,
+            ]);
 
             SocialMediaComplianceRequestVersion::query()->create([
                 'request_id' => $compliance->id,
@@ -183,10 +197,11 @@ class SocialMediaComplianceService
                 'submitted_at' => now(),
                 'status' => SocialMediaComplianceRequest::STATUS_PENDING,
                 'feedback' => '',
+                'on_behalf_by_user_id' => $onBehalfById,
             ]);
         });
 
-        $compliance = $compliance->fresh(['currentVersionRow', 'assignee', 'post', 'user']);
+        $compliance = $compliance->fresh(['currentVersionRow', 'assignee', 'post', 'user', 'onBehalfBy']);
 
         if ($compliance->assignee) {
             $this->mail->notifyResubmitted($compliance, $compliance->assignee, $user);
@@ -253,7 +268,15 @@ class SocialMediaComplianceService
             $imageUrl,
             $feedback
         ) {
-            $compliance->update(['current_version' => $newVersion]);
+            $onBehalfById = $this->actingAdvisors->onBehalfById(
+                $user,
+                $this->actingAdvisors->requireSubject($user)
+            );
+
+            $compliance->update([
+                'current_version' => $newVersion,
+                'on_behalf_by_user_id' => $onBehalfById ?? $compliance->on_behalf_by_user_id,
+            ]);
 
             SocialMediaComplianceRequestVersion::query()->create([
                 'request_id' => $compliance->id,
@@ -267,10 +290,11 @@ class SocialMediaComplianceService
                 'feedback' => $feedback,
                 'reviewed_by' => $current->reviewed_by,
                 'reviewed_at' => $current->reviewed_at,
+                'on_behalf_by_user_id' => $onBehalfById,
             ]);
         });
 
-        $compliance = $compliance->fresh(['currentVersionRow', 'post', 'user']);
+        $compliance = $compliance->fresh(['currentVersionRow', 'post', 'user', 'onBehalfBy']);
 
         $this->activityLogs->log([
             'action' => 'smc.confirm_feedback',
@@ -591,6 +615,7 @@ class SocialMediaComplianceService
                 'post:id,title,type',
                 'user:id,name,email,firm_id',
                 'user.firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
+                'onBehalfBy:id,name,email',
             ])
             ->orderByDesc('id');
 
@@ -602,7 +627,12 @@ class SocialMediaComplianceService
                 $q->where('assigned_to', $actor->id)->orWhereNull('assigned_to');
             });
         } elseif ($canViewOwn) {
-            $query->where('user_id', $actor->id);
+            $subject = $this->actingAdvisors->subjectOrNull($actor);
+            if (! $subject) {
+                $query->whereRaw('1 = 0');
+            } else {
+                $query->where('user_id', $subject->id);
+            }
         } else {
             throw ValidationException::withMessages([
                 'capability' => 'You do not have permission to view social media compliance requests.',
@@ -629,7 +659,13 @@ class SocialMediaComplianceService
         $this->assertModuleEnabled($hub);
 
         $query = SocialMediaComplianceRequest::query()
-            ->with(['currentVersionRow', 'assignee:id,name,email', 'user:id,name,email,firm_id', 'post:id,title'])
+            ->with([
+                'currentVersionRow',
+                'assignee:id,name,email',
+                'user:id,name,email,firm_id',
+                'onBehalfBy:id,name,email',
+                'post:id,title',
+            ])
             ->orderByDesc('id');
 
         if ($actor) {
@@ -659,10 +695,17 @@ class SocialMediaComplianceService
                 }
             }
 
+            $attribution = ActingAdvisorService::attributionLabel(
+                $row->name,
+                $row->onBehalfBy?->name
+            );
+
             $export[] = [
                 'id' => $row->id,
-                'submitted_by' => $row->name,
+                'submitted_by' => $attribution ?: $row->name,
                 'submitter_email' => $row->user?->email,
+                'on_behalf_by' => $row->onBehalfBy?->name,
+                'on_behalf_of' => $attribution ? $row->name : null,
                 'post_id' => $row->post_id,
                 'post_title' => $row->post?->title,
                 'current_version' => $row->current_version,
@@ -781,11 +824,7 @@ class SocialMediaComplianceService
 
     private function assertOwner(SocialMediaComplianceRequest $compliance, User $user): void
     {
-        if ((int) $compliance->user_id !== (int) $user->id) {
-            throw ValidationException::withMessages([
-                'request' => 'You can only manage your own social media compliance requests.',
-            ]);
-        }
+        $this->actingAdvisors->assertCanManageOwnedBy($user, (int) $compliance->user_id);
     }
 
     /**

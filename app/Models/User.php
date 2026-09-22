@@ -34,6 +34,12 @@ class User extends Authenticatable
     /** White-label advisor (subscriber, typically unlimited credits). */
     public const ROLE_ADVISOR = 'advisor';
 
+    /**
+     * Firm-scoped staff who submit compliance and related work on behalf of advisors.
+     * Display name is overridable via hub role_display_names.
+     */
+    public const ROLE_ADMIN_STAFF = 'admin_staff';
+
     /** General user / subscriber. */
     public const ROLE_USER = 'user';
 
@@ -64,6 +70,7 @@ class User extends Authenticatable
         self::ROLE_MANAGER => 'Manager',
         self::ROLE_APPROVER => 'Approver',
         self::ROLE_ADVISOR => 'Advisor',
+        self::ROLE_ADMIN_STAFF => 'Admin-staff',
         self::ROLE_USER => 'User',
     ];
 
@@ -94,6 +101,7 @@ class User extends Authenticatable
         'stripe_customer_id',
         'stripe_payment_method_id',
         'acting_hub_id',
+        'acting_advisor_id',
         'firm_id',
     ];
 
@@ -191,6 +199,16 @@ class User extends Authenticatable
         return $this->role === self::ROLE_ADVISOR || (bool) $this->is_advisor;
     }
 
+    public function isAdminStaff(): bool
+    {
+        return $this->role === self::ROLE_ADMIN_STAFF;
+    }
+
+    public function actingAdvisor(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'acting_advisor_id');
+    }
+
     /**
      * Staff and Excel-invited advisors may sign in when the hub is invite-only.
      * General members (self-registered users) may not. Suspended / discontinued advisors may not.
@@ -204,7 +222,8 @@ class User extends Authenticatable
         return $this->isPowerAdmin()
             || $this->isClientAdmin()
             || $this->isApprover()
-            || $this->isAdvisor();
+            || $this->isAdvisor()
+            || $this->isAdminStaff();
     }
 
     /**

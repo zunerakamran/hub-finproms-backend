@@ -289,6 +289,15 @@ class AuthController extends Controller
             $payload['hub_switcher'] = $switcher;
         }
 
+        try {
+            $advisorSwitcher = app(\App\Services\ActingAdvisorService::class)->switcherPayload($user);
+        } catch (\Throwable) {
+            $advisorSwitcher = null;
+        }
+        if ($advisorSwitcher !== null) {
+            $payload['acting_advisor_switcher'] = $advisorSwitcher;
+        }
+
         return response()->json($payload);
     }
 }

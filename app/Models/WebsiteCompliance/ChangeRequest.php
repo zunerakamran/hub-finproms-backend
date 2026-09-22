@@ -3,6 +3,7 @@
 namespace App\Models\WebsiteCompliance;
 
 use App\Models\User;
+use App\Services\ActingAdvisorService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -41,6 +42,7 @@ class ChangeRequest extends Model
     protected $fillable = [
         'section_id',
         'editor_id',
+        'on_behalf_by_user_id',
         'approver_id',
         'proposed_content',
         'status',
@@ -67,6 +69,11 @@ class ChangeRequest extends Model
     public function editor(): BelongsTo
     {
         return $this->belongsTo(User::class, 'editor_id');
+    }
+
+    public function onBehalfBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'on_behalf_by_user_id');
     }
 
     public function approver(): BelongsTo
@@ -148,6 +155,7 @@ class ChangeRequest extends Model
             'currentVersionRow',
             'editor:id,name,email,firm_id',
             'editor.firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
+            'onBehalfBy:id,name,email',
             'approver:id,name,email',
             'section:id,name,display_name,advisor_id',
         ]);
@@ -164,10 +172,13 @@ class ChangeRequest extends Model
             self::STATUS_APPROVED_WITH_FEEDBACK,
         ], true);
 
+        $attribution = ActingAdvisorService::attributionPayload($this->editor, $this->onBehalfBy);
+
         $payload = [
             'id' => $this->id,
             'section_id' => $this->section_id,
             'editor_id' => $this->editor_id,
+            'on_behalf_by_user_id' => $this->on_behalf_by_user_id,
             'approver_id' => $this->approver_id,
             'status' => $this->status,
             'current_version' => (int) ($this->current_version ?: 1),
@@ -180,6 +191,8 @@ class ChangeRequest extends Model
             'scheduled_at' => optional($this->scheduled_at)?->toIso8601String(),
             'created_at' => optional($this->created_at)?->toIso8601String(),
             'updated_at' => optional($this->updated_at)?->toIso8601String(),
+            'attribution' => $attribution,
+            'attribution_label' => $attribution['attribution_label'] ?? null,
             'editor' => $this->editor ? [
                 'id' => $this->editor->id,
                 'name' => $this->editor->name,
@@ -197,6 +210,11 @@ class ChangeRequest extends Model
                             : null,
                     ],
                 ] : null,
+            ] : null,
+            'on_behalf_by' => $this->onBehalfBy ? [
+                'id' => $this->onBehalfBy->id,
+                'name' => $this->onBehalfBy->name,
+                'email' => $this->onBehalfBy->email,
             ] : null,
             'approver' => $this->approver ? [
                 'id' => $this->approver->id,

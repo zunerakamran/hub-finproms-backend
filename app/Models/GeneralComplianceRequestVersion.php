@@ -23,6 +23,7 @@ class GeneralComplianceRequestVersion extends Model
         'feedback',
         'reviewed_by',
         'reviewed_at',
+        'on_behalf_by_user_id',
     ];
 
     protected function casts(): array

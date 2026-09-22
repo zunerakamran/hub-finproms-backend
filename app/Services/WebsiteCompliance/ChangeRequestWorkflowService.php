@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Models\WebsiteCompliance\ChangeRequest;
 use App\Models\WebsiteCompliance\ChangeRequestVersion;
 use App\Models\WebsiteCompliance\Section;
+use App\Services\ActingAdvisorService;
 use App\Services\ActivityLogService;
 use App\Services\FirmComplianceVisibilityService;
 use Illuminate\Http\Request;
@@ -497,6 +498,16 @@ class ChangeRequestWorkflowService
             return true;
         }
 
-        return (int) $changeRequest->editor_id === (int) $user->id;
+        if ((int) $changeRequest->editor_id === (int) $user->id) {
+            return true;
+        }
+
+        try {
+            app(ActingAdvisorService::class)->assertCanManageOwnedBy($user, (int) $changeRequest->editor_id);
+
+            return true;
+        } catch (\Illuminate\Validation\ValidationException) {
+            return false;
+        }
     }
 }

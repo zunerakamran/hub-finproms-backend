@@ -23,6 +23,7 @@ class CapabilitiesMatrixService
         User::ROLE_MANAGER,
         User::ROLE_APPROVER,
         User::ROLE_ADVISOR,
+        User::ROLE_ADMIN_STAFF,
         User::ROLE_USER,
     ];
 
@@ -540,9 +541,9 @@ class CapabilitiesMatrixService
                 $hubType === Hub::TYPE_WHITE_LABEL;
         }
 
-        // Remaining roles (approver / advisor / user): dashboard & admin-email tools off by default.
+        // Remaining roles (approver / advisor / admin-staff / user): dashboard & admin-email tools off by default.
         // Power Admin enables them per hub in the Capabilities matrix.
-        foreach ([User::ROLE_APPROVER, User::ROLE_ADVISOR, User::ROLE_USER] as $role) {
+        foreach ([User::ROLE_APPROVER, User::ROLE_ADVISOR, User::ROLE_ADMIN_STAFF, User::ROLE_USER] as $role) {
             foreach (array_keys($matrix[$role] ?? []) as $key) {
                 $meta = Hub::CHECKLIST_DEFINITIONS[$key] ?? null;
                 $group = $meta['group'] ?? null;
@@ -638,7 +639,7 @@ class CapabilitiesMatrixService
             }
 
             // Remaining roles must not inherit hub-wide dashboard / admin-email OR flags.
-            foreach ([User::ROLE_APPROVER, User::ROLE_ADVISOR, User::ROLE_USER] as $role) {
+            foreach ([User::ROLE_APPROVER, User::ROLE_ADVISOR, User::ROLE_ADMIN_STAFF, User::ROLE_USER] as $role) {
                 foreach (Hub::CHECKLIST_DEFINITIONS as $key => $meta) {
                     $group = $meta['group'] ?? null;
                     if (Hub::isDashboardCapabilityGroup($group) || $group === Hub::GROUP_ADMIN_EMAILS) {

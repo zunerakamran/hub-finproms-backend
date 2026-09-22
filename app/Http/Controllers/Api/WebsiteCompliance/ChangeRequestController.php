@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Models\WebsiteCompliance\ChangeRequest;
 use App\Models\WebsiteCompliance\Section;
 use App\Models\WebsiteCompliance\TemplateRequest;
+use App\Services\ActingAdvisorService;
 use App\Services\ActingHubService;
 use App\Services\ActivityLogService;
 use App\Services\FirmComplianceVisibilityService;
@@ -27,13 +28,18 @@ class ChangeRequestController extends Controller
         private readonly WebsiteComplianceGate $gate,
         private readonly ActivityLogService $activityLogs,
         private readonly ChangeRequestWorkflowService $workflow,
-        private readonly FirmComplianceVisibilityService $firmVisibility
+        private readonly FirmComplianceVisibilityService $firmVisibility,
+        private readonly ActingAdvisorService $actingAdvisors
     ) {}
 
     public function store(Request $request): JsonResponse
     {
         $user = $request->user();
         $this->gate->assertCan($user, 'wc_submit_change_requests');
+
+        $subject = $this->actingAdvisors->requireSubject($user);
+        $onBehalfById = $this->actingAdvisors->onBehalfById($user, $subject);
+        $editorId = $this->gate->tenantUserIdOrNull($subject) ?? (int) $subject->id;
 
         if ($request->has('section_edits') && is_array($request->section_edits)) {
             $request->validate([
@@ -43,13 +49,14 @@ class ChangeRequestController extends Controller
                 'section_edits.*.current_content' => 'nullable|string',
             ]);
 
-            $edits = $this->workflow->prepareAndLockEdits($request->section_edits, $user);
+            $edits = $this->workflow->prepareAndLockEdits($request->section_edits, $subject);
             $proposedContent = json_encode($edits);
             $primarySectionId = count($edits) === 1 ? $edits[0]['section_id'] : null;
 
             $changeRequest = ChangeRequest::create([
                 'section_id' => $primarySectionId,
-                'editor_id' => $this->gate->tenantUserIdOrNull($user),
+                'editor_id' => $editorId,
+                'on_behalf_by_user_id' => $onBehalfById,
                 'proposed_content' => $proposedContent,
                 'status' => ChangeRequest::STATUS_PENDING,
                 'current_version' => 1,
@@ -59,13 +66,14 @@ class ChangeRequestController extends Controller
 
             $this->activityLogs->log([
                 'action' => 'wc.change_request.submit',
-                'description' => 'Submitted change request for '.count($edits).' section(s)',
+                'description' => 'Submitted change request for '.count($edits).' section(s)'
+                    .($onBehalfById ? ' on behalf of user #'.$editorId : ''),
                 'user' => $user,
                 'subject' => $changeRequest,
                 'request' => $request,
             ]);
 
-            return response()->json($changeRequest->fresh(['editor', 'section', 'currentVersionRow'])->toApiArray(), 201);
+            return response()->json($changeRequest->fresh(['editor', 'onBehalfBy', 'section', 'currentVersionRow'])->toApiArray(), 201);
         }
 
         $request->validate([
@@ -80,12 +88,13 @@ class ChangeRequestController extends Controller
                 'proposed_content' => $request->proposed_content,
                 'current_content' => $request->current_content,
             ],
-        ], $user);
+        ], $subject);
         $proposedContent = json_encode($edits);
 
         $changeRequest = ChangeRequest::create([
             'section_id' => $request->section_id,
-            'editor_id' => $this->gate->tenantUserIdOrNull($user),
+            'editor_id' => $editorId,
+            'on_behalf_by_user_id' => $onBehalfById,
             'proposed_content' => $proposedContent,
             'status' => ChangeRequest::STATUS_PENDING,
             'current_version' => 1,
@@ -95,13 +104,14 @@ class ChangeRequestController extends Controller
 
         $this->activityLogs->log([
             'action' => 'wc.change_request.submit',
-            'description' => 'Submitted change request',
+            'description' => 'Submitted change request'
+                .($onBehalfById ? ' on behalf of user #'.$editorId : ''),
             'user' => $user,
             'subject' => $changeRequest,
             'request' => $request,
         ]);
 
-        return response()->json($changeRequest->fresh(['editor', 'section', 'currentVersionRow'])->toApiArray(), 201);
+        return response()->json($changeRequest->fresh(['editor', 'onBehalfBy', 'section', 'currentVersionRow'])->toApiArray(), 201);
     }
 
     public function index(Request $request): JsonResponse
@@ -113,6 +123,7 @@ class ChangeRequestController extends Controller
             'section',
             'editor:id,name,email,firm_id',
             'editor.firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
+            'onBehalfBy:id,name,email',
             'approver',
             'currentVersionRow',
         ];
@@ -148,10 +159,16 @@ class ChangeRequestController extends Controller
             $this->firmVisibility->scopeQueryForActor($query, $user, 'editor', 'approver_id');
             $requests = $query->get();
         } else {
-            $requests = ChangeRequest::with(['section', 'approver', 'currentVersionRow'])
-                ->where('editor_id', $actorId)
-                ->latest()
-                ->get();
+            $subject = $this->actingAdvisors->subjectOrNull($user);
+            $editorId = $subject
+                ? ($this->gate->tenantUserIdOrNull($subject) ?? (int) $subject->id)
+                : null;
+            $requests = $editorId
+                ? ChangeRequest::with($with)
+                    ->where('editor_id', $editorId)
+                    ->latest()
+                    ->get()
+                : collect();
         }
 
         return response()->json($requests->map(fn (ChangeRequest $cr) => $cr->toApiArray())->values());
@@ -165,13 +182,19 @@ class ChangeRequestController extends Controller
         $changeRequest = ChangeRequest::with([
             'section',
             'editor.firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
+            'onBehalfBy:id,name,email',
             'approver',
             'currentVersionRow',
             'versions',
         ])->findOrFail($id);
 
         $actorId = $this->gate->tenantUserIdOrNull($user) ?? (int) $user->id;
-        $isOwner = (int) $changeRequest->editor_id === (int) $actorId;
+        $subject = $this->actingAdvisors->subjectOrNull($user);
+        $subjectId = $subject
+            ? ($this->gate->tenantUserIdOrNull($subject) ?? (int) $subject->id)
+            : $actorId;
+        $isOwner = (int) $changeRequest->editor_id === (int) $subjectId
+            || (int) $changeRequest->editor_id === (int) $actorId;
         $isAssignee = (int) ($changeRequest->approver_id ?? 0) === (int) $actorId;
         $isUnassignedPending = $changeRequest->status === ChangeRequest::STATUS_PENDING
             && empty($changeRequest->approver_id);

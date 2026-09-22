@@ -27,7 +27,8 @@ class GeneralComplianceService
         private readonly CapabilitiesMatrixService $matrix,
         private readonly GeneralComplianceMailService $mail,
         private readonly ActivityLogService $activityLogs,
-        private readonly FirmComplianceVisibilityService $firmVisibility
+        private readonly FirmComplianceVisibilityService $firmVisibility,
+        private readonly ActingAdvisorService $actingAdvisors
     ) {}
 
     public function assertModuleEnabled(Hub $hub): void
@@ -84,6 +85,9 @@ class GeneralComplianceService
     {
         $this->assertModuleEnabled($hub);
 
+        $subject = $this->actingAdvisors->requireSubject($user);
+        $onBehalfById = $this->actingAdvisors->onBehalfById($user, $subject);
+
         $description = trim((string) ($data['description'] ?? ''));
         if ($description === '') {
             throw ValidationException::withMessages([
@@ -99,12 +103,13 @@ class GeneralComplianceService
         }
         $this->assertAttachmentLimits($files);
 
-        $compliance = DB::transaction(function () use ($user, $description, $files) {
+        $compliance = DB::transaction(function () use ($subject, $user, $onBehalfById, $description, $files) {
             $compliance = GeneralComplianceRequest::query()->create([
-                'user_id' => $user->id,
-                'name' => $user->name,
+                'user_id' => $subject->id,
+                'name' => $subject->name,
                 'current_version' => 1,
                 'submission_date' => now(),
+                'on_behalf_by_user_id' => $onBehalfById,
             ]);
 
             $version = GeneralComplianceRequestVersion::query()->create([
@@ -115,18 +120,20 @@ class GeneralComplianceService
                 'submitted_at' => now(),
                 'status' => GeneralComplianceRequest::STATUS_PENDING,
                 'feedback' => '',
+                'on_behalf_by_user_id' => $onBehalfById,
             ]);
 
             $this->storeAttachmentsForVersion($version, $files);
 
-            return $compliance->fresh(['currentVersionRow.attachments', 'user']);
+            return $compliance->fresh(['currentVersionRow.attachments', 'user', 'onBehalfBy']);
         });
 
-        $this->mail->notifyRequestSubmitted($compliance, $user);
+        $this->mail->notifyRequestSubmitted($compliance, $subject);
 
         $this->activityLogs->log([
             'action' => 'gc.submit',
-            'description' => 'Submitted general compliance request #'.$compliance->id,
+            'description' => 'Submitted general compliance request #'.$compliance->id
+                .($onBehalfById ? ' on behalf of user #'.$subject->id : ''),
             'user' => $user,
             'hub' => $hub,
             'subject' => $compliance,
@@ -136,6 +143,7 @@ class GeneralComplianceService
                 'version' => 1,
                 'status' => GeneralComplianceRequest::STATUS_PENDING,
                 'attachment_count' => count($files),
+                'on_behalf_of_user_id' => $onBehalfById ? $subject->id : null,
             ],
         ]);
 
@@ -169,9 +177,13 @@ class GeneralComplianceService
         $hasNewFiles = $files !== [];
 
         $newVersion = (int) $compliance->current_version + 1;
+        $onBehalfById = $this->actingAdvisors->onBehalfById($user, $this->actingAdvisors->requireSubject($user));
 
-        DB::transaction(function () use ($compliance, $user, $description, $files, $hasNewFiles, $current, $newVersion) {
-            $compliance->update(['current_version' => $newVersion]);
+        DB::transaction(function () use ($compliance, $user, $description, $files, $hasNewFiles, $current, $newVersion, $onBehalfById) {
+            $compliance->update([
+                'current_version' => $newVersion,
+                'on_behalf_by_user_id' => $onBehalfById ?? $compliance->on_behalf_by_user_id,
+            ]);
 
             $version = GeneralComplianceRequestVersion::query()->create([
                 'request_id' => $compliance->id,
@@ -181,6 +193,7 @@ class GeneralComplianceService
                 'submitted_at' => now(),
                 'status' => GeneralComplianceRequest::STATUS_PENDING,
                 'feedback' => '',
+                'on_behalf_by_user_id' => $onBehalfById,
             ]);
 
             if ($hasNewFiles) {
@@ -190,7 +203,7 @@ class GeneralComplianceService
             }
         });
 
-        $compliance = $compliance->fresh(['currentVersionRow.attachments', 'assignee', 'user']);
+        $compliance = $compliance->fresh(['currentVersionRow.attachments', 'assignee', 'user', 'onBehalfBy']);
 
         if ($compliance->assignee) {
             $this->mail->notifyResubmitted($compliance, $compliance->assignee, $user);
@@ -253,7 +266,15 @@ class GeneralComplianceService
             $hasNewFiles,
             $feedback
         ) {
-            $compliance->update(['current_version' => $newVersion]);
+            $onBehalfById = $this->actingAdvisors->onBehalfById(
+                $user,
+                $this->actingAdvisors->requireSubject($user)
+            );
+
+            $compliance->update([
+                'current_version' => $newVersion,
+                'on_behalf_by_user_id' => $onBehalfById ?? $compliance->on_behalf_by_user_id,
+            ]);
 
             $version = GeneralComplianceRequestVersion::query()->create([
                 'request_id' => $compliance->id,
@@ -265,6 +286,7 @@ class GeneralComplianceService
                 'feedback' => $feedback,
                 'reviewed_by' => $current->reviewed_by,
                 'reviewed_at' => $current->reviewed_at,
+                'on_behalf_by_user_id' => $onBehalfById,
             ]);
 
             if ($hasNewFiles) {
@@ -274,7 +296,7 @@ class GeneralComplianceService
             }
         });
 
-        $compliance = $compliance->fresh(['currentVersionRow.attachments', 'user']);
+        $compliance = $compliance->fresh(['currentVersionRow.attachments', 'user', 'onBehalfBy']);
 
         $this->activityLogs->log([
             'action' => 'gc.confirm_feedback',
@@ -594,6 +616,7 @@ class GeneralComplianceService
                 'assignee:id,name,email',
                 'user:id,name,email,firm_id',
                 'user.firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
+                'onBehalfBy:id,name,email',
             ])
             ->orderByDesc('id');
 
@@ -605,7 +628,12 @@ class GeneralComplianceService
                 $q->where('assigned_to', $actor->id)->orWhereNull('assigned_to');
             });
         } elseif ($canViewOwn) {
-            $query->where('user_id', $actor->id);
+            $subject = $this->actingAdvisors->subjectOrNull($actor);
+            if (! $subject) {
+                $query->whereRaw('1 = 0');
+            } else {
+                $query->where('user_id', $subject->id);
+            }
         } else {
             throw ValidationException::withMessages([
                 'capability' => 'You do not have permission to view general compliance requests.',
@@ -632,7 +660,12 @@ class GeneralComplianceService
         $this->assertModuleEnabled($hub);
 
         $query = GeneralComplianceRequest::query()
-            ->with(['currentVersionRow.attachments', 'assignee:id,name,email', 'user:id,name,email,firm_id'])
+            ->with([
+                'currentVersionRow.attachments',
+                'assignee:id,name,email',
+                'user:id,name,email,firm_id',
+                'onBehalfBy:id,name,email',
+            ])
             ->orderByDesc('id');
 
         if ($actor) {
@@ -663,10 +696,16 @@ class GeneralComplianceService
             }
 
             $attachments = $row->currentVersionRow?->attachments ?? collect();
+            $attribution = ActingAdvisorService::attributionLabel(
+                $row->name,
+                $row->onBehalfBy?->name
+            );
             $export[] = [
                 'id' => $row->id,
-                'submitted_by' => $row->name,
+                'submitted_by' => $attribution ?: $row->name,
                 'submitter_email' => $row->user?->email,
+                'on_behalf_by' => $row->onBehalfBy?->name,
+                'on_behalf_of' => $attribution ? $row->name : null,
                 'current_version' => $row->current_version,
                 'version_count' => $versionCount,
                 'description' => $row->currentVersionRow?->description,
@@ -784,11 +823,7 @@ class GeneralComplianceService
 
     private function assertOwner(GeneralComplianceRequest $compliance, User $user): void
     {
-        if ((int) $compliance->user_id !== (int) $user->id) {
-            throw ValidationException::withMessages([
-                'request' => 'You can only manage your own general compliance requests.',
-            ]);
-        }
+        $this->actingAdvisors->assertCanManageOwnedBy($user, (int) $compliance->user_id);
     }
 
     /**

@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\ActivityLogController;
+use App\Http\Controllers\Api\ActingAdvisorController;
 use App\Http\Controllers\Api\ActingHubController;
 use App\Http\Controllers\Api\AdvisorBillingController;
 use App\Http\Controllers\Api\AdvisorController;
@@ -101,6 +102,9 @@ Route::middleware('hub_can:member_view_plans')->group(function () {
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/my-dashboard', [MyDashboardController::class, 'show']);
+
+    Route::get('/acting-advisor', [ActingAdvisorController::class, 'show']);
+    Route::put('/acting-advisor', [ActingAdvisorController::class, 'update']);
 
     Route::middleware('hub_can:member_view_plans')->group(function () {
         Route::post('/subscription-plans/{plan}/checkout', [SubscriptionController::class, 'checkout']);

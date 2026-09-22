@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\WebsiteCompliance\UsesWcDatabaseContext;
+use App\Services\ActingAdvisorService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -41,6 +42,7 @@ class SocialMediaComplianceRequest extends Model
         'assigned_to',
         'assigned_date',
         'assigned_by',
+        'on_behalf_by_user_id',
     ];
 
     protected function casts(): array
@@ -55,6 +57,11 @@ class SocialMediaComplianceRequest extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function onBehalfBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'on_behalf_by_user_id');
     }
 
     public function post(): BelongsTo
@@ -103,9 +110,11 @@ class SocialMediaComplianceRequest extends Model
             'post:id,title,type,attachment_path,attachment_name,attachment_mime',
             'user:id,name,email,firm_id',
             'user.firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
+            'onBehalfBy:id,name,email',
         ]);
 
         $version = $this->currentVersionRow;
+        $attribution = ActingAdvisorService::attributionPayload($this->user, $this->onBehalfBy);
         $payload = [
             'id' => $this->id,
             'user_id' => $this->user_id,
@@ -116,6 +125,9 @@ class SocialMediaComplianceRequest extends Model
             'assigned_to' => $this->assigned_to,
             'assigned_date' => optional($this->assigned_date)?->toIso8601String(),
             'assigned_by' => $this->assigned_by,
+            'on_behalf_by_user_id' => $this->on_behalf_by_user_id,
+            'attribution' => $attribution,
+            'attribution_label' => $attribution['attribution_label'] ?? null,
             'assignee' => $this->assignee ? [
                 'id' => $this->assignee->id,
                 'name' => $this->assignee->name,
@@ -138,6 +150,11 @@ class SocialMediaComplianceRequest extends Model
                             : null,
                     ],
                 ] : null,
+            ] : null,
+            'on_behalf_by' => $this->onBehalfBy ? [
+                'id' => $this->onBehalfBy->id,
+                'name' => $this->onBehalfBy->name,
+                'email' => $this->onBehalfBy->email,
             ] : null,
             'post' => $this->post ? [
                 'id' => $this->post->id,

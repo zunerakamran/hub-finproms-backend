@@ -71,6 +71,15 @@ class HubController extends Controller
                 $payload['effective_capabilities'] = $effective;
             }
             $payload['viewer_role'] = $user->role;
+
+            try {
+                $advisorSwitcher = app(\App\Services\ActingAdvisorService::class)->switcherPayload($user);
+            } catch (\Throwable) {
+                $advisorSwitcher = null;
+            }
+            if ($advisorSwitcher !== null) {
+                $payload['acting_advisor_switcher'] = $advisorSwitcher;
+            }
         }
 
         return response()->json([
