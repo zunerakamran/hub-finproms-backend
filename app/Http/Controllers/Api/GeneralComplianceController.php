@@ -413,11 +413,13 @@ class GeneralComplianceController extends Controller
             || $this->matrix->roleCan($hub, $role, 'gc_submit_request');
         $canAll = $this->matrix->roleCan($hub, $role, 'gc_view_all_requests')
             || $this->matrix->roleCan($hub, $role, 'gc_assign_requests');
-        $canReviewAssigned = $this->matrix->roleCan($hub, $role, 'gc_review_requests')
-            && (int) $compliance->assigned_to === (int) $user->id;
+        $canReview = $this->matrix->roleCan($hub, $role, 'gc_review_requests');
+        $isAssignee = (int) ($compliance->assigned_to ?? 0) === (int) $user->id;
+        $isUnassigned = empty($compliance->assigned_to);
 
-        $allowed = ($isOwner && $canOwn) || $canReviewAssigned;
-        if ($canAll) {
+        $allowed = ($isOwner && $canOwn) || ($canReview && $isAssignee);
+
+        if ($canAll || ($canReview && $isUnassigned)) {
             if (! $compliance->relationLoaded('user')) {
                 $compliance->load('user:id,firm_id');
             }

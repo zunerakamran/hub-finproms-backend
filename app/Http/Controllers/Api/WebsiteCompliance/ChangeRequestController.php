@@ -206,11 +206,18 @@ class ChangeRequestController extends Controller
         $user = $request->user();
         $this->gate->assertCan($user, 'wc_review_change_requests');
 
-        $changeRequest = ChangeRequest::findOrFail($id);
+        $changeRequest = ChangeRequest::with('editor:id,firm_id')->findOrFail($id);
 
         if ($changeRequest->status !== ChangeRequest::STATUS_PENDING) {
             return response()->json(['message' => 'Request already assigned or processed'], 409);
         }
+
+        $this->firmVisibility->assertActorCanActOnRequest(
+            $user,
+            $changeRequest->editor_id ? (int) $changeRequest->editor_id : null,
+            $changeRequest->editor?->firm_id ? (int) $changeRequest->editor->firm_id : null,
+            null
+        );
 
         $changeRequest->update([
             'approver_id' => $this->gate->tenantUserIdOrNull($user),
@@ -242,7 +249,14 @@ class ChangeRequestController extends Controller
             'approver_id' => ['required', Rule::exists(User::class, 'id')],
         ]);
 
-        $changeRequest = ChangeRequest::findOrFail($id);
+        $changeRequest = ChangeRequest::with('editor:id,firm_id')->findOrFail($id);
+
+        $this->firmVisibility->assertActorCanActOnRequest(
+            $user,
+            $changeRequest->editor_id ? (int) $changeRequest->editor_id : null,
+            $changeRequest->editor?->firm_id ? (int) $changeRequest->editor->firm_id : null,
+            $changeRequest->approver_id ? (int) $changeRequest->approver_id : null
+        );
 
         $changeRequest->update([
             'approver_id' => $request->approver_id,

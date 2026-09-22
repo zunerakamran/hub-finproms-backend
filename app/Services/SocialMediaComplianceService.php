@@ -300,6 +300,16 @@ class SocialMediaComplianceService
             ]);
         }
 
+        if (! $compliance->relationLoaded('user')) {
+            $compliance->load('user:id,firm_id');
+        }
+        $this->firmVisibility->assertActorCanActOnRequest(
+            $actor,
+            (int) $compliance->user_id,
+            $compliance->user?->firm_id ? (int) $compliance->user->firm_id : null,
+            $compliance->assigned_to ? (int) $compliance->assigned_to : null
+        );
+
         // Reviewers without assign capability may only pick up unassigned requests for themselves.
         if (! $canAssign) {
             if (! $assignTo || (int) $assignTo !== (int) $actor->id) {
@@ -386,6 +396,16 @@ class SocialMediaComplianceService
                 'assigned_to' => 'You can only review requests assigned to you.',
             ]);
         }
+
+        if (! $compliance->relationLoaded('user')) {
+            $compliance->load('user:id,firm_id');
+        }
+        $this->firmVisibility->assertActorCanActOnRequest(
+            $actor,
+            (int) $compliance->user_id,
+            $compliance->user?->firm_id ? (int) $compliance->user->firm_id : null,
+            $compliance->assigned_to ? (int) $compliance->assigned_to : null
+        );
 
         $status = (string) $data['status'];
         if (! in_array($status, SocialMediaComplianceRequest::STATUSES, true)) {

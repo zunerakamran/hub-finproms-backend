@@ -400,11 +400,15 @@ class SocialMediaComplianceController extends Controller
             || $this->matrix->roleCan($hub, $role, 'smc_submit_request');
         $canAll = $this->matrix->roleCan($hub, $role, 'smc_view_all_requests')
             || $this->matrix->roleCan($hub, $role, 'smc_assign_requests');
-        $canReviewAssigned = $this->matrix->roleCan($hub, $role, 'smc_review_requests')
-            && (int) $compliance->assigned_to === (int) $user->id;
+        $canReview = $this->matrix->roleCan($hub, $role, 'smc_review_requests');
+        $isAssignee = (int) ($compliance->assigned_to ?? 0) === (int) $user->id;
+        $isUnassigned = empty($compliance->assigned_to);
 
-        $allowed = ($isOwner && $canOwn) || $canReviewAssigned;
-        if ($canAll) {
+        $allowed = ($isOwner && $canOwn) || ($canReview && $isAssignee);
+
+        // view-all / assign / review-pickup still respect firm visibility for
+        // manager, client_admin, and other firm-scoped roles.
+        if ($canAll || ($canReview && $isUnassigned)) {
             if (! $compliance->relationLoaded('user')) {
                 $compliance->load('user:id,firm_id');
             }

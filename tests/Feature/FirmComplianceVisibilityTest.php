@@ -115,6 +115,8 @@ class FirmComplianceVisibilityTest extends TestCase
         $this->assertTrue($visibility->viewerFirmCanSee($acme->id, $acme, false));
         $this->assertFalse($visibility->viewerFirmCanSee($other->id, $acme, false));
         $this->assertTrue($visibility->viewerFirmCanSee($central->id, $acme, true));
+        $this->assertFalse($visibility->viewerFirmCanSee(null, $acme, false));
+        $this->assertFalse($visibility->viewerFirmCanSee($acme->id, null, false));
 
         $acme->update([
             'compliance_visible_to_own' => false,
@@ -126,5 +128,76 @@ class FirmComplianceVisibilityTest extends TestCase
         $this->assertFalse($visibility->viewerFirmCanSee($acme->id, $acme, false));
         $this->assertTrue($visibility->viewerFirmCanSee($peer->id, $acme, false));
         $this->assertFalse($visibility->viewerFirmCanSee($central->id, $acme, true));
+    }
+
+    public function test_power_and_finproms_admins_bypass_firm_scope(): void
+    {
+        $visibility = app(FirmComplianceVisibilityService::class);
+        $power = User::factory()->powerAdmin()->create(['firm_id' => null]);
+        $finproms = User::factory()->create(['role' => User::ROLE_FINPROMS_ADMIN, 'firm_id' => null]);
+        $manager = User::factory()->create(['role' => User::ROLE_MANAGER, 'firm_id' => null]);
+
+        $this->assertTrue($visibility->actorBypassesFirmScope($power));
+        $this->assertTrue($visibility->actorBypassesFirmScope($finproms));
+        $this->assertFalse($visibility->actorBypassesFirmScope($manager));
+    }
+
+    public function test_manager_with_firm_only_sees_allowed_firm_requests(): void
+    {
+        $firmX = Firm::query()->create([
+            'name' => 'Firm X',
+            'compliance_visible_to_own' => true,
+            'compliance_visible_to_central' => false,
+        ]);
+        $firmY = Firm::query()->create([
+            'name' => 'Firm Y',
+            'compliance_visible_to_own' => true,
+            'compliance_visible_to_central' => false,
+        ]);
+
+        $manager = User::factory()->create([
+            'role' => User::ROLE_MANAGER,
+            'firm_id' => $firmX->id,
+        ]);
+        $manager->setRelation('firm', $firmX);
+
+        $visibility = app(FirmComplianceVisibilityService::class);
+
+        $this->assertTrue($visibility->actorCanSeeSubmitterFirm($manager, $firmX));
+        $this->assertFalse($visibility->actorCanSeeSubmitterFirm($manager, $firmY));
+        $this->assertFalse($visibility->actorCanSeeSubmitterFirm($manager, null));
+
+        $power = User::factory()->powerAdmin()->create();
+        $this->assertTrue($visibility->actorCanSeeSubmitterFirm($power, $firmY));
+        $this->assertTrue($visibility->actorCanViewRequest($power, 99, $firmY->id, null));
+    }
+
+    public function test_client_admin_with_firm_follows_same_visibility_rules(): void
+    {
+        $firmX = Firm::query()->create([
+            'name' => 'Firm X',
+            'compliance_visible_to_own' => true,
+            'compliance_visible_to_central' => false,
+        ]);
+        $firmY = Firm::query()->create([
+            'name' => 'Firm Y',
+            'compliance_visible_to_own' => true,
+            'compliance_visible_to_central' => false,
+        ]);
+
+        $admin = User::factory()->create([
+            'role' => User::ROLE_CLIENT_ADMIN,
+            'firm_id' => $firmX->id,
+        ]);
+        $admin->setRelation('firm', $firmX);
+
+        $visibility = app(FirmComplianceVisibilityService::class);
+
+        $this->assertTrue($visibility->actorCanSeeSubmitterFirm($admin, $firmX));
+        $this->assertFalse($visibility->actorCanSeeSubmitterFirm($admin, $firmY));
+        $this->assertTrue($visibility->actorCanViewRequest($admin, 1, $firmX->id, null));
+        $this->assertFalse($visibility->actorCanViewRequest($admin, 2, $firmY->id, null));
+        // Assigned work is always visible even across firms.
+        $this->assertTrue($visibility->actorCanViewRequest($admin, 2, $firmY->id, $admin->id));
     }
 }

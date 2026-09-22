@@ -7,6 +7,7 @@ use App\Models\WebsiteCompliance\ChangeRequest;
 use App\Models\WebsiteCompliance\ChangeRequestVersion;
 use App\Models\WebsiteCompliance\Section;
 use App\Services\ActivityLogService;
+use App\Services\FirmComplianceVisibilityService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
@@ -15,7 +16,8 @@ class ChangeRequestWorkflowService
 {
     public function __construct(
         private readonly ActivityLogService $activityLogs,
-        private readonly WebsiteComplianceGate $gate
+        private readonly WebsiteComplianceGate $gate,
+        private readonly FirmComplianceVisibilityService $firmVisibility
     ) {}
 
     /**
@@ -313,6 +315,19 @@ class ChangeRequestWorkflowService
             && $changeRequest->approver_id !== null
             && (int) $changeRequest->approver_id !== (int) ($this->gate->tenantUserIdOrNull($user) ?? $user->id)
         ) {
+            throw new HttpException(403, 'Unauthorized');
+        }
+
+        if (! $changeRequest->relationLoaded('editor')) {
+            $changeRequest->load('editor:id,firm_id');
+        }
+
+        if (! $this->firmVisibility->actorCanViewRequest(
+            $user,
+            $changeRequest->editor_id ? (int) $changeRequest->editor_id : null,
+            $changeRequest->editor?->firm_id ? (int) $changeRequest->editor->firm_id : null,
+            $changeRequest->approver_id ? (int) $changeRequest->approver_id : null
+        )) {
             throw new HttpException(403, 'Unauthorized');
         }
 

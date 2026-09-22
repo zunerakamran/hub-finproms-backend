@@ -112,6 +112,7 @@ class PowerAdminUserController extends Controller
     {
         $hub = $this->actingWhiteLabelHub($request);
         $validated = $this->validatedPayload($request, null, skipUnique: $hub !== null);
+        $validated = $this->normalizeFirmForRole($validated);
 
         if ($hub = $this->actingWhiteLabelHub($request)) {
             try {
@@ -204,6 +205,7 @@ class PowerAdminUserController extends Controller
             $current->is_suspended = $existing['is_suspended'];
 
             $validated = $this->validatedPayload($request, $current, skipUnique: true);
+            $validated = $this->normalizeFirmForRole($validated, $existing['role'] ?? null);
 
             if (array_key_exists('role', $validated) && $validated['role'] !== $existing['role']) {
                 $this->assertCanChangeRoleOnHub($request, $hub, $existing, $validated['role']);
@@ -235,6 +237,7 @@ class PowerAdminUserController extends Controller
 
         $model = User::query()->findOrFail($user);
         $validated = $this->validatedPayload($request, $model);
+        $validated = $this->normalizeFirmForRole($validated, $model->role);
 
         if (array_key_exists('role', $validated) && $validated['role'] !== $model->role) {
             $this->assertCanChangeRole($request, $model, $validated['role']);
@@ -376,6 +379,22 @@ class PowerAdminUserController extends Controller
             ])
             ->values()
             ->all();
+    }
+
+    /**
+     * Power Admin and FinProms Admin are outside the firm model.
+     *
+     * @param  array<string, mixed>  $validated
+     * @return array<string, mixed>
+     */
+    private function normalizeFirmForRole(array $validated, ?string $existingRole = null): array
+    {
+        $role = $validated['role'] ?? $existingRole;
+        if (in_array($role, [User::ROLE_POWER_ADMIN, User::ROLE_FINPROMS_ADMIN], true)) {
+            $validated['firm_id'] = null;
+        }
+
+        return $validated;
     }
 
     private function assertCanChangeRole(Request $request, User $user, string $newRole): void
