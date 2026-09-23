@@ -244,7 +244,7 @@ class ChangeRequestController extends Controller
                 'string',
                 Rule::in([
                     ChangeRequest::STATUS_PENDING,
-                    ChangeRequest::STATUS_UNDER_REVIEW,
+                    ChangeRequest::STATUS_APPROVED,
                     ChangeRequest::STATUS_REJECTED,
                     ChangeRequest::STATUS_APPROVED_WITH_FEEDBACK,
                 ]),
@@ -283,12 +283,13 @@ class ChangeRequestController extends Controller
 
         $changeRequest->update([
             'approver_id' => $this->gate->tenantUserIdOrNull($user),
-            'status' => ChangeRequest::STATUS_UNDER_REVIEW,
+            // Stay Pending when claimed — same as SMC/GC assignment (status changes via review / manager override).
+            'status' => ChangeRequest::STATUS_PENDING,
         ]);
 
         $this->workflow->syncCurrentVersionStatus(
             $changeRequest->fresh(['currentVersionRow']),
-            ChangeRequest::STATUS_UNDER_REVIEW
+            ChangeRequest::STATUS_PENDING
         );
 
         $this->activityLogs->log([
@@ -332,12 +333,13 @@ class ChangeRequestController extends Controller
 
         $changeRequest->update([
             'approver_id' => $request->approver_id,
-            'status' => ChangeRequest::STATUS_UNDER_REVIEW,
+            // Stay Pending when assigned — manager can still change status; approver reviews while Pending.
+            'status' => ChangeRequest::STATUS_PENDING,
         ]);
 
         $this->workflow->syncCurrentVersionStatus(
             $changeRequest->fresh(['currentVersionRow']),
-            ChangeRequest::STATUS_UNDER_REVIEW
+            ChangeRequest::STATUS_PENDING
         );
 
         $this->activityLogs->log([

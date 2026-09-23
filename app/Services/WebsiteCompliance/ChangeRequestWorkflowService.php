@@ -194,7 +194,7 @@ class ChangeRequestWorkflowService
 
         $allowedTargets = [
             ChangeRequest::STATUS_PENDING,
-            ChangeRequest::STATUS_UNDER_REVIEW,
+            ChangeRequest::STATUS_APPROVED,
             ChangeRequest::STATUS_REJECTED,
             ChangeRequest::STATUS_APPROVED_WITH_FEEDBACK,
         ];
@@ -202,7 +202,7 @@ class ChangeRequestWorkflowService
         $status = (string) ($data['status'] ?? '');
         if (! in_array($status, $allowedTargets, true)) {
             throw ValidationException::withMessages([
-                'status' => 'Invalid status. Use pending, under_review, rejected, or approved_with_feedback.',
+                'status' => 'Invalid status. Use pending, approved, rejected, or approved_with_feedback.',
             ]);
         }
 
@@ -252,6 +252,13 @@ class ChangeRequestWorkflowService
             'reviewed_by' => $user->name ?: (string) $user->id,
             'reviewed_at' => now(),
         ]);
+
+        if ($status === ChangeRequest::STATUS_APPROVED) {
+            ChangeRequestPublishService::publish(
+                $changeRequest->fresh(['section', 'currentVersionRow']),
+                (int) $user->id
+            );
+        }
 
         $this->activityLogs->log([
             'action' => 'wc.change_request.change_status',
