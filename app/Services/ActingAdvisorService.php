@@ -71,6 +71,34 @@ class ActingAdvisorService
     }
 
     /**
+     * Subject user for credits, purchases, subscriptions, and related billing.
+     * Same as requireSubject (advisor when selected, else self).
+     */
+    public function billingSubject(User $actor): User
+    {
+        return $this->requireSubject($actor);
+    }
+
+    /**
+     * Credits / unlimited flags for display and spend (advisor when acting).
+     *
+     * @return array{balance: int, has_unlimited_credits: bool, subject_id: int, subject_name: string, is_acting: bool}
+     */
+    public function billingCreditsPayload(User $actor, bool $hubAllowsUnlimited = true): array
+    {
+        $subject = $this->billingSubject($actor);
+        $isActing = (int) $subject->id !== (int) $actor->id;
+
+        return [
+            'balance' => (int) $subject->credits,
+            'has_unlimited_credits' => $subject->hasUnlimitedCredits($hubAllowsUnlimited),
+            'subject_id' => (int) $subject->id,
+            'subject_name' => (string) $subject->name,
+            'is_acting' => $isActing,
+        ];
+    }
+
+    /**
      * Advisors in the same firm the admin-staff may work on behalf of.
      *
      * @return Collection<int, User>

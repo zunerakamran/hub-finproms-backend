@@ -8,6 +8,8 @@ use App\Models\BundlePurchase;
 use App\Models\ContentCheckout;
 use App\Models\Post;
 use App\Models\PostPurchase;
+use App\Models\User;
+use App\Services\ActingAdvisorService;
 use App\Services\ContentPurchaseCheckoutService;
 use App\Services\HubService;
 use App\Services\InvoiceService;
@@ -21,7 +23,8 @@ class PurchaseController extends Controller
     public function __construct(
         private readonly InvoiceService $invoices,
         private readonly HubService $hubs,
-        private readonly ContentPurchaseCheckoutService $contentCheckouts
+        private readonly ContentPurchaseCheckoutService $contentCheckouts,
+        private readonly ActingAdvisorService $actingAdvisors
     ) {}
 
     public function purchasePost(Request $request, Post $post): JsonResponse
@@ -32,7 +35,8 @@ class PurchaseController extends Controller
             ], 422);
         }
 
-        $user = $request->user();
+        $actor = $request->user();
+        $user = $this->actingAdvisors->billingSubject($actor);
 
         if ($user->hasPurchased($post)) {
             return response()->json([
@@ -67,6 +71,7 @@ class PurchaseController extends Controller
         }
 
         $creditsToSpend = $unlimited ? 0 : $post->credits_cost;
+        $onBehalfById = $this->actingAdvisors->onBehalfById($actor, $user);
 
         [$purchase, $invoice] = DB::transaction(function () use ($user, $post, $creditsToSpend, $unlimited) {
             if (! $unlimited && $creditsToSpend > 0) {
@@ -92,12 +97,17 @@ class PurchaseController extends Controller
         $post->load('creator:id,name');
         $post->setAttribute('is_purchased', true);
 
+        $responseUser = $this->responseUserWithBillingCredits($actor, $user);
+
         return response()->json([
-            'message' => 'Post purchased successfully.',
+            'message' => $onBehalfById
+                ? 'Post purchased successfully on behalf of '.$user->name.'.'
+                : 'Post purchased successfully.',
             'purchase' => $purchase,
             'invoice' => $invoice,
             'post' => $post,
-            'user' => $user,
+            'user' => $responseUser,
+            'on_behalf_by_user_id' => $onBehalfById,
         ], 201);
     }
 
@@ -117,7 +127,8 @@ class PurchaseController extends Controller
             ], 422);
         }
 
-        $user = $request->user();
+        $actor = $request->user();
+        $user = $this->actingAdvisors->billingSubject($actor);
 
         if ($user->hasPurchasedBundle($bundle)) {
             return response()->json([
@@ -152,6 +163,7 @@ class PurchaseController extends Controller
         }
 
         $creditsToSpend = $unlimited ? 0 : $bundle->credits_cost;
+        $onBehalfById = $this->actingAdvisors->onBehalfById($actor, $user);
 
         [$purchase, $invoice] = DB::transaction(function () use ($user, $bundle, $creditsToSpend, $unlimited) {
             if (! $unlimited && $creditsToSpend > 0) {
@@ -193,12 +205,17 @@ class PurchaseController extends Controller
         $bundle->loadCount('posts');
         $bundle->setAttribute('is_purchased', true);
 
+        $responseUser = $this->responseUserWithBillingCredits($actor, $user);
+
         return response()->json([
-            'message' => 'Bundle purchased successfully.',
+            'message' => $onBehalfById
+                ? 'Bundle purchased successfully on behalf of '.$user->name.'.'
+                : 'Bundle purchased successfully.',
             'purchase' => $purchase,
             'invoice' => $invoice,
             'bundle' => $bundle,
-            'user' => $user,
+            'user' => $responseUser,
+            'on_behalf_by_user_id' => $onBehalfById,
         ], 201);
     }
 
@@ -223,7 +240,9 @@ class PurchaseController extends Controller
             ], 422);
         }
 
-        if ($checkout->user_id !== $request->user()->id && ! $request->user()->isAdmin()) {
+        if ($checkout->user_id !== $request->user()->id
+            && $checkout->user_id !== $this->actingAdvisors->billingSubject($request->user())->id
+            && ! $request->user()->isAdmin()) {
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
 
@@ -255,14 +274,16 @@ class PurchaseController extends Controller
 
     public function myPurchases(Request $request): JsonResponse
     {
-        $user = $request->user();
+        $actor = $request->user();
         $hub = app(\App\Services\HubService::class)->current();
         $matrix = app(\App\Services\CapabilitiesMatrixService::class);
-        $role = $matrix->effectiveRoleFor($user);
+        $role = $matrix->effectiveRoleFor($actor);
 
         if (! $matrix->roleCan($hub, $role, 'general_show_purchases')) {
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
+
+        $user = $this->actingAdvisors->billingSubject($actor);
 
         $purchases = $user
             ->purchases()
@@ -271,6 +292,22 @@ class PurchaseController extends Controller
             ->paginate((int) $request->integer('per_page', 12));
 
         return response()->json($purchases);
+    }
+
+    /**
+     * Auth user payload with billing subject's credits overlaid (for Admin-staff acting).
+     */
+    private function responseUserWithBillingCredits(User $actor, User $subject): User
+    {
+        $hubUnlimited = $this->hubs->can('unlimited_credits');
+        $actor->setAttribute('credits', (int) $subject->credits);
+        $actor->setAttribute('has_unlimited_credits', $subject->hasUnlimitedCredits($hubUnlimited));
+        if ((int) $actor->id !== (int) $subject->id) {
+            $actor->setAttribute('billing_subject_id', (int) $subject->id);
+            $actor->setAttribute('billing_subject_name', $subject->name);
+        }
+
+        return $actor;
     }
 
     /**

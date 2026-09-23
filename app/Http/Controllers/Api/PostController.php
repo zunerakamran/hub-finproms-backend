@@ -10,6 +10,7 @@ use App\Models\Post;
 use App\Models\Setting;
 use App\Models\Tag;
 use App\Models\User;
+use App\Services\ActingAdvisorService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -79,9 +80,10 @@ class PostController extends Controller
 
         $posts = $query->paginate((int) $request->integer('per_page', 12));
 
+        $billingUser = $this->billingUser($request);
         $purchasedIds = [];
-        if ($user) {
-            $purchasedIds = $user
+        if ($billingUser) {
+            $purchasedIds = $billingUser
                 ->purchases()
                 ->whereIn('post_id', $posts->getCollection()->pluck('id'))
                 ->pluck('post_id')
@@ -154,7 +156,8 @@ class PostController extends Controller
         $post->refresh();
 
         $post->load('creator:id,name');
-        $isPurchased = $user ? $user->hasPurchased($post) : false;
+        $billingUser = $this->billingUser($request);
+        $isPurchased = $billingUser ? $billingUser->hasPurchased($post) : false;
         $isClientAdmin = $user?->isClientAdmin() ?? false;
         $isAuthenticated = $user !== null;
         $canViewCatalog = $isAuthenticated;
@@ -423,6 +426,19 @@ class PostController extends Controller
     private function optionalUser(Request $request): ?User
     {
         return $request->user() ?? Auth::guard('sanctum')->user();
+    }
+
+    /**
+     * Catalog purchase ownership follows Admin-staff's selected advisor when set.
+     */
+    private function billingUser(Request $request): ?User
+    {
+        $actor = $this->optionalUser($request);
+        if (! $actor) {
+            return null;
+        }
+
+        return app(ActingAdvisorService::class)->billingSubject($actor);
     }
 
     private function viewerKey(Request $request, ?User $user): string

@@ -269,10 +269,36 @@ class AuthController extends Controller
         $user = $request->user();
         $user->load('firm:id,name');
 
+        $actingAdvisors = app(\App\Services\ActingAdvisorService::class);
+        $subject = $actingAdvisors->billingSubject($user);
+        $hub = app(\App\Services\HubService::class)->current();
+        $hubUnlimited = $hub->can('unlimited_credits');
+        $isActing = (int) $subject->id !== (int) $user->id;
+
+        // When Admin-staff act as an advisor, expose that advisor's credits / unlimited
+        // on the auth user payload so the website header and catalog see full access.
+        if ($isActing) {
+            $user->setAttribute('credits', (int) $subject->credits);
+            $user->setAttribute(
+                'has_unlimited_credits',
+                $subject->hasUnlimitedCredits($hubUnlimited)
+            );
+            $user->setAttribute('billing_subject_id', (int) $subject->id);
+            $user->setAttribute('billing_subject_name', $subject->name);
+        }
+
         $payload = [
             'user' => $user,
-            'visible_metrics' => $user->contentMetricVisibility(),
-            'active_plan' => $user->activePlan(),
+            'visible_metrics' => $subject->contentMetricVisibility(),
+            'active_plan' => $subject->activePlan(),
+            'billing_subject' => [
+                'id' => (int) $subject->id,
+                'name' => $subject->name,
+                'email' => $subject->email,
+                'is_acting' => $isActing,
+                'credits' => (int) $subject->credits,
+                'has_unlimited_credits' => $subject->hasUnlimitedCredits($hubUnlimited),
+            ],
         ];
 
         if ($user->isPowerAdmin()) {
@@ -290,7 +316,7 @@ class AuthController extends Controller
         }
 
         try {
-            $advisorSwitcher = app(\App\Services\ActingAdvisorService::class)->switcherPayload($user);
+            $advisorSwitcher = $actingAdvisors->switcherPayload($user);
         } catch (\Throwable) {
             $advisorSwitcher = null;
         }

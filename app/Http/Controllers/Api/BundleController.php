@@ -8,6 +8,7 @@ use App\Models\Bundle;
 use App\Models\Post;
 use App\Models\Tag;
 use App\Models\User;
+use App\Services\ActingAdvisorService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -55,9 +56,10 @@ class BundleController extends Controller
 
         $bundles = $query->paginate((int) $request->integer('per_page', 12));
 
+        $billingUser = $this->billingUser($request);
         $purchasedIds = [];
-        if ($user) {
-            $purchasedIds = $user
+        if ($billingUser) {
+            $purchasedIds = $billingUser
                 ->bundlePurchases()
                 ->whereIn('bundle_id', $bundles->getCollection()->pluck('id'))
                 ->pluck('bundle_id')
@@ -85,11 +87,12 @@ class BundleController extends Controller
         $bundle->load(['creator:id,name', 'posts.creator:id,name']);
         $bundle->loadCount('posts');
 
-        $isPurchased = $user ? $user->hasPurchasedBundle($bundle) : false;
+        $billingUser = $this->billingUser($request);
+        $isPurchased = $billingUser ? $billingUser->hasPurchasedBundle($bundle) : false;
         $bundle->setAttribute('is_purchased', $isPurchased);
 
-        $bundle->posts->each(function (Post $post) use ($user, $isPurchased, $isAdmin) {
-            $postPurchased = $isPurchased || ($user?->hasPurchased($post) ?? false);
+        $bundle->posts->each(function (Post $post) use ($billingUser, $isPurchased, $isAdmin) {
+            $postPurchased = $isPurchased || ($billingUser?->hasPurchased($post) ?? false);
             $post->setAttribute('is_purchased', $postPurchased);
             if (! $postPurchased && ! $isAdmin) {
                 $post->makeHidden(['attachment_path', 'attachment_url', 'attachment_name', 'attachment_mime']);
@@ -418,5 +421,15 @@ class BundleController extends Controller
     private function optionalUser(Request $request): ?User
     {
         return $request->user() ?? Auth::guard('sanctum')->user();
+    }
+
+    private function billingUser(Request $request): ?User
+    {
+        $actor = $this->optionalUser($request);
+        if (! $actor) {
+            return null;
+        }
+
+        return app(ActingAdvisorService::class)->billingSubject($actor);
     }
 }

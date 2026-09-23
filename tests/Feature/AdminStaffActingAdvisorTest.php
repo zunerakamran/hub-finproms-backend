@@ -216,4 +216,59 @@ class AdminStaffActingAdvisorTest extends TestCase
         $userId = (int) $create->json('user.id');
         $this->assertTrue((bool) User::query()->find($userId)?->allows_admin_staff_acting);
     }
+
+    public function test_acting_as_advisor_exposes_advisor_credits_on_me_and_dashboard(): void
+    {
+        $hub = $this->createSharedHub();
+        $this->setRoleCaps($hub, User::ROLE_ADVISOR, [
+            'general_show_credits' => true,
+            'general_show_subscription' => true,
+            'general_show_invoices' => true,
+            'general_show_purchases' => true,
+        ]);
+        $this->setRoleCaps($hub, User::ROLE_ADMIN_STAFF, [
+            'general_show_credits' => false,
+            'general_show_subscription' => false,
+            'general_show_invoices' => false,
+            'general_show_purchases' => false,
+        ]);
+
+        $firm = Firm::query()->create(['name' => 'Firm A']);
+        $staff = User::factory()->create([
+            'role' => User::ROLE_ADMIN_STAFF,
+            'firm_id' => $firm->id,
+            'credits' => 3,
+            'has_unlimited_credits' => false,
+        ]);
+        $advisor = User::factory()->create([
+            'name' => 'Credit Advisor',
+            'role' => User::ROLE_ADVISOR,
+            'is_advisor' => true,
+            'firm_id' => $firm->id,
+            'allows_admin_staff_acting' => true,
+            'credits' => 42,
+            'has_unlimited_credits' => true,
+        ]);
+
+        Sanctum::actingAs($staff);
+
+        $this->getJson('/api/auth/me')
+            ->assertOk()
+            ->assertJsonPath('user.credits', 3)
+            ->assertJsonPath('billing_subject.is_acting', false);
+
+        $this->putJson('/api/acting-advisor', ['advisor_id' => $advisor->id])->assertOk();
+
+        $me = $this->getJson('/api/auth/me')->assertOk();
+        $this->assertSame(42, (int) $me->json('user.credits'));
+        $this->assertTrue((bool) $me->json('user.has_unlimited_credits'));
+        $this->assertTrue((bool) $me->json('billing_subject.is_acting'));
+        $this->assertSame($advisor->id, (int) $me->json('billing_subject.id'));
+
+        $dash = $this->getJson('/api/my-dashboard')->assertOk();
+        $this->assertSame(42, (int) $dash->json('credits.balance'));
+        $this->assertTrue((bool) $dash->json('credits.has_unlimited_credits'));
+        $this->assertSame('Credit Advisor', $dash->json('credits.subject_name'));
+        $this->assertTrue((bool) $dash->json('billing_subject.is_acting'));
+    }
 }

@@ -316,7 +316,11 @@ class SubscriptionController extends Controller
 
     public function mySubscriptions(Request $request): JsonResponse
     {
-        $subscriptions = $request->user()
+        $actor = $request->user();
+        $subject = app(\App\Services\ActingAdvisorService::class)->billingSubject($actor);
+        $hubUnlimited = app(\App\Services\HubService::class)->can('unlimited_credits');
+
+        $subscriptions = $subject
             ->subscriptions()
             ->with('plan')
             ->latest()
@@ -324,9 +328,15 @@ class SubscriptionController extends Controller
 
         return response()->json([
             'subscriptions' => $subscriptions,
-            'credits' => $request->user()->credits,
-            'visible_metrics' => $request->user()->contentMetricVisibility(),
-            'active_plan' => $request->user()->activePlan(),
+            'credits' => (int) $subject->credits,
+            'has_unlimited_credits' => $subject->hasUnlimitedCredits($hubUnlimited),
+            'visible_metrics' => $subject->contentMetricVisibility(),
+            'active_plan' => $subject->activePlan(),
+            'billing_subject' => [
+                'id' => (int) $subject->id,
+                'name' => $subject->name,
+                'is_acting' => (int) $subject->id !== (int) $actor->id,
+            ],
         ]);
     }
 

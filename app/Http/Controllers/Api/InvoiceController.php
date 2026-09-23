@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Invoice;
+use App\Services\ActingAdvisorService;
 use App\Services\ActingHubService;
 use App\Services\CapabilitiesMatrixService;
 use App\Services\HubService;
@@ -14,14 +15,17 @@ class InvoiceController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $user = $request->user();
+        $actor = $request->user();
         $hub = app(HubService::class)->current();
         $matrix = app(CapabilitiesMatrixService::class);
-        $role = $matrix->effectiveRoleFor($user);
+        $actingAdvisors = app(ActingAdvisorService::class);
+        $role = $matrix->effectiveRoleFor($actor);
 
         if (! $matrix->roleCan($hub, $role, 'general_show_invoices')) {
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
+
+        $user = $actingAdvisors->billingSubject($actor);
 
         $invoices = $user
             ->invoices()
@@ -42,9 +46,12 @@ class InvoiceController extends Controller
         // (dashboard_view_advisor_invoices is private-only and false on shared current()).
         $hub = app(ActingHubService::class)->targetHub($user);
         $matrix = app(CapabilitiesMatrixService::class);
+        $actingAdvisors = app(ActingAdvisorService::class);
         $role = $matrix->effectiveRoleFor($user);
+        $subject = $actingAdvisors->billingSubject($user);
 
-        $isOwner = (int) $invoice->user_id === (int) $user->id;
+        $isOwner = (int) $invoice->user_id === (int) $user->id
+            || (int) $invoice->user_id === (int) $subject->id;
         $canGeneralInvoices = $matrix->roleCan($hub, $role, 'general_show_invoices');
         $canAdvisorInvoices = $matrix->roleCan($hub, $role, 'dashboard_view_advisor_invoices');
 
@@ -54,7 +61,7 @@ class InvoiceController extends Controller
             $belongsToTargetHub = $billingHubId === 0 || $billingHubId === (int) $hub->id;
             $allowed = $isOwner || ($canAdvisorInvoices && $belongsToTargetHub);
         } else {
-            // Personal invoices: owner + general invoices capability.
+            // Personal invoices: owner (or acting subject) + general invoices capability.
             $allowed = $isOwner && $canGeneralInvoices;
         }
 
