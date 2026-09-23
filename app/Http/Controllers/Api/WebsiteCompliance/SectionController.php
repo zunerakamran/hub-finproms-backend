@@ -178,8 +178,9 @@ class SectionController extends Controller
         }
 
         $section = Section::findOrFail($id);
+        $lockOwnerId = $this->actingAdvisors->lockOwnerIdForWrite($user);
 
-        if ($section->is_locked && (int) $section->locked_by !== (int) $user->id) {
+        if ($section->is_locked && ! $this->actingAdvisors->mayOwnLock($user, $section->locked_by)) {
             // Remote control-plane operators can take over locks on white-label hubs.
             if (! $this->gate->isRemoteControlPlaneOperator($user)) {
                 if (! $section->locked_by) {
@@ -193,7 +194,7 @@ class SectionController extends Controller
 
         $section->update([
             'is_locked' => true,
-            'locked_by' => $this->gate->tenantUserIdOrNull($user),
+            'locked_by' => $lockOwnerId,
         ]);
 
         $this->activityLogs->log([

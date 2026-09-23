@@ -99,6 +99,42 @@ class ActingAdvisorService
     }
 
     /**
+     * User ids that may treat a section lock as their own (actor + selected advisor).
+     *
+     * @return list<int>
+     */
+    public function lockOwnerIds(User $actor): array
+    {
+        $ids = [(int) $actor->id];
+        $websiteId = $this->websiteAdvisorId($actor);
+        if ($websiteId) {
+            $ids[] = $websiteId;
+        }
+
+        return array_values(array_unique(array_filter($ids)));
+    }
+
+    /**
+     * Whether this actor may edit a section locked by $lockedBy.
+     */
+    public function mayOwnLock(User $actor, mixed $lockedBy): bool
+    {
+        if ($lockedBy === null || $lockedBy === '') {
+            return false;
+        }
+
+        return in_array((int) $lockedBy, $this->lockOwnerIds($actor), true);
+    }
+
+    /**
+     * Id to store on section.locked_by while editing (advisor when acting).
+     */
+    public function lockOwnerIdForWrite(User $actor): int
+    {
+        return $this->websiteAdvisorId($actor) ?? (int) $actor->id;
+    }
+
+    /**
      * Advisors in the same firm the admin-staff may work on behalf of.
      *
      * @return Collection<int, User>

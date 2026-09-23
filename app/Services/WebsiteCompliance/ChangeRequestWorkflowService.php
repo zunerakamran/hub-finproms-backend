@@ -27,11 +27,13 @@ class ChangeRequestWorkflowService
      * @param  list<array{section_id:int, proposed_content:string, current_content?:string|null}>  $sectionEdits
      * @return list<array{section_id:int, section_name:string, current_content:mixed, proposed_content:string}>
      */
-    public function prepareAndLockEdits(array $sectionEdits, User $user): array
+    public function prepareAndLockEdits(array $sectionEdits, User $user, ?User $actor = null): array
     {
         $edits = [];
-        $tenantUserId = $this->gate->tenantUserIdOrNull($user);
-        $canBypassLocks = $this->gate->isRemoteControlPlaneOperator($user);
+        $actor = $actor ?? $user;
+        $actingAdvisors = app(ActingAdvisorService::class);
+        $canBypassLocks = $this->gate->isRemoteControlPlaneOperator($actor)
+            || $this->gate->isRemoteControlPlaneOperator($user);
 
         foreach ($sectionEdits as $edit) {
             $section = Section::findOrFail($edit['section_id']);
@@ -39,7 +41,8 @@ class ChangeRequestWorkflowService
                 $section->is_locked
                 && ! $canBypassLocks
                 && $section->locked_by !== null
-                && (int) $section->locked_by !== (int) ($tenantUserId ?? $user->id)
+                && ! $actingAdvisors->mayOwnLock($actor, $section->locked_by)
+                && ! $actingAdvisors->mayOwnLock($user, $section->locked_by)
             ) {
                 throw new HttpException(409, "Section '{$section->name}' is locked by another user");
             }

@@ -49,7 +49,7 @@ class ChangeRequestController extends Controller
                 'section_edits.*.current_content' => 'nullable|string',
             ]);
 
-            $edits = $this->workflow->prepareAndLockEdits($request->section_edits, $subject);
+            $edits = $this->workflow->prepareAndLockEdits($request->section_edits, $subject, $user);
             $proposedContent = json_encode($edits);
             $primarySectionId = count($edits) === 1 ? $edits[0]['section_id'] : null;
 
@@ -88,7 +88,7 @@ class ChangeRequestController extends Controller
                 'proposed_content' => $request->proposed_content,
                 'current_content' => $request->current_content,
             ],
-        ], $subject);
+        ], $subject, $user);
         $proposedContent = json_encode($edits);
 
         $changeRequest = ChangeRequest::create([
@@ -159,6 +159,7 @@ class ChangeRequestController extends Controller
             $this->firmVisibility->scopeQueryForActor($query, $user, 'editor', 'approver_id');
             $requests = $query->get();
         } else {
+            // Advisors / Admin-staff (and Admin-staff acting as an advisor): own editor history.
             $subject = $this->actingAdvisors->subjectOrNull($user);
             $editorId = $subject
                 ? ($this->gate->tenantUserIdOrNull($subject) ?? (int) $subject->id)
