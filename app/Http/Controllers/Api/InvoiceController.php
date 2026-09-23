@@ -17,7 +17,7 @@ class InvoiceController extends Controller
         $user = $request->user();
         $hub = app(HubService::class)->current();
         $matrix = app(CapabilitiesMatrixService::class);
-        $role = (string) $user->role;
+        $role = $matrix->effectiveRoleFor($user);
 
         if (! $matrix->roleCan($hub, $role, 'general_show_invoices')) {
             return response()->json(['message' => 'Unauthorized.'], 403);
@@ -42,7 +42,7 @@ class InvoiceController extends Controller
         // (dashboard_view_advisor_invoices is private-only and false on shared current()).
         $hub = app(ActingHubService::class)->targetHub($user);
         $matrix = app(CapabilitiesMatrixService::class);
-        $role = (string) $user->role;
+        $role = $matrix->effectiveRoleFor($user);
 
         $isOwner = (int) $invoice->user_id === (int) $user->id;
         $canGeneralInvoices = $matrix->roleCan($hub, $role, 'general_show_invoices');

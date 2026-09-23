@@ -9,6 +9,7 @@ use App\Models\WebsiteCompliance\Section;
 use App\Models\WebsiteCompliance\Template;
 use App\Models\WebsiteCompliance\TemplateRequest;
 use App\Services\ActivityLogService;
+use App\Services\ActingAdvisorService;
 use App\Services\WebsiteCompliance\AdvisorSectionService;
 use App\Services\WebsiteCompliance\CpanelSyncService;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
@@ -21,7 +22,8 @@ class SectionController extends Controller
 {
     public function __construct(
         private readonly WebsiteComplianceGate $gate,
-        private readonly ActivityLogService $activityLogs
+        private readonly ActivityLogService $activityLogs,
+        private readonly ActingAdvisorService $actingAdvisors
     ) {}
 
     public function index(Request $request, int $pageId): JsonResponse
@@ -31,9 +33,9 @@ class SectionController extends Controller
 
         $query = Section::with(['template', 'advisor', 'lockedByUser'])->where('page_id', $pageId);
 
-        $advisorId = $user && $user->isAdvisor()
-            ? $user->id
-            : $request->query('advisor_id');
+        $websiteAdvisorId = $user ? $this->actingAdvisors->websiteAdvisorId($user) : null;
+        $advisorId = $websiteAdvisorId
+            ?? $request->query('advisor_id');
 
         $templateRequestId = $request->query('template_request_id');
 
@@ -89,9 +91,10 @@ class SectionController extends Controller
                 return null;
             }
 
-            if ($user && $user->isAdvisor()) {
-                $allowed = (int) ($tr->advisor_id ?? 0) === (int) $user->id
-                    || (int) ($tr->assigned_advisor_id ?? 0) === (int) $user->id;
+            $websiteAdvisorId = $user ? $this->actingAdvisors->websiteAdvisorId($user) : null;
+            if ($websiteAdvisorId) {
+                $allowed = (int) ($tr->advisor_id ?? 0) === (int) $websiteAdvisorId
+                    || (int) ($tr->assigned_advisor_id ?? 0) === (int) $websiteAdvisorId;
                 if (! $allowed) {
                     return false;
                 }
@@ -155,8 +158,11 @@ class SectionController extends Controller
         ]);
 
         $data = $request->only('page_id', 'name', 'content', 'template_id', 'advisor_id');
-        if (empty($data['advisor_id']) && $user->isAdvisor()) {
-            $data['advisor_id'] = $user->id;
+        if (empty($data['advisor_id'])) {
+            $websiteAdvisorId = $this->actingAdvisors->websiteAdvisorId($user);
+            if ($websiteAdvisorId) {
+                $data['advisor_id'] = $websiteAdvisorId;
+            }
         }
 
         $section = Section::create($data);

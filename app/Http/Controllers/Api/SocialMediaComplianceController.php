@@ -93,7 +93,7 @@ class SocialMediaComplianceController extends Controller
         $hub = $this->smcHub($user);
         $this->compliance->assertModuleEnabled($hub);
 
-        $role = (string) $user->role;
+        $role = $this->matrix->effectiveRoleFor($user);
         $canOwn = $this->matrix->roleCan($hub, $role, 'smc_view_own_requests')
             || $this->matrix->roleCan($hub, $role, 'smc_submit_request');
         if (! $canOwn) {
@@ -445,8 +445,10 @@ class SocialMediaComplianceController extends Controller
 
     private function authorizeView($hub, User $user, SocialMediaComplianceRequest $compliance): void
     {
-        $role = (string) $user->role;
-        $isOwner = (int) $compliance->user_id === (int) $user->id;
+        $role = $this->matrix->effectiveRoleFor($user);
+        $subject = $this->actingAdvisors->subjectOrNull($user);
+        $isOwner = (int) $compliance->user_id === (int) $user->id
+            || ($subject && (int) $compliance->user_id === (int) $subject->id);
         $canOwn = $this->matrix->roleCan($hub, $role, 'smc_view_own_requests')
             || $this->matrix->roleCan($hub, $role, 'smc_submit_request');
         $canAll = $this->matrix->roleCan($hub, $role, 'smc_view_all_requests')

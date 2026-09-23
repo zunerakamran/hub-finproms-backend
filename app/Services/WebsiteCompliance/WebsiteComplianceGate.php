@@ -46,7 +46,7 @@ class WebsiteComplianceGate
             return true;
         }
 
-        return $this->matrix->roleCan($hub, (string) $user->role, $wcCapability);
+        return $this->matrix->userCan($hub, $user, $wcCapability);
     }
 
     public function assertCan(User $user, string $wcCapability): void

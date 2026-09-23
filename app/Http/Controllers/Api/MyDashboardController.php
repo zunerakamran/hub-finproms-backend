@@ -24,7 +24,7 @@ class MyDashboardController extends Controller
     {
         $user = $request->user();
         $hub = $this->hubs->current();
-        $role = (string) $user->role;
+        $role = $this->matrix->effectiveRoleFor($user);
 
         if (! $this->matrix->roleHasGeneralDashboardAccess($hub, $role)) {
             return response()->json(['message' => 'Unauthorized.'], 403);

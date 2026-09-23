@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use App\Models\Hub;
 use App\Models\User;
+use App\Services\ActingAdvisorService;
 use App\Services\ActingHubService;
 use App\Services\CapabilitiesMatrixService;
 use App\Services\HubService;
@@ -16,7 +17,8 @@ class EnsureHubCapability
     public function __construct(
         private readonly HubService $hubs,
         private readonly CapabilitiesMatrixService $matrix,
-        private readonly ActingHubService $actingHubs
+        private readonly ActingHubService $actingHubs,
+        private readonly ActingAdvisorService $actingAdvisors
     ) {}
 
     /**
@@ -58,18 +60,20 @@ class EnsureHubCapability
                 return $next($request);
             }
 
-            if ($this->matrix->roleCan($hubForCap, (string) $user->role, $capability)) {
+            if ($this->matrix->userCan($hubForCap, $user, $capability)) {
                 return $next($request);
             }
         }
 
         $failedHub = $this->actingHubs->capabilityHub($user, $capabilities[0]);
+        $effectiveRole = $this->actingAdvisors->effectiveCapabilityRole($user);
 
         return response()->json([
             'message' => 'This capability is disabled for your role on this hub.',
             'capability' => $capabilities[0],
             'capabilities' => $capabilities,
             'role' => $user->role,
+            'effective_role' => $effectiveRole,
             'hub_id' => $failedHub->id,
             'hub_slug' => $failedHub->slug,
         ], 403);

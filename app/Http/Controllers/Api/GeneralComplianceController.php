@@ -93,7 +93,7 @@ class GeneralComplianceController extends Controller
         $hub = $this->gcHub($user);
         $this->compliance->assertModuleEnabled($hub);
 
-        $role = (string) $user->role;
+        $role = $this->matrix->effectiveRoleFor($user);
         $canOwn = $this->matrix->roleCan($hub, $role, 'gc_view_own_requests')
             || $this->matrix->roleCan($hub, $role, 'gc_submit_request');
         if (! $canOwn) {
@@ -457,8 +457,10 @@ class GeneralComplianceController extends Controller
 
     private function authorizeView($hub, User $user, GeneralComplianceRequest $compliance): void
     {
-        $role = (string) $user->role;
-        $isOwner = (int) $compliance->user_id === (int) $user->id;
+        $role = $this->matrix->effectiveRoleFor($user);
+        $subject = $this->actingAdvisors->subjectOrNull($user);
+        $isOwner = (int) $compliance->user_id === (int) $user->id
+            || ($subject && (int) $compliance->user_id === (int) $subject->id);
         $canOwn = $this->matrix->roleCan($hub, $role, 'gc_view_own_requests')
             || $this->matrix->roleCan($hub, $role, 'gc_submit_request');
         $canAll = $this->matrix->roleCan($hub, $role, 'gc_view_all_requests')

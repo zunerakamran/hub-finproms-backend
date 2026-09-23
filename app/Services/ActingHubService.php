@@ -233,7 +233,7 @@ class ActingHubService
     {
         $current = $this->hubs->current();
         $acting = $this->actingHub($user);
-        $role = (string) $user->role;
+        $role = $this->matrix->effectiveRoleFor($user);
 
         $flags = array_keys($acting->resolvedChecklist());
         $effective = [];

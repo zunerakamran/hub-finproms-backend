@@ -677,6 +677,22 @@ class CapabilitiesMatrixService
     }
 
     /**
+     * Matrix role for this user, honouring Admin-staff "act as advisor".
+     */
+    public function effectiveRoleFor(User $user): string
+    {
+        return app(ActingAdvisorService::class)->effectiveCapabilityRole($user);
+    }
+
+    /**
+     * Whether this user currently has a capability (Admin-staff may mirror advisor).
+     */
+    public function userCan(Hub $hub, User $user, string $flag): bool
+    {
+        return $this->roleCan($hub, $this->effectiveRoleFor($user), $flag);
+    }
+
+    /**
      * Whether a user role has a capability on this hub (member/dashboard).
      */
     public function roleCan(Hub $hub, string $role, string $flag): bool

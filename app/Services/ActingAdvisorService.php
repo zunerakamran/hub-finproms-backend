@@ -10,6 +10,11 @@ use Symfony\Component\HttpKernel\Exception\HttpException;
 
 /**
  * Admin-staff "work on behalf of advisor" context (firm-scoped).
+ *
+ * Dropdown eligibility: same firm + advisors with allows_admin_staff_acting.
+ * No selection → act as self with admin_staff Capabilities matrix cells.
+ * With selection → mirror advisor dashboard/website caps; attribute writes
+ * as "{staff} submitted on behalf of {advisor}".
  */
 class ActingAdvisorService
 {
@@ -19,6 +24,50 @@ class ActingAdvisorService
     public function canActOnBehalf(User $user): bool
     {
         return $user->isAdminStaff();
+    }
+
+    /**
+     * Role column used for Capabilities matrix / dashboard gates.
+     * When Admin-staff has selected an advisor, mirror the advisor column.
+     */
+    public function effectiveCapabilityRole(User $actor): string
+    {
+        if (! $this->canActOnBehalf($actor)) {
+            $role = (string) $actor->role;
+
+            return $role === 'admin' ? User::ROLE_CLIENT_ADMIN : $role;
+        }
+
+        $advisor = $this->actingAdvisor($actor);
+        if (! $advisor) {
+            return User::ROLE_ADMIN_STAFF;
+        }
+
+        // Eligible subjects are advisors — always use the advisor matrix column.
+        return User::ROLE_ADVISOR;
+    }
+
+    /**
+     * Advisor id for website / advisor-scoped surfaces (null when not operating as one).
+     */
+    public function websiteAdvisorId(User $actor): ?int
+    {
+        if ($this->canActOnBehalf($actor)) {
+            $advisor = $this->actingAdvisor($actor);
+
+            return $advisor ? (int) $advisor->id : null;
+        }
+
+        if ($actor->isAdvisor()) {
+            return (int) $actor->id;
+        }
+
+        return null;
+    }
+
+    public function isOperatingAsAdvisor(User $actor): bool
+    {
+        return $this->websiteAdvisorId($actor) !== null;
     }
 
     /**
@@ -72,8 +121,8 @@ class ActingAdvisorService
     }
 
     /**
-     * Subject user for compliance / advisor-scoped actions.
-     * Admin-staff must have selected an advisor; everyone else acts as themselves.
+     * Subject user for compliance / advisor-scoped writes.
+     * Admin-staff without a selection act as themselves (matrix-gated).
      */
     public function requireSubject(User $actor): User
     {
@@ -81,26 +130,16 @@ class ActingAdvisorService
             return $actor;
         }
 
-        $advisor = $this->actingAdvisor($actor);
-        if (! $advisor) {
-            throw ValidationException::withMessages([
-                'acting_advisor_id' => 'Select an advisor to work on behalf of before continuing.',
-            ]);
-        }
-
-        return $advisor;
+        return $this->actingAdvisor($actor) ?? $actor;
     }
 
     /**
-     * Subject for "my requests" listing (null for admin-staff with no selection).
+     * Subject for "my requests" / owned listings.
+     * Admin-staff with no selection → themselves (not null / empty queue).
      */
     public function subjectOrNull(User $actor): ?User
     {
-        if (! $this->canActOnBehalf($actor)) {
-            return $actor;
-        }
-
-        return $this->actingAdvisor($actor);
+        return $this->requireSubject($actor);
     }
 
     /**
@@ -215,6 +254,8 @@ class ActingAdvisorService
         return [
             'enabled' => true,
             'role' => User::ROLE_ADMIN_STAFF,
+            'effective_role' => $this->effectiveCapabilityRole($user),
+            'is_acting_as_advisor' => $acting !== null,
             'acting_advisor' => $acting ? [
                 'id' => $acting->id,
                 'name' => $acting->name,

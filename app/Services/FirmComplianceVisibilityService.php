@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Builder;
  * submitted by users of a given firm, based on that firm's visibility settings.
  *
  * Who is firm-scoped:
- * - client_admin, manager, approver, advisor, user (and any other non-control-plane role)
+ * - client_admin, manager, approver, advisor, admin_staff, user (and any other non-control-plane role)
  *   when they have a firm_id — including when they have "view all" capabilities.
  *
  * Who bypasses firm scope (sees everything their capabilities allow):

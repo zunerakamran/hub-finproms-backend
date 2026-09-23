@@ -133,6 +133,15 @@ class WhiteLabelUserService
                 $fill['is_advisor'] = true;
             }
 
+            $role = $fill['role'] ?? $user->role;
+            $isAdvisor = ($role === User::ROLE_ADVISOR)
+                || (bool) ($fill['is_advisor'] ?? $user->is_advisor);
+            if (! $isAdvisor) {
+                $fill['allows_admin_staff_acting'] = false;
+            } elseif (array_key_exists('allows_admin_staff_acting', $fill)) {
+                $fill['allows_admin_staff_acting'] = (bool) $fill['allows_admin_staff_acting'];
+            }
+
             if (array_key_exists('role', $fill) && $fill['role'] !== User::ROLE_ADMIN_STAFF) {
                 $fill['acting_advisor_id'] = null;
             }

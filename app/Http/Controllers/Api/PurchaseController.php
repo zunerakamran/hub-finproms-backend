@@ -258,7 +258,7 @@ class PurchaseController extends Controller
         $user = $request->user();
         $hub = app(\App\Services\HubService::class)->current();
         $matrix = app(\App\Services\CapabilitiesMatrixService::class);
-        $role = (string) $user->role;
+        $role = $matrix->effectiveRoleFor($user);
 
         if (! $matrix->roleCan($hub, $role, 'general_show_purchases')) {
             return response()->json(['message' => 'Unauthorized.'], 403);

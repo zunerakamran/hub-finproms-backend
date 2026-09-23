@@ -8,6 +8,7 @@ use App\Models\WebsiteCompliance\Page;
 use App\Models\WebsiteCompliance\Section;
 use App\Models\WebsiteCompliance\TemplateRequest;
 use App\Services\ActivityLogService;
+use App\Services\ActingAdvisorService;
 use App\Services\WebsiteCompliance\AdvisorSectionService;
 use App\Services\WebsiteCompliance\CpanelSyncService;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
@@ -21,7 +22,8 @@ class TemplateRequestController extends Controller
 {
     public function __construct(
         private readonly WebsiteComplianceGate $gate,
-        private readonly ActivityLogService $activityLogs
+        private readonly ActivityLogService $activityLogs,
+        private readonly ActingAdvisorService $actingAdvisors
     ) {}
 
     private function resolveTemplateName(?string $requested): ?string
@@ -52,7 +54,9 @@ class TemplateRequestController extends Controller
         }
 
         // Managers with "Assign website templates" must pick an advisor on create.
-        $mustAssignAdvisor = ! $user->isAdvisor()
+        // Admin-staff acting as an advisor behave like that advisor (no assign required).
+        $operatingAsAdvisor = $this->actingAdvisors->isOperatingAsAdvisor($user);
+        $mustAssignAdvisor = ! $operatingAsAdvisor
             && $this->gate->can($user, 'wc_assign_website_templates');
 
         $request->validate([
@@ -81,11 +85,15 @@ class TemplateRequestController extends Controller
             ?? ($this->gate->can($user, 'wc_deploy_websites') ? 'hub_main_website' : 'advisor_website');
 
         $tenantUserId = $this->gate->tenantUserIdOrNull($user);
+        $websiteAdvisorId = $this->actingAdvisors->websiteAdvisorId($user);
+        $onBehalfById = $websiteAdvisorId && $this->actingAdvisors->canActOnBehalf($user)
+            ? (int) $user->id
+            : null;
 
         // Persist the pending request only. Hub sections are created on deploy
         // (same path for advisor self-request and manager-assigned deployments).
         $templateRequest = TemplateRequest::create([
-            'advisor_id' => $user->isAdvisor() ? $tenantUserId : null,
+            'advisor_id' => $operatingAsAdvisor ? ($websiteAdvisorId ?? $tenantUserId) : null,
             'requested_by_id' => $tenantUserId,
             'template_name' => $templateName,
             'request_type' => $requestType,
@@ -102,7 +110,8 @@ class TemplateRequestController extends Controller
 
         $this->activityLogs->log([
             'action' => 'wc.template_request.submit',
-            'description' => "Requested template ({$templateRequest->template_name}) deployment [{$requestType}] for domain: ".$request->domain_name,
+            'description' => "Requested template ({$templateRequest->template_name}) deployment [{$requestType}] for domain: ".$request->domain_name
+                .($onBehalfById && $websiteAdvisorId ? ' on behalf of user #'.$websiteAdvisorId : ''),
             'user' => $user,
             'subject' => $templateRequest,
             'request' => $request,
@@ -125,19 +134,25 @@ class TemplateRequestController extends Controller
             $this->gate->can($user, 'wc_request_deployments')
             || $this->gate->can($user, 'wc_assign_website_templates')
         ) {
+            $scopeId = $this->actingAdvisors->websiteAdvisorId($user) ?? (int) $user->id;
             $requests = $query
-                ->where(function ($q) use ($user) {
-                    $q->where('advisor_id', $user->id)
-                        ->orWhere('assigned_advisor_id', $user->id)
+                ->where(function ($q) use ($user, $scopeId) {
+                    $q->where('advisor_id', $scopeId)
+                        ->orWhere('assigned_advisor_id', $scopeId)
                         ->orWhere('requested_by_id', $user->id);
+                    if ($scopeId !== (int) $user->id) {
+                        $q->orWhere('advisor_id', $user->id)
+                            ->orWhere('assigned_advisor_id', $user->id);
+                    }
                 })
                 ->latest()
                 ->get();
         } else {
+            $scopeId = $this->actingAdvisors->websiteAdvisorId($user) ?? (int) $user->id;
             $requests = $query
-                ->where(function ($q) use ($user) {
-                    $q->where('advisor_id', $user->id)
-                        ->orWhere('assigned_advisor_id', $user->id);
+                ->where(function ($q) use ($scopeId) {
+                    $q->where('advisor_id', $scopeId)
+                        ->orWhere('assigned_advisor_id', $scopeId);
                 })
                 ->latest()
                 ->get();
@@ -303,9 +318,10 @@ class TemplateRequestController extends Controller
 
         $isPowerAdminAccess = $this->gate->can($user, 'wc_manage_deployment_sections')
             || $this->gate->can($user, 'wc_publish_live_content');
-        $isOwnerAdvisor = $user->isAdvisor() && (
-            (int) ($templateRequest->advisor_id ?? 0) === (int) $user->id
-            || (int) ($templateRequest->assigned_advisor_id ?? 0) === (int) $user->id
+        $websiteAdvisorId = $this->actingAdvisors->websiteAdvisorId($user);
+        $isOwnerAdvisor = $websiteAdvisorId && (
+            (int) ($templateRequest->advisor_id ?? 0) === (int) $websiteAdvisorId
+            || (int) ($templateRequest->assigned_advisor_id ?? 0) === (int) $websiteAdvisorId
         );
 
         if (! $isPowerAdminAccess && ! $isOwnerAdvisor) {
