@@ -128,7 +128,9 @@ class TemplateRequestController extends Controller
         $query = TemplateRequest::with($this->requestRelations());
 
         // Control-plane operators (and anyone with view-all) see every deployment on the acting hub.
-        if ($this->gate->can($user, 'wc_view_all_deployments') || $this->gate->isRemoteControlPlaneOperator($user)) {
+        if ($this->gate->can($user, 'wc_view_all_deployments')
+            || $this->gate->can($user, 'wc_publish_live_content')
+            || $this->gate->isRemoteControlPlaneOperator($user)) {
             $requests = $query->latest()->get();
         } elseif (
             $this->gate->can($user, 'wc_request_deployments')
