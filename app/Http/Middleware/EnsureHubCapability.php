@@ -93,8 +93,18 @@ class EnsureHubCapability
             return false;
         }
 
-        if (! Hub::isWebsiteComplianceCapability($capability) && $capability !== 'module_website_compliance') {
+        if (! Hub::isWebsiteComplianceCapability($capability)
+            && ! Hub::isWebsiteTemplateLibraryCapability($capability)
+            && $capability !== 'module_website_compliance'
+            && $capability !== 'module_website_template_library'
+        ) {
             return false;
+        }
+
+        if (Hub::isWebsiteTemplateLibraryCapability($capability)
+            || $capability === 'module_website_template_library'
+        ) {
+            return $hubForCap->hasWebsiteTemplateLibraryModule();
         }
 
         return $hubForCap->hasWebsiteComplianceModule();

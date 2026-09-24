@@ -71,6 +71,7 @@ class CapabilitiesMatrixService
             || $group === Hub::GROUP_GENERAL
             || $group === Hub::GROUP_SOCIAL_MEDIA_COMPLIANCE
             || $group === Hub::GROUP_GENERAL_COMPLIANCE
+            || $group === Hub::GROUP_WEBSITE_TEMPLATE_LIBRARY
             || $group === Hub::GROUP_WEBSITE_COMPLIANCE
         ) {
             // User-facing / compliance caps apply to every role column so Power Admin
@@ -161,6 +162,8 @@ class CapabilitiesMatrixService
         $smcModuleOn = $hub->hasSocialMediaComplianceModule();
         $gcModuleOn = $hub->hasGeneralComplianceModule();
         $wcModuleOn = $hub->hasWebsiteComplianceModule();
+        $wtlModuleOn = $hub->hasWebsiteTemplateLibraryModule();
+        $smtlModuleOn = $hub->hasSocialMediaTemplateLibraryModule();
 
         $groupSort = [];
         foreach (Hub::MATRIX_GROUP_ORDER as $index => $groupKey) {
@@ -182,18 +185,26 @@ class CapabilitiesMatrixService
             $requiresSmcModule = Hub::isSocialMediaComplianceCapability($key);
             $requiresGcModule = Hub::isGeneralComplianceCapability($key);
             $requiresWcModule = Hub::isWebsiteComplianceCapability($key);
+            $requiresWtlModule = Hub::isWebsiteTemplateLibraryCapability($key);
+            $requiresSmtlModule = Hub::isSocialMediaTemplateLibraryCapability($key);
             $inactive = ($requiresPrivate && $publicMode)
                 || ($requiresPublic && $privateMode)
                 || ($requiresSmcModule && ! $smcModuleOn)
                 || ($requiresGcModule && ! $gcModuleOn)
-                || ($requiresWcModule && ! $wcModuleOn);
+                || ($requiresWcModule && ! $wcModuleOn)
+                || ($requiresWtlModule && ! $wtlModuleOn)
+                || ($requiresSmtlModule && ! $smtlModuleOn);
 
             $inactiveReason = null;
             if ($inactive) {
-                if ($requiresSmcModule && ! $smcModuleOn) {
+                if ($requiresSmtlModule && ! $smtlModuleOn) {
+                    $inactiveReason = 'module_social_media_template_library_off';
+                } elseif ($requiresSmcModule && ! $smcModuleOn) {
                     $inactiveReason = 'module_social_media_compliance_off';
                 } elseif ($requiresGcModule && ! $gcModuleOn) {
                     $inactiveReason = 'module_general_compliance_off';
+                } elseif ($requiresWtlModule && ! $wtlModuleOn) {
+                    $inactiveReason = 'module_website_template_library_off';
                 } elseif ($requiresWcModule && ! $wcModuleOn) {
                     $inactiveReason = 'module_website_compliance_off';
                 } elseif ($requiresPrivate) {
@@ -227,10 +238,14 @@ class CapabilitiesMatrixService
             }
 
             $requiresModule = null;
-            if ($requiresSmcModule) {
+            if ($requiresSmtlModule) {
+                $requiresModule = 'module_social_media_template_library';
+            } elseif ($requiresSmcModule) {
                 $requiresModule = 'module_social_media_compliance';
             } elseif ($requiresGcModule) {
                 $requiresModule = 'module_general_compliance';
+            } elseif ($requiresWtlModule) {
+                $requiresModule = 'module_website_template_library';
             } elseif ($requiresWcModule) {
                 $requiresModule = 'module_website_compliance';
             }
@@ -280,7 +295,10 @@ class CapabilitiesMatrixService
                 'type' => $hub->type,
                 'private_invite_only' => $privateMode,
                 'public_subscribe' => $publicMode,
+                'module_white_label_hub' => $hub->hasWhiteLabelHubModule(),
+                'module_social_media_template_library' => $smtlModuleOn,
                 'module_social_media_compliance' => $smcModuleOn,
+                'module_website_template_library' => $wtlModuleOn,
                 'module_website_compliance' => $wcModuleOn,
                 'module_general_compliance' => $gcModuleOn,
             ],
@@ -292,8 +310,10 @@ class CapabilitiesMatrixService
             'private_capability_keys' => Hub::PRIVATE_CAPABILITY_KEYS,
             'public_capability_keys' => Hub::PUBLIC_CAPABILITY_KEYS,
             'group_order' => $groupOrder,
+            'social_media_template_library_capability_keys' => Hub::SOCIAL_MEDIA_TEMPLATE_LIBRARY_CAPABILITY_KEYS,
             'social_media_compliance_capability_keys' => Hub::SOCIAL_MEDIA_COMPLIANCE_CAPABILITY_KEYS,
             'general_compliance_capability_keys' => Hub::GENERAL_COMPLIANCE_CAPABILITY_KEYS,
+            'website_template_library_capability_keys' => Hub::WEBSITE_TEMPLATE_LIBRARY_CAPABILITY_KEYS,
             'website_compliance_capability_keys' => Hub::WEBSITE_COMPLIANCE_CAPABILITY_KEYS,
             'module_keys' => Hub::MODULE_KEYS,
             'roles' => $roles,
@@ -713,17 +733,27 @@ class CapabilitiesMatrixService
             return false;
         }
 
-        // Social Media Compliance caps are inactive while the module is off.
+        // Social Media Template Library caps are inactive while the module is off.
+        if (Hub::isSocialMediaTemplateLibraryCapability($flag) && ! $hub->hasSocialMediaTemplateLibraryModule()) {
+            return false;
+        }
+
+        // Social Media Pre Approval caps are inactive while the module is off.
         if (Hub::isSocialMediaComplianceCapability($flag) && ! $hub->hasSocialMediaComplianceModule()) {
             return false;
         }
 
-        // General Compliance caps are inactive while the module is off.
+        // Generic Content Pre Approval caps are inactive while the module is off.
         if (Hub::isGeneralComplianceCapability($flag) && ! $hub->hasGeneralComplianceModule()) {
             return false;
         }
 
-        // Website Compliance caps are inactive while the module is off.
+        // Website Template Library caps are inactive while the module is off.
+        if (Hub::isWebsiteTemplateLibraryCapability($flag) && ! $hub->hasWebsiteTemplateLibraryModule()) {
+            return false;
+        }
+
+        // Website Content Pre Approval caps are inactive while the module is off.
         if (Hub::isWebsiteComplianceCapability($flag) && ! $hub->hasWebsiteComplianceModule()) {
             return false;
         }

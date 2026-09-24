@@ -19,24 +19,48 @@ class WebsiteComplianceGate
         private readonly HubService $hubs
     ) {}
 
-    public function assertModuleEnabled(User $user): Hub
+    public function assertModuleEnabled(User $user, ?string $wcCapability = null): Hub
     {
-        $hub = $this->actingHubs->capabilityHub($user, 'wc_edit_sections');
+        $capability = $wcCapability ?: 'wc_edit_sections';
+        $hub = $this->actingHubs->capabilityHub($user, $capability);
 
-        if (! $hub->hasWebsiteComplianceModule()) {
+        if ($wcCapability === null) {
+            if (! $hub->hasWebsiteComplianceModule() && ! $hub->hasWebsiteTemplateLibraryModule()) {
+                throw ValidationException::withMessages([
+                    'module' => 'Website Template Library / Content Pre Approval is not enabled for this hub.',
+                ]);
+            }
+
+            return $hub;
+        }
+
+        if (! $this->moduleEnabledFor($hub, $wcCapability)) {
+            $label = Hub::isWebsiteTemplateLibraryCapability($wcCapability)
+                ? 'Website Template Library'
+                : 'Website Content Pre Approval';
+
             throw ValidationException::withMessages([
-                'module' => 'Website Compliance is not enabled for this hub.',
+                'module' => $label.' is not enabled for this hub.',
             ]);
         }
 
         return $hub;
     }
 
+    public function moduleEnabledFor(Hub $hub, string $wcCapability): bool
+    {
+        if (Hub::isWebsiteTemplateLibraryCapability($wcCapability)) {
+            return $hub->hasWebsiteTemplateLibraryModule();
+        }
+
+        return $hub->hasWebsiteComplianceModule();
+    }
+
     public function can(User $user, string $wcCapability): bool
     {
         $hub = $this->actingHubs->capabilityHub($user, $wcCapability);
 
-        if (! $hub->hasWebsiteComplianceModule()) {
+        if (! $this->moduleEnabledFor($hub, $wcCapability)) {
             return false;
         }
 
@@ -51,7 +75,7 @@ class WebsiteComplianceGate
 
     public function assertCan(User $user, string $wcCapability): void
     {
-        $this->assertModuleEnabled($user);
+        $this->assertModuleEnabled($user, $wcCapability);
 
         if (! $this->can($user, $wcCapability)) {
             throw new HttpException(403, 'This capability is disabled for your role on this hub.');

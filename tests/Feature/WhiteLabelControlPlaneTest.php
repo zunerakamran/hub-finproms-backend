@@ -257,6 +257,7 @@ class WhiteLabelControlPlaneTest extends TestCase
 
         $checklist = $hub->resolvedChecklist();
         $checklist['module_website_compliance'] = true;
+        $checklist['module_website_template_library'] = true;
         $checklist['wc_manage_templates'] = true;
         $checklist['wc_view_all_deployments'] = true;
         $roleCaps = is_array($hub->role_capabilities) ? $hub->role_capabilities : [];
@@ -316,6 +317,7 @@ class WhiteLabelControlPlaneTest extends TestCase
 
         $checklist = $hub->resolvedChecklist();
         $checklist['module_website_compliance'] = true;
+        $checklist['module_website_template_library'] = true;
         $hub->forceFill(['checklist' => $checklist])->save();
 
         $remote = app(WhiteLabelDatabaseService::class);
@@ -374,6 +376,7 @@ class WhiteLabelControlPlaneTest extends TestCase
 
         $checklist = $hub->resolvedChecklist();
         $checklist['module_website_compliance'] = true;
+        $checklist['module_website_template_library'] = true;
         $hub->forceFill(['checklist' => $checklist])->save();
 
         $remote = app(WhiteLabelDatabaseService::class);

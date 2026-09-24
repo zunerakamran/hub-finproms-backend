@@ -38,6 +38,8 @@ class Hub extends Model
 
     public const GROUP_WEBSITE_COMPLIANCE = 'website_compliance';
 
+    public const GROUP_WEBSITE_TEMPLATE_LIBRARY = 'website_template_library';
+
     /**
      * Default display labels for compliance statuses (snake_case keys).
      * Used by SMC / GC / WC — DB may store Title Case (SMC/GC) or snake_case (WC).
@@ -68,9 +70,10 @@ class Hub extends Model
         self::GROUP_DASHBOARD_HUB => 'Hub operations',
         self::GROUP_DASHBOARD => 'Hub-admin dashboard',
         self::GROUP_ADMIN_EMAILS => 'Admin emails',
-        self::GROUP_SOCIAL_MEDIA_COMPLIANCE => 'Social Media Compliance',
-        self::GROUP_GENERAL_COMPLIANCE => 'General Compliance',
-        self::GROUP_WEBSITE_COMPLIANCE => 'Website Compliance',
+        self::GROUP_SOCIAL_MEDIA_COMPLIANCE => 'Social Media Pre Approval',
+        self::GROUP_GENERAL_COMPLIANCE => 'Generic Content Pre Approval',
+        self::GROUP_WEBSITE_TEMPLATE_LIBRARY => 'Website Template Library',
+        self::GROUP_WEBSITE_COMPLIANCE => 'Website Content Pre Approval',
     ];
 
     /**
@@ -88,6 +91,7 @@ class Hub extends Model
         self::GROUP_ADMIN_EMAILS,
         self::GROUP_SOCIAL_MEDIA_COMPLIANCE,
         self::GROUP_GENERAL_COMPLIANCE,
+        self::GROUP_WEBSITE_TEMPLATE_LIBRARY,
         self::GROUP_WEBSITE_COMPLIANCE,
     ];
 
@@ -129,6 +133,7 @@ class Hub extends Model
         self::GROUP_ADMIN_EMAILS,
         self::GROUP_SOCIAL_MEDIA_COMPLIANCE,
         self::GROUP_GENERAL_COMPLIANCE,
+        self::GROUP_WEBSITE_TEMPLATE_LIBRARY,
         self::GROUP_WEBSITE_COMPLIANCE,
     ];
 
@@ -138,18 +143,60 @@ class Hub extends Model
     }
 
     /**
-     * Hub module functionality keys (enabled per hub on the Modules checklist).
+     * Hub module functionality keys (enabled per hub on the Modules page).
      *
      * @var list<string>
      */
     public const MODULE_KEYS = [
+        'module_white_label_hub',
+        'module_social_media_template_library',
         'module_social_media_compliance',
+        'module_website_template_library',
         'module_website_compliance',
         'module_general_compliance',
     ];
 
     /**
-     * Social Media Compliance capabilities — inactive/blurred while the module is off.
+     * Modules that cannot be toggled — state is derived from hub type.
+     *
+     * @var list<string>
+     */
+    public const LOCKED_MODULE_KEYS = [
+        'module_white_label_hub',
+    ];
+
+    /**
+     * Functionalities that require Social Media Template Library.
+     * Inactive / forced off while that module is disabled.
+     *
+     * @var list<string>
+     */
+    public const SOCIAL_MEDIA_TEMPLATE_LIBRARY_FUNCTIONALITY_KEYS = [
+        'one_off_purchase',
+        'receive_content_from_shared',
+    ];
+
+    /**
+     * Capabilities that require Social Media Template Library (posts catalog / buying).
+     *
+     * @var list<string>
+     */
+    public const SOCIAL_MEDIA_TEMPLATE_LIBRARY_CAPABILITY_KEYS = [
+        'member_browse_catalog',
+        'member_purchase_content',
+        'member_download_content',
+        'member_in_app_edit',
+        'general_show_purchases',
+        'dashboard_manage_posts',
+        'dashboard_manage_bundles',
+        'dashboard_manage_types',
+        'dashboard_manage_categories',
+        'dashboard_manage_tags',
+        'dashboard_ai_content',
+    ];
+
+    /**
+     * Social Media Pre Approval (compliance) capabilities — inactive while the module is off.
      *
      * @var list<string>
      */
@@ -164,7 +211,7 @@ class Hub extends Model
     ];
 
     /**
-     * General Compliance capabilities — inactive/blurred while the module is off.
+     * Generic Content Pre Approval capabilities — inactive while the module is off.
      *
      * @var list<string>
      */
@@ -179,8 +226,20 @@ class Hub extends Model
     ];
 
     /**
-     * Website Compliance capabilities — inactive/blurred while the module is off.
-     * Mapped from the former content-flow PermissionCatalog (hub-owned user/role caps omitted).
+     * Website Template Library (showcase) capabilities — inactive while the module is off.
+     *
+     * @var list<string>
+     */
+    public const WEBSITE_TEMPLATE_LIBRARY_CAPABILITY_KEYS = [
+        'wc_manage_templates',
+        'wc_request_deployments',
+        'wc_assign_website_templates',
+        'wc_view_all_deployments',
+        'wc_deploy_websites',
+    ];
+
+    /**
+     * Website Content Pre Approval capabilities — inactive while the module is off.
      *
      * @var list<string>
      */
@@ -191,11 +250,6 @@ class Hub extends Model
         'wc_view_all_change_requests',
         'wc_review_change_requests',
         'wc_change_request_status',
-        'wc_request_deployments',
-        'wc_assign_website_templates',
-        'wc_view_all_deployments',
-        'wc_deploy_websites',
-        'wc_manage_templates',
         'wc_manage_deployment_sections',
         'wc_publish_live_content',
         'wc_view_activity_logs',
@@ -311,24 +365,45 @@ class Hub extends Model
             'default_white_label' => true,
         ],
 
-        // --- Modules (hub checklist) ---
+        // --- Modules (hub Modules page) ---
+        'module_white_label_hub' => [
+            'label' => 'White Label Hub',
+            'description' => 'White-labelled hub product packaging. Always on for white-labelled hubs; always off (and locked) on the shared hub.',
+            'group' => self::GROUP_MODULES,
+            'default_shared' => false,
+            'default_white_label' => true,
+        ],
+        'module_social_media_template_library' => [
+            'label' => 'Social Media Template Library',
+            'description' => 'Enable the posts / reels catalog, purchasing, and content-management tools. Related functionalities and capabilities stay inactive while this module is off.',
+            'group' => self::GROUP_MODULES,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
         'module_social_media_compliance' => [
-            'label' => 'Social Media Compliance',
-            'description' => 'Enable social media post compliance workflow on this hub. Related capabilities are blurred until this module is on.',
+            'label' => 'Social Media Pre Approval Workflow',
+            'description' => 'Enable social media post pre-approval / compliance workflow on this hub. Related capabilities are blurred until this module is on.',
+            'group' => self::GROUP_MODULES,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'module_website_template_library' => [
+            'label' => 'Website Template Library',
+            'description' => 'Enable the website showcase template library, deployment requests, and template assignment on this hub. Related capabilities are blurred until this module is on.',
             'group' => self::GROUP_MODULES,
             'default_shared' => false,
             'default_white_label' => false,
         ],
         'module_website_compliance' => [
-            'label' => 'Website Compliance',
-            'description' => 'Enable website templates, section editing, change-request approval, and cPanel deployment on this hub. Related capabilities are blurred until this module is on.',
+            'label' => 'Website Content Pre Approval Workflow',
+            'description' => 'Enable website content pre-approval (section editing, change requests, and publish workflow) on this hub. Related capabilities are blurred until this module is on.',
             'group' => self::GROUP_MODULES,
             'default_shared' => false,
             'default_white_label' => false,
         ],
         'module_general_compliance' => [
-            'label' => 'General Compliance',
-            'description' => 'Enable general compliance workflow on this hub (free-form description + file attachments). Related capabilities are blurred until this module is on.',
+            'label' => 'Generic Content Pre Approval Workflow',
+            'description' => 'Enable generic content pre-approval workflow on this hub (free-form description + file attachments). Related capabilities are blurred until this module is on.',
             'group' => self::GROUP_MODULES,
             'default_shared' => false,
             'default_white_label' => false,
@@ -515,7 +590,7 @@ class Hub extends Model
         ],
         'dashboard_manage_compliance_status_display_names' => [
             'label' => 'Set compliance status display names',
-            'description' => 'Customize how compliance statuses appear (Pending, Approved, Rejected, Approved with Feedback, and related WC statuses) across Social Media, General, and Website Compliance.',
+            'description' => 'Customize how compliance statuses appear (Pending, Approved, Rejected, Approved with Feedback, and related WC statuses) across Social Media, Generic Content, and Website pre-approval workflows.',
             'group' => self::GROUP_DASHBOARD_HUB,
             'default_shared' => true,
             'default_white_label' => true,
@@ -550,7 +625,7 @@ class Hub extends Model
         ],
         'dashboard_manage_modules' => [
             'label' => 'Manage hub modules',
-            'description' => 'Enable or disable product modules for this hub (Social Media, General, and Website Compliance). Related capability sections stay blurred while a module is off.',
+            'description' => 'Enable or disable product modules for this hub (White Label, Social Media / Website template libraries, and pre-approval workflows). Related capability sections stay blurred while a module is off.',
             'group' => self::GROUP_DASHBOARD_HUB,
             'default_shared' => true,
             'default_white_label' => true,
@@ -572,7 +647,7 @@ class Hub extends Model
             'default_white_label' => true,
         ],
 
-        // --- Social Media Compliance (blurred while module_social_media_compliance is off) ---
+        // --- Social Media Pre Approval (blurred while module_social_media_compliance is off) ---
         'smc_submit_request' => [
             'label' => 'Submit social media compliance requests',
             'description' => 'Submit a purchased post for social media compliance review (and resubmit after rejection / confirm after approved-with-feedback).',
@@ -623,7 +698,7 @@ class Hub extends Model
             'default_white_label' => false,
         ],
 
-        // --- General Compliance (blurred while module_general_compliance is off) ---
+        // --- Generic Content Pre Approval (blurred while module_general_compliance is off) ---
         'gc_submit_request' => [
             'label' => 'Submit general compliance requests',
             'description' => 'Submit a free-form general compliance request with description and file attachments (and resubmit after rejection / confirm after approved-with-feedback).',
@@ -674,7 +749,44 @@ class Hub extends Model
             'default_white_label' => false,
         ],
 
-        // --- Website Compliance (blurred while module_website_compliance is off) ---
+        // --- Website Template Library (blurred while module_website_template_library is off) ---
+        'wc_manage_templates' => [
+            'label' => 'Manage website templates',
+            'description' => 'Create, edit, and delete showcase templates.',
+            'group' => self::GROUP_WEBSITE_TEMPLATE_LIBRARY,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'wc_request_deployments' => [
+            'label' => 'Request website deployments',
+            'description' => 'Request a new showcase / advisor site deployment from a template (self-serve).',
+            'group' => self::GROUP_WEBSITE_TEMPLATE_LIBRARY,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'wc_assign_website_templates' => [
+            'label' => 'Assign website templates',
+            'description' => 'Request showcase site deployments and assign them to advisors for content editing.',
+            'group' => self::GROUP_WEBSITE_TEMPLATE_LIBRARY,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'wc_view_all_deployments' => [
+            'label' => 'View all website deployments',
+            'description' => 'See all deployment requests (list only; does not allow requesting or deploying).',
+            'group' => self::GROUP_WEBSITE_TEMPLATE_LIBRARY,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'wc_deploy_websites' => [
+            'label' => 'Deploy websites to cPanel',
+            'description' => 'Deploy or update advisor sites on cPanel with domain and database credentials.',
+            'group' => self::GROUP_WEBSITE_TEMPLATE_LIBRARY,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+
+        // --- Website Content Pre Approval (blurred while module_website_compliance is off) ---
         'wc_edit_sections' => [
             'label' => 'Edit website sections',
             'description' => 'Lock and edit website section content on a deployed template.',
@@ -713,41 +825,6 @@ class Hub extends Model
         'wc_change_request_status' => [
             'label' => 'Change website compliance request status',
             'description' => 'Override a change request’s status by creating a new version with an optional comment (typically for managers). Not allowed once content is scheduled or published. Respects firm visibility.',
-            'group' => self::GROUP_WEBSITE_COMPLIANCE,
-            'default_shared' => false,
-            'default_white_label' => false,
-        ],
-        'wc_request_deployments' => [
-            'label' => 'Request website deployments',
-            'description' => 'Request a new showcase / advisor site deployment from a template (self-serve).',
-            'group' => self::GROUP_WEBSITE_COMPLIANCE,
-            'default_shared' => false,
-            'default_white_label' => false,
-        ],
-        'wc_assign_website_templates' => [
-            'label' => 'Assign website templates',
-            'description' => 'Request showcase site deployments and assign them to advisors for content editing.',
-            'group' => self::GROUP_WEBSITE_COMPLIANCE,
-            'default_shared' => false,
-            'default_white_label' => false,
-        ],
-        'wc_view_all_deployments' => [
-            'label' => 'View all website deployments',
-            'description' => 'See all deployment requests (list only; does not allow requesting or deploying).',
-            'group' => self::GROUP_WEBSITE_COMPLIANCE,
-            'default_shared' => false,
-            'default_white_label' => false,
-        ],
-        'wc_deploy_websites' => [
-            'label' => 'Deploy websites to cPanel',
-            'description' => 'Deploy or update advisor sites on cPanel with domain and database credentials.',
-            'group' => self::GROUP_WEBSITE_COMPLIANCE,
-            'default_shared' => false,
-            'default_white_label' => false,
-        ],
-        'wc_manage_templates' => [
-            'label' => 'Manage website templates',
-            'description' => 'Create, edit, and delete showcase templates.',
             'group' => self::GROUP_WEBSITE_COMPLIANCE,
             'default_shared' => false,
             'default_white_label' => false,
@@ -959,10 +1036,31 @@ class Hub extends Model
             || ((self::CHECKLIST_DEFINITIONS[$key]['group'] ?? null) === self::GROUP_GENERAL_COMPLIANCE);
     }
 
+    public static function isWebsiteTemplateLibraryCapability(string $key): bool
+    {
+        return in_array($key, self::WEBSITE_TEMPLATE_LIBRARY_CAPABILITY_KEYS, true)
+            || ((self::CHECKLIST_DEFINITIONS[$key]['group'] ?? null) === self::GROUP_WEBSITE_TEMPLATE_LIBRARY);
+    }
+
     public static function isWebsiteComplianceCapability(string $key): bool
     {
         return in_array($key, self::WEBSITE_COMPLIANCE_CAPABILITY_KEYS, true)
             || ((self::CHECKLIST_DEFINITIONS[$key]['group'] ?? null) === self::GROUP_WEBSITE_COMPLIANCE);
+    }
+
+    public static function isSocialMediaTemplateLibraryCapability(string $key): bool
+    {
+        return in_array($key, self::SOCIAL_MEDIA_TEMPLATE_LIBRARY_CAPABILITY_KEYS, true);
+    }
+
+    public static function isSocialMediaTemplateLibraryFunctionality(string $key): bool
+    {
+        return in_array($key, self::SOCIAL_MEDIA_TEMPLATE_LIBRARY_FUNCTIONALITY_KEYS, true);
+    }
+
+    public static function isLockedModuleKey(string $key): bool
+    {
+        return in_array($key, self::LOCKED_MODULE_KEYS, true);
     }
 
     public static function isModuleKey(string $key): bool
@@ -971,19 +1069,34 @@ class Hub extends Model
             || ((self::CHECKLIST_DEFINITIONS[$key]['group'] ?? null) === self::GROUP_MODULES);
     }
 
+    public function hasWhiteLabelHubModule(): bool
+    {
+        return $this->isWhiteLabel();
+    }
+
+    public function hasSocialMediaTemplateLibraryModule(): bool
+    {
+        return (bool) ($this->resolvedChecklist()['module_social_media_template_library'] ?? false);
+    }
+
     public function hasSocialMediaComplianceModule(): bool
     {
-        return $this->can('module_social_media_compliance');
+        return (bool) ($this->resolvedChecklist()['module_social_media_compliance'] ?? false);
     }
 
     public function hasGeneralComplianceModule(): bool
     {
-        return $this->can('module_general_compliance');
+        return (bool) ($this->resolvedChecklist()['module_general_compliance'] ?? false);
+    }
+
+    public function hasWebsiteTemplateLibraryModule(): bool
+    {
+        return (bool) ($this->resolvedChecklist()['module_website_template_library'] ?? false);
     }
 
     public function hasWebsiteComplianceModule(): bool
     {
-        return $this->can('module_website_compliance');
+        return (bool) ($this->resolvedChecklist()['module_website_compliance'] ?? false);
     }
 
     /**
@@ -997,6 +1110,8 @@ class Hub extends Model
         foreach (self::CHECKLIST_DEFINITIONS as $flag => $meta) {
             $defaults[$flag] = (bool) $meta[$key];
         }
+
+        $defaults['module_white_label_hub'] = $type === self::TYPE_WHITE_LABEL;
 
         return $defaults;
     }
@@ -1016,6 +1131,9 @@ class Hub extends Model
             }
         }
 
+        // White Label Hub is type-locked: never toggleable from stored checklist.
+        $resolved['module_white_label_hub'] = $this->isWhiteLabel();
+
         return $resolved;
     }
 
@@ -1023,7 +1141,23 @@ class Hub extends Model
     {
         $checklist = $this->resolvedChecklist();
 
-        return (bool) ($checklist[$flag] ?? false);
+        if ($flag === 'module_white_label_hub') {
+            return $this->isWhiteLabel();
+        }
+
+        $enabled = (bool) ($checklist[$flag] ?? false);
+        if (! $enabled) {
+            return false;
+        }
+
+        // Posts-library related functionalities stay off while the library module is off.
+        if (self::isSocialMediaTemplateLibraryFunctionality($flag)
+            && ! ($checklist['module_social_media_template_library'] ?? false)
+        ) {
+            return false;
+        }
+
+        return true;
     }
 
     public static function isFunctionalityKey(string $key): bool
@@ -1043,11 +1177,12 @@ class Hub extends Model
     /**
      * Admin hub-checklist payload: Functionalities only (not user capabilities).
      *
-     * @return list<array{key: string, label: string, description: string, group: string, group_label: string, enabled: bool, exclusive_with: ?string}>
+     * @return list<array{key: string, label: string, description: string, group: string, group_label: string, enabled: bool, exclusive_with: ?string, requires_module: ?string, inactive: bool, locked: bool}>
      */
     public function checklistForAdmin(): array
     {
         $resolved = $this->resolvedChecklist();
+        $smtlOn = (bool) ($resolved['module_social_media_template_library'] ?? false);
         $items = [];
 
         foreach (self::CHECKLIST_DEFINITIONS as $key => $meta) {
@@ -1055,14 +1190,31 @@ class Hub extends Model
             if (! in_array($group, self::FUNCTIONALITY_GROUPS, true)) {
                 continue;
             }
+
+            $requiresModule = null;
+            $inactive = false;
+            $locked = self::isLockedModuleKey($key);
+
+            if (self::isSocialMediaTemplateLibraryFunctionality($key)) {
+                $requiresModule = 'module_social_media_template_library';
+                $inactive = ! $smtlOn;
+            }
+
+            if ($key === 'module_white_label_hub') {
+                $locked = true;
+            }
+
             $items[] = [
                 'key' => $key,
                 'label' => $meta['label'],
                 'description' => $meta['description'],
                 'group' => $group,
                 'group_label' => self::CHECKLIST_GROUPS[$group] ?? $group,
-                'enabled' => (bool) ($resolved[$key] ?? false),
+                'enabled' => $inactive ? false : (bool) ($resolved[$key] ?? false),
                 'exclusive_with' => self::CHECKLIST_OPPOSITES[$key] ?? null,
+                'requires_module' => $requiresModule,
+                'inactive' => $inactive,
+                'locked' => $locked,
             ];
         }
 

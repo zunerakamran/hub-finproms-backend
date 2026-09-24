@@ -65,6 +65,14 @@ class HubService
             }
         }
 
+        $clean['module_white_label_hub'] = $type === Hub::TYPE_WHITE_LABEL;
+
+        if (! ($clean['module_social_media_template_library'] ?? false)) {
+            foreach (Hub::SOCIAL_MEDIA_TEMPLATE_LIBRARY_FUNCTIONALITY_KEYS as $funcKey) {
+                $clean[$funcKey] = false;
+            }
+        }
+
         return $this->applyExclusivity($clean, array_keys($input));
     }
 
@@ -79,8 +87,19 @@ class HubService
         $current = $hub->resolvedChecklist();
 
         foreach (array_keys(Hub::CHECKLIST_DEFINITIONS) as $key) {
+            if (Hub::isLockedModuleKey($key)) {
+                continue;
+            }
             if (array_key_exists($key, $partial)) {
                 $current[$key] = filter_var($partial[$key], FILTER_VALIDATE_BOOLEAN);
+            }
+        }
+
+        $current['module_white_label_hub'] = $hub->isWhiteLabel();
+
+        if (! ($current['module_social_media_template_library'] ?? false)) {
+            foreach (Hub::SOCIAL_MEDIA_TEMPLATE_LIBRARY_FUNCTIONALITY_KEYS as $funcKey) {
+                $current[$funcKey] = false;
             }
         }
 

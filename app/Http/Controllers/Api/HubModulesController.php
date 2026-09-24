@@ -60,13 +60,23 @@ class HubModulesController extends Controller
 
         $checklist = $hub->resolvedChecklist();
         foreach (Hub::MODULE_KEYS as $key) {
+            if (Hub::isLockedModuleKey($key)) {
+                continue;
+            }
             if (array_key_exists($key, $input)) {
                 $checklist[$key] = (bool) $input[$key];
             }
         }
 
-        // Future modules stay off until implemented.
-        // (Website Compliance is now available.)
+        // Type-locked: shared = off, white-label = on.
+        $checklist['module_white_label_hub'] = $hub->isWhiteLabel();
+
+        // Turning off the posts library disables related functionalities.
+        if (! ($checklist['module_social_media_template_library'] ?? false)) {
+            foreach (Hub::SOCIAL_MEDIA_TEMPLATE_LIBRARY_FUNCTIONALITY_KEYS as $funcKey) {
+                $checklist[$funcKey] = false;
+            }
+        }
 
         $hub->checklist = $checklist;
         $hub->save();
@@ -139,7 +149,7 @@ class HubModulesController extends Controller
     }
 
     /**
-     * @return list<array{key: string, label: string, description: string, enabled: bool, available: bool}>
+     * @return list<array{key: string, label: string, description: string, enabled: bool, available: bool, locked: bool, locked_reason: ?string}>
      */
     private function modulesPayload(Hub $hub): array
     {
@@ -151,17 +161,22 @@ class HubModulesController extends Controller
             if (! $meta) {
                 continue;
             }
-            $available = in_array($key, [
-                'module_social_media_compliance',
-                'module_general_compliance',
-                'module_website_compliance',
-            ], true);
+
+            $locked = Hub::isLockedModuleKey($key);
+            $lockedReason = null;
+            if ($key === 'module_white_label_hub') {
+                $locked = true;
+                $lockedReason = $hub->isWhiteLabel() ? 'white_label_hub' : 'shared_hub';
+            }
+
             $items[] = [
                 'key' => $key,
                 'label' => $meta['label'],
                 'description' => $meta['description'],
-                'enabled' => $available ? (bool) ($resolved[$key] ?? false) : false,
-                'available' => $available,
+                'enabled' => (bool) ($resolved[$key] ?? false),
+                'available' => true,
+                'locked' => $locked,
+                'locked_reason' => $lockedReason,
             ];
         }
 

@@ -47,7 +47,7 @@ class WebsiteComplianceTemplateSeeder extends Seeder
     }
 
     /**
-     * Turn on Website Compliance + sensible role defaults (mirrors former content-flow grants).
+     * Turn on Website Template Library + Content Pre Approval with sensible role defaults.
      */
     private function enableModuleWithDefaultCapabilities(): void
     {
@@ -55,8 +55,13 @@ class WebsiteComplianceTemplateSeeder extends Seeder
             return;
         }
 
+        $allWcKeys = array_values(array_unique(array_merge(
+            Hub::WEBSITE_TEMPLATE_LIBRARY_CAPABILITY_KEYS,
+            Hub::WEBSITE_COMPLIANCE_CAPABILITY_KEYS
+        )));
+
         $defaultsByRole = [
-            User::ROLE_POWER_ADMIN => Hub::WEBSITE_COMPLIANCE_CAPABILITY_KEYS,
+            User::ROLE_POWER_ADMIN => $allWcKeys,
             User::ROLE_FINPROMS_ADMIN => [
                 'wc_view_all_change_requests',
                 'wc_assign_change_requests',
@@ -92,21 +97,22 @@ class WebsiteComplianceTemplateSeeder extends Seeder
             User::ROLE_USER => [],
         ];
 
-        Hub::query()->orderBy('id')->each(function (Hub $hub) use ($defaultsByRole) {
+        Hub::query()->orderBy('id')->each(function (Hub $hub) use ($defaultsByRole, $allWcKeys) {
             $checklist = $hub->resolvedChecklist();
             $checklist['module_website_compliance'] = true;
+            $checklist['module_website_template_library'] = true;
 
             $roleCaps = is_array($hub->role_capabilities) ? $hub->role_capabilities : [];
             foreach (CapabilitiesMatrixService::MATRIX_ROLES as $role) {
                 if (! isset($roleCaps[$role]) || ! is_array($roleCaps[$role])) {
                     $roleCaps[$role] = [];
                 }
-                foreach (Hub::WEBSITE_COMPLIANCE_CAPABILITY_KEYS as $key) {
+                foreach ($allWcKeys as $key) {
                     $roleCaps[$role][$key] = in_array($key, $defaultsByRole[$role] ?? [], true);
                 }
             }
 
-            foreach (Hub::WEBSITE_COMPLIANCE_CAPABILITY_KEYS as $key) {
+            foreach ($allWcKeys as $key) {
                 $any = false;
                 foreach (CapabilitiesMatrixService::MATRIX_ROLES as $role) {
                     if (! empty($roleCaps[$role][$key])) {
