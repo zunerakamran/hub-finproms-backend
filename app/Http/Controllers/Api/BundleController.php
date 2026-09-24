@@ -37,10 +37,14 @@ class BundleController extends Controller
 
         $user = $this->optionalUser($request);
         $isAdmin = $user?->isClientAdmin() ?? false;
+        $billingUser = $this->billingUser($request);
+        $metricVisibility = $this->metricVisibilityFor($billingUser ?? $user);
 
         $query = Bundle::query()
             ->with(['creator:id,name'])
             ->withCount('posts')
+            ->withSum('posts as reach_count', 'reach_count')
+            ->withSum('posts as views_count', 'views_count')
             ->latest('updated_at');
 
         if (! $isAdmin) {
@@ -57,7 +61,6 @@ class BundleController extends Controller
 
         $bundles = $query->paginate((int) $request->integer('per_page', 12));
 
-        $billingUser = $this->billingUser($request);
         $purchasedIds = [];
         if ($billingUser) {
             $purchasedIds = $billingUser
@@ -67,19 +70,26 @@ class BundleController extends Controller
                 ->all();
         }
 
-        $bundles->getCollection()->transform(function (Bundle $bundle) use ($purchasedIds) {
+        $bundles->getCollection()->transform(function (Bundle $bundle) use ($purchasedIds, $metricVisibility) {
             $bundle->setAttribute('is_purchased', in_array($bundle->id, $purchasedIds, true));
+            $bundle->setAttribute('reach_count', (int) ($bundle->reach_count ?? 0));
+            $bundle->setAttribute('views_count', (int) ($bundle->views_count ?? 0));
+            $this->applyMetricVisibility($bundle, $metricVisibility);
 
             return $bundle;
         });
 
-        return response()->json($bundles);
+        return response()->json(array_merge($bundles->toArray(), [
+            'visible_metrics' => $metricVisibility,
+        ]));
     }
 
     public function show(Request $request, Bundle $bundle): JsonResponse
     {
         $user = $this->optionalUser($request);
         $isAdmin = $user?->isClientAdmin() ?? false;
+        $billingUser = $this->billingUser($request);
+        $metricVisibility = $this->metricVisibilityFor($billingUser ?? $user);
 
         if (! $bundle->is_active && ! $isAdmin) {
             return response()->json(['message' => 'Bundle not found.'], 404);
@@ -87,18 +97,22 @@ class BundleController extends Controller
 
         $bundle->load(['creator:id,name', 'posts.creator:id,name']);
         $bundle->loadCount('posts');
+        $bundle->setAttribute('reach_count', (int) $bundle->posts->sum('reach_count'));
+        $bundle->setAttribute('views_count', (int) $bundle->posts->sum('views_count'));
 
-        $billingUser = $this->billingUser($request);
         $isPurchased = $billingUser ? $billingUser->hasPurchasedBundle($bundle) : false;
         $bundle->setAttribute('is_purchased', $isPurchased);
 
-        $bundle->posts->each(function (Post $post) use ($billingUser, $isPurchased, $isAdmin) {
+        $bundle->posts->each(function (Post $post) use ($billingUser, $isPurchased, $isAdmin, $metricVisibility) {
             $postPurchased = $isPurchased || ($billingUser?->hasPurchased($post) ?? false);
             $post->setAttribute('is_purchased', $postPurchased);
             if (! $postPurchased && ! $isAdmin) {
                 $post->makeHidden(['attachment_path', 'attachment_url', 'attachment_name', 'attachment_mime']);
             }
+            $this->applyPostMetricVisibility($post, $metricVisibility);
         });
+
+        $this->applyMetricVisibility($bundle, $metricVisibility);
 
         return response()->json([
             'bundle' => $bundle,
@@ -106,6 +120,7 @@ class BundleController extends Controller
                 ? app(\App\Services\ContentPurchaseCheckoutService::class)->availablePaymentMethods()
                 : [],
             'one_off_purchase' => app(\App\Services\HubService::class)->can('one_off_purchase'),
+            'visible_metrics' => $metricVisibility,
         ]);
     }
 
@@ -486,5 +501,73 @@ class BundleController extends Controller
         }
 
         return app(ActingAdvisorService::class)->billingSubject($actor);
+    }
+
+    /**
+     * @return array{reach: bool, views: bool, buys: bool}
+     */
+    private function metricVisibilityFor(?User $user): array
+    {
+        if (! $user) {
+            return ['reach' => false, 'views' => false, 'buys' => false];
+        }
+
+        return $user->contentMetricVisibility();
+    }
+
+    /**
+     * @param  array{reach: bool, views: bool, buys: bool}  $visibility
+     */
+    private function applyMetricVisibility(Bundle $bundle, array $visibility): Bundle
+    {
+        $hidden = [];
+
+        if (! $visibility['reach']) {
+            $hidden[] = 'reach_count';
+        }
+
+        if (! $visibility['views']) {
+            $hidden[] = 'views_count';
+        }
+
+        if (! $visibility['buys']) {
+            $hidden[] = 'buy_count';
+        }
+
+        if ($hidden !== []) {
+            $bundle->makeHidden($hidden);
+        }
+
+        $bundle->setAttribute('visible_metrics', $visibility);
+
+        return $bundle;
+    }
+
+    /**
+     * @param  array{reach: bool, views: bool, buys: bool}  $visibility
+     */
+    private function applyPostMetricVisibility(Post $post, array $visibility): Post
+    {
+        $hidden = [];
+
+        if (! $visibility['reach']) {
+            $hidden[] = 'reach_count';
+        }
+
+        if (! $visibility['views']) {
+            $hidden[] = 'views_count';
+        }
+
+        if (! $visibility['buys']) {
+            $hidden[] = 'buy_count';
+        }
+
+        if ($hidden !== []) {
+            $post->makeHidden($hidden);
+        }
+
+        $post->setAttribute('visible_metrics', $visibility);
+
+        return $post;
     }
 }
