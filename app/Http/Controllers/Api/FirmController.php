@@ -22,9 +22,24 @@ class FirmController extends Controller
 
     public function index(Request $request): JsonResponse
     {
+        $validated = $request->validate([
+            'q' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+            'page' => ['sometimes', 'integer', 'min:1'],
+        ]);
+
+        $perPage = (int) ($validated['per_page'] ?? 25);
+        $page = max(1, (int) ($validated['page'] ?? $request->integer('page', 1)));
+        $search = isset($validated['q']) ? trim((string) $validated['q']) : '';
+
         if ($hub = $this->actingWhiteLabelHub($request)) {
             try {
-                $listed = $this->whiteLabelFirms->list($hub);
+                $listed = $this->whiteLabelFirms->paginate(
+                    $hub,
+                    $search !== '' ? $search : null,
+                    $perPage,
+                    $page
+                );
             } catch (InvalidArgumentException $e) {
                 return response()->json(['message' => $e->getMessage()], 422);
             }
@@ -43,17 +58,39 @@ class FirmController extends Controller
             ->groupBy('firm_id')
             ->pluck('users_count', 'firm_id');
 
-        $firms = Firm::query()
+        $query = Firm::query()
             ->with('complianceVisibleToFirm:id,name')
-            ->orderByDesc('is_central')
+            ->orderByDesc('created_at')
+            ->orderByDesc('id');
+
+        if ($search !== '') {
+            $query->where('name', 'like', '%'.$search.'%');
+        }
+
+        $paginator = $query->paginate($perPage, ['*'], 'page', $page);
+
+        $firmOptions = Firm::query()
             ->orderBy('name')
-            ->get()
-            ->map(fn (Firm $firm) => $firm->toApiArray((int) ($counts[$firm->id] ?? 0)))
+            ->get(['id', 'name', 'is_central'])
+            ->map(fn (Firm $firm) => [
+                'id' => $firm->id,
+                'name' => $firm->name,
+                'is_central' => $firm->isCentral(),
+            ])
             ->values();
 
         return response()->json([
-            'firms' => $firms,
+            'firms' => $paginator->getCollection()
+                ->map(fn (Firm $firm) => $firm->toApiArray((int) ($counts[$firm->id] ?? 0)))
+                ->values(),
+            'firm_options' => $firmOptions,
             'central_firm_id' => Firm::query()->where('is_central', true)->value('id'),
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+            ],
             'acting_on_white_label' => false,
         ]);
     }

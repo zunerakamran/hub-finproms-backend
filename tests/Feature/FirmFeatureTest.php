@@ -60,11 +60,48 @@ class FirmFeatureTest extends TestCase
 
         $this->getJson('/api/power-admin/firms')
             ->assertOk()
-            ->assertJsonFragment(['name' => 'Acme Wealth']);
+            ->assertJsonFragment(['name' => 'Acme Wealth'])
+            ->assertJsonStructure([
+                'firms',
+                'firm_options',
+                'central_firm_id',
+                'meta' => ['current_page', 'last_page', 'per_page', 'total'],
+            ]);
 
         $this->putJson('/api/power-admin/firms/'.$firmId, ['name' => 'Acme Partners'])
             ->assertOk()
             ->assertJsonPath('firm.name', 'Acme Partners');
+    }
+
+    public function test_firms_index_supports_search_pagination_and_latest_first(): void
+    {
+        $hub = $this->createSharedHub();
+        $this->enableManageFirms($hub);
+
+        $admin = User::factory()->powerAdmin()->create();
+        Sanctum::actingAs($admin);
+
+        Firm::central();
+
+        $older = Firm::query()->create(['name' => 'Alpha Partners']);
+        $older->forceFill(['created_at' => now()->subDay(), 'updated_at' => now()->subDay()])->save();
+
+        $newer = Firm::query()->create(['name' => 'Zeta Advisors']);
+        $newer->forceFill(['created_at' => now(), 'updated_at' => now()])->save();
+
+        $index = $this->getJson('/api/power-admin/firms?per_page=10')->assertOk();
+        $names = collect($index->json('firms'))->pluck('name')->values()->all();
+        $this->assertSame('Zeta Advisors', $names[0]);
+        $this->assertLessThan(
+            array_search('Alpha Partners', $names, true),
+            array_search('Zeta Advisors', $names, true)
+        );
+
+        $this->getJson('/api/power-admin/firms?q=Zeta')
+            ->assertOk()
+            ->assertJsonCount(1, 'firms')
+            ->assertJsonPath('firms.0.name', 'Zeta Advisors')
+            ->assertJsonPath('meta.total', 1);
     }
 
     public function test_user_create_assigns_firm_and_lists_firms_for_dropdown(): void

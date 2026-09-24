@@ -52,32 +52,105 @@ class WhiteLabelFirmService
 
             return [
                 'firms' => $rows->map(function ($row) use ($counts, $byId) {
-                    $other = $row->compliance_visible_to_firm_id
-                        ? $byId->get($row->compliance_visible_to_firm_id)
-                        : null;
-
-                    return [
-                        'id' => (int) $row->id,
-                        'name' => (string) $row->name,
-                        'is_central' => (bool) $row->is_central,
-                        'users_count' => (int) ($counts[$row->id] ?? 0),
-                        'compliance_visibility' => [
-                            'visible_to_own' => (bool) ($row->compliance_visible_to_own ?? true),
-                            'visible_to_central' => (bool) ($row->compliance_visible_to_central ?? false),
-                            'visible_to_firm_id' => $row->compliance_visible_to_firm_id
-                                ? (int) $row->compliance_visible_to_firm_id
-                                : null,
-                            'visible_to_firm' => $other
-                                ? ['id' => (int) $other->id, 'name' => (string) $other->name]
-                                : null,
-                        ],
-                    ];
+                    return $this->mapListRow($row, $counts, $byId);
                 })->values()->all(),
                 'central_firm_id' => DB::connection($connection)->table('firms')
                     ->where('is_central', true)
                     ->value('id'),
             ];
         });
+    }
+
+    /**
+     * @return array{
+     *   firms: list<array<string, mixed>>,
+     *   firm_options: list<array{id: int, name: string, is_central: bool}>,
+     *   central_firm_id: ?int,
+     *   meta: array<string, int>
+     * }
+     */
+    public function paginate(Hub $hub, ?string $search, int $perPage, int $page = 1): array
+    {
+        $this->assertTarget($hub);
+
+        return $this->remoteDb->run($hub, function (string $connection) use ($search, $perPage, $page) {
+            $this->ensureCentral($connection);
+
+            $counts = DB::connection($connection)->table('users')
+                ->whereNotNull('firm_id')
+                ->selectRaw('firm_id, COUNT(*) as users_count')
+                ->groupBy('firm_id')
+                ->pluck('users_count', 'firm_id');
+
+            $allRows = DB::connection($connection)->table('firms')
+                ->orderByDesc('created_at')
+                ->orderByDesc('id')
+                ->get();
+            $byId = $allRows->keyBy('id');
+
+            $filtered = $allRows;
+            if ($search !== null && trim($search) !== '') {
+                $term = mb_strtolower(trim($search));
+                $filtered = $allRows->filter(
+                    fn ($row) => str_contains(mb_strtolower((string) $row->name), $term)
+                )->values();
+            }
+
+            $total = $filtered->count();
+            $perPage = max(1, min(100, $perPage));
+            $lastPage = max(1, (int) ceil($total / $perPage));
+            $page = max(1, min($page, $lastPage));
+            $pageRows = $filtered->slice(($page - 1) * $perPage, $perPage)->values();
+
+            return [
+                'firms' => $pageRows->map(function ($row) use ($counts, $byId) {
+                    return $this->mapListRow($row, $counts, $byId);
+                })->all(),
+                'firm_options' => $allRows->map(fn ($row) => [
+                    'id' => (int) $row->id,
+                    'name' => (string) $row->name,
+                    'is_central' => (bool) $row->is_central,
+                ])->values()->all(),
+                'central_firm_id' => DB::connection($connection)->table('firms')
+                    ->where('is_central', true)
+                    ->value('id'),
+                'meta' => [
+                    'current_page' => $page,
+                    'last_page' => $lastPage,
+                    'per_page' => $perPage,
+                    'total' => $total,
+                ],
+            ];
+        });
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int|string, mixed>  $counts
+     * @param  \Illuminate\Support\Collection<int|string, mixed>  $byId
+     * @return array<string, mixed>
+     */
+    private function mapListRow(object $row, $counts, $byId): array
+    {
+        $other = $row->compliance_visible_to_firm_id
+            ? $byId->get($row->compliance_visible_to_firm_id)
+            : null;
+
+        return [
+            'id' => (int) $row->id,
+            'name' => (string) $row->name,
+            'is_central' => (bool) $row->is_central,
+            'users_count' => (int) ($counts[$row->id] ?? 0),
+            'compliance_visibility' => [
+                'visible_to_own' => (bool) ($row->compliance_visible_to_own ?? true),
+                'visible_to_central' => (bool) ($row->compliance_visible_to_central ?? false),
+                'visible_to_firm_id' => $row->compliance_visible_to_firm_id
+                    ? (int) $row->compliance_visible_to_firm_id
+                    : null,
+                'visible_to_firm' => $other
+                    ? ['id' => (int) $other->id, 'name' => (string) $other->name]
+                    : null,
+            ],
+        ];
     }
 
     /**
