@@ -509,6 +509,8 @@ class PostController extends Controller
         }
 
         if (! $contentVisible) {
+            // Guests may see cover/video previews (home gallery / locked catalog tiles)
+            // but not copy, tags, or downloadable attachments.
             $post->makeHidden([
                 'description',
                 'tags',
@@ -516,13 +518,10 @@ class PostController extends Controller
                 'attachment_url',
                 'attachment_name',
                 'attachment_mime',
-                'cover_url',
-                'video_url',
             ]);
             $post->setAttribute('description', null);
             $post->setAttribute('tags', []);
-            $post->setAttribute('cover_url', null);
-            $post->setAttribute('video_url', null);
+            $post->makeVisible(['cover_url', 'video_url']);
         } else {
             // Browse preview: image cover and reel video (download still gated above).
             $post->makeVisible(['cover_url', 'video_url']);
