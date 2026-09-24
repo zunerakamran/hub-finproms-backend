@@ -377,7 +377,7 @@ class CapabilitiesMatrixService
             $this->applyRoleMatrix($shared, $controlPlaneInput, ActingHubService::CONTROL_PLANE_ROLES);
             $this->applyRoleMatrix($shared, $tenantInput, $this->tenantRoles());
         } else {
-            // Power Admin / FinProms hub tools are per white-label hub so the
+            // Power Admin / FinProms hub tools are per white-labelled hub so the
             // shared dashboard navbar follows that hub while it is selected.
             $this->applyRoleMatrix($tenantHub, $controlPlaneInput, ActingHubService::CONTROL_PLANE_ROLES);
             $this->applyRoleMatrix($tenantHub, $tenantInput, $this->tenantRoles());
@@ -529,13 +529,13 @@ class CapabilitiesMatrixService
             }
         }
 
-        // Control white-label hubs is a shared-hub tool; default on for FinProms admin there.
+        // Control white-labelled hubs is a shared-hub tool; default on for FinProms admin there.
         if (isset($matrix[User::ROLE_FINPROMS_ADMIN])) {
             $matrix[User::ROLE_FINPROMS_ADMIN][ActingHubService::CAPABILITY] =
                 $hubType === Hub::TYPE_SHARED;
         }
 
-        // Subscriber credits also default on for FinProms admin on white-label hubs.
+        // Subscriber credits also default on for FinProms admin on white-labelled hubs.
         if (isset($matrix[User::ROLE_FINPROMS_ADMIN])) {
             $matrix[User::ROLE_FINPROMS_ADMIN]['dashboard_manage_subscriber_credits'] =
                 $hubType === Hub::TYPE_WHITE_LABEL;
@@ -702,12 +702,12 @@ class CapabilitiesMatrixService
             return $this->powerCapabilities->can($flag);
         }
 
-        // Private-hub tools are inactive while the hub is public.
+        // White-labelled hub tools are inactive while the hub is shared.
         if (Hub::isPrivateCapability($flag) && ! $hub->isPrivateInviteOnly()) {
             return false;
         }
 
-        // Public-hub tools are inactive while the hub is private invite-only.
+        // Shared-hub tools are inactive while the hub is white-labelled invite-only.
         if (Hub::isPublicCapability($flag) && $hub->isPrivateInviteOnly()) {
             return false;
         }

@@ -8,7 +8,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 /**
- * Client admin card on file — private-hub payer tool only.
+ * Client admin card on file — white-labelled hub payer tool only.
  * Not part of the Power Admin capabilities matrix; power/finproms staff
  * charge the client admin card during import checkout instead.
  */
@@ -74,7 +74,7 @@ class AdvisorPaymentCardController extends Controller
 
     private function assertClientAdminPayer(?\App\Models\User $user): void
     {
-        // Payment card is the white-label client-admin payer entrance only.
+        // Payment card is the white-labelled client-admin payer entrance only.
         // Do not use isClientAdmin() — that includes finproms_admin / manager.
         if (! $user || ! $user->isWhiteLabelClientAdmin()) {
             abort(response()->json([

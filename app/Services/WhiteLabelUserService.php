@@ -9,7 +9,7 @@ use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 
 /**
- * Read/write users on a white-label hub's own database while the shared
+ * Read/write users on a white-labelled hub's own database while the shared
  * dashboard hub switcher is acting on that hub.
  */
 class WhiteLabelUserService
@@ -21,10 +21,10 @@ class WhiteLabelUserService
     public function assertTarget(Hub $hub): void
     {
         if ($hub->isShared()) {
-            throw new InvalidArgumentException('Select a white-label hub, not the shared hub.');
+            throw new InvalidArgumentException('Select a white-labelled hub, not the shared hub.');
         }
         if (! $hub->is_active) {
-            throw new InvalidArgumentException('That white-label hub is inactive.');
+            throw new InvalidArgumentException('That white-labelled hub is inactive.');
         }
         $this->remoteDb->assertConfigured($hub);
     }
@@ -272,7 +272,7 @@ class WhiteLabelUserService
     {
         $user = User::on($connection)->find($userId);
         if (! $user) {
-            throw new InvalidArgumentException('User not found on this white-label hub.');
+            throw new InvalidArgumentException('User not found on this white-labelled hub.');
         }
 
         return $user;

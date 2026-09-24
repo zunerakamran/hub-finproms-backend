@@ -43,7 +43,7 @@ class PublishScheduledChangeRequestJob implements ShouldBeUnique, ShouldQueue
         if ($this->hubId) {
             $hub = Hub::query()->find($this->hubId);
             if (! $hub || ! $hub->hasRemoteDatabaseConfigured()) {
-                Log::warning('wc scheduled job: white-label hub unavailable', [
+                Log::warning('wc scheduled job: white-labelled hub unavailable', [
                     'hub_id' => $this->hubId,
                     'change_request_id' => $this->changeRequestId,
                 ]);

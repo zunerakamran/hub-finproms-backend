@@ -53,7 +53,7 @@ class EnsureHubCapability
         }
 
         foreach ($capabilities as $capability) {
-            // When controlling a white-label hub, hub-scoped caps follow that hub's matrix.
+            // When controlling a white-labelled hub, hub-scoped caps follow that hub's matrix.
             $hubForCap = $this->actingHubs->capabilityHub($user, $capability);
 
             if ($this->controlPlaneRemoteWebsiteComplianceAllows($user, $hubForCap, $capability)) {
@@ -81,7 +81,7 @@ class EnsureHubCapability
 
     /**
      * Power Admin / FinProms Admin are shared-hub only. While the switcher is on a
-     * white-label with Website Compliance enabled, allow WC route caps remotely.
+     * white-labelled with Website Compliance enabled, allow WC route caps remotely.
      */
     private function controlPlaneRemoteWebsiteComplianceAllows(User $user, Hub $hubForCap, string $capability): bool
     {

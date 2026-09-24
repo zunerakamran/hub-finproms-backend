@@ -11,7 +11,7 @@ use Throwable;
  *
  * Isolation is DB-per-hub: each Laravel deploy only seeds / keeps templates
  * listed for its HUB_SLUG. template4 belongs on myhub; shared must not store it.
- * When Power Admin acts on a white-label from shared, ownership follows that hub.
+ * When Power Admin acts on a white-labelled from shared, ownership follows that hub.
  */
 class HubTemplateCatalog
 {

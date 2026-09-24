@@ -111,7 +111,7 @@ class TemplateController extends Controller
                 'nullable',
                 'string',
                 'max:255',
-                // Use the Template model so uniqueness hits the acting white-label DB.
+                // Use the Template model so uniqueness hits the acting white-labelled DB.
                 Rule::unique(Template::class, 'slug'),
             ],
             'description' => 'nullable|string',
@@ -124,7 +124,7 @@ class TemplateController extends Controller
         $slug = $request->slug ? Str::slug($request->slug) : Str::slug($request->name);
 
         // Local HUB_SLUG deploys stay catalog-bound. Remote PA/FinProms write to the
-        // acting white-label DB, so that hub may register any showcase slug it needs.
+        // acting white-labelled DB, so that hub may register any showcase slug it needs.
         if (
             ! $this->gate->isRemoteControlPlaneOperator($user)
             && ! HubTemplateCatalog::allows($slug)

@@ -228,7 +228,7 @@ class Hub extends Model
     ];
 
     /**
-     * Dashboard/member capabilities that only apply while the hub is private (invite-only).
+     * Dashboard/member capabilities that only apply while the hub is white-labelled (invite-only).
      * Shown blurred / inactive on the Capabilities matrix when public subscribe is on.
      *
      * @var list<string>
@@ -243,7 +243,7 @@ class Hub extends Model
     ];
 
     /**
-     * Capabilities that only apply while the hub is public (self-serve subscribe).
+     * Capabilities that only apply while the hub is shared (self-serve subscribe).
      * Shown blurred / inactive on the Capabilities matrix when private invite-only is on.
      *
      * @var list<string>
@@ -284,7 +284,7 @@ class Hub extends Model
         ],
         'unlimited_credits' => [
             'label' => 'Unlimited credits',
-            'description' => 'Private-hub subscribers get unlimited credits (or set a fixed allotment under Subscriber credits).',
+            'description' => 'White-labelled hub subscribers get unlimited credits (or set a fixed allotment under Subscriber credits).',
             'group' => self::GROUP_BEHAVIOUR,
             'default_shared' => false,
             'default_white_label' => true,
@@ -464,28 +464,28 @@ class Hub extends Model
         ],
         'dashboard_view_advisor_invoices' => [
             'label' => 'View advisor billing invoices',
-            'description' => 'See invoices for private hub advisor subscriber billing (rate × advisors).',
+            'description' => 'See invoices for white-labelled hub advisor subscriber billing (rate × advisors).',
             'group' => self::GROUP_DASHBOARD_ADVISORS,
             'default_shared' => false,
             'default_white_label' => true,
         ],
         'dashboard_manage_advisor_pricing' => [
             'label' => 'Set advisor billing rates / quotas',
-            'description' => 'Configure pricing tiers (rate per advisor) used for private hub billing (rate × advisors).',
+            'description' => 'Configure pricing tiers (rate per advisor) used for white-labelled hub billing (rate × advisors).',
             'group' => self::GROUP_DASHBOARD_ADVISORS,
             'default_shared' => false,
             'default_white_label' => true,
         ],
         'dashboard_manage_advisor_renewal' => [
             'label' => 'Set advisor billing auto-renew date',
-            'description' => 'Choose the monthly auto-renew day for private hub advisor billing (Power Admin / FinProms admin).',
+            'description' => 'Choose the monthly auto-renew day for white-labelled hub advisor billing (Power Admin / FinProms admin).',
             'group' => self::GROUP_DASHBOARD_ADVISORS,
             'default_shared' => false,
             'default_white_label' => true,
         ],
         'dashboard_manage_subscriber_credits' => [
-            'label' => 'Set subscriber credits (private hub)',
-            'description' => 'Set unlimited or a fixed credit allotment for Excel-imported private-hub subscribers (applied on import and autorenew). Private-hub only — inactive while the hub is public.',
+            'label' => 'Set subscriber credits (white-labelled hub)',
+            'description' => 'Set unlimited or a fixed credit allotment for Excel-imported white-labelled hub subscribers (applied on import and autorenew). White-labelled hub only — inactive while the hub is shared.',
             'group' => self::GROUP_DASHBOARD_ADVISORS,
             'default_shared' => false,
             'default_white_label' => true,
@@ -543,7 +543,7 @@ class Hub extends Model
         ],
         'dashboard_control_white_label_hubs' => [
             'label' => 'Control white labelled hubs',
-            'description' => 'On the shared hub dashboard, unlocks a hub switcher. Selecting a white-label hub shows that hub’s dashboard tools (based on its Capabilities matrix). Creating users / posts / types / categories / tags / bundles while that hub is selected writes only to that hub’s own database — not the shared catalog.',
+            'description' => 'On the shared hub dashboard, unlocks a hub switcher. Selecting a white-labelled hub shows that hub’s dashboard tools (based on its Capabilities matrix). Creating users / posts / types / categories / tags / bundles while that hub is selected writes only to that hub’s own database — not the shared catalog.',
             'group' => self::GROUP_DASHBOARD_HUB,
             'default_shared' => true,
             'default_white_label' => false,
@@ -776,7 +776,7 @@ class Hub extends Model
     ];
 
     /**
-     * Dashboard content tools that follow the acting white-label hub context
+     * Dashboard content tools that follow the acting white-labelled hub context
      * when Control white labelled hubs is enabled.
      *
      * @var list<string>
@@ -854,7 +854,7 @@ class Hub extends Model
     }
 
     /**
-     * Private-hub Excel subscribers: null subscriber_credits = unlimited.
+     * White-labelled hub Excel subscribers: null subscriber_credits = unlimited.
      */
     public function givesUnlimitedSubscriberCredits(): bool
     {
@@ -1193,7 +1193,7 @@ class Hub extends Model
             [
                 'key' => 'remote_db',
                 'label' => $needsRemoteDb
-                    ? 'White-label database credentials recorded (own DB)'
+                    ? 'White-labelled database credentials recorded (own DB)'
                     : 'Shared hub uses its own .env database (not stored here)',
                 'done' => $needsRemoteDb ? $hasDb : true,
                 'required' => $needsRemoteDb,
@@ -1206,13 +1206,13 @@ class Hub extends Model
             ],
             [
                 'key' => 'hub_slug',
-                'label' => 'White-label backend uses HUB_SLUG='.$this->slug,
+                'label' => 'White-labelled backend uses HUB_SLUG='.$this->slug,
                 'done' => true,
                 'required' => true,
             ],
             [
                 'key' => 'own_db_env',
-                'label' => 'White-label .env points at its OWN database (not shared)',
+                'label' => 'White-labelled .env points at its OWN database (not shared)',
                 'done' => true,
                 'required' => $needsRemoteDb,
             ],
@@ -1241,7 +1241,7 @@ class Hub extends Model
         $dbUser = $database['username'] ?: 'hub_user';
 
         $envSnippet = implode("\n", [
-            '# White-label deploy — same codebase, OWN database (not the shared hub DB)',
+            '# White-labelled deploy — same codebase, OWN database (not the shared hub DB)',
             'HUB_SLUG='.$this->slug,
             $frontendLine,
             $apiLine,
@@ -1268,7 +1268,7 @@ class Hub extends Model
     }
 
     /**
-     * Absolute logo URL suitable for emails and white-label sync
+     * Absolute logo URL suitable for emails and white-labelled sync
      * (files live on the control-plane deploy).
      */
     public function logoAbsoluteUrl(): ?string
@@ -1277,7 +1277,7 @@ class Hub extends Model
     }
 
     /**
-     * Absolute white logo URL for dark UI surfaces and white-label sync.
+     * Absolute white logo URL for dark UI surfaces and white-labelled sync.
      */
     public function whiteLogoAbsoluteUrl(): ?string
     {
@@ -1285,7 +1285,7 @@ class Hub extends Model
     }
 
     /**
-     * Absolute favicon URL for emails and white-label sync.
+     * Absolute favicon URL for emails and white-labelled sync.
      */
     public function faviconAbsoluteUrl(): ?string
     {
@@ -1293,7 +1293,7 @@ class Hub extends Model
     }
 
     /**
-     * Absolute auth background image URL for white-label sync.
+     * Absolute auth background image URL for white-labelled sync.
      */
     public function authBgImageAbsoluteUrl(): ?string
     {

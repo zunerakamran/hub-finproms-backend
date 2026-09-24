@@ -130,7 +130,7 @@ class PowerAdminUserController extends Controller
             $this->functionalMail->accountCreatedByAdmin($mailUser, $hub);
 
             return response()->json([
-                'message' => 'User created on '.$hub->name.' (white-label database).',
+                'message' => 'User created on '.$hub->name.' (white-labelled database).',
                 'user' => $user,
                 'roles' => $this->roleOptions(),
                 'firms' => $this->firmOptions($hub),

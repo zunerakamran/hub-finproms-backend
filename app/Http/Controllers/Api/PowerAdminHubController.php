@@ -287,7 +287,7 @@ class PowerAdminHubController extends Controller
                 $this->whiteLabelSync->pushSettings($hub);
                 $usersConnection = $this->remoteDb->connect($hub);
             } elseif ($hub->isWhiteLabel()) {
-                $syncWarning = 'This hub has no remote database wiring, so the live white-label site was not updated.';
+                $syncWarning = 'This hub has no remote database wiring, so the live white-labelled site was not updated.';
             }
         } catch (InvalidArgumentException $e) {
             return response()->json([
@@ -399,7 +399,7 @@ class PowerAdminHubController extends Controller
     }
 
     /**
-     * Push registry settings onto the white-label hub's own database when wired.
+     * Push registry settings onto the white-labelled hub's own database when wired.
      */
     private function syncWhiteLabelSettings(?Hub $hub): void
     {

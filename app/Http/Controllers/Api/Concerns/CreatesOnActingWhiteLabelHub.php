@@ -11,7 +11,7 @@ use InvalidArgumentException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
- * When the shared-hub hub switcher is on a white-label hub, manage content there.
+ * When the shared-hub hub switcher is on a white-labelled hub, manage content there.
  */
 trait CreatesOnActingWhiteLabelHub
 {
@@ -23,7 +23,7 @@ trait CreatesOnActingWhiteLabelHub
         }
 
         // Public member catalog (shared frontend) must always read the deploy hub DB.
-        // Acting-hub scoping is for dashboard management of white-label content only.
+        // Acting-hub scoping is for dashboard management of white-labelled content only.
         if ($this->isPublicCatalogRead($request)) {
             return null;
         }
@@ -84,7 +84,7 @@ trait CreatesOnActingWhiteLabelHub
         }
 
         return response()->json([
-            'message' => 'Post created on '.$hub->name.' (white-label database).',
+            'message' => 'Post created on '.$hub->name.' (white-labelled database).',
             'post' => $post,
             'target_hub' => $this->targetHubPayload($hub),
         ], 201);

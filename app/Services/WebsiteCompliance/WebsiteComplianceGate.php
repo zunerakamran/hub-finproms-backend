@@ -40,7 +40,7 @@ class WebsiteComplianceGate
             return false;
         }
 
-        // Power Admin / FinProms Admin control white-labels from shared — they are
+        // Power Admin / FinProms Admin control white-labelleds from shared — they are
         // never provisioned as users on the tenant DB, so grant full WC ops while acting.
         if ($this->isRemoteControlPlaneOperator($user)) {
             return true;
@@ -69,7 +69,7 @@ class WebsiteComplianceGate
     }
 
     /**
-     * Shared-hub control-plane operator currently switched onto a white-label hub.
+     * Shared-hub control-plane operator currently switched onto a white-labelled hub.
      */
     public function isRemoteControlPlaneOperator(User $user): bool
     {
@@ -81,7 +81,7 @@ class WebsiteComplianceGate
     }
 
     /**
-     * User ids written into white-label wc_* FK columns.
+     * User ids written into white-labelled wc_* FK columns.
      * Control-plane operators (PA / FinProms) do not exist on tenant DBs.
      */
     public function tenantUserIdOrNull(User $user): ?int

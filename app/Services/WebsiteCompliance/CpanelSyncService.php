@@ -111,7 +111,7 @@ class CpanelSyncService
     /**
      * Make uploaded asset paths loadable from advisor cPanel sites.
      * Relative upload paths are resolved against THIS deploy (where files were stored),
-     * not the acting white-label API URL.
+     * not the acting white-labelled API URL.
      */
     public static function absoluteAssetUrl(mixed $path): ?string
     {
@@ -373,8 +373,8 @@ class CpanelSyncService
     }
 
     /**
-     * When Power Admin deploys from shared onto a white-label, advisor sites
-     * should use that white-label's Laravel API for live content endpoints.
+     * When Power Admin deploys from shared onto a white-labelled, advisor sites
+     * should use that white-labelled's Laravel API for live content endpoints.
      */
     protected static function actingWhiteLabelApiUrl(): ?string
     {

@@ -208,7 +208,7 @@ class AdvisorPricingService
     }
 
     /**
-     * Count active advisors on a white-label hub's own database.
+     * Count active advisors on a white-labelled hub's own database.
      */
     public function currentAdvisorCountForHub(Hub $hub): int
     {

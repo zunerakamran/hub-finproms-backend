@@ -9,7 +9,7 @@ use InvalidArgumentException;
 use Throwable;
 
 /**
- * Opens a temporary Laravel DB connection to a white-label hub's own database.
+ * Opens a temporary Laravel DB connection to a white-labelled hub's own database.
  */
 class WhiteLabelDatabaseService
 {

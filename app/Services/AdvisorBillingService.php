@@ -40,7 +40,7 @@ class AdvisorBillingService
     }
 
     /**
-     * Prefer the importer when they are the white-label client admin;
+     * Prefer the importer when they are the white-labelled client admin;
      * otherwise the first client_admin (payer of record for this deployment).
      */
     public function resolvePayer(User $importer): User

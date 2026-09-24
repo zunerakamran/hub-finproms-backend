@@ -13,7 +13,7 @@ use InvalidArgumentException;
 use Throwable;
 
 /**
- * Read/write catalog content directly on a white-label hub's own database.
+ * Read/write catalog content directly on a white-labelled hub's own database.
  * These items are NOT stored on the shared hub.
  */
 class WhiteLabelContentService
@@ -26,10 +26,10 @@ class WhiteLabelContentService
     public function assertTarget(Hub $hub): void
     {
         if ($hub->isShared()) {
-            throw new InvalidArgumentException('Select a white-label hub, not the shared hub.');
+            throw new InvalidArgumentException('Select a white-labelled hub, not the shared hub.');
         }
         if (! $hub->is_active) {
-            throw new InvalidArgumentException('That white-label hub is inactive.');
+            throw new InvalidArgumentException('That white-labelled hub is inactive.');
         }
         if (! $hub->can('receive_content_from_shared')) {
             throw new InvalidArgumentException('That hub does not allow content from the shared hub.');
@@ -118,7 +118,7 @@ class WhiteLabelContentService
         try {
             $row = DB::connection($connection)->table('posts')->where('id', $postId)->first();
             if (! $row) {
-                throw new InvalidArgumentException('Post not found on this white-label hub.');
+                throw new InvalidArgumentException('Post not found on this white-labelled hub.');
             }
 
             return $this->mapPostRow($row);
@@ -137,7 +137,7 @@ class WhiteLabelContentService
         try {
             $row = DB::connection($connection)->table('posts')->where('id', $postId)->first();
             if (! $row) {
-                throw new InvalidArgumentException('Post not found on this white-label hub.');
+                throw new InvalidArgumentException('Post not found on this white-labelled hub.');
             }
 
             $updates = ['updated_at' => now()];
@@ -188,7 +188,7 @@ class WhiteLabelContentService
         try {
             $row = DB::connection($connection)->table('posts')->where('id', $postId)->first();
             if (! $row) {
-                throw new InvalidArgumentException('Post not found on this white-label hub.');
+                throw new InvalidArgumentException('Post not found on this white-labelled hub.');
             }
 
             DB::connection($connection)->table('bundle_post')->where('post_id', $postId)->delete();
@@ -258,7 +258,7 @@ class WhiteLabelContentService
         try {
             $row = DB::connection($connection)->table('content_types')->where('id', $typeId)->first();
             if (! $row) {
-                throw new InvalidArgumentException('Type not found on this white-label hub.');
+                throw new InvalidArgumentException('Type not found on this white-labelled hub.');
             }
 
             $oldName = (string) $row->name;
@@ -297,7 +297,7 @@ class WhiteLabelContentService
         try {
             $row = DB::connection($connection)->table('content_types')->where('id', $typeId)->first();
             if (! $row) {
-                throw new InvalidArgumentException('Type not found on this white-label hub.');
+                throw new InvalidArgumentException('Type not found on this white-labelled hub.');
             }
             if (DB::connection($connection)->table('posts')->where('type', $row->name)->exists()) {
                 throw new InvalidArgumentException('Cannot delete a content type that is used by posts.');
@@ -367,7 +367,7 @@ class WhiteLabelContentService
         try {
             $row = DB::connection($connection)->table('categories')->where('id', $categoryId)->first();
             if (! $row) {
-                throw new InvalidArgumentException('Category not found on this white-label hub.');
+                throw new InvalidArgumentException('Category not found on this white-labelled hub.');
             }
 
             $oldName = (string) $row->name;
@@ -406,7 +406,7 @@ class WhiteLabelContentService
         try {
             $row = DB::connection($connection)->table('categories')->where('id', $categoryId)->first();
             if (! $row) {
-                throw new InvalidArgumentException('Category not found on this white-label hub.');
+                throw new InvalidArgumentException('Category not found on this white-labelled hub.');
             }
             if (DB::connection($connection)->table('posts')->where('category', $row->name)->exists()) {
                 throw new InvalidArgumentException('Cannot delete a category that is used by posts.');
@@ -473,7 +473,7 @@ class WhiteLabelContentService
         try {
             $row = DB::connection($connection)->table('tags')->where('id', $tagId)->first();
             if (! $row) {
-                throw new InvalidArgumentException('Tag not found on this white-label hub.');
+                throw new InvalidArgumentException('Tag not found on this white-labelled hub.');
             }
 
             $oldName = (string) $row->name;
@@ -526,7 +526,7 @@ class WhiteLabelContentService
         try {
             $row = DB::connection($connection)->table('tags')->where('id', $tagId)->first();
             if (! $row) {
-                throw new InvalidArgumentException('Tag not found on this white-label hub.');
+                throw new InvalidArgumentException('Tag not found on this white-labelled hub.');
             }
 
             $name = (string) $row->name;
@@ -585,7 +585,7 @@ class WhiteLabelContentService
     }
 
     /**
-     * Create a bundle on the white-label DB. post_ids refer to REMOTE post ids.
+     * Create a bundle on the white-labelled DB. post_ids refer to REMOTE post ids.
      *
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
@@ -596,12 +596,12 @@ class WhiteLabelContentService
         try {
             $postIds = array_values(array_unique(array_map('intval', $payload['post_ids'] ?? [])));
             if ($postIds === []) {
-                throw new InvalidArgumentException('Add at least one post from this white-label hub.');
+                throw new InvalidArgumentException('Add at least one post from this white-labelled hub.');
             }
 
             $found = DB::connection($connection)->table('posts')->whereIn('id', $postIds)->pluck('id')->all();
             if (count($found) !== count($postIds)) {
-                throw new InvalidArgumentException('One or more selected posts do not exist on this white-label hub.');
+                throw new InvalidArgumentException('One or more selected posts do not exist on this white-labelled hub.');
             }
 
             $now = now();
@@ -655,7 +655,7 @@ class WhiteLabelContentService
         try {
             $row = DB::connection($connection)->table('bundles')->where('id', $bundleId)->first();
             if (! $row) {
-                throw new InvalidArgumentException('Bundle not found on this white-label hub.');
+                throw new InvalidArgumentException('Bundle not found on this white-labelled hub.');
             }
 
             $updates = ['updated_at' => now()];
@@ -682,11 +682,11 @@ class WhiteLabelContentService
             if (array_key_exists('post_ids', $payload)) {
                 $postIds = array_values(array_unique(array_map('intval', $payload['post_ids'] ?? [])));
                 if ($postIds === []) {
-                    throw new InvalidArgumentException('Add at least one post from this white-label hub.');
+                    throw new InvalidArgumentException('Add at least one post from this white-labelled hub.');
                 }
                 $found = DB::connection($connection)->table('posts')->whereIn('id', $postIds)->pluck('id')->all();
                 if (count($found) !== count($postIds)) {
-                    throw new InvalidArgumentException('One or more selected posts do not exist on this white-label hub.');
+                    throw new InvalidArgumentException('One or more selected posts do not exist on this white-labelled hub.');
                 }
 
                 DB::connection($connection)->table('bundle_post')->where('bundle_id', $bundleId)->delete();
@@ -726,7 +726,7 @@ class WhiteLabelContentService
         try {
             $row = DB::connection($connection)->table('bundles')->where('id', $bundleId)->first();
             if (! $row) {
-                throw new InvalidArgumentException('Bundle not found on this white-label hub.');
+                throw new InvalidArgumentException('Bundle not found on this white-labelled hub.');
             }
             DB::connection($connection)->table('bundle_post')->where('bundle_id', $bundleId)->delete();
             DB::connection($connection)->table('bundles')->where('id', $bundleId)->delete();

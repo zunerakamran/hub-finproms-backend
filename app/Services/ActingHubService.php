@@ -10,7 +10,7 @@ use Symfony\Component\HttpKernel\Exception\HttpException;
 
 /**
  * Shared-hub "acting hub" context for Control white labelled hubs.
- * Selecting a white-label hub scopes dashboard users and content tools to that hub's DB.
+ * Selecting a white-labelled hub scopes dashboard users and content tools to that hub's DB.
  */
 class ActingHubService
 {
@@ -20,7 +20,7 @@ class ActingHubService
      * These roles only exist as users on the shared hub. The hub switcher
      * capability (`dashboard_control_white_label_hubs`) always lives on shared.
      * All other hub dashboard / compliance matrix cells for these roles are
-     * stored per hub — including each white-label — so the navbar follows the
+     * stored per hub — including each white-labelled — so the navbar follows the
      * selected hub's Capabilities matrix (see PROJECT_REQUIREMENTS §4.4).
      *
      * @var list<string>
@@ -93,7 +93,7 @@ class ActingHubService
 
     /**
      * Hub whose data this request should read/write.
-     * Explicit hub_id wins; otherwise the switcher white-label hub; otherwise this deploy.
+     * Explicit hub_id wins; otherwise the switcher white-labelled hub; otherwise this deploy.
      */
     public function targetHub(?User $user, ?int $hubId = null): Hub
     {
@@ -114,7 +114,7 @@ class ActingHubService
     }
 
     /**
-     * Capability checks for hub-level flags follow the acting white-label hub.
+     * Capability checks for hub-level flags follow the acting white-labelled hub.
      * Only the shared-hub switcher capability stays on the shared deploy hub.
      */
     public function capabilityHub(User $user, string $capability): Hub
@@ -130,7 +130,7 @@ class ActingHubService
             return $current;
         }
 
-        // While a white-label is selected, modules / functionalities / role
+        // While a white-labelled is selected, modules / functionalities / role
         // matrix cells (including Power Admin / FinProms) follow that hub.
         if (Hub::isModuleKey($capability)
             || Hub::isFunctionalityKey($capability)
@@ -180,7 +180,7 @@ class ActingHubService
     }
 
     /**
-     * Hubs shown in the switcher (shared + white-labels).
+     * Hubs shown in the switcher (shared + white-labelleds).
      *
      * @return list<array<string, mixed>>
      */
@@ -297,14 +297,14 @@ class ActingHubService
     }
 
     /**
-     * Resolve and assert the acting white-label hub for content writes.
+     * Resolve and assert the acting white-labelled hub for content writes.
      */
     public function requireActingWhiteLabel(User $user): Hub
     {
         if (! $this->canControl($user)) {
             throw new HttpException(
                 403,
-                'Enable “Control white labelled hubs” in Capabilities to manage white-label content.'
+                'Enable “Control white labelled hubs” in Capabilities to manage white-labelled content.'
             );
         }
 
@@ -328,7 +328,7 @@ class ActingHubService
         }
 
         if (! $hub->is_active) {
-            throw new InvalidArgumentException('That white-label hub is inactive.');
+            throw new InvalidArgumentException('That white-labelled hub is inactive.');
         }
         if (! $hub->can('receive_content_from_shared')) {
             throw new InvalidArgumentException('That hub does not allow content from the shared hub.');

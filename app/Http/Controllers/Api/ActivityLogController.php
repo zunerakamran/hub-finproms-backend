@@ -86,7 +86,7 @@ class ActivityLogController extends Controller
     private function filters(Request $request): array
     {
         $validated = $request->validate([
-            'user_id' => ['sometimes', 'nullable', 'integer', 'min:1'],
+            'user_id' => ['sometimes', 'nullable', 'integer', 'min:0'],
             'action' => ['sometimes', 'nullable', 'string', 'max:120'],
             'q' => ['sometimes', 'nullable', 'string', 'max:255'],
             'from' => ['sometimes', 'nullable', 'date'],
@@ -95,7 +95,7 @@ class ActivityLogController extends Controller
         ]);
 
         return [
-            'user_id' => $validated['user_id'] ?? null,
+            'user_id' => array_key_exists('user_id', $validated) ? $validated['user_id'] : null,
             'action' => $validated['action'] ?? null,
             'q' => $validated['q'] ?? null,
             'from' => $validated['from'] ?? null,

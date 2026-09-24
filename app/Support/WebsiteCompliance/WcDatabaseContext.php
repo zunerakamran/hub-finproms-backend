@@ -4,7 +4,7 @@ namespace App\Support\WebsiteCompliance;
 
 /**
  * Request-scoped DB connection for Website Compliance models.
- * When Power Admin acts on a white-label hub from shared, WC reads/writes
+ * When Power Admin acts on a white-labelled hub from shared, WC reads/writes
  * that hub's database without changing the shared deploy default connection
  * (Hub registry, auth, activity logs stay on shared).
  */

@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
 /**
- * CRUD firms on a white-label hub's own database while the shared
+ * CRUD firms on a white-labelled hub's own database while the shared
  * dashboard hub switcher is acting on that hub.
  */
 class WhiteLabelFirmService
@@ -19,10 +19,10 @@ class WhiteLabelFirmService
     public function assertTarget(Hub $hub): void
     {
         if ($hub->isShared()) {
-            throw new InvalidArgumentException('Select a white-label hub, not the shared hub.');
+            throw new InvalidArgumentException('Select a white-labelled hub, not the shared hub.');
         }
         if (! $hub->is_active) {
-            throw new InvalidArgumentException('That white-label hub is inactive.');
+            throw new InvalidArgumentException('That white-labelled hub is inactive.');
         }
         $this->remoteDb->assertConfigured($hub);
     }
@@ -132,7 +132,7 @@ class WhiteLabelFirmService
         return $this->remoteDb->run($hub, function (string $connection) use ($firmId, $payload) {
             $row = DB::connection($connection)->table('firms')->where('id', $firmId)->first();
             if (! $row) {
-                throw new InvalidArgumentException('Firm not found on this white-label hub.');
+                throw new InvalidArgumentException('Firm not found on this white-labelled hub.');
             }
 
             $name = trim((string) $payload['name']);
@@ -186,7 +186,7 @@ class WhiteLabelFirmService
         $this->remoteDb->run($hub, function (string $connection) use ($firmId): void {
             $row = DB::connection($connection)->table('firms')->where('id', $firmId)->first();
             if (! $row) {
-                throw new InvalidArgumentException('Firm not found on this white-label hub.');
+                throw new InvalidArgumentException('Firm not found on this white-labelled hub.');
             }
 
             if ((bool) ($row->is_central ?? false)) {

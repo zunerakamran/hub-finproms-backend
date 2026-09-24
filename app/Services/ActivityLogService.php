@@ -254,8 +254,13 @@ class ActivityLogService
     {
         $query = ActivityLog::query()->where('hub_id', $hub->id);
 
-        if (! empty($filters['user_id'])) {
-            $query->where('user_id', (int) $filters['user_id']);
+        if (array_key_exists('user_id', $filters) && $filters['user_id'] !== null && $filters['user_id'] !== '') {
+            // 0 = guest / anonymous activity (user_id IS NULL).
+            if ((int) $filters['user_id'] === 0) {
+                $query->whereNull('user_id');
+            } else {
+                $query->where('user_id', (int) $filters['user_id']);
+            }
         }
 
         if (! empty($filters['action'])) {

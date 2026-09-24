@@ -9,7 +9,7 @@ use Throwable;
 
 /**
  * Copy control-plane hub settings from the shared registry onto the
- * white-label hub's own database (the deploy that serves that site).
+ * white-labelled hub's own database (the deploy that serves that site).
  */
 class WhiteLabelHubSyncService
 {
@@ -31,7 +31,7 @@ class WhiteLabelHubSyncService
         if (! $hub->hasRemoteDatabaseConfigured()) {
             throw new InvalidArgumentException(
                 'Remote database credentials are incomplete for hub "'.$hub->name.'". '
-                .'White-label functionalities and users cannot be updated until deploy wiring is complete.'
+                .'White-labelled functionalities and users cannot be updated until deploy wiring is complete.'
             );
         }
 
@@ -47,7 +47,7 @@ class WhiteLabelHubSyncService
                 }
 
                 // Logos/favicons are uploaded on the shared control-plane disk.
-                // Push absolute URLs so the white-label deploy can load them
+                // Push absolute URLs so the white-labelled deploy can load them
                 // (relative storage paths would 404 on the tenant host).
                 $payload = [
                     'name' => $hub->name,
@@ -90,7 +90,7 @@ class WhiteLabelHubSyncService
             throw $e;
         } catch (Throwable $e) {
             throw new InvalidArgumentException(
-                'Could not update the white-label database for "'.$hub->name.'": '.$e->getMessage()
+                'Could not update the white-labelled database for "'.$hub->name.'": '.$e->getMessage()
                 .' Check deploy wiring (DB host must be reachable from the shared hub — localhost only works if both sites share the same MySQL server).'
             );
         }

@@ -330,7 +330,7 @@ class AdvisorController extends Controller
 
         if (! $hub->can('private_invite_only')) {
             abort(response()->json([
-                'message' => 'Advisor tools are only available while this hub is private (invite-only).',
+                'message' => 'Advisor tools are only available while this hub is white-labelled (invite-only).',
             ], 403));
         }
 

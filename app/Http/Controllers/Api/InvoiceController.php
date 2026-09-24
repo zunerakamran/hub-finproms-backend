@@ -42,7 +42,7 @@ class InvoiceController extends Controller
     public function show(Request $request, Invoice $invoice): JsonResponse
     {
         $user = $request->user();
-        // Use acting/target hub so white-label private caps resolve correctly
+        // Use acting/target hub so white-labelled private caps resolve correctly
         // (dashboard_view_advisor_invoices is private-only and false on shared current()).
         $hub = app(ActingHubService::class)->targetHub($user);
         $matrix = app(CapabilitiesMatrixService::class);

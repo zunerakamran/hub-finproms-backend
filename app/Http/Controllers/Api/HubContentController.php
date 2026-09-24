@@ -14,7 +14,7 @@ use InvalidArgumentException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
 /**
- * Create/list catalog content on the acting white-label hub (hub switcher).
+ * Create/list catalog content on the acting white-labelled hub (hub switcher).
  * Content is written only to that hub's own database — not the shared catalog.
  */
 class HubContentController extends Controller
@@ -90,7 +90,7 @@ class HubContentController extends Controller
         }
 
         return response()->json([
-            'message' => 'Post created on '.$hub->name.' (white-label database).',
+            'message' => 'Post created on '.$hub->name.' (white-labelled database).',
             'post' => $post,
             'target_hub' => ['id' => $hub->id, 'name' => $hub->name, 'slug' => $hub->slug],
         ], 201);
@@ -535,7 +535,7 @@ class HubContentController extends Controller
     {
         $current = $this->hubs->current();
         if (! $current->isShared()) {
-            throw new HttpException(403, 'Controlling white-label hubs is only available from the shared hub.');
+            throw new HttpException(403, 'Controlling white-labelled hubs is only available from the shared hub.');
         }
 
         $user = $request->user();

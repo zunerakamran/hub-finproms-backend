@@ -12,7 +12,7 @@ use Throwable;
 
 /**
  * Publishes due scheduled Website Compliance change requests.
- * Scans the shared/default DB and every configured white-label hub remote DB.
+ * Scans the shared/default DB and every configured white-labelled hub remote DB.
  */
 class ScheduledChangeRequestPublisher
 {
@@ -60,7 +60,7 @@ class ScheduledChangeRequestPublisher
                     });
                 });
             } catch (Throwable $e) {
-                Log::warning('wc scheduled publisher: skipped white-label hub', [
+                Log::warning('wc scheduled publisher: skipped white-labelled hub', [
                     'hub_id' => $hub->id,
                     'hub_name' => $hub->name,
                     'error' => $e->getMessage(),

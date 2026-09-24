@@ -181,7 +181,7 @@ class SectionController extends Controller
         $lockOwnerId = $this->actingAdvisors->lockOwnerIdForWrite($user);
 
         if ($section->is_locked && ! $this->actingAdvisors->mayOwnLock($user, $section->locked_by)) {
-            // Remote control-plane operators can take over locks on white-label hubs.
+            // Remote control-plane operators can take over locks on white-labelled hubs.
             if (! $this->gate->isRemoteControlPlaneOperator($user)) {
                 if (! $section->locked_by) {
                     return response()->json(['message' => 'This section has a pending or scheduled change request and cannot be edited until it is reviewed.'], 409);

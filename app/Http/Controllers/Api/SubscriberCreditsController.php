@@ -93,7 +93,7 @@ class SubscriberCreditsController extends Controller
 
         if ($hub->isShared() || ! $hub->isPrivateInviteOnly()) {
             abort(response()->json([
-                'message' => 'Subscriber credits are only configured for private invite-only hubs. Select a private white-label hub in Control hub.',
+                'message' => 'Subscriber credits are only configured for private invite-only hubs. Select a private white-labelled hub in Control hub.',
             ], 422));
         }
 

@@ -218,7 +218,7 @@ class PaymentSettingsService
             \Illuminate\Support\Facades\Cache::forget('setting:'.Setting::KEY_STRIPE_WEBHOOK_SECRET);
         }
 
-        // Optional per-hub Stripe override (shared or white-label).
+        // Optional per-hub Stripe override (shared or white-labelled).
         if ($hub) {
             $dirty = false;
             if (array_key_exists('hub_stripe_key', $payload)) {

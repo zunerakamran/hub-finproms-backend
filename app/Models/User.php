@@ -31,7 +31,7 @@ class User extends Authenticatable
     /** Content / social media compliance approver. */
     public const ROLE_APPROVER = 'approver';
 
-    /** White-label advisor (subscriber, typically unlimited credits). */
+    /** White-labelled advisor (subscriber, typically unlimited credits). */
     public const ROLE_ADVISOR = 'advisor';
 
     /**
@@ -75,7 +75,7 @@ class User extends Authenticatable
     ];
 
     /**
-     * While WC is remounted onto an acting white-label DB, resolve advisors /
+     * While WC is remounted onto an acting white-labelled DB, resolve advisors /
      * editors for wc_* relations from that same database.
      */
     public function getConnectionName(): ?string
@@ -245,7 +245,7 @@ class User extends Authenticatable
     }
 
     /**
-     * Per-user unlimited credits (white-label advisors), optionally combined with hub checklist.
+     * Per-user unlimited credits (white-labelled advisors), optionally combined with hub checklist.
      * Suspended / discontinued advisors never receive unlimited credits.
      */
     public function hasUnlimitedCredits(bool $hubAllowsUnlimited = true): bool

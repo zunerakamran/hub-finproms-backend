@@ -181,7 +181,7 @@ class HubVisibilityTransitionService
         ];
 
         if ($hub->isWhiteLabel() && $usersConnection === null) {
-            // Never mutate shared-hub users when toggling a white-label hub.
+            // Never mutate shared-hub users when toggling a white-labelled hub.
             if ($transition === 'private_to_public') {
                 $this->advisorBilling->stopAutoRenewForHub($hub);
                 $result['auto_renew_stopped'] = true;

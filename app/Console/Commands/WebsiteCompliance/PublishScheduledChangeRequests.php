@@ -9,7 +9,7 @@ class PublishScheduledChangeRequests extends Command
 {
     protected $signature = 'wc:publish-scheduled';
 
-    protected $description = 'Publish Website Compliance change requests whose scheduled_at time has been reached (shared + white-label hub DBs)';
+    protected $description = 'Publish Website Compliance change requests whose scheduled_at time has been reached (shared + white-labelled hub DBs)';
 
     public function handle(ScheduledChangeRequestPublisher $publisher): int
     {

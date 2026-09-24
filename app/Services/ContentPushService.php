@@ -17,7 +17,7 @@ use InvalidArgumentException;
 use Throwable;
 
 /**
- * Push content from the shared hub into a white-label hub's own database.
+ * Push content from the shared hub into a white-labelled hub's own database.
  */
 class ContentPushService
 {
@@ -148,7 +148,7 @@ class ContentPushService
             ->get();
 
         if ($targets->isEmpty()) {
-            throw new InvalidArgumentException('No active white-label hubs selected.');
+            throw new InvalidArgumentException('No active white-labelled hubs selected.');
         }
 
         $results = [];
