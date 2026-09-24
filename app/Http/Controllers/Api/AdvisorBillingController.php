@@ -209,7 +209,7 @@ class AdvisorBillingController extends Controller
 
         if (! $this->billing->billingEnabled($hub)) {
             abort(response()->json([
-                'message' => 'Advisor auto-renew settings apply to private invite-only hubs with advisor billing.',
+                'message' => 'Advisor auto-renew settings apply to white-labelled invite-only hubs with advisor billing.',
             ], 403));
         }
 

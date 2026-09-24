@@ -262,15 +262,15 @@ class Hub extends Model
     public const CHECKLIST_DEFINITIONS = [
         // --- Functionalities (hub checklist) ---
         'public_subscribe' => [
-            'label' => 'Public subscribe / self-registration',
-            'description' => 'Anyone can register and subscribe.',
+            'label' => 'Shared subscribe / self-registration',
+            'description' => 'Anyone can register and subscribe on this shared hub.',
             'group' => self::GROUP_BEHAVIOUR,
             'default_shared' => true,
             'default_white_label' => false,
         ],
         'private_invite_only' => [
-            'label' => 'Private invite-only access',
-            'description' => 'Only invited advisors (e.g. Excel import) can access.',
+            'label' => 'White-labelled invite-only access',
+            'description' => 'Only invited advisors (e.g. Excel import) can access this white-labelled hub.',
             'group' => self::GROUP_BEHAVIOUR,
             'default_shared' => false,
             'default_white_label' => true,
@@ -441,7 +441,7 @@ class Hub extends Model
         // --- 4. Firms ---
         'dashboard_manage_firms' => [
             'label' => 'Manage firms',
-            'description' => 'Add/manage firms and set which firm (own, Central/Network, or another) may review, approve, and see reports for each firm’s compliance requests. Public self-registration does not ask for a firm.',
+            'description' => 'Add/manage firms and set which firm (own, Central/Network, or another) may review, approve, and see reports for each firm’s compliance requests. Shared hub self-registration does not ask for a firm.',
             'group' => self::GROUP_DASHBOARD_FIRMS,
             'default_shared' => true,
             'default_white_label' => true,
