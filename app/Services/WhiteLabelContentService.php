@@ -6,6 +6,7 @@ use App\Models\Hub;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
@@ -573,6 +574,8 @@ class WhiteLabelContentService
                         'credits_cost' => (int) $r->credits_cost,
                         'is_active' => (bool) $r->is_active,
                         'posts_count' => $count,
+                        'image_path' => $r->image_path ?? null,
+                        'image_url' => $this->resolveBundleImageUrl($r->image_path ?? null),
                     ];
                 })->all(),
             ];
@@ -602,7 +605,7 @@ class WhiteLabelContentService
             }
 
             $now = now();
-            $id = (int) DB::connection($connection)->table('bundles')->insertGetId([
+            $insert = [
                 'created_by' => $this->resolveRemoteCreatorId($connection),
                 'title' => $payload['title'],
                 'description' => $payload['description'] ?? null,
@@ -611,7 +614,12 @@ class WhiteLabelContentService
                 'buy_count' => 0,
                 'created_at' => $now,
                 'updated_at' => $now,
-            ]);
+            ];
+            if (Schema::connection($connection)->hasColumn('bundles', 'image_path')) {
+                $insert['image_path'] = $payload['image_path'] ?? null;
+            }
+
+            $id = (int) DB::connection($connection)->table('bundles')->insertGetId($insert);
 
             foreach ($postIds as $index => $postId) {
                 DB::connection($connection)->table('bundle_post')->insert([
@@ -629,6 +637,8 @@ class WhiteLabelContentService
                 'credits_cost' => (int) $payload['credits_cost'],
                 'posts_count' => count($postIds),
                 'is_active' => (bool) ($payload['is_active'] ?? true),
+                'image_path' => $insert['image_path'] ?? null,
+                'image_url' => $this->resolveBundleImageUrl($insert['image_path'] ?? null),
             ];
         } finally {
             $this->remoteDb->disconnect($hub);
@@ -659,6 +669,12 @@ class WhiteLabelContentService
             }
             if (array_key_exists('is_active', $payload)) {
                 $updates['is_active'] = (bool) $payload['is_active'];
+            }
+            if (
+                array_key_exists('image_path', $payload)
+                && Schema::connection($connection)->hasColumn('bundles', 'image_path')
+            ) {
+                $updates['image_path'] = $payload['image_path'];
             }
 
             DB::connection($connection)->table('bundles')->where('id', $bundleId)->update($updates);
@@ -696,6 +712,8 @@ class WhiteLabelContentService
                 'credits_cost' => (int) $fresh->credits_cost,
                 'is_active' => (bool) $fresh->is_active,
                 'posts_count' => $count,
+                'image_path' => $fresh->image_path ?? null,
+                'image_url' => $this->resolveBundleImageUrl($fresh->image_path ?? null),
             ];
         } finally {
             $this->remoteDb->disconnect($hub);
@@ -857,5 +875,20 @@ class WhiteLabelContentService
             'created_at' => $now,
             'updated_at' => $now,
         ]);
+    }
+
+    private function resolveBundleImageUrl(?string $path): ?string
+    {
+        if (! filled($path)) {
+            return null;
+        }
+
+        if (str_starts_with($path, 'http://')
+            || str_starts_with($path, 'https://')
+            || str_starts_with($path, '/')) {
+            return $path;
+        }
+
+        return Storage::disk('public')->url($path);
     }
 }

@@ -13,6 +13,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -132,7 +133,12 @@ class BundleController extends Controller
                 'is_active' => ['sometimes', 'boolean'],
                 'post_ids' => ['required', 'array', 'min:1'],
                 'post_ids.*' => ['integer'],
+                'image' => ['nullable', 'image', 'max:5120', 'mimes:jpg,jpeg,png,gif,webp'],
             ]);
+
+            if ($path = $this->storeBundleImage($request)) {
+                $validated['image_path'] = $this->publicImageUrl($path);
+            }
 
             return $this->createBundleOnActingHub($hub, $validated);
         }
@@ -154,6 +160,7 @@ class BundleController extends Controller
                 'created_by' => $request->user()->id,
                 'title' => $validated['title'],
                 'description' => $validated['description'] ?? null,
+                'image_path' => $this->storeBundleImage($request),
                 'credits_cost' => $validated['credits_cost'],
                 'is_active' => $validated['is_active'] ?? true,
             ]);
@@ -185,6 +192,11 @@ class BundleController extends Controller
                     'is_active' => filter_var($request->input('is_active'), FILTER_VALIDATE_BOOLEAN),
                 ]);
             }
+            if ($request->has('remove_image') && ! is_bool($request->input('remove_image'))) {
+                $request->merge([
+                    'remove_image' => filter_var($request->input('remove_image'), FILTER_VALIDATE_BOOLEAN),
+                ]);
+            }
 
             $validated = $request->validate([
                 'title' => ['sometimes', 'string', 'max:255'],
@@ -193,7 +205,15 @@ class BundleController extends Controller
                 'is_active' => ['sometimes', 'boolean'],
                 'post_ids' => ['sometimes', 'array', 'min:1'],
                 'post_ids.*' => ['integer'],
+                'image' => ['nullable', 'image', 'max:5120', 'mimes:jpg,jpeg,png,gif,webp'],
+                'remove_image' => ['sometimes', 'boolean'],
             ]);
+
+            if ($path = $this->storeBundleImage($request)) {
+                $validated['image_path'] = $this->publicImageUrl($path);
+            } elseif (! empty($validated['remove_image'])) {
+                $validated['image_path'] = null;
+            }
 
             return $this->updateBundleOnActingHub($hub, $bundle, $validated);
         }
@@ -212,6 +232,19 @@ class BundleController extends Controller
                     ? $validated['is_active']
                     : $model->is_active,
             ]);
+
+            if ($request->hasFile('image')) {
+                if ($model->image_path && ! str_starts_with((string) $model->image_path, 'http')) {
+                    Storage::disk('public')->delete($model->image_path);
+                }
+                $model->image_path = $this->storeBundleImage($request);
+            } elseif ($request->boolean('remove_image')) {
+                if ($model->image_path && ! str_starts_with((string) $model->image_path, 'http')) {
+                    Storage::disk('public')->delete($model->image_path);
+                }
+                $model->image_path = null;
+            }
+
             $model->save();
 
             $hasPostIds = $request->has('post_ids') || array_key_exists('post_ids', $validated);
@@ -276,11 +309,19 @@ class BundleController extends Controller
             ]);
         }
 
+        if ($request->has('remove_image') && ! is_bool($request->input('remove_image'))) {
+            $request->merge([
+                'remove_image' => filter_var($request->input('remove_image'), FILTER_VALIDATE_BOOLEAN),
+            ]);
+        }
+
         $validated = $request->validate([
             'title' => [$required, 'string', 'max:255'],
             'description' => ['nullable', 'string'],
             'credits_cost' => [$required, 'integer', 'min:1'],
             'is_active' => ['sometimes', 'boolean'],
+            'image' => ['nullable', 'image', 'max:5120', 'mimes:jpg,jpeg,png,gif,webp'],
+            'remove_image' => ['sometimes', 'boolean'],
             'post_ids' => ['nullable', 'array'],
             'post_ids.*' => ['integer', 'distinct', 'exists:posts,id'],
             'new_posts' => ['nullable', 'array'],
@@ -300,6 +341,20 @@ class BundleController extends Controller
         ]);
 
         return $validated;
+    }
+
+    private function storeBundleImage(Request $request): ?string
+    {
+        if (! $request->hasFile('image')) {
+            return null;
+        }
+
+        return $request->file('image')->store('bundles', 'public');
+    }
+
+    private function publicImageUrl(string $path): string
+    {
+        return url(Storage::disk('public')->url($path));
     }
 
     /**

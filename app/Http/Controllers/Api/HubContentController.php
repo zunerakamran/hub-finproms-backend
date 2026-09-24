@@ -221,7 +221,13 @@ class HubContentController extends Controller
             'is_active' => ['sometimes', 'boolean'],
             'post_ids' => ['required', 'array', 'min:1'],
             'post_ids.*' => ['integer'],
+            'image' => ['nullable', 'image', 'max:5120', 'mimes:jpg,jpeg,png,gif,webp'],
         ]);
+
+        if ($request->hasFile('image')) {
+            $path = $request->file('image')->store('bundles', 'public');
+            $validated['image_path'] = url(\Illuminate\Support\Facades\Storage::disk('public')->url($path));
+        }
 
         try {
             $bundle = $this->content->createBundle($hub, $validated);
@@ -445,6 +451,11 @@ class HubContentController extends Controller
                 'is_active' => filter_var($request->input('is_active'), FILTER_VALIDATE_BOOLEAN),
             ]);
         }
+        if ($request->has('remove_image') && ! is_bool($request->input('remove_image'))) {
+            $request->merge([
+                'remove_image' => filter_var($request->input('remove_image'), FILTER_VALIDATE_BOOLEAN),
+            ]);
+        }
 
         $validated = $request->validate([
             'title' => ['sometimes', 'string', 'max:255'],
@@ -453,7 +464,16 @@ class HubContentController extends Controller
             'is_active' => ['sometimes', 'boolean'],
             'post_ids' => ['sometimes', 'array', 'min:1'],
             'post_ids.*' => ['integer'],
+            'image' => ['nullable', 'image', 'max:5120', 'mimes:jpg,jpeg,png,gif,webp'],
+            'remove_image' => ['sometimes', 'boolean'],
         ]);
+
+        if ($request->hasFile('image')) {
+            $path = $request->file('image')->store('bundles', 'public');
+            $validated['image_path'] = url(\Illuminate\Support\Facades\Storage::disk('public')->url($path));
+        } elseif (! empty($validated['remove_image'])) {
+            $validated['image_path'] = null;
+        }
 
         try {
             $updated = $this->content->updateBundle($hub, $bundle, $validated);

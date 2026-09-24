@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Storage;
 
 class Bundle extends Model
 {
@@ -13,6 +14,7 @@ class Bundle extends Model
         'created_by',
         'title',
         'description',
+        'image_path',
         'credits_cost',
         'is_active',
         'buy_count',
@@ -20,6 +22,7 @@ class Bundle extends Model
 
     protected $appends = [
         'posts_count',
+        'image_url',
     ];
 
     protected function casts(): array
@@ -29,6 +32,30 @@ class Bundle extends Model
             'is_active' => 'boolean',
             'buy_count' => 'integer',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::deleting(function (Bundle $bundle): void {
+            if ($bundle->image_path && ! str_starts_with($bundle->image_path, 'http')) {
+                Storage::disk('public')->delete($bundle->image_path);
+            }
+        });
+    }
+
+    public function getImageUrlAttribute(): ?string
+    {
+        if (! $this->image_path) {
+            return null;
+        }
+
+        if (str_starts_with($this->image_path, 'http://')
+            || str_starts_with($this->image_path, 'https://')
+            || str_starts_with($this->image_path, '/')) {
+            return $this->image_path;
+        }
+
+        return Storage::disk('public')->url($this->image_path);
     }
 
     public function creator(): BelongsTo
