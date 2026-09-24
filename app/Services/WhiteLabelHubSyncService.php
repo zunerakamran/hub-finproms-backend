@@ -56,6 +56,7 @@ class WhiteLabelHubSyncService
                     'primary_color' => $hub->primary_color,
                     'secondary_color' => $hub->secondary_color,
                     'logo_url' => $hub->logoAbsoluteUrl(),
+                    'white_logo_url' => $hub->whiteLogoAbsoluteUrl(),
                     'favicon_url' => $hub->faviconAbsoluteUrl(),
                     'from_email' => $hub->from_email,
                     'frontend_url' => $hub->frontend_url,

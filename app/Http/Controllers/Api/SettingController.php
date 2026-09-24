@@ -45,6 +45,8 @@ class SettingController extends Controller
             'from_email' => ['sometimes', 'nullable', 'email', 'max:255'],
             'logo' => ['sometimes', 'file', 'image', 'max:5120'],
             'remove_logo' => ['sometimes', 'boolean'],
+            'white_logo' => ['sometimes', 'file', 'image', 'max:5120'],
+            'remove_white_logo' => ['sometimes', 'boolean'],
             // Favicons often use .ico; Laravel's "image" rule rejects that, so use mimes.
             'favicon' => ['sometimes', 'file', 'mimes:ico,png,jpg,jpeg,gif,webp,svg', 'max:1024'],
             'remove_favicon' => ['sometimes', 'boolean'],
@@ -83,6 +85,20 @@ class SettingController extends Controller
             $this->deleteStoredAsset($hub->logo_url, 'hubs/logos/');
             $path = $request->file('logo')->store('hubs/logos', 'public');
             $hub->logo_url = $path;
+            $hubDirty = true;
+        }
+
+        $removeWhiteLogo = filter_var($request->input('remove_white_logo'), FILTER_VALIDATE_BOOLEAN);
+        if ($removeWhiteLogo && ! $request->hasFile('white_logo')) {
+            $this->deleteStoredAsset($hub->white_logo_url, 'hubs/white-logos/');
+            $hub->white_logo_url = null;
+            $hubDirty = true;
+        }
+
+        if ($request->hasFile('white_logo')) {
+            $this->deleteStoredAsset($hub->white_logo_url, 'hubs/white-logos/');
+            $path = $request->file('white_logo')->store('hubs/white-logos', 'public');
+            $hub->white_logo_url = $path;
             $hubDirty = true;
         }
 
@@ -152,6 +168,7 @@ class SettingController extends Controller
             'application_name' => $hub->name,
             'from_email' => $hub->from_email,
             'logo_url' => $hub->logoPublicUrl(),
+            'white_logo_url' => $hub->whiteLogoPublicUrl(),
             'favicon_url' => $hub->faviconPublicUrl(),
             'color_scheme' => [
                 'primary' => $hub->primary_color,

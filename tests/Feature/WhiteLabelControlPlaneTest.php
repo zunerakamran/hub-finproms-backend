@@ -216,6 +216,7 @@ class WhiteLabelControlPlaneTest extends TestCase
         [$admin, $hub] = $this->actingPowerAdminOnWiredHub();
 
         $hub->logo_url = 'hubs/logos/brand-logo.png';
+        $hub->white_logo_url = 'hubs/white-logos/brand-logo-white.png';
         $hub->favicon_url = 'hubs/favicons/brand.ico';
         $hub->save();
 
@@ -229,6 +230,10 @@ class WhiteLabelControlPlaneTest extends TestCase
             $this->assertSame(
                 'https://sharedhub.fin-proms.com/api/media/hubs/logos/brand-logo.png',
                 $row->logo_url
+            );
+            $this->assertSame(
+                'https://sharedhub.fin-proms.com/api/media/hubs/white-logos/brand-logo-white.png',
+                $row->white_logo_url
             );
             $this->assertSame(
                 'https://sharedhub.fin-proms.com/api/media/hubs/favicons/brand.ico',
@@ -745,6 +750,7 @@ class WhiteLabelControlPlaneTest extends TestCase
             $table->string('primary_color')->nullable();
             $table->string('secondary_color')->nullable();
             $table->string('logo_url')->nullable();
+            $table->string('white_logo_url')->nullable();
             $table->string('favicon_url')->nullable();
             $table->string('from_email')->nullable();
             $table->string('frontend_url')->nullable();

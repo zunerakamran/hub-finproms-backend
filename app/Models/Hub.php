@@ -797,6 +797,7 @@ class Hub extends Model
         'primary_color',
         'secondary_color',
         'logo_url',
+        'white_logo_url',
         'favicon_url',
         'from_email',
         'frontend_url',
@@ -1067,6 +1068,14 @@ class Hub extends Model
     }
 
     /**
+     * Public URL for the white-on-dark hub logo variant.
+     */
+    public function whiteLogoPublicUrl(): ?string
+    {
+        return $this->publicAssetUrl($this->white_logo_url);
+    }
+
+    /**
      * Public URL for the hub favicon (uploaded storage path or external URL).
      */
     public function faviconPublicUrl(): ?string
@@ -1259,6 +1268,14 @@ class Hub extends Model
     }
 
     /**
+     * Absolute white logo URL for dark UI surfaces and white-label sync.
+     */
+    public function whiteLogoAbsoluteUrl(): ?string
+    {
+        return $this->absoluteAssetUrl($this->whiteLogoPublicUrl());
+    }
+
+    /**
      * Absolute favicon URL for emails and white-label sync.
      */
     public function faviconAbsoluteUrl(): ?string
@@ -1300,6 +1317,7 @@ class Hub extends Model
      * @return array{
      *   application_name: string,
      *   logo_url: ?string,
+     *   white_logo_url: ?string,
      *   favicon_url: ?string,
      *   from_email: ?string,
      *   primary_color: ?string,
@@ -1314,6 +1332,7 @@ class Hub extends Model
             // Absolute URLs so login/signup (and emails) always resolve the
             // control-plane or local media host correctly.
             'logo_url' => $this->logoAbsoluteUrl(),
+            'white_logo_url' => $this->whiteLogoAbsoluteUrl(),
             'favicon_url' => $this->faviconAbsoluteUrl(),
             'from_email' => $this->from_email,
             'primary_color' => $this->primary_color,
