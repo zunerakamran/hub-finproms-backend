@@ -58,6 +58,7 @@ class WhiteLabelHubSyncService
                     'logo_url' => $hub->logoAbsoluteUrl(),
                     'white_logo_url' => $hub->whiteLogoAbsoluteUrl(),
                     'favicon_url' => $hub->faviconAbsoluteUrl(),
+                    'auth_bg_image_url' => $hub->authBgImageAbsoluteUrl(),
                     'from_email' => $hub->from_email,
                     'frontend_url' => $hub->frontend_url,
                     'checklist' => json_encode($hub->resolvedChecklist()),

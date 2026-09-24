@@ -50,6 +50,8 @@ class SettingController extends Controller
             // Favicons often use .ico; Laravel's "image" rule rejects that, so use mimes.
             'favicon' => ['sometimes', 'file', 'mimes:ico,png,jpg,jpeg,gif,webp,svg', 'max:1024'],
             'remove_favicon' => ['sometimes', 'boolean'],
+            'auth_bg_image' => ['sometimes', 'file', 'image', 'max:8192'],
+            'remove_auth_bg_image' => ['sometimes', 'boolean'],
             'color_scheme' => ['sometimes', 'array'],
             'color_scheme.primary' => ['nullable', 'string', 'max:32'],
             'color_scheme.secondary' => ['nullable', 'string', 'max:32'],
@@ -116,6 +118,20 @@ class SettingController extends Controller
             $hubDirty = true;
         }
 
+        $removeAuthBg = filter_var($request->input('remove_auth_bg_image'), FILTER_VALIDATE_BOOLEAN);
+        if ($removeAuthBg && ! $request->hasFile('auth_bg_image')) {
+            $this->deleteStoredAsset($hub->auth_bg_image_url, 'hubs/auth-bg/');
+            $hub->auth_bg_image_url = null;
+            $hubDirty = true;
+        }
+
+        if ($request->hasFile('auth_bg_image')) {
+            $this->deleteStoredAsset($hub->auth_bg_image_url, 'hubs/auth-bg/');
+            $path = $request->file('auth_bg_image')->store('hubs/auth-bg', 'public');
+            $hub->auth_bg_image_url = $path;
+            $hubDirty = true;
+        }
+
         if (isset($validated['color_scheme']) && is_array($validated['color_scheme'])) {
             if (array_key_exists('primary', $validated['color_scheme'])) {
                 $hub->primary_color = $validated['color_scheme']['primary'];
@@ -170,6 +186,7 @@ class SettingController extends Controller
             'logo_url' => $hub->logoPublicUrl(),
             'white_logo_url' => $hub->whiteLogoPublicUrl(),
             'favicon_url' => $hub->faviconPublicUrl(),
+            'auth_bg_image_url' => $hub->authBgImagePublicUrl(),
             'color_scheme' => [
                 'primary' => $hub->primary_color,
                 'secondary' => $hub->secondary_color,

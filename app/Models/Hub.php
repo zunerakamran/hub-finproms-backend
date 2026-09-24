@@ -501,7 +501,7 @@ class Hub extends Model
         ],
         'dashboard_manage_settings' => [
             'label' => 'Manage settings',
-            'description' => 'Hub admin can manage hub settings: NEW banner, logo, favicon, color scheme, and application name.',
+            'description' => 'Hub admin can manage hub settings: NEW banner, logo, favicon, auth background, color scheme, and application name.',
             'group' => self::GROUP_DASHBOARD_HUB,
             'default_shared' => true,
             'default_white_label' => true,
@@ -799,6 +799,7 @@ class Hub extends Model
         'logo_url',
         'white_logo_url',
         'favicon_url',
+        'auth_bg_image_url',
         'from_email',
         'frontend_url',
         'api_url',
@@ -1084,6 +1085,14 @@ class Hub extends Model
     }
 
     /**
+     * Public URL for the login/register background image.
+     */
+    public function authBgImagePublicUrl(): ?string
+    {
+        return $this->publicAssetUrl($this->auth_bg_image_url);
+    }
+
+    /**
      * Resolve a stored asset path or absolute/external URL to a public URL.
      */
     private function publicAssetUrl(?string $value): ?string
@@ -1284,6 +1293,14 @@ class Hub extends Model
     }
 
     /**
+     * Absolute auth background image URL for white-label sync.
+     */
+    public function authBgImageAbsoluteUrl(): ?string
+    {
+        return $this->absoluteAssetUrl($this->authBgImagePublicUrl());
+    }
+
+    /**
      * Ensure a public asset URL is host-absolute (http/https).
      */
     private function absoluteAssetUrl(?string $url): ?string
@@ -1319,6 +1336,7 @@ class Hub extends Model
      *   logo_url: ?string,
      *   white_logo_url: ?string,
      *   favicon_url: ?string,
+     *   auth_bg_image_url: ?string,
      *   from_email: ?string,
      *   primary_color: ?string,
      *   secondary_color: ?string,
@@ -1334,6 +1352,7 @@ class Hub extends Model
             'logo_url' => $this->logoAbsoluteUrl(),
             'white_logo_url' => $this->whiteLogoAbsoluteUrl(),
             'favicon_url' => $this->faviconAbsoluteUrl(),
+            'auth_bg_image_url' => $this->authBgImageAbsoluteUrl(),
             'from_email' => $this->from_email,
             'primary_color' => $this->primary_color,
             'secondary_color' => $this->secondary_color,
