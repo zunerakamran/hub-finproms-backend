@@ -44,7 +44,7 @@ class OrderConfirmationMail extends Mailable
             replyTo: [
                 new Address($this->data['support_email'], $siteName),
             ],
-            subject: "Your {$siteName} Order is Confirmed!",
+            subject: (string) ($this->data['subject'] ?? "Your {$siteName} Order is Confirmed!"),
         );
     }
 

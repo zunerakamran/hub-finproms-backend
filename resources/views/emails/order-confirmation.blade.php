@@ -124,10 +124,10 @@
                         <tr>
                             <td style="font-family:Arial, Helvetica, sans-serif; color:#ffffff;">
                                 <div style="font-size:13px; letter-spacing:0.08em; text-transform:uppercase; opacity:0.9; margin-bottom:8px;">
-                                    Order confirmed
+                                    {{ $eyebrow ?? 'Order confirmed' }}
                                 </div>
                                 <div style="font-size:24px; line-height:1.3; font-weight:700;">
-                                    Your {{ $site_name }} Order is Confirmed!
+                                    {{ $heading ?? ('Your '.$site_name.' Order is Confirmed!') }}
                                 </div>
                             </td>
                         </tr>
@@ -137,13 +137,17 @@
 
             <tr>
                 <td style="background-color:#ffffff; padding:28px 28px 8px 28px;" class="mobile-padding">
-                    <p style="margin:0 0 16px 0; font-family:Arial, Helvetica, sans-serif; font-size:16px; line-height:1.6; color:#1f2937;">
-                        Hi {{ $username }},
-                    </p>
-                    <p style="margin:0 0 20px 0; font-family:Arial, Helvetica, sans-serif; font-size:15px; line-height:1.65; color:#4b5563;">
-                        Thank you for your order with <strong style="color:#111827;">{{ $site_name }}</strong>!
-                        We’ve received your payment and here are your purchase details.
-                    </p>
+                    @if (! empty($intro))
+                        <p style="margin:0 0 20px 0; font-family:Arial, Helvetica, sans-serif; font-size:15px; line-height:1.65; color:#4b5563;">{!! nl2br(e($intro)) !!}</p>
+                    @else
+                        <p style="margin:0 0 16px 0; font-family:Arial, Helvetica, sans-serif; font-size:16px; line-height:1.6; color:#1f2937;">
+                            Hi {{ $username }},
+                        </p>
+                        <p style="margin:0 0 20px 0; font-family:Arial, Helvetica, sans-serif; font-size:15px; line-height:1.65; color:#4b5563;">
+                            Thank you for your order with <strong style="color:#111827;">{{ $site_name }}</strong>!
+                            We’ve received your payment and here are your purchase details.
+                        </p>
+                    @endif
                 </td>
             </tr>
 

@@ -54,10 +54,10 @@
                 <td style="background-color:{{ $primary_color }}; border-radius:12px 12px 0 0; padding:28px 28px 24px 28px;" class="mobile-padding">
                     <div style="font-family:Arial, Helvetica, sans-serif; color:#ffffff;">
                         <div style="font-size:13px; letter-spacing:0.08em; text-transform:uppercase; opacity:0.9; margin-bottom:8px;">
-                            Admin notification
+                            {{ $eyebrow ?? 'Admin notification' }}
                         </div>
                         <div style="font-size:22px; line-height:1.3; font-weight:700;">
-                            New User Registration
+                            {{ $heading ?? 'New User Registration' }}
                         </div>
                     </div>
                 </td>
@@ -66,7 +66,11 @@
             <tr>
                 <td style="background-color:#ffffff; padding:28px 28px 16px 28px;" class="mobile-padding">
                     <p style="margin:0 0 20px 0; font-family:Arial, Helvetica, sans-serif; font-size:15px; line-height:1.65; color:#4b5563;">
-                        New User has registered on <strong style="color:#111827;">{{ $site_name }}</strong>
+                        @if (! empty($intro))
+                            {!! nl2br(e($intro)) !!}
+                        @else
+                            New User has registered on <strong style="color:#111827;">{{ $site_name }}</strong>
+                        @endif
                     </p>
 
                     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#f9fafb; border:1px solid #e5e7eb; border-radius:10px;">

@@ -54,10 +54,10 @@
                 <td style="background-color:{{ $primary_color }}; border-radius:12px 12px 0 0; padding:28px 28px 24px 28px;" class="mobile-padding">
                     <div style="font-family:Arial, Helvetica, sans-serif; color:#ffffff;">
                         <div style="font-size:13px; letter-spacing:0.08em; text-transform:uppercase; opacity:0.9; margin-bottom:8px;">
-                            Admin notification
+                            {{ $eyebrow ?? 'Admin notification' }}
                         </div>
                         <div style="font-size:22px; line-height:1.3; font-weight:700;">
-                            New download purchase — Order #{{ $payment_id }}
+                            {{ $heading ?? ('New download purchase — Order #'.$payment_id) }}
                         </div>
                     </div>
                 </td>
@@ -65,12 +65,16 @@
 
             <tr>
                 <td style="background-color:#ffffff; padding:28px 28px 12px 28px;" class="mobile-padding">
-                    <p style="margin:0 0 16px 0; font-family:Arial, Helvetica, sans-serif; font-size:16px; line-height:1.6; color:#1f2937;">
-                        Hello,
-                    </p>
-                    <p style="margin:0 0 20px 0; font-family:Arial, Helvetica, sans-serif; font-size:15px; line-height:1.65; color:#4b5563;">
-                        A Downloads purchase has been made on <strong style="color:#111827;">{{ $site_name }}</strong>.
-                    </p>
+                    @if (! empty($intro))
+                        <p style="margin:0 0 20px 0; font-family:Arial, Helvetica, sans-serif; font-size:15px; line-height:1.65; color:#4b5563;">{!! nl2br(e($intro)) !!}</p>
+                    @else
+                        <p style="margin:0 0 16px 0; font-family:Arial, Helvetica, sans-serif; font-size:16px; line-height:1.6; color:#1f2937;">
+                            Hello,
+                        </p>
+                        <p style="margin:0 0 20px 0; font-family:Arial, Helvetica, sans-serif; font-size:15px; line-height:1.65; color:#4b5563;">
+                            A Downloads purchase has been made on <strong style="color:#111827;">{{ $site_name }}</strong>.
+                        </p>
+                    @endif
                 </td>
             </tr>
 

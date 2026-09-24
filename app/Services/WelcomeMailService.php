@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Mail\WelcomeMail;
 use App\Models\User;
+use App\Support\EmailTemplateCatalog;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Throwable;
@@ -11,7 +12,8 @@ use Throwable;
 class WelcomeMailService
 {
     public function __construct(
-        private readonly HubService $hubs
+        private readonly HubService $hubs,
+        private readonly EmailTemplateService $emailTemplates
     ) {}
 
     public function send(User $user): void
@@ -27,8 +29,22 @@ class WelcomeMailService
             ? (string) $hub->from_email
             : $fromEmail;
 
+        $vars = [
+            'user_name' => $user->name ?: 'there',
+            'user_email' => (string) $user->email,
+            'site_name' => $hub->name,
+            'support_email' => $supportEmail,
+        ];
+
+        $copy = $this->emailTemplates->resolve(
+            $hub,
+            'user_registered',
+            EmailTemplateCatalog::AUDIENCE_USER,
+            $vars
+        );
+
         $data = [
-            'username' => $user->name ?: 'there',
+            'username' => $vars['user_name'],
             'site_name' => $hub->name,
             'logo_url' => $hub->logoAbsoluteUrl(),
             'primary_color' => $hub->primary_color ?: '#1d4ed8',
@@ -37,6 +53,12 @@ class WelcomeMailService
             'from_email' => $fromEmail,
             'login_url' => $frontendUrl.'/login',
             'explore_url' => $frontendUrl.'/',
+            'subject' => $copy['subject'],
+            'eyebrow' => $copy['eyebrow'],
+            'heading' => $copy['heading'],
+            'intro' => $copy['intro'],
+            'closing' => $copy['closing'],
+            'cta_label' => $copy['cta_label'] ?: 'Log in',
         ];
 
         try {

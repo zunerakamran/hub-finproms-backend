@@ -564,6 +564,13 @@ class Hub extends Model
             'default_shared' => true,
             'default_white_label' => true,
         ],
+        'dashboard_manage_email_templates' => [
+            'label' => 'Manage email templates',
+            'description' => 'Create and edit transactional email templates for this hub (subject, heading, body). Layout (logo and theme colours) stays branded. Admin recipients are still controlled by “Receive admin emails”.',
+            'group' => self::GROUP_ADMIN_EMAILS,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
 
         // --- Social Media Compliance (blurred while module_social_media_compliance is off) ---
         'smc_submit_request' => [
@@ -814,6 +821,7 @@ class Hub extends Model
         'role_capabilities',
         'role_display_names',
         'compliance_status_display_names',
+        'email_templates',
         'advisor_billing_renew_day',
         'subscriber_credits',
         'advisor_stripe_subscription_id',
@@ -837,6 +845,7 @@ class Hub extends Model
             'role_capabilities' => 'array',
             'role_display_names' => 'array',
             'compliance_status_display_names' => 'array',
+            'email_templates' => 'array',
             'advisor_billing_renew_day' => 'integer',
             'subscriber_credits' => 'integer',
             'db_port' => 'integer',

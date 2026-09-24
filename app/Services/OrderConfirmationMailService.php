@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Mail\OrderConfirmationMail;
 use App\Models\Invoice;
+use App\Support\EmailTemplateCatalog;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Throwable;
@@ -11,7 +12,8 @@ use Throwable;
 class OrderConfirmationMailService
 {
     public function __construct(
-        private readonly HubService $hubs
+        private readonly HubService $hubs,
+        private readonly EmailTemplateService $emailTemplates
     ) {}
 
     /**
@@ -49,6 +51,20 @@ class OrderConfirmationMailService
             ? (string) $hub->from_email
             : $fromEmail;
 
+        $amount = $this->formatMoney((float) $invoice->amount, (string) $invoice->currency);
+        $copy = $this->emailTemplates->resolve(
+            $hub,
+            'order_confirmed',
+            EmailTemplateCatalog::AUDIENCE_USER,
+            [
+                'user_name' => $user->name ?: 'there',
+                'site_name' => $hub->name,
+                'invoice_number' => $invoice->invoice_number,
+                'amount' => $amount,
+                'support_email' => $supportEmail,
+            ]
+        );
+
         $data = [
             'username' => $user->name ?: 'there',
             'site_name' => $hub->name,
@@ -61,10 +77,16 @@ class OrderConfirmationMailService
             'date' => optional($invoice->issued_at)->timezone(config('app.timezone'))->format('d M Y, H:i')
                 ?? now()->format('d M Y, H:i'),
             'payment_method' => $this->paymentMethodLabel($invoice),
-            'price' => $this->formatMoney((float) $invoice->amount, (string) $invoice->currency),
+            'price' => $amount,
             'order_list' => $this->orderList($invoice),
             'invoice_url' => $frontendUrl.'/invoices/'.$invoice->id,
             'login_url' => $frontendUrl.'/login',
+            'subject' => $copy['subject'],
+            'eyebrow' => $copy['eyebrow'],
+            'heading' => $copy['heading'],
+            'intro' => $copy['intro'],
+            'closing' => $copy['closing'],
+            'cta_label' => $copy['cta_label'] ?: 'View invoice',
         ];
 
         try {

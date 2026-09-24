@@ -606,6 +606,7 @@ class CapabilitiesMatrixService
                 && $group !== Hub::GROUP_SOCIAL_MEDIA_COMPLIANCE
                 && $group !== Hub::GROUP_GENERAL_COMPLIANCE
                 && $group !== Hub::GROUP_WEBSITE_COMPLIANCE
+                && $key !== 'dashboard_manage_email_templates'
             ) {
                 continue;
             }

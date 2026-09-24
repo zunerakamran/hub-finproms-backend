@@ -38,6 +38,7 @@ use App\Http\Controllers\Api\PowerAdminUserController;
 use App\Http\Controllers\Api\PurchaseController;
 use App\Http\Controllers\Api\SettingController;
 use App\Http\Controllers\Api\RoleDisplayNameController;
+use App\Http\Controllers\Api\EmailTemplateController;
 use App\Http\Controllers\Api\ComplianceStatusDisplayNameController;
 use App\Http\Controllers\Api\StripeWebhookController;
 use App\Http\Controllers\Api\SubscriptionController;
@@ -336,6 +337,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:dashboard_manage_role_display_names')->group(function () {
             Route::get('/role-display-names', [RoleDisplayNameController::class, 'index']);
             Route::put('/role-display-names', [RoleDisplayNameController::class, 'update']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_email_templates')->group(function () {
+            Route::get('/email-templates', [EmailTemplateController::class, 'index']);
+            Route::get('/email-templates/{event}', [EmailTemplateController::class, 'show']);
+            Route::put('/email-templates/{event}/{audience}', [EmailTemplateController::class, 'update']);
+            Route::post('/email-templates/{event}/{audience}/reset', [EmailTemplateController::class, 'reset']);
         });
 
         Route::middleware('hub_can:dashboard_manage_compliance_status_display_names')->group(function () {

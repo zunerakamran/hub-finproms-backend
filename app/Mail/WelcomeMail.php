@@ -39,7 +39,7 @@ class WelcomeMail extends Mailable
             replyTo: [
                 new Address($this->data['support_email'], $siteName),
             ],
-            subject: "Welcome to {$siteName}!",
+            subject: (string) ($this->data['subject'] ?? "Welcome to {$siteName}!"),
         );
     }
 

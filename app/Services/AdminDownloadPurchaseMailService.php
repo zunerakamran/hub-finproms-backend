@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Mail\AdminDownloadPurchaseMail;
 use App\Models\Invoice;
+use App\Support\EmailTemplateCatalog;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Throwable;
@@ -12,7 +13,8 @@ class AdminDownloadPurchaseMailService
 {
     public function __construct(
         private readonly HubService $hubs,
-        private readonly AdminMailRecipientService $adminRecipients
+        private readonly AdminMailRecipientService $adminRecipients,
+        private readonly EmailTemplateService $emailTemplates
     ) {}
 
     /**
@@ -46,6 +48,20 @@ class AdminDownloadPurchaseMailService
             ? (string) $hub->from_email
             : $fromEmail;
 
+        $amount = $this->formatMoney((float) $invoice->amount, (string) $invoice->currency);
+        $copy = $this->emailTemplates->resolve(
+            $hub,
+            'post_purchased',
+            EmailTemplateCatalog::AUDIENCE_ADMIN,
+            [
+                'site_name' => $hub->name,
+                'invoice_number' => $invoice->invoice_number,
+                'purchaser_name' => $purchaser?->name ?: ($invoice->billing_name ?: 'Unknown'),
+                'purchaser_email' => $purchaser?->email ?: $invoice->billing_email,
+                'amount' => $amount,
+            ]
+        );
+
         $data = [
             'site_name' => $hub->name,
             'logo_url' => $hub->logoAbsoluteUrl(),
@@ -56,9 +72,14 @@ class AdminDownloadPurchaseMailService
             'payment_id' => $invoice->invoice_number,
             'purchaser' => $purchaser?->name ?: ($invoice->billing_name ?: 'Unknown'),
             'purchaser_email' => $purchaser?->email ?: $invoice->billing_email,
-            'price' => $this->formatMoney((float) $invoice->amount, (string) $invoice->currency),
+            'price' => $amount,
             'payment_method' => 'Credits',
             'download_list' => $this->downloadList($invoice),
+            'subject' => $copy['subject'],
+            'eyebrow' => $copy['eyebrow'],
+            'heading' => $copy['heading'],
+            'intro' => $copy['intro'],
+            'closing' => $copy['closing'],
         ];
 
         foreach ($recipients as $email) {

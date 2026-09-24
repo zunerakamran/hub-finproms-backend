@@ -53,10 +53,10 @@
                 <td style="background-color:{{ $primary_color }}; border-radius:12px 12px 0 0; padding:28px 28px 24px 28px;" class="mobile-padding">
                     <div style="font-family:Arial, Helvetica, sans-serif; color:#ffffff;">
                         <div style="font-size:13px; letter-spacing:0.08em; text-transform:uppercase; opacity:0.9; margin-bottom:8px;">
-                            Welcome
+                            {{ $eyebrow ?? 'Welcome' }}
                         </div>
                         <div style="font-size:24px; line-height:1.3; font-weight:700;">
-                            Welcome to {{ $site_name }}!
+                            {{ $heading ?? ('Welcome to '.$site_name.'!') }}
                         </div>
                     </div>
                 </td>
@@ -64,13 +64,17 @@
 
             <tr>
                 <td style="background-color:#ffffff; padding:28px 28px 8px 28px;" class="mobile-padding">
-                    <p style="margin:0 0 16px 0; font-family:Arial, Helvetica, sans-serif; font-size:16px; line-height:1.6; color:#1f2937;">
-                        Hi {{ $username }},
-                    </p>
-                    <p style="margin:0 0 20px 0; font-family:Arial, Helvetica, sans-serif; font-size:15px; line-height:1.65; color:#4b5563;">
-                        Thank you for verifying your email and joining <strong style="color:#111827;">{{ $site_name }}</strong>!
-                        We’re thrilled to have you on board.
-                    </p>
+                    @if (! empty($intro))
+                        <p style="margin:0 0 20px 0; font-family:Arial, Helvetica, sans-serif; font-size:15px; line-height:1.65; color:#4b5563;">{!! nl2br(e($intro)) !!}</p>
+                    @else
+                        <p style="margin:0 0 16px 0; font-family:Arial, Helvetica, sans-serif; font-size:16px; line-height:1.6; color:#1f2937;">
+                            Hi {{ $username }},
+                        </p>
+                        <p style="margin:0 0 20px 0; font-family:Arial, Helvetica, sans-serif; font-size:15px; line-height:1.65; color:#4b5563;">
+                            Thank you for verifying your email and joining <strong style="color:#111827;">{{ $site_name }}</strong>!
+                            We’re thrilled to have you on board.
+                        </p>
+                    @endif
                     <p style="margin:0 0 12px 0; font-family:Arial, Helvetica, sans-serif; font-size:15px; font-weight:700; color:#111827;">
                         Here’s what you can do next:
                     </p>
@@ -85,7 +89,7 @@
                                 <div style="font-size:14px; font-weight:600; color:#111827; margin-bottom:8px;">1. Log in to your account</div>
                                 <div class="mobile-full-btn">
                                     <a href="{{ $login_url }}" style="display:inline-block; background-color:{{ $primary_color }}; color:#ffffff; font-family:Arial, Helvetica, sans-serif; font-size:14px; font-weight:600; padding:11px 18px; border-radius:8px;">
-                                        Click here to log in →
+                                        {{ $cta_label ?? 'Click here to log in' }} →
                                     </a>
                                 </div>
                             </td>
@@ -117,11 +121,15 @@
 
             <tr>
                 <td style="background-color:#ffffff; border-radius:0 0 12px 12px; padding:8px 28px 28px 28px;" class="mobile-padding">
-                    <p style="margin:0 0 16px 0; font-family:Arial, Helvetica, sans-serif; font-size:14px; line-height:1.65; color:#4b5563;">
-                        We look forward to being the trusted partner in your journey of growth.
-                        For any assistance you can always reach us at
-                        <a href="mailto:{{ $support_email }}" style="color:{{ $primary_color }}; font-weight:600;">{{ $support_email }}</a>.
-                    </p>
+                    @if (! empty($closing))
+                        <p style="margin:0 0 16px 0; font-family:Arial, Helvetica, sans-serif; font-size:14px; line-height:1.65; color:#4b5563;">{!! nl2br(e($closing)) !!}</p>
+                    @else
+                        <p style="margin:0 0 16px 0; font-family:Arial, Helvetica, sans-serif; font-size:14px; line-height:1.65; color:#4b5563;">
+                            We look forward to being the trusted partner in your journey of growth.
+                            For any assistance you can always reach us at
+                            <a href="mailto:{{ $support_email }}" style="color:{{ $primary_color }}; font-weight:600;">{{ $support_email }}</a>.
+                        </p>
+                    @endif
                     <p style="margin:0; font-family:Arial, Helvetica, sans-serif; font-size:14px; line-height:1.6; color:#111827;">
                         Best regards,<br>
                         <strong>{{ $site_name }}</strong>

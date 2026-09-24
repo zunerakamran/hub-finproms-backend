@@ -35,7 +35,7 @@ class AdminNewUserRegistrationMail extends Mailable
 
         return new Envelope(
             from: new Address($this->data['from_email'], $siteName),
-            subject: "[{$siteName}] New User Registration",
+            subject: (string) ($this->data['subject'] ?? "[{$siteName}] New User Registration"),
         );
     }
 

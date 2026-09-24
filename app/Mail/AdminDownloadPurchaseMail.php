@@ -40,7 +40,7 @@ class AdminDownloadPurchaseMail extends Mailable
 
         return new Envelope(
             from: new Address($this->data['from_email'], $siteName),
-            subject: "New download purchase - Order #{$paymentId}",
+            subject: (string) ($this->data['subject'] ?? "New download purchase - Order #{$paymentId}"),
         );
     }
 

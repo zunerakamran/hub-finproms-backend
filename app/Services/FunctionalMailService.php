@@ -7,6 +7,7 @@ use App\Models\HubAdvisorBilling;
 use App\Models\Invoice;
 use App\Models\User;
 use App\Models\UserSubscription;
+use App\Support\EmailTemplateCatalog;
 
 /**
  * Orchestrates remaining transactional / admin emails for product flows.
@@ -16,7 +17,8 @@ class FunctionalMailService
     public function __construct(
         private readonly HubService $hubs,
         private readonly HubMailService $mail,
-        private readonly PaymentSettingsService $paymentSettings
+        private readonly PaymentSettingsService $paymentSettings,
+        private readonly EmailTemplateService $emailTemplates
     ) {}
 
     public function adminSubscriptionPaid(Invoice $invoice): void
@@ -31,11 +33,20 @@ class FunctionalMailService
         $user = $invoice->user;
         $plan = $invoice->subscription?->plan;
 
+        $copy = $this->emailTemplates->resolve($hub, 'subscription_paid', EmailTemplateCatalog::AUDIENCE_ADMIN, [
+            'site_name' => $branding['site_name'],
+            'user_name' => $user?->name ?: 'Unknown',
+            'user_email' => $user?->email ?: '',
+            'plan_name' => $plan?->name ?? ($invoice->description ?: 'Subscription'),
+            'amount' => $this->mail->formatMoney((float) $invoice->amount, (string) $invoice->currency),
+            'invoice_number' => $invoice->invoice_number,
+        ]);
+
         $this->mail->sendToAdmins(
-            subject: "[{$branding['site_name']}] New subscription payment",
-            eyebrow: 'Admin notification',
-            heading: 'New subscription payment',
-            intro: "A plan subscription payment was received on {$branding['site_name']}.",
+            subject: $copy['subject'],
+            eyebrow: $copy['eyebrow'],
+            heading: $copy['heading'],
+            intro: $copy['intro'],
             fields: [
                 ['label' => 'Purchaser', 'value' => ($user?->name ?: 'Unknown').($user?->email ? "\n".$user->email : '')],
                 ['label' => 'Plan', 'value' => $plan?->name ?? ($invoice->description ?: 'Subscription')],
@@ -44,9 +55,10 @@ class FunctionalMailService
                 ['label' => 'Invoice', 'value' => $invoice->invoice_number],
             ],
             cta: [
-                'label' => 'View invoice',
+                'label' => $copy['cta_label'] ?: 'View invoice',
                 'url' => $branding['frontend_url'].'/invoices/'.$invoice->id,
             ],
+            closing: $copy['closing'],
             excludeEmail: $user?->email,
             hub: $hub,
         );
@@ -64,43 +76,55 @@ class FunctionalMailService
         $payer = $invoice->user;
         $billing = $invoice->advisorBilling;
 
+        $vars = [
+            'user_name' => $payer?->name ?: 'there',
+            'user_email' => $payer?->email ?: '',
+            'site_name' => $branding['site_name'],
+            'amount' => $this->mail->formatMoney((float) $invoice->amount, (string) $invoice->currency),
+            'invoice_number' => $invoice->invoice_number,
+            'advisor_count' => (string) ($billing?->advisor_count ?? '—'),
+        ];
+
         $fields = [
             ['label' => 'Invoice', 'value' => $invoice->invoice_number],
             ['label' => 'Description', 'value' => $invoice->description ?: 'Advisor billing'],
-            ['label' => 'Amount', 'value' => $this->mail->formatMoney((float) $invoice->amount, (string) $invoice->currency)],
-            ['label' => 'Advisors', 'value' => (string) ($billing?->advisor_count ?? '—')],
+            ['label' => 'Amount', 'value' => $vars['amount']],
+            ['label' => 'Advisors', 'value' => $vars['advisor_count']],
             ['label' => 'Payment method', 'value' => $this->advisorPaymentMethod($billing)],
         ];
 
         if ($payer?->email) {
+            $userCopy = $this->emailTemplates->resolve($hub, 'advisor_billing_paid', EmailTemplateCatalog::AUDIENCE_USER, $vars);
             $this->mail->sendToUser(
                 $payer,
-                subject: "Your {$branding['site_name']} advisor billing receipt",
-                eyebrow: 'Payment received',
-                heading: 'Advisor billing payment confirmed',
-                intro: "Hi {$payer->name},\n\nWe’ve received your advisor billing payment for {$branding['site_name']}.",
+                subject: $userCopy['subject'],
+                eyebrow: $userCopy['eyebrow'],
+                heading: $userCopy['heading'],
+                intro: $userCopy['intro'],
                 fields: $fields,
                 cta: [
-                    'label' => 'View invoice',
+                    'label' => $userCopy['cta_label'] ?: 'View invoice',
                     'url' => $branding['frontend_url'].'/invoices/'.$invoice->id,
                 ],
-                closing: 'Thank you for your payment.',
+                closing: $userCopy['closing'],
                 hub: $hub,
             );
         }
 
+        $adminCopy = $this->emailTemplates->resolve($hub, 'advisor_billing_paid', EmailTemplateCatalog::AUDIENCE_ADMIN, $vars);
         $this->mail->sendToAdmins(
-            subject: "[{$branding['site_name']}] Advisor billing paid",
-            eyebrow: 'Admin notification',
-            heading: 'Advisor billing payment received',
-            intro: "An advisor billing payment was received on {$branding['site_name']}.",
+            subject: $adminCopy['subject'],
+            eyebrow: $adminCopy['eyebrow'],
+            heading: $adminCopy['heading'],
+            intro: $adminCopy['intro'],
             fields: array_merge([
                 ['label' => 'Paid by', 'value' => ($payer?->name ?: 'Unknown').($payer?->email ? "\n".$payer->email : '')],
             ], $fields),
             cta: [
-                'label' => 'View invoice',
+                'label' => $adminCopy['cta_label'] ?: 'View invoice',
                 'url' => $branding['frontend_url'].'/invoices/'.$invoice->id,
             ],
+            closing: $adminCopy['closing'],
             excludeEmail: $payer?->email,
             hub: $hub,
         );
@@ -119,36 +143,48 @@ class FunctionalMailService
         $bank = app(BankTransferSubscriptionService::class)->bankDetails();
         $amount = $this->mail->formatMoney((float) $subscription->amount_paid, strtoupper((string) ($this->paymentSettings->stripeCurrency() ?: 'gbp')));
 
+        $vars = [
+            'user_name' => $user?->name ?: 'there',
+            'user_email' => $user?->email ?: '',
+            'site_name' => $branding['site_name'],
+            'plan_name' => $subscription->plan?->name ?? 'Subscription',
+            'amount' => $amount,
+            'payment_reference' => (string) $subscription->payment_reference,
+        ];
+
         $bankLines = $this->formatBankDetails($bank);
         $fields = [
-            ['label' => 'Plan', 'value' => $subscription->plan?->name ?? 'Subscription'],
+            ['label' => 'Plan', 'value' => $vars['plan_name']],
             ['label' => 'Amount', 'value' => $amount],
-            ['label' => 'Payment reference', 'value' => (string) $subscription->payment_reference],
+            ['label' => 'Payment reference', 'value' => $vars['payment_reference']],
             ['label' => 'Bank details', 'value' => $bankLines],
         ];
 
         if ($user?->email) {
+            $userCopy = $this->emailTemplates->resolve($hub, 'bank_transfer_subscription_pending', EmailTemplateCatalog::AUDIENCE_USER, $vars);
             $this->mail->sendToUser(
                 $user,
-                subject: "[{$branding['site_name']}] Complete your bank transfer",
-                eyebrow: 'Payment pending',
-                heading: 'Bank transfer instructions',
-                intro: "Hi {$user->name},\n\nYour subscription order is pending. Please complete the bank transfer using the details below.",
+                subject: $userCopy['subject'],
+                eyebrow: $userCopy['eyebrow'],
+                heading: $userCopy['heading'],
+                intro: $userCopy['intro'],
                 fields: $fields,
-                cta: ['label' => 'Log in', 'url' => $branding['login_url']],
-                closing: 'Include the payment reference exactly so we can match your payment.',
+                cta: ['label' => $userCopy['cta_label'] ?: 'Log in', 'url' => $branding['login_url']],
+                closing: $userCopy['closing'],
                 hub: $hub,
             );
         }
 
+        $adminCopy = $this->emailTemplates->resolve($hub, 'bank_transfer_subscription_pending', EmailTemplateCatalog::AUDIENCE_ADMIN, $vars);
         $this->mail->sendToAdmins(
-            subject: "[{$branding['site_name']}] Pending bank transfer subscription",
-            eyebrow: 'Admin notification',
-            heading: 'Pending subscription bank transfer',
-            intro: "A member started a bank transfer subscription on {$branding['site_name']}.",
+            subject: $adminCopy['subject'],
+            eyebrow: $adminCopy['eyebrow'],
+            heading: $adminCopy['heading'],
+            intro: $adminCopy['intro'],
             fields: array_merge([
                 ['label' => 'Member', 'value' => ($user?->name ?: 'Unknown').($user?->email ? "\n".$user->email : '')],
             ], $fields),
+            closing: $adminCopy['closing'],
             excludeEmail: $user?->email,
             hub: $hub,
         );
@@ -167,34 +203,46 @@ class FunctionalMailService
         $bank = app(BankTransferSubscriptionService::class)->bankDetails();
         $amount = $this->mail->formatMoney((float) $billing->amount, 'gbp');
 
+        $vars = [
+            'user_name' => $payer?->name ?: 'there',
+            'user_email' => $payer?->email ?: '',
+            'site_name' => $branding['site_name'],
+            'amount' => $amount,
+            'advisor_count' => (string) $billing->advisor_count,
+            'payment_reference' => (string) $billing->payment_reference,
+        ];
+
         $fields = [
             ['label' => 'Amount', 'value' => $amount],
-            ['label' => 'Advisors', 'value' => (string) $billing->advisor_count],
-            ['label' => 'Payment reference', 'value' => (string) $billing->payment_reference],
+            ['label' => 'Advisors', 'value' => $vars['advisor_count']],
+            ['label' => 'Payment reference', 'value' => $vars['payment_reference']],
             ['label' => 'Bank details', 'value' => $this->formatBankDetails($bank)],
         ];
 
         if ($payer?->email) {
+            $userCopy = $this->emailTemplates->resolve($hub, 'bank_transfer_advisor_billing_pending', EmailTemplateCatalog::AUDIENCE_USER, $vars);
             $this->mail->sendToUser(
                 $payer,
-                subject: "[{$branding['site_name']}] Advisor billing bank transfer",
-                eyebrow: 'Payment pending',
-                heading: 'Advisor billing transfer instructions',
-                intro: "Hi {$payer->name},\n\nYour advisor billing payment is pending. Please complete the bank transfer using the details below.",
+                subject: $userCopy['subject'],
+                eyebrow: $userCopy['eyebrow'],
+                heading: $userCopy['heading'],
+                intro: $userCopy['intro'],
                 fields: $fields,
-                closing: 'Include the payment reference exactly so we can match your payment.',
+                closing: $userCopy['closing'],
                 hub: $hub,
             );
         }
 
+        $adminCopy = $this->emailTemplates->resolve($hub, 'bank_transfer_advisor_billing_pending', EmailTemplateCatalog::AUDIENCE_ADMIN, $vars);
         $this->mail->sendToAdmins(
-            subject: "[{$branding['site_name']}] Pending advisor billing transfer",
-            eyebrow: 'Admin notification',
-            heading: 'Pending advisor billing bank transfer',
-            intro: "An advisor billing bank transfer is awaiting confirmation on {$branding['site_name']}.",
+            subject: $adminCopy['subject'],
+            eyebrow: $adminCopy['eyebrow'],
+            heading: $adminCopy['heading'],
+            intro: $adminCopy['intro'],
             fields: array_merge([
                 ['label' => 'Payer', 'value' => ($payer?->name ?: 'Unknown').($payer?->email ? "\n".$payer->email : '')],
             ], $fields),
+            closing: $adminCopy['closing'],
             excludeEmail: $payer?->email,
             hub: $hub,
         );
@@ -211,17 +259,25 @@ class FunctionalMailService
             $fields[] = ['label' => 'Temporary password', 'value' => $temporaryPassword];
         }
 
+        $copy = $this->emailTemplates->resolve($hub, 'advisor_invite', EmailTemplateCatalog::AUDIENCE_USER, [
+            'user_name' => $user->name ?: 'there',
+            'user_email' => (string) $user->email,
+            'site_name' => $branding['site_name'],
+            'temporary_password' => $temporaryPassword ?? '',
+        ]);
+
         $this->mail->sendToUser(
             $user,
-            subject: "Welcome to {$branding['site_name']} — your advisor access",
-            eyebrow: 'Advisor invite',
-            heading: "You're invited to {$branding['site_name']}",
-            intro: "Hi {$user->name},\n\nAn advisor account has been created for you on {$branding['site_name']}.",
+            subject: $copy['subject'],
+            eyebrow: $copy['eyebrow'],
+            heading: $copy['heading'],
+            intro: $copy['intro'],
             fields: $fields,
             bullets: $temporaryPassword
                 ? ['Use the temporary password to sign in, then change it after login.']
                 : ['Sign in with the password provided by your administrator.'],
-            cta: ['label' => 'Log in', 'url' => $branding['login_url']],
+            cta: ['label' => $copy['cta_label'] ?: 'Log in', 'url' => $branding['login_url']],
+            closing: $copy['closing'],
             hub: $hub,
         );
     }
@@ -230,14 +286,19 @@ class FunctionalMailService
     {
         $hub = $this->hubs->current();
         $branding = $this->mail->branding($hub);
+        $copy = $this->emailTemplates->resolve($hub, 'advisor_reactivated', EmailTemplateCatalog::AUDIENCE_USER, [
+            'user_name' => $user->name ?: 'there',
+            'site_name' => $branding['site_name'],
+        ]);
 
         $this->mail->sendToUser(
             $user,
-            subject: "[{$branding['site_name']}] Your advisor access was restored",
-            eyebrow: 'Access restored',
-            heading: 'Advisor access restored',
-            intro: "Hi {$user->name},\n\nYour advisor access on {$branding['site_name']} has been restored. You can log in again.",
-            cta: ['label' => 'Log in', 'url' => $branding['login_url']],
+            subject: $copy['subject'],
+            eyebrow: $copy['eyebrow'],
+            heading: $copy['heading'],
+            intro: $copy['intro'],
+            cta: ['label' => $copy['cta_label'] ?: 'Log in', 'url' => $branding['login_url']],
+            closing: $copy['closing'],
             hub: $hub,
         );
     }
@@ -246,26 +307,35 @@ class FunctionalMailService
     {
         $hub = $this->hubs->current();
         $branding = $this->mail->branding($hub);
+        $vars = [
+            'user_name' => $user->name ?: 'there',
+            'user_email' => (string) $user->email,
+            'site_name' => $branding['site_name'],
+            'support_email' => $branding['support_email'],
+        ];
 
+        $userCopy = $this->emailTemplates->resolve($hub, 'advisor_discontinued', EmailTemplateCatalog::AUDIENCE_USER, $vars);
         $this->mail->sendToUser(
             $user,
-            subject: "[{$branding['site_name']}] Your advisor access has ended",
-            eyebrow: 'Access ended',
-            heading: 'Advisor access discontinued',
-            intro: "Hi {$user->name},\n\nYour advisor access on {$branding['site_name']} has been discontinued. You will no longer be able to sign in.",
-            closing: "If you think this was a mistake, contact {$branding['support_email']}.",
+            subject: $userCopy['subject'],
+            eyebrow: $userCopy['eyebrow'],
+            heading: $userCopy['heading'],
+            intro: $userCopy['intro'],
+            closing: $userCopy['closing'],
             hub: $hub,
         );
 
+        $adminCopy = $this->emailTemplates->resolve($hub, 'advisor_discontinued', EmailTemplateCatalog::AUDIENCE_ADMIN, $vars);
         $this->mail->sendToAdmins(
-            subject: "[{$branding['site_name']}] Advisor discontinued",
-            eyebrow: 'Admin notification',
-            heading: 'Advisor discontinued',
-            intro: "An advisor was discontinued on {$branding['site_name']}.",
+            subject: $adminCopy['subject'],
+            eyebrow: $adminCopy['eyebrow'],
+            heading: $adminCopy['heading'],
+            intro: $adminCopy['intro'],
             fields: [
                 ['label' => 'Advisor', 'value' => $user->name ?: 'Unknown'],
                 ['label' => 'E-mail', 'value' => (string) $user->email],
             ],
+            closing: $adminCopy['closing'],
             excludeEmail: $user->email,
             hub: $hub,
         );
@@ -274,14 +344,19 @@ class FunctionalMailService
     public function advisorSuspended(User $user, Hub $hub): void
     {
         $branding = $this->mail->branding($hub);
+        $copy = $this->emailTemplates->resolve($hub, 'advisor_suspended', EmailTemplateCatalog::AUDIENCE_USER, [
+            'user_name' => $user->name ?: 'there',
+            'site_name' => $branding['site_name'],
+            'support_email' => $branding['support_email'],
+        ]);
 
         $this->mail->sendToUser(
             $user,
-            subject: "[{$branding['site_name']}] Advisor access suspended",
-            eyebrow: 'Access suspended',
-            heading: 'Advisor access temporarily suspended',
-            intro: "Hi {$user->name},\n\n{$branding['site_name']} is now operating in public mode. Your invite-only advisor access has been suspended.",
-            closing: "Contact {$branding['support_email']} if you need help.",
+            subject: $copy['subject'],
+            eyebrow: $copy['eyebrow'],
+            heading: $copy['heading'],
+            intro: $copy['intro'],
+            closing: $copy['closing'],
             hub: $hub,
         );
     }
@@ -301,6 +376,12 @@ class FunctionalMailService
         $createdList = collect($created)->map(fn ($r) => ($r['name'] ?? '').' <'.($r['email'] ?? '').'>')->implode("\n");
         $reactivatedList = collect($reactivated)->map(fn ($r) => ($r['name'] ?? '').' <'.($r['email'] ?? '').'>')->implode("\n");
 
+        $copy = $this->emailTemplates->resolve($hub, 'advisor_import_summary', EmailTemplateCatalog::AUDIENCE_ADMIN, [
+            'site_name' => $branding['site_name'],
+            'created_count' => (string) count($created),
+            'reactivated_count' => (string) count($reactivated),
+        ]);
+
         $fields = [
             ['label' => 'Created', 'value' => (string) count($created)],
             ['label' => 'Reactivated', 'value' => (string) count($reactivated)],
@@ -313,11 +394,12 @@ class FunctionalMailService
         }
 
         $this->mail->sendToAdmins(
-            subject: "[{$branding['site_name']}] Advisor import completed",
-            eyebrow: 'Admin notification',
-            heading: 'Advisor import summary',
-            intro: "An advisor Excel/CSV import finished on {$branding['site_name']}.",
+            subject: $copy['subject'],
+            eyebrow: $copy['eyebrow'],
+            heading: $copy['heading'],
+            intro: $copy['intro'],
             fields: $fields,
+            closing: $copy['closing'],
             hub: $hub,
         );
     }
@@ -326,19 +408,26 @@ class FunctionalMailService
     {
         $hub ??= $this->hubs->current();
         $branding = $this->mail->branding($hub);
+        $copy = $this->emailTemplates->resolve($hub, 'account_created_by_admin', EmailTemplateCatalog::AUDIENCE_USER, [
+            'user_name' => $user->name ?: 'there',
+            'user_email' => (string) $user->email,
+            'role_label' => $user->role_label,
+            'site_name' => $branding['site_name'],
+        ]);
 
         $this->mail->sendToUser(
             $user,
-            subject: "Welcome to {$branding['site_name']}!",
-            eyebrow: 'Account created',
-            heading: "Your {$branding['site_name']} account is ready",
-            intro: "Hi {$user->name},\n\nAn administrator created an account for you on {$branding['site_name']}.",
+            subject: $copy['subject'],
+            eyebrow: $copy['eyebrow'],
+            heading: $copy['heading'],
+            intro: $copy['intro'],
             fields: [
                 ['label' => 'Email', 'value' => (string) $user->email],
                 ['label' => 'Role', 'value' => $user->role_label],
             ],
             bullets: ['Sign in with the password provided by your administrator.'],
-            cta: ['label' => 'Log in', 'url' => $branding['login_url']],
+            cta: ['label' => $copy['cta_label'] ?: 'Log in', 'url' => $branding['login_url']],
+            closing: $copy['closing'],
             hub: $hub,
         );
     }
@@ -347,14 +436,19 @@ class FunctionalMailService
     {
         $hub ??= $this->hubs->current();
         $branding = $this->mail->branding($hub);
+        $copy = $this->emailTemplates->resolve($hub, 'account_suspended_by_admin', EmailTemplateCatalog::AUDIENCE_USER, [
+            'user_name' => $user->name ?: 'there',
+            'site_name' => $branding['site_name'],
+            'support_email' => $branding['support_email'],
+        ]);
 
         $this->mail->sendToUser(
             $user,
-            subject: "[{$branding['site_name']}] Account suspended",
-            eyebrow: 'Account update',
-            heading: 'Your account has been suspended',
-            intro: "Hi {$user->name},\n\nYour account on {$branding['site_name']} has been suspended. You will not be able to sign in until an administrator restores access.",
-            closing: "Questions? Contact {$branding['support_email']}.",
+            subject: $copy['subject'],
+            eyebrow: $copy['eyebrow'],
+            heading: $copy['heading'],
+            intro: $copy['intro'],
+            closing: $copy['closing'],
             hub: $hub,
         );
     }
@@ -363,15 +457,20 @@ class FunctionalMailService
     {
         $hub ??= $this->hubs->current();
         $branding = $this->mail->branding($hub);
+        $copy = $this->emailTemplates->resolve($hub, 'password_changed_by_admin', EmailTemplateCatalog::AUDIENCE_USER, [
+            'user_name' => $user->name ?: 'there',
+            'site_name' => $branding['site_name'],
+            'support_email' => $branding['support_email'],
+        ]);
 
         $this->mail->sendToUser(
             $user,
-            subject: "[{$branding['site_name']}] Your password was changed",
-            eyebrow: 'Security',
-            heading: 'Password updated',
-            intro: "Hi {$user->name},\n\nAn administrator updated the password for your {$branding['site_name']} account. If you did not expect this, contact support immediately.",
-            cta: ['label' => 'Log in', 'url' => $branding['login_url']],
-            closing: "Support: {$branding['support_email']}",
+            subject: $copy['subject'],
+            eyebrow: $copy['eyebrow'],
+            heading: $copy['heading'],
+            intro: $copy['intro'],
+            cta: ['label' => $copy['cta_label'] ?: 'Log in', 'url' => $branding['login_url']],
+            closing: $copy['closing'],
             hub: $hub,
         );
     }
@@ -381,15 +480,19 @@ class FunctionalMailService
         $hub = $this->hubs->current();
         $branding = $this->mail->branding($hub);
         $url = $branding['frontend_url'].'/reset-password?token='.urlencode($token).'&email='.urlencode((string) $user->email);
+        $copy = $this->emailTemplates->resolve($hub, 'password_reset', EmailTemplateCatalog::AUDIENCE_USER, [
+            'user_name' => $user->name ?: 'there',
+            'site_name' => $branding['site_name'],
+        ]);
 
         $this->mail->sendToUser(
             $user,
-            subject: "[{$branding['site_name']}] Reset your password",
-            eyebrow: 'Security',
-            heading: 'Reset your password',
-            intro: "Hi {$user->name},\n\nWe received a request to reset your password for {$branding['site_name']}.",
-            cta: ['label' => 'Reset password', 'url' => $url],
-            closing: 'If you did not request this, you can ignore this email. This link expires soon.',
+            subject: $copy['subject'],
+            eyebrow: $copy['eyebrow'],
+            heading: $copy['heading'],
+            intro: $copy['intro'],
+            cta: ['label' => $copy['cta_label'] ?: 'Reset password', 'url' => $url],
+            closing: $copy['closing'],
             hub: $hub,
         );
     }
