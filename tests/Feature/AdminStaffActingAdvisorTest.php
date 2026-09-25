@@ -26,6 +26,7 @@ class AdminStaffActingAdvisorTest extends TestCase
             'checklist' => array_merge(Hub::defaultChecklist(Hub::TYPE_SHARED), [
                 'module_social_media_compliance' => true,
                 'module_general_compliance' => true,
+                'module_website_template_library' => true,
                 'module_website_compliance' => true,
             ]),
         ]);

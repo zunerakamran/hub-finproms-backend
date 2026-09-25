@@ -51,7 +51,8 @@ class HubModulesController extends Controller
         ]);
 
         $input = $this->normalizeModulesPayload($validated['modules']);
-        $unknown = array_diff(array_keys($input), Hub::MODULE_KEYS);
+        $allowedKeys = $hub->moduleKeysForPage();
+        $unknown = array_diff(array_keys($input), $allowedKeys);
         if ($unknown !== []) {
             return response()->json([
                 'message' => 'Unknown module keys: '.implode(', ', $unknown),
@@ -59,7 +60,7 @@ class HubModulesController extends Controller
         }
 
         $checklist = $hub->resolvedChecklist();
-        foreach (Hub::MODULE_KEYS as $key) {
+        foreach ($allowedKeys as $key) {
             if (Hub::isLockedModuleKey($key)) {
                 continue;
             }
@@ -68,15 +69,7 @@ class HubModulesController extends Controller
             }
         }
 
-        // Type-locked: shared = off, white-label = on.
-        $checklist['module_white_label_hub'] = $hub->isWhiteLabel();
-
-        // Turning off the posts library disables related functionalities.
-        if (! ($checklist['module_social_media_template_library'] ?? false)) {
-            foreach (Hub::SOCIAL_MEDIA_TEMPLATE_LIBRARY_FUNCTIONALITY_KEYS as $funcKey) {
-                $checklist[$funcKey] = false;
-            }
-        }
+        $checklist = $hub->applyModuleDependencies($checklist);
 
         $hub->checklist = $checklist;
         $hub->save();
@@ -149,34 +142,64 @@ class HubModulesController extends Controller
     }
 
     /**
-     * @return list<array{key: string, label: string, description: string, enabled: bool, available: bool, locked: bool, locked_reason: ?string}>
+     * @return list<array{
+     *   key: string,
+     *   label: string,
+     *   description: string,
+     *   enabled: bool,
+     *   available: bool,
+     *   locked: bool,
+     *   locked_reason: ?string,
+     *   depends_on: list<string>,
+     *   dependencies_met: bool
+     * }>
      */
     private function modulesPayload(Hub $hub): array
     {
         $resolved = $hub->resolvedChecklist();
         $items = [];
 
-        foreach (Hub::MODULE_KEYS as $key) {
+        foreach ($hub->moduleKeysForPage() as $key) {
             $meta = Hub::CHECKLIST_DEFINITIONS[$key] ?? null;
             if (! $meta) {
                 continue;
             }
 
+            $dependsOn = $hub->moduleDependenciesFor($key);
+            $dependenciesMet = true;
+            foreach ($dependsOn as $dep) {
+                if (! ($resolved[$dep] ?? false)) {
+                    $dependenciesMet = false;
+                    break;
+                }
+            }
+
             $locked = Hub::isLockedModuleKey($key);
             $lockedReason = null;
-            if ($key === 'module_white_label_hub') {
+            if ($key === 'module_shared_hub') {
                 $locked = true;
-                $lockedReason = $hub->isWhiteLabel() ? 'white_label_hub' : 'shared_hub';
+                $lockedReason = 'shared_hub';
+            } elseif ($key === 'module_white_label_hub') {
+                $locked = true;
+                $lockedReason = 'white_label_hub';
+            }
+
+            $enabled = (bool) ($resolved[$key] ?? false);
+            // Dependents cannot stay on when parents are off.
+            if (! $dependenciesMet) {
+                $enabled = false;
             }
 
             $items[] = [
                 'key' => $key,
                 'label' => $meta['label'],
                 'description' => $meta['description'],
-                'enabled' => (bool) ($resolved[$key] ?? false),
+                'enabled' => $enabled,
                 'available' => true,
                 'locked' => $locked,
                 'locked_reason' => $lockedReason,
+                'depends_on' => $dependsOn,
+                'dependencies_met' => $dependenciesMet,
             ];
         }
 

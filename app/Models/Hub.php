@@ -143,12 +143,26 @@ class Hub extends Model
     }
 
     /**
-     * Hub module functionality keys (enabled per hub on the Modules page).
+     * All known module keys (including both Shared Hub and White Label Hub bases).
      *
      * @var list<string>
      */
     public const MODULE_KEYS = [
+        'module_shared_hub',
         'module_white_label_hub',
+        'module_social_media_template_library',
+        'module_social_media_compliance',
+        'module_website_template_library',
+        'module_website_compliance',
+        'module_general_compliance',
+    ];
+
+    /**
+     * Product modules shown on the Modules page after the hub-type base module.
+     *
+     * @var list<string>
+     */
+    public const PRODUCT_MODULE_KEYS = [
         'module_social_media_template_library',
         'module_social_media_compliance',
         'module_website_template_library',
@@ -162,8 +176,131 @@ class Hub extends Model
      * @var list<string>
      */
     public const LOCKED_MODULE_KEYS = [
+        'module_shared_hub',
         'module_white_label_hub',
     ];
+
+    /**
+     * Module dependency graph.
+     * `__base__` resolves to Shared Hub or White Label Hub for the current hub.
+     *
+     * 1 base → no deps
+     * 2 (SM template library) → 1
+     * 3 (SM pre-approval) → 1 + 2
+     * 4 (Website template library) → 1
+     * 5 (Website content pre-approval) → 1 + 4
+     * 6 (Generic content pre-approval) → 1
+     *
+     * @var array<string, list<string>>
+     */
+    public const MODULE_DEPENDENCIES = [
+        'module_shared_hub' => [],
+        'module_white_label_hub' => [],
+        'module_social_media_template_library' => ['__base__'],
+        'module_social_media_compliance' => ['__base__', 'module_social_media_template_library'],
+        'module_website_template_library' => ['__base__'],
+        'module_website_compliance' => ['__base__', 'module_website_template_library'],
+        'module_general_compliance' => ['__base__'],
+    ];
+
+    /**
+     * Base packaging module key for this hub type (slot #1 on the Modules page).
+     */
+    public function baseModuleKey(): string
+    {
+        return $this->isShared() ? 'module_shared_hub' : 'module_white_label_hub';
+    }
+
+    /**
+     * Ordered module keys for the Modules page (exactly 6 for this hub).
+     *
+     * @return list<string>
+     */
+    public function moduleKeysForPage(): array
+    {
+        return array_values(array_merge([$this->baseModuleKey()], self::PRODUCT_MODULE_KEYS));
+    }
+
+    /**
+     * Resolve dependency keys for a module on this hub (__base__ → shared/white-label key).
+     *
+     * @return list<string>
+     */
+    public function moduleDependenciesFor(string $key): array
+    {
+        $deps = self::MODULE_DEPENDENCIES[$key] ?? [];
+        $base = $this->baseModuleKey();
+
+        return array_values(array_map(
+            fn (string $dep) => $dep === '__base__' ? $base : $dep,
+            $deps
+        ));
+    }
+
+    /**
+     * Force locked base modules and cascade-disable dependents when parents are off.
+     *
+     * @param  array<string, bool>  $checklist
+     * @return array<string, bool>
+     */
+    public function applyModuleDependencies(array $checklist): array
+    {
+        return self::applyModuleDependencyRules($checklist, $this->type);
+    }
+
+    /**
+     * @param  array<string, bool>  $checklist
+     * @return array<string, bool>
+     */
+    public static function applyModuleDependencyRules(array $checklist, string $type): array
+    {
+        $isShared = $type === self::TYPE_SHARED;
+        $checklist['module_shared_hub'] = $isShared;
+        $checklist['module_white_label_hub'] = ! $isShared;
+        $base = $isShared ? 'module_shared_hub' : 'module_white_label_hub';
+
+        // Cascade in MODULE_KEYS order so parents are resolved before children.
+        foreach (self::MODULE_KEYS as $key) {
+            if (self::isLockedModuleKey($key)) {
+                continue;
+            }
+            $deps = self::MODULE_DEPENDENCIES[$key] ?? [];
+            foreach ($deps as $dep) {
+                $resolvedDep = $dep === '__base__' ? $base : $dep;
+                if (! ($checklist[$resolvedDep] ?? false)) {
+                    $checklist[$key] = false;
+                    break;
+                }
+            }
+        }
+
+        if (! ($checklist['module_social_media_template_library'] ?? false)) {
+            foreach (self::SOCIAL_MEDIA_TEMPLATE_LIBRARY_FUNCTIONALITY_KEYS as $funcKey) {
+                $checklist[$funcKey] = false;
+            }
+        }
+
+        return $checklist;
+    }
+
+    /**
+     * Whether a module is on and all of its dependencies are satisfied.
+     */
+    public function moduleEffectivelyEnabled(string $key): bool
+    {
+        $checklist = $this->resolvedChecklist();
+        if (! ($checklist[$key] ?? false)) {
+            return false;
+        }
+
+        foreach ($this->moduleDependenciesFor($key) as $dep) {
+            if (! ($checklist[$dep] ?? false)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     /**
      * Functionalities that require Social Media Template Library.
@@ -366,44 +503,51 @@ class Hub extends Model
         ],
 
         // --- Modules (hub Modules page) ---
+        'module_shared_hub' => [
+            'label' => 'Shared Hub',
+            'description' => 'Shared hub product packaging. Always on (and locked) for the shared hub. Other modules depend on this base module.',
+            'group' => self::GROUP_MODULES,
+            'default_shared' => true,
+            'default_white_label' => false,
+        ],
         'module_white_label_hub' => [
             'label' => 'White Label Hub',
-            'description' => 'White-labelled hub product packaging. Always on for white-labelled hubs; always off (and locked) on the shared hub.',
+            'description' => 'White-labelled hub product packaging. Always on (and locked) for white-labelled hubs. Other modules depend on this base module.',
             'group' => self::GROUP_MODULES,
             'default_shared' => false,
             'default_white_label' => true,
         ],
         'module_social_media_template_library' => [
             'label' => 'Social Media Template Library',
-            'description' => 'Enable the posts / reels catalog, purchasing, and content-management tools. Related functionalities and capabilities stay inactive while this module is off.',
+            'description' => 'Enable the posts / reels catalog, purchasing, and content-management tools. Requires Shared / White Label Hub. Related functionalities and capabilities stay inactive while this module is off.',
             'group' => self::GROUP_MODULES,
             'default_shared' => true,
             'default_white_label' => true,
         ],
         'module_social_media_compliance' => [
             'label' => 'Social Media Pre Approval Workflow',
-            'description' => 'Enable social media post pre-approval / compliance workflow on this hub. Related capabilities are blurred until this module is on.',
+            'description' => 'Enable social media post pre-approval / compliance workflow. Requires Shared / White Label Hub and Social Media Template Library.',
             'group' => self::GROUP_MODULES,
             'default_shared' => false,
             'default_white_label' => false,
         ],
         'module_website_template_library' => [
             'label' => 'Website Template Library',
-            'description' => 'Enable the website showcase template library, deployment requests, and template assignment on this hub. Related capabilities are blurred until this module is on.',
+            'description' => 'Enable the website showcase template library, deployment requests, and template assignment. Requires Shared / White Label Hub.',
             'group' => self::GROUP_MODULES,
             'default_shared' => false,
             'default_white_label' => false,
         ],
         'module_website_compliance' => [
             'label' => 'Website Content Pre Approval Workflow',
-            'description' => 'Enable website content pre-approval (section editing, change requests, and publish workflow) on this hub. Related capabilities are blurred until this module is on.',
+            'description' => 'Enable website content pre-approval (section editing, change requests, and publish workflow). Requires Shared / White Label Hub and Website Template Library.',
             'group' => self::GROUP_MODULES,
             'default_shared' => false,
             'default_white_label' => false,
         ],
         'module_general_compliance' => [
             'label' => 'Generic Content Pre Approval Workflow',
-            'description' => 'Enable generic content pre-approval workflow on this hub (free-form description + file attachments). Related capabilities are blurred until this module is on.',
+            'description' => 'Enable generic content pre-approval workflow (free-form description + file attachments). Requires Shared / White Label Hub.',
             'group' => self::GROUP_MODULES,
             'default_shared' => false,
             'default_white_label' => false,
@@ -1071,32 +1215,42 @@ class Hub extends Model
 
     public function hasWhiteLabelHubModule(): bool
     {
-        return $this->isWhiteLabel();
+        return $this->moduleEffectivelyEnabled('module_white_label_hub');
+    }
+
+    public function hasSharedHubModule(): bool
+    {
+        return $this->moduleEffectivelyEnabled('module_shared_hub');
+    }
+
+    public function hasBaseHubModule(): bool
+    {
+        return $this->moduleEffectivelyEnabled($this->baseModuleKey());
     }
 
     public function hasSocialMediaTemplateLibraryModule(): bool
     {
-        return (bool) ($this->resolvedChecklist()['module_social_media_template_library'] ?? false);
+        return $this->moduleEffectivelyEnabled('module_social_media_template_library');
     }
 
     public function hasSocialMediaComplianceModule(): bool
     {
-        return (bool) ($this->resolvedChecklist()['module_social_media_compliance'] ?? false);
+        return $this->moduleEffectivelyEnabled('module_social_media_compliance');
     }
 
     public function hasGeneralComplianceModule(): bool
     {
-        return (bool) ($this->resolvedChecklist()['module_general_compliance'] ?? false);
+        return $this->moduleEffectivelyEnabled('module_general_compliance');
     }
 
     public function hasWebsiteTemplateLibraryModule(): bool
     {
-        return (bool) ($this->resolvedChecklist()['module_website_template_library'] ?? false);
+        return $this->moduleEffectivelyEnabled('module_website_template_library');
     }
 
     public function hasWebsiteComplianceModule(): bool
     {
-        return (bool) ($this->resolvedChecklist()['module_website_compliance'] ?? false);
+        return $this->moduleEffectivelyEnabled('module_website_compliance');
     }
 
     /**
@@ -1111,6 +1265,7 @@ class Hub extends Model
             $defaults[$flag] = (bool) $meta[$key];
         }
 
+        $defaults['module_shared_hub'] = $type === self::TYPE_SHARED;
         $defaults['module_white_label_hub'] = $type === self::TYPE_WHITE_LABEL;
 
         return $defaults;
@@ -1131,18 +1286,22 @@ class Hub extends Model
             }
         }
 
-        // White Label Hub is type-locked: never toggleable from stored checklist.
-        $resolved['module_white_label_hub'] = $this->isWhiteLabel();
-
-        return $resolved;
+        return $this->applyModuleDependencies($resolved);
     }
 
     public function can(string $flag): bool
     {
         $checklist = $this->resolvedChecklist();
 
+        if ($flag === 'module_shared_hub') {
+            return $this->isShared();
+        }
         if ($flag === 'module_white_label_hub') {
             return $this->isWhiteLabel();
+        }
+
+        if (self::isModuleKey($flag)) {
+            return $this->moduleEffectivelyEnabled($flag);
         }
 
         $enabled = (bool) ($checklist[$flag] ?? false);
@@ -1152,7 +1311,7 @@ class Hub extends Model
 
         // Posts-library related functionalities stay off while the library module is off.
         if (self::isSocialMediaTemplateLibraryFunctionality($flag)
-            && ! ($checklist['module_social_media_template_library'] ?? false)
+            && ! $this->moduleEffectivelyEnabled('module_social_media_template_library')
         ) {
             return false;
         }
@@ -1200,8 +1359,16 @@ class Hub extends Model
                 $inactive = ! $smtlOn;
             }
 
-            if ($key === 'module_white_label_hub') {
+            if ($key === 'module_white_label_hub' || $key === 'module_shared_hub') {
                 $locked = true;
+            }
+
+            // Only show the base module that applies to this hub on the checklist screen.
+            if ($group === self::GROUP_MODULES
+                && self::isLockedModuleKey($key)
+                && $key !== $this->baseModuleKey()
+            ) {
+                continue;
             }
 
             $items[] = [

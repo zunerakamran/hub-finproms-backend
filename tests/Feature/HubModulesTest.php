@@ -13,7 +13,7 @@ class HubModulesTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_modules_endpoint_returns_six_modules_with_white_label_locked_on_shared(): void
+    public function test_modules_endpoint_returns_six_modules_with_shared_hub_base(): void
     {
         $hub = $this->createSharedHub();
         $admin = User::factory()->powerAdmin()->create();
@@ -24,16 +24,25 @@ class HubModulesTest extends TestCase
 
         $modules = collect($response->json('modules'));
         $this->assertCount(6, $modules);
-        $this->assertSame(Hub::MODULE_KEYS, $modules->pluck('key')->all());
+        $this->assertSame($hub->moduleKeysForPage(), $modules->pluck('key')->all());
 
-        $whiteLabel = $modules->firstWhere('key', 'module_white_label_hub');
-        $this->assertFalse($whiteLabel['enabled']);
-        $this->assertTrue($whiteLabel['locked']);
-        $this->assertSame('shared_hub', $whiteLabel['locked_reason']);
+        $base = $modules->firstWhere('key', 'module_shared_hub');
+        $this->assertTrue($base['enabled']);
+        $this->assertTrue($base['locked']);
+        $this->assertSame('shared_hub', $base['locked_reason']);
+        $this->assertSame([], $base['depends_on']);
 
         $library = $modules->firstWhere('key', 'module_social_media_template_library');
         $this->assertTrue($library['enabled']);
         $this->assertFalse($library['locked']);
+        $this->assertSame(['module_shared_hub'], $library['depends_on']);
+        $this->assertTrue($library['dependencies_met']);
+
+        $smc = $modules->firstWhere('key', 'module_social_media_compliance');
+        $this->assertSame(
+            ['module_shared_hub', 'module_social_media_template_library'],
+            $smc['depends_on']
+        );
     }
 
     public function test_white_label_hub_module_is_always_enabled_and_locked(): void
@@ -48,6 +57,8 @@ class HubModulesTest extends TestCase
 
         $this->assertTrue($hub->hasWhiteLabelHubModule());
         $this->assertTrue($hub->resolvedChecklist()['module_white_label_hub']);
+        $this->assertFalse($hub->resolvedChecklist()['module_shared_hub']);
+        $this->assertSame('module_white_label_hub', $hub->baseModuleKey());
 
         $checklist = $hub->resolvedChecklist();
         $checklist['module_white_label_hub'] = false;
@@ -56,11 +67,12 @@ class HubModulesTest extends TestCase
         $this->assertTrue($hub->fresh()->hasWhiteLabelHubModule());
     }
 
-    public function test_disabling_social_media_template_library_disables_related_functionalities_and_caps(): void
+    public function test_disabling_social_media_template_library_cascades_to_pre_approval(): void
     {
         $hub = $this->createSharedHub([
             'checklist' => array_merge(Hub::defaultChecklist(Hub::TYPE_SHARED), [
                 'module_social_media_template_library' => true,
+                'module_social_media_compliance' => true,
                 'one_off_purchase' => true,
                 'receive_content_from_shared' => true,
             ]),
@@ -80,24 +92,25 @@ class HubModulesTest extends TestCase
         $this->putJson('/api/power-admin/modules', [
             'modules' => [
                 'module_social_media_template_library' => false,
-                'module_white_label_hub' => true, // ignored / locked
+                'module_social_media_compliance' => true, // forced off by dependency
+                'module_shared_hub' => false, // ignored / locked on
             ],
         ])->assertOk()
-            ->assertJsonPath('modules.0.key', 'module_white_label_hub')
-            ->assertJsonPath('modules.0.enabled', false)
+            ->assertJsonPath('modules.0.key', 'module_shared_hub')
+            ->assertJsonPath('modules.0.enabled', true)
             ->assertJsonPath('modules.0.locked', true);
 
         $hub->refresh();
-        $resolved = $hub->resolvedChecklist();
-        $this->assertFalse($resolved['module_social_media_template_library']);
-        $this->assertFalse($resolved['module_white_label_hub']);
+        $this->assertTrue($hub->hasSharedHubModule());
+        $this->assertFalse($hub->hasSocialMediaTemplateLibraryModule());
+        $this->assertFalse($hub->hasSocialMediaComplianceModule());
         $this->assertFalse($hub->can('one_off_purchase'));
         $this->assertFalse($hub->can('receive_content_from_shared'));
         $this->assertFalse($matrix->roleCan($hub, User::ROLE_USER, 'member_browse_catalog'));
         $this->assertFalse($matrix->roleCan($hub, User::ROLE_USER, 'member_purchase_content'));
     }
 
-    public function test_website_template_library_caps_require_their_own_module(): void
+    public function test_website_content_pre_approval_requires_template_library(): void
     {
         $hub = $this->createSharedHub([
             'checklist' => array_merge(Hub::defaultChecklist(Hub::TYPE_SHARED), [
@@ -105,6 +118,10 @@ class HubModulesTest extends TestCase
                 'module_website_template_library' => false,
             ]),
         ]);
+
+        // Dependency cascade forces website compliance off while template library is off.
+        $this->assertFalse($hub->hasWebsiteTemplateLibraryModule());
+        $this->assertFalse($hub->hasWebsiteComplianceModule());
 
         $matrix = app(CapabilitiesMatrixService::class);
         $caps = $matrix->resolvedRoleCapabilities($hub);
@@ -114,16 +131,16 @@ class HubModulesTest extends TestCase
         $hub->save();
 
         $this->assertFalse($matrix->roleCan($hub, User::ROLE_CLIENT_ADMIN, 'wc_manage_templates'));
-        $this->assertTrue($matrix->roleCan($hub, User::ROLE_CLIENT_ADMIN, 'wc_edit_sections'));
+        $this->assertFalse($matrix->roleCan($hub, User::ROLE_CLIENT_ADMIN, 'wc_edit_sections'));
 
-        $payload = $matrix->matrix($hub);
-        $templateRow = collect($payload['rows'])->firstWhere('key', 'wc_manage_templates');
-        $this->assertTrue($templateRow['inactive']);
-        $this->assertSame('module_website_template_library', $templateRow['requires_module']);
+        $checklist = $hub->resolvedChecklist();
+        $checklist['module_website_template_library'] = true;
+        $checklist['module_website_compliance'] = true;
+        $hub->forceFill(['checklist' => $hub->applyModuleDependencies($checklist)])->save();
 
-        $complianceRow = collect($payload['rows'])->firstWhere('key', 'wc_edit_sections');
-        $this->assertFalse($complianceRow['inactive']);
-        $this->assertSame('module_website_compliance', $complianceRow['requires_module']);
+        $this->assertTrue($hub->fresh()->hasWebsiteTemplateLibraryModule());
+        $this->assertTrue($hub->fresh()->hasWebsiteComplianceModule());
+        $this->assertTrue($matrix->roleCan($hub->fresh(), User::ROLE_CLIENT_ADMIN, 'wc_edit_sections'));
     }
 
     private function createSharedHub(array $extra = []): Hub

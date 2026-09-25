@@ -296,6 +296,7 @@ class CapabilitiesMatrixService
                 'private_invite_only' => $privateMode,
                 'public_subscribe' => $publicMode,
                 'module_white_label_hub' => $hub->hasWhiteLabelHubModule(),
+                'module_shared_hub' => $hub->hasSharedHubModule(),
                 'module_social_media_template_library' => $smtlModuleOn,
                 'module_social_media_compliance' => $smcModuleOn,
                 'module_website_template_library' => $wtlModuleOn,

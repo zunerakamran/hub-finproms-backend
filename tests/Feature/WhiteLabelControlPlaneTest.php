@@ -115,8 +115,10 @@ class WhiteLabelControlPlaneTest extends TestCase
 
         $this->putJson('/api/power-admin/modules', [
             'modules' => [
+                'module_social_media_template_library' => true,
                 'module_social_media_compliance' => true,
                 'module_general_compliance' => true,
+                'module_website_template_library' => true,
                 'module_website_compliance' => true,
             ],
         ])->assertOk();
@@ -187,6 +189,7 @@ class WhiteLabelControlPlaneTest extends TestCase
 
         $this->putJson('/api/power-admin/modules', [
             'modules' => [
+                'module_social_media_template_library' => true,
                 'module_social_media_compliance' => true,
             ],
         ])->assertOk()
@@ -542,6 +545,7 @@ class WhiteLabelControlPlaneTest extends TestCase
         [$admin, $hub] = $this->actingPowerAdminOnWiredHub();
 
         $checklist = $hub->resolvedChecklist();
+        $checklist['module_social_media_template_library'] = true;
         $checklist['module_social_media_compliance'] = true;
         $roleCaps = is_array($hub->role_capabilities) ? $hub->role_capabilities : [];
         $roleCaps[User::ROLE_POWER_ADMIN]['smc_view_reports'] = true;

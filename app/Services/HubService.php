@@ -65,13 +65,9 @@ class HubService
             }
         }
 
+        $clean['module_shared_hub'] = $type === Hub::TYPE_SHARED;
         $clean['module_white_label_hub'] = $type === Hub::TYPE_WHITE_LABEL;
-
-        if (! ($clean['module_social_media_template_library'] ?? false)) {
-            foreach (Hub::SOCIAL_MEDIA_TEMPLATE_LIBRARY_FUNCTIONALITY_KEYS as $funcKey) {
-                $clean[$funcKey] = false;
-            }
-        }
+        $clean = Hub::applyModuleDependencyRules($clean, $type);
 
         return $this->applyExclusivity($clean, array_keys($input));
     }
@@ -95,13 +91,7 @@ class HubService
             }
         }
 
-        $current['module_white_label_hub'] = $hub->isWhiteLabel();
-
-        if (! ($current['module_social_media_template_library'] ?? false)) {
-            foreach (Hub::SOCIAL_MEDIA_TEMPLATE_LIBRARY_FUNCTIONALITY_KEYS as $funcKey) {
-                $current[$funcKey] = false;
-            }
-        }
+        $current = $hub->applyModuleDependencies($current);
 
         return $this->applyExclusivity($current, array_keys($partial));
     }
