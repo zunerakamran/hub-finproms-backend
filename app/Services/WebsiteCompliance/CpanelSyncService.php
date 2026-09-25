@@ -37,6 +37,34 @@ class CpanelSyncService
     }
 
     /**
+     * Push logo / white logo / favicon / colour scheme only — no DB rewrite.
+     * Used after deployment when Power Admin updates branding.
+     */
+    public static function pushBrandingToCpanel(TemplateRequest $templateRequest, mixed $advisorId = null): bool
+    {
+        if (! $templateRequest->cpanel_domain) {
+            Log::info('pushBrandingToCpanel: no cpanel_domain on template request #'.$templateRequest->id);
+
+            return false;
+        }
+
+        $advisorId = $advisorId ?? $templateRequest->advisor_id ?? $templateRequest->assigned_advisor_id;
+
+        $payload = [
+            'api_key' => $templateRequest->cpanel_api_key,
+            'advisor_id' => $advisorId,
+            'deployment_mode' => 'advisor',
+            'primary_color' => BrandColor::toHex($templateRequest->primary_color, '#0B1B3D'),
+            'secondary_color' => BrandColor::toHex($templateRequest->secondary_color, '#C8102E'),
+            'logo_url' => self::brandingAssetForCpanel($templateRequest->logo_url, 'logo'),
+            'white_logo_url' => self::brandingAssetForCpanel($templateRequest->white_logo_url, 'white_logo'),
+            'favicon_url' => self::brandingAssetForCpanel($templateRequest->favicon_url, 'favicon'),
+        ];
+
+        return self::postToCpanel($templateRequest, $payload, 'branding');
+    }
+
+    /**
      * Push APPROVED content into the advisor's own cPanel MySQL `sections` table.
      */
     public static function pushToAdvisorCpanel(mixed $advisorId, array $sectionsUpdated = []): bool

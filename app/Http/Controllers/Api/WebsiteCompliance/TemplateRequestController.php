@@ -591,7 +591,7 @@ class TemplateRequestController extends Controller
         ]);
 
         $templateRequest = TemplateRequest::findOrFail($id);
-        $updates = $this->brandingUpdatesFromRequest($request, true);
+        $updates = $this->brandingUpdatesFromRequest($request);
 
         if ($updates === []) {
             return response()->json([
@@ -606,7 +606,7 @@ class TemplateRequestController extends Controller
         $targetAdvisorId = $templateRequest->assigned_advisor_id ?? $templateRequest->advisor_id;
 
         if ($templateRequest->status === 'deployed' && filled($templateRequest->cpanel_domain)) {
-            $configSynced = CpanelSyncService::pushDeployConfig($templateRequest, $targetAdvisorId);
+            $configSynced = CpanelSyncService::pushBrandingToCpanel($templateRequest, $targetAdvisorId);
         }
 
         $this->activityLogs->log([
@@ -635,15 +635,16 @@ class TemplateRequestController extends Controller
     /**
      * @return array<string, mixed>
      */
-    private function brandingUpdatesFromRequest(Request $request, bool $requirePresence = false): array
+    private function brandingUpdatesFromRequest(Request $request): array
     {
         $updates = [];
 
         foreach (['logo_url', 'white_logo_url', 'favicon_url'] as $key) {
-            if ($requirePresence && ! $request->exists($key)) {
+            if (! $request->exists($key)) {
                 continue;
             }
-            if (! $requirePresence && ! $request->exists($key)) {
+            // Skip white_logo_url when the WC DB has not been migrated yet.
+            if ($key === 'white_logo_url' && ! $this->templateRequestsHaveWhiteLogoColumn()) {
                 continue;
             }
             $raw = $request->input($key);
@@ -659,5 +660,24 @@ class TemplateRequestController extends Controller
         }
 
         return $updates;
+    }
+
+    private function templateRequestsHaveWhiteLogoColumn(): bool
+    {
+        static $hasColumn = null;
+        if ($hasColumn !== null) {
+            return $hasColumn;
+        }
+
+        try {
+            $connection = (new TemplateRequest)->getConnectionName()
+                ?: config('database.default');
+            $hasColumn = \Illuminate\Support\Facades\Schema::connection($connection)
+                ->hasColumn('wc_template_requests', 'white_logo_url');
+        } catch (\Throwable) {
+            $hasColumn = false;
+        }
+
+        return $hasColumn;
     }
 }
