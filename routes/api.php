@@ -217,6 +217,7 @@ Route::middleware('auth:sanctum')->group(function () {
         });
         Route::middleware('hub_can:wc_deploy_websites')->group(function () {
             Route::post('/template-requests/{id}/deploy', [WcTemplateRequestController::class, 'deploy'])->whereNumber('id');
+            Route::put('/template-requests/{id}/branding', [WcTemplateRequestController::class, 'updateBranding'])->whereNumber('id');
             Route::post('/template-requests/{id}/reject', [WcTemplateRequestController::class, 'reject'])->whereNumber('id');
         });
         Route::middleware('hub_can:wc_assign_website_templates')->group(function () {
@@ -487,6 +488,7 @@ Route::middleware('auth:sanctum')->group(function () {
             });
             Route::middleware('hub_can:wc_deploy_websites')->group(function () {
                 Route::post('/template-requests/{id}/deploy', [WcTemplateRequestController::class, 'deploy'])->whereNumber('id');
+                Route::put('/template-requests/{id}/branding', [WcTemplateRequestController::class, 'updateBranding'])->whereNumber('id');
                 Route::post('/template-requests/{id}/reject', [WcTemplateRequestController::class, 'reject'])->whereNumber('id');
             });
             Route::middleware('hub_can:wc_manage_templates')->group(function () {
@@ -771,6 +773,7 @@ Route::middleware('auth:sanctum')->group(function () {
             });
             Route::middleware('hub_can:wc_deploy_websites')->group(function () {
                 Route::post('/template-requests/{id}/deploy', [WcTemplateRequestController::class, 'deploy'])->whereNumber('id');
+                Route::put('/template-requests/{id}/branding', [WcTemplateRequestController::class, 'updateBranding'])->whereNumber('id');
                 Route::post('/template-requests/{id}/reject', [WcTemplateRequestController::class, 'reject'])->whereNumber('id');
             });
             Route::middleware('hub_can:wc_manage_templates')->group(function () {

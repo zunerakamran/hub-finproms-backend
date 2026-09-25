@@ -92,6 +92,7 @@ class CpanelSyncService
             'primary_color' => BrandColor::toHex($templateRequest->primary_color, '#0B1B3D'),
             'secondary_color' => BrandColor::toHex($templateRequest->secondary_color, '#C8102E'),
             'logo_url' => self::brandingAssetForCpanel($templateRequest->logo_url, 'logo'),
+            'white_logo_url' => self::brandingAssetForCpanel($templateRequest->white_logo_url, 'white_logo'),
             'favicon_url' => self::brandingAssetForCpanel($templateRequest->favicon_url, 'favicon'),
         ];
 

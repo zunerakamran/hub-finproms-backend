@@ -627,6 +627,7 @@ class ChangeRequestController extends Controller
                 'primary_color' => null,
                 'secondary_color' => null,
                 'logo_url' => null,
+                'white_logo_url' => null,
                 'favicon_url' => null,
                 'template_request_id' => null,
                 'advisor_id' => $section?->advisor_id,
@@ -646,6 +647,7 @@ class ChangeRequestController extends Controller
             'primary_color' => $templateRequest->primary_color ?: null,
             'secondary_color' => $templateRequest->secondary_color ?: null,
             'logo_url' => CpanelSyncService::absoluteAssetUrl($templateRequest->logo_url),
+            'white_logo_url' => CpanelSyncService::absoluteAssetUrl($templateRequest->white_logo_url),
             'favicon_url' => CpanelSyncService::absoluteAssetUrl($templateRequest->favicon_url),
             'template_request_id' => $templateRequest->id,
             'advisor_id' => $section?->advisor_id

@@ -404,6 +404,7 @@ class WhiteLabelControlPlaneTest extends TestCase
                 $table->string('request_type')->default('advisor_website');
                 $table->string('domain_name')->nullable();
                 $table->string('logo_url', 500)->nullable();
+                $table->string('white_logo_url', 1000)->nullable();
                 $table->string('favicon_url', 1000)->nullable();
                 $table->string('primary_color', 50)->nullable();
                 $table->string('secondary_color', 50)->nullable();

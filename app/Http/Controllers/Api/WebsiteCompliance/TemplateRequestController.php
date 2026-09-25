@@ -64,6 +64,7 @@ class TemplateRequestController extends Controller
             'template_name' => 'nullable|string|max:255',
             'request_type' => 'nullable|in:advisor_website,hub_main_website',
             'logo_url' => 'nullable|string|max:1000',
+            'white_logo_url' => 'nullable|string|max:1000',
             'favicon_url' => 'nullable|string|max:1000',
             'primary_color' => 'nullable|string|max:50',
             'secondary_color' => 'nullable|string|max:50',
@@ -102,6 +103,7 @@ class TemplateRequestController extends Controller
                 : null,
             'domain_name' => $request->domain_name,
             'logo_url' => CpanelSyncService::absoluteAssetUrl($request->logo_url),
+            'white_logo_url' => CpanelSyncService::absoluteAssetUrl($request->white_logo_url),
             'favicon_url' => CpanelSyncService::absoluteAssetUrl($request->favicon_url),
             'primary_color' => BrandColor::toHex($request->primary_color ?? null, '#0B1B3D'),
             'secondary_color' => BrandColor::toHex($request->secondary_color ?? null, '#C8102E'),
@@ -175,11 +177,16 @@ class TemplateRequestController extends Controller
             'cpanel_db_user' => 'nullable|string|max:255',
             'cpanel_db_password' => 'nullable|string|max:255',
             'cpanel_api_key' => 'nullable|string|max:255',
+            'logo_url' => 'nullable|string|max:1000',
+            'white_logo_url' => 'nullable|string|max:1000',
+            'favicon_url' => 'nullable|string|max:1000',
+            'primary_color' => 'nullable|string|max:50',
+            'secondary_color' => 'nullable|string|max:50',
         ]);
 
         $templateRequest = TemplateRequest::findOrFail($id);
 
-        $templateRequest->update([
+        $updates = [
             'status' => 'deployed',
             'cpanel_domain' => $request->cpanel_domain,
             'cpanel_db_host' => $request->cpanel_db_host,
@@ -187,7 +194,12 @@ class TemplateRequestController extends Controller
             'cpanel_db_user' => $request->cpanel_db_user,
             'cpanel_db_password' => $request->cpanel_db_password ?? $request->input('cpanel_db_pass'),
             'cpanel_api_key' => $request->cpanel_api_key,
-        ]);
+        ];
+
+        $updates = array_merge($updates, $this->brandingUpdatesFromRequest($request));
+
+        $templateRequest->update($updates);
+        $templateRequest->refresh();
 
         $targetAdvisorId = $templateRequest->assigned_advisor_id ?? $templateRequest->advisor_id;
         $hubSectionsCreated = 0;
@@ -558,5 +570,94 @@ class TemplateRequestController extends Controller
                 : 'Content saved in the hub database, but the live site was not updated. Check Laravel logs and cPanel configuration.',
             'cpanel_synced' => $cpanelSynced,
         ]);
+    }
+
+    /**
+     * Power Admin: update site branding (logo / white logo / favicon / colours)
+     * during or after deployment. When the site is already deployed, push branding
+     * to the advisor cPanel site_settings.
+     */
+    public function updateBranding(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        $this->gate->assertCan($user, 'wc_deploy_websites');
+
+        $request->validate([
+            'logo_url' => 'nullable|string|max:1000',
+            'white_logo_url' => 'nullable|string|max:1000',
+            'favicon_url' => 'nullable|string|max:1000',
+            'primary_color' => 'nullable|string|max:50',
+            'secondary_color' => 'nullable|string|max:50',
+        ]);
+
+        $templateRequest = TemplateRequest::findOrFail($id);
+        $updates = $this->brandingUpdatesFromRequest($request, true);
+
+        if ($updates === []) {
+            return response()->json([
+                'message' => 'No branding fields were provided.',
+            ], 422);
+        }
+
+        $templateRequest->update($updates);
+        $templateRequest->refresh();
+
+        $configSynced = false;
+        $targetAdvisorId = $templateRequest->assigned_advisor_id ?? $templateRequest->advisor_id;
+
+        if ($templateRequest->status === 'deployed' && filled($templateRequest->cpanel_domain)) {
+            $configSynced = CpanelSyncService::pushDeployConfig($templateRequest, $targetAdvisorId);
+        }
+
+        $this->activityLogs->log([
+            'action' => 'wc.template_request.update_branding',
+            'description' => 'Updated branding for domain: '.($templateRequest->domain_name ?: $templateRequest->cpanel_domain)
+                .($configSynced ? ' (remote config written)' : ''),
+            'user' => $user,
+            'subject' => $templateRequest,
+            'request' => $request,
+        ]);
+
+        $message = 'Branding updated successfully.';
+        if ($templateRequest->status === 'deployed') {
+            $message = $configSynced
+                ? 'Branding updated and pushed to the live site.'
+                : 'Branding saved on the hub, but the live site sync could not be verified. Check Laravel logs and cPanel configuration.';
+        }
+
+        return response()->json([
+            'message' => $message,
+            'config_synced' => $configSynced,
+            'template_request' => $templateRequest->load($this->requestRelations()),
+        ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function brandingUpdatesFromRequest(Request $request, bool $requirePresence = false): array
+    {
+        $updates = [];
+
+        foreach (['logo_url', 'white_logo_url', 'favicon_url'] as $key) {
+            if ($requirePresence && ! $request->exists($key)) {
+                continue;
+            }
+            if (! $requirePresence && ! $request->exists($key)) {
+                continue;
+            }
+            $raw = $request->input($key);
+            $updates[$key] = filled($raw) ? CpanelSyncService::absoluteAssetUrl($raw) : null;
+        }
+
+        if ($request->filled('primary_color')) {
+            $updates['primary_color'] = BrandColor::toHex($request->primary_color, '#0B1B3D');
+        }
+
+        if ($request->filled('secondary_color')) {
+            $updates['secondary_color'] = BrandColor::toHex($request->secondary_color, '#C8102E');
+        }
+
+        return $updates;
     }
 }
