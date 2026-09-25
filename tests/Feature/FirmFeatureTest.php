@@ -9,7 +9,6 @@ use App\Services\AdvisorImportService;
 use App\Services\CapabilitiesMatrixService;
 use App\Services\HubService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Http\UploadedFile;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -158,8 +157,10 @@ class FirmFeatureTest extends TestCase
         ]);
         $firm = Firm::query()->create(['name' => 'Acme Wealth']);
 
-        $csv = "name,email,password,firm\nJane Advisor,jane.firm@example.com,,Acme Wealth\n";
-        $file = UploadedFile::fake()->createWithContent('advisors.csv', $csv);
+        $file = \Tests\Support\ExcelUploadFactory::make([
+            ['name', 'email', 'password', 'role', 'firm'],
+            ['Jane Advisor', 'jane.firm@example.com', '', 'advisor', 'Acme Wealth'],
+        ]);
 
         $plan = app(AdvisorImportService::class)->buildPlan($file);
 
@@ -167,6 +168,7 @@ class FirmFeatureTest extends TestCase
         $this->assertSame($firm->id, $plan['pending'][0]['firm_id']);
         $this->assertSame('Acme Wealth', $plan['pending'][0]['firm']);
         $this->assertSame('Acme Wealth', $plan['preview']['created'][0]['firm']);
+        $this->assertSame(User::ROLE_ADVISOR, $plan['pending'][0]['role']);
     }
 
     public function test_advisor_import_skips_unknown_firm(): void
@@ -176,8 +178,10 @@ class FirmFeatureTest extends TestCase
             'public_subscribe' => false,
         ]);
 
-        $csv = "name,email,password,firm\nJane Advisor,jane.missing@example.com,,Missing Firm\n";
-        $file = UploadedFile::fake()->createWithContent('advisors.csv', $csv);
+        $file = \Tests\Support\ExcelUploadFactory::make([
+            ['name', 'email', 'password', 'role', 'firm'],
+            ['Jane Advisor', 'jane.missing@example.com', '', 'advisor', 'Missing Firm'],
+        ]);
 
         $plan = app(AdvisorImportService::class)->buildPlan($file);
 

@@ -22,13 +22,27 @@ use Symfony\Component\HttpKernel\Exception\HttpException;
 class PowerAdminUserController extends Controller
 {
     /**
-     * Roles Power Admin may assign from the dashboard.
+     * Roles Power Admin may assign from the dashboard on the shared hub.
      *
      * @var list<string>
      */
     public const ASSIGNABLE_ROLES = [
         User::ROLE_POWER_ADMIN,
         User::ROLE_FINPROMS_ADMIN,
+        User::ROLE_CLIENT_ADMIN,
+        User::ROLE_MANAGER,
+        User::ROLE_APPROVER,
+        User::ROLE_ADVISOR,
+        User::ROLE_ADMIN_STAFF,
+        User::ROLE_USER,
+    ];
+
+    /**
+     * Roles assignable on white-labelled hubs (control-plane roles excluded).
+     *
+     * @var list<string>
+     */
+    public const WHITE_LABEL_ASSIGNABLE_ROLES = [
         User::ROLE_CLIENT_ADMIN,
         User::ROLE_MANAGER,
         User::ROLE_APPROVER,
@@ -49,7 +63,7 @@ class PowerAdminUserController extends Controller
     {
         $validated = $request->validate([
             'q' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'role' => ['sometimes', 'nullable', 'string', Rule::in(self::ASSIGNABLE_ROLES)],
+            'role' => ['sometimes', 'nullable', 'string', Rule::in($this->assignableRoles($this->actingWhiteLabelHub($request) ?? $this->labelHub()))],
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
         ]);
 
@@ -132,7 +146,7 @@ class PowerAdminUserController extends Controller
             return response()->json([
                 'message' => 'User created on '.$hub->name.' (white-labelled database).',
                 'user' => $user,
-                'roles' => $this->roleOptions(),
+                'roles' => $this->roleOptions($hub),
                 'firms' => $this->firmOptions($hub),
                 'acting_on_white_label' => true,
                 'target_hub' => $this->targetHubPayload($hub),
@@ -175,7 +189,7 @@ class PowerAdminUserController extends Controller
 
             return response()->json([
                 'user' => $payload,
-                'roles' => $this->roleOptions(),
+                'roles' => $this->roleOptions($hub),
                 'firms' => $this->firmOptions($hub),
                 'acting_on_white_label' => true,
                 'target_hub' => $this->targetHubPayload($hub),
@@ -232,7 +246,7 @@ class PowerAdminUserController extends Controller
             return response()->json([
                 'message' => 'User updated on '.$hub->name.'.',
                 'user' => $updated['user'],
-                'roles' => $this->roleOptions(),
+                'roles' => $this->roleOptions($hub),
                 'firms' => $this->firmOptions($hub),
                 'acting_on_white_label' => true,
                 'target_hub' => $this->targetHubPayload($hub),
@@ -351,11 +365,13 @@ class PowerAdminUserController extends Controller
             $firmRules[] = Rule::exists('firms', 'id');
         }
 
+        $roleHub = $this->actingWhiteLabelHub($request) ?? $this->labelHub();
+
         return $request->validate([
             'name' => [$user ? 'sometimes' : 'required', 'string', 'max:255'],
             'email' => $emailRules,
             'password' => $passwordRules,
-            'role' => [$user ? 'sometimes' : 'required', 'string', Rule::in(self::ASSIGNABLE_ROLES)],
+            'role' => [$user ? 'sometimes' : 'required', 'string', Rule::in($this->assignableRoles($roleHub))],
             'credits' => ['sometimes', 'integer', 'min:0'],
             'is_advisor' => ['sometimes', 'boolean'],
             'allows_admin_staff_acting' => ['sometimes', 'boolean'],
@@ -483,13 +499,25 @@ class PowerAdminUserController extends Controller
     }
 
     /**
+     * @return list<string>
+     */
+    private function assignableRoles(?Hub $hub = null): array
+    {
+        if ($hub && $hub->isWhiteLabel()) {
+            return self::WHITE_LABEL_ASSIGNABLE_ROLES;
+        }
+
+        return self::ASSIGNABLE_ROLES;
+    }
+
+    /**
      * @return list<array{key: string, label: string}>
      */
     private function roleOptions(?Hub $hub = null): array
     {
         $hub ??= $this->labelHub();
         $roles = [];
-        foreach (self::ASSIGNABLE_ROLES as $role) {
+        foreach ($this->assignableRoles($hub) as $role) {
             $roles[] = [
                 'key' => $role,
                 'label' => $hub

@@ -384,7 +384,7 @@ class EmailTemplateCatalog
 
             'advisor_import_summary' => [
                 'label' => 'Advisor import completed',
-                'description' => 'Admin summary after an advisor Excel/CSV import finishes.',
+                'description' => 'Admin summary after an advisor Excel import finishes.',
                 'group' => 'Advisors',
                 'requires_any' => ['private_invite_only'],
                 'requires_module' => null,
@@ -401,7 +401,7 @@ class EmailTemplateCatalog
                         'subject' => '[{{site_name}}] Advisor import completed',
                         'eyebrow' => 'Admin notification',
                         'heading' => 'Advisor import summary',
-                        'intro' => 'An advisor Excel/CSV import finished on {{site_name}}.',
+                        'intro' => 'An advisor Excel import finished on {{site_name}}.',
                         'closing' => null,
                         'cta_label' => null,
                     ],

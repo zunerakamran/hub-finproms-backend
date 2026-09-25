@@ -6,6 +6,7 @@ use App\Models\Firm;
 use App\Models\Hub;
 use App\Models\User;
 use App\Models\UserSubscription;
+use App\Support\AdvisorImportXlsxTemplate;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -13,6 +14,21 @@ use RuntimeException;
 
 class AdvisorImportService
 {
+    /**
+     * Roles that may be assigned via Excel import on a private / white-labelled hub.
+     * Control-plane roles (power_admin, finproms_admin) are never importable.
+     *
+     * @var list<string>
+     */
+    public const IMPORTABLE_ROLES = [
+        User::ROLE_CLIENT_ADMIN,
+        User::ROLE_MANAGER,
+        User::ROLE_APPROVER,
+        User::ROLE_ADVISOR,
+        User::ROLE_ADMIN_STAFF,
+        User::ROLE_USER,
+    ];
+
     public function __construct(
         private readonly HubService $hubs,
         private readonly SubscriberCreditsService $subscriberCredits
@@ -40,8 +56,8 @@ class AdvisorImportService
      * Classify rows without creating users. Used when payment is required first.
      *
      * @return array{
-     *   pending: list<array{action: string, name: string, email: string, password: string, firm_id: ?int, firm: ?string}>,
-     *   preview: array{created: list<array{name: string, email: string, firm: ?string}>, updated: list<array{name: string, email: string, firm: ?string}>, reactivated: list<array{name: string, email: string, firm: ?string}>},
+     *   pending: list<array{action: string, name: string, email: string, password: string, role: string, firm_id: ?int, firm: ?string}>,
+     *   preview: array{created: list<array{name: string, email: string, role: ?string, firm: ?string}>, updated: list<array{name: string, email: string, role: ?string, firm: ?string}>, reactivated: list<array{name: string, email: string, role: ?string, firm: ?string}>},
      *   skipped: list<array{row: int, email: ?string, reason: string}>,
      *   summary: array{total_rows: int, created: int, updated: int, reactivated: int, skipped: int, billable_batch: int}
      * }
@@ -54,7 +70,7 @@ class AdvisorImportService
 
         if ($rows === []) {
             throw new RuntimeException(
-                'No advisor rows were found. Make sure the first non-empty row contains headers like name, email, password, firm.'
+                'No user rows were found. Make sure the first non-empty row contains headers like name, email, password, role, firm.'
             );
         }
 
@@ -63,12 +79,14 @@ class AdvisorImportService
         $previewUpdated = [];
         $previewReactivated = [];
         $skipped = [];
+        $billableBatch = 0;
 
         foreach ($rows as $index => $row) {
             $rowNumber = $index + 2;
             $name = trim((string) ($row['name'] ?? ''));
             $email = strtolower(trim((string) ($row['email'] ?? '')));
             $password = trim((string) ($row['password'] ?? ''));
+            $roleInput = trim((string) ($row['role'] ?? ''));
             $firmName = trim((string) ($row['firm'] ?? ''));
 
             if ($email === '' && $name === '') {
@@ -88,7 +106,16 @@ class AdvisorImportService
                 $name = Str::before($email, '@');
             }
 
-            $firmId = null;
+            $role = $this->resolveRole($hub, $roleInput);
+            if ($role === null) {
+                $skipped[] = [
+                    'row' => $rowNumber,
+                    'email' => $email,
+                    'reason' => $this->invalidRoleReason($hub, $roleInput),
+                ];
+                continue;
+            }
+
             if ($firmName === '') {
                 $skipped[] = [
                     'row' => $rowNumber,
@@ -113,15 +140,16 @@ class AdvisorImportService
 
             $firmId = (int) $firm->id;
             $resolvedFirmName = (string) $firm->name;
+            $roleLabel = $hub->roleLabel($role);
 
             $user = User::on($connection)->where('email', $email)->first();
 
             if ($user) {
-                if ($user->isClientAdmin() || $user->isPowerAdmin()) {
+                if (ActingHubService::isControlPlaneRole((string) $user->role)) {
                     $skipped[] = [
                         'row' => $rowNumber,
                         'email' => $email,
-                        'reason' => 'Email belongs to an admin account.',
+                        'reason' => 'Email belongs to a control-plane admin account.',
                     ];
                     continue;
                 }
@@ -133,14 +161,25 @@ class AdvisorImportService
                     'name' => $name,
                     'email' => $email,
                     'password' => '',
+                    'role' => $role,
                     'firm_id' => $firmId,
                     'firm' => $resolvedFirmName,
                 ];
 
+                $previewRow = [
+                    'name' => $name,
+                    'email' => $email,
+                    'role' => $roleLabel,
+                    'firm' => $resolvedFirmName,
+                ];
+
                 if ($action === 'reactivate') {
-                    $previewReactivated[] = ['name' => $name, 'email' => $email, 'firm' => $resolvedFirmName];
+                    $previewReactivated[] = $previewRow;
+                    if ($this->roleIsAdvisor($role)) {
+                        $billableBatch++;
+                    }
                 } else {
-                    $previewUpdated[] = ['name' => $name, 'email' => $email, 'firm' => $resolvedFirmName];
+                    $previewUpdated[] = $previewRow;
                 }
 
                 continue;
@@ -151,10 +190,19 @@ class AdvisorImportService
                 'name' => $name,
                 'email' => $email,
                 'password' => $password,
+                'role' => $role,
                 'firm_id' => $firmId,
                 'firm' => $resolvedFirmName,
             ];
-            $previewCreated[] = ['name' => $name, 'email' => $email, 'firm' => $resolvedFirmName];
+            $previewCreated[] = [
+                'name' => $name,
+                'email' => $email,
+                'role' => $roleLabel,
+                'firm' => $resolvedFirmName,
+            ];
+            if ($this->roleIsAdvisor($role)) {
+                $billableBatch++;
+            }
         }
 
         return [
@@ -171,7 +219,7 @@ class AdvisorImportService
                 'updated' => count($previewUpdated),
                 'reactivated' => count($previewReactivated),
                 'skipped' => count($skipped),
-                'billable_batch' => count($previewCreated) + count($previewReactivated),
+                'billable_batch' => $billableBatch,
             ],
         ];
     }
@@ -179,12 +227,12 @@ class AdvisorImportService
     /**
      * Apply a previously staged import plan (after payment method is chosen).
      *
-     * @param  list<array{action: string, name: string, email: string, password?: string, firm_id?: ?int}>  $pending
+     * @param  list<array{action: string, name: string, email: string, password?: string, role?: string, firm_id?: ?int}>  $pending
      * @param  list<array{row: int, email: ?string, reason: string}>  $skipped
      * @return array{
-     *   created: list<array{name: string, email: string, temporary_password: ?string, firm: ?string}>,
-     *   updated: list<array{name: string, email: string, firm: ?string}>,
-     *   reactivated: list<array{name: string, email: string, firm: ?string}>,
+     *   created: list<array{name: string, email: string, temporary_password: ?string, role: ?string, firm: ?string}>,
+     *   updated: list<array{name: string, email: string, role: ?string, firm: ?string}>,
+     *   reactivated: list<array{name: string, email: string, role: ?string, firm: ?string}>,
      *   skipped: list<array{row: int, email: ?string, reason: string}>,
      *   summary: array{total_rows: int, created: int, updated: int, reactivated: int, skipped: int, billable_batch: int}
      * }
@@ -207,6 +255,7 @@ class AdvisorImportService
             $name = trim((string) ($row['name'] ?? ''));
             $email = strtolower(trim((string) ($row['email'] ?? '')));
             $password = trim((string) ($row['password'] ?? ''));
+            $role = trim((string) ($row['role'] ?? ''));
             $firmId = isset($row['firm_id']) && $row['firm_id'] !== null && $row['firm_id'] !== ''
                 ? (int) $row['firm_id']
                 : null;
@@ -224,6 +273,15 @@ class AdvisorImportService
                 $name = Str::before($email, '@');
             }
 
+            if (! in_array($role, self::IMPORTABLE_ROLES, true)) {
+                $skipped[] = [
+                    'row' => $index + 1,
+                    'email' => $email,
+                    'reason' => $this->invalidRoleReason($hub, $role),
+                ];
+                continue;
+            }
+
             if ($firmId === null) {
                 $skipped[] = [
                     'row' => $index + 1,
@@ -233,12 +291,16 @@ class AdvisorImportService
                 continue;
             }
 
+            $isAdvisor = $this->roleIsAdvisor($role);
+
             try {
                 $result = DB::connection($connection)->transaction(function () use (
                     $action,
                     $name,
                     $email,
                     $password,
+                    $role,
+                    $isAdvisor,
                     $firmId,
                     $hub,
                     $connection
@@ -247,10 +309,10 @@ class AdvisorImportService
                     $temporaryPassword = null;
 
                     if ($user) {
-                        if ($user->isClientAdmin() || $user->isPowerAdmin()) {
+                        if (ActingHubService::isControlPlaneRole((string) $user->role)) {
                             return [
                                 'status' => 'skipped',
-                                'reason' => 'Email belongs to an admin account.',
+                                'reason' => 'Email belongs to a control-plane admin account.',
                             ];
                         }
 
@@ -258,17 +320,23 @@ class AdvisorImportService
 
                         $user->fill([
                             'name' => $name,
-                            'role' => User::ROLE_USER,
-                            'is_advisor' => true,
+                            'role' => $role,
+                            'is_advisor' => $isAdvisor,
                             'is_suspended' => false,
                             'is_discontinued' => false,
                             'discontinued_at' => null,
                             'firm_id' => $firmId,
                         ]);
+                        if (! $isAdvisor) {
+                            $user->allows_admin_staff_acting = false;
+                        }
                         $user->save();
-                        $this->ensureAdvisorSubscription($user);
-                        if ($wasInactive) {
-                            $this->subscriberCredits->applyToAdvisor($user->fresh(), $hub, true);
+
+                        if ($isAdvisor) {
+                            $this->ensureAdvisorSubscription($user);
+                            if ($wasInactive) {
+                                $this->subscriberCredits->applyToAdvisor($user->fresh(), $hub, true);
+                            }
                         }
 
                         return [
@@ -290,17 +358,20 @@ class AdvisorImportService
                         'name' => $name,
                         'email' => $email,
                         'password' => $password,
-                        'role' => User::ROLE_USER,
+                        'role' => $role,
                         'credits' => 0,
-                        'is_advisor' => true,
+                        'is_advisor' => $isAdvisor,
+                        'allows_admin_staff_acting' => false,
                         'has_unlimited_credits' => false,
                         'is_suspended' => false,
                         'is_discontinued' => false,
                         'firm_id' => $firmId,
                     ]);
 
-                    $this->ensureAdvisorSubscription($user);
-                    $this->subscriberCredits->applyToAdvisor($user->fresh(), $hub, true);
+                    if ($isAdvisor) {
+                        $this->ensureAdvisorSubscription($user);
+                        $this->subscriberCredits->applyToAdvisor($user->fresh(), $hub, true);
+                    }
 
                     return [
                         'status' => 'created',
@@ -327,12 +398,14 @@ class AdvisorImportService
             }
 
             $firmLabel = $result['user']->firm?->name ?? ($row['firm'] ?? null);
+            $roleLabel = $hub->roleLabel((string) $result['user']->role);
 
             if ($result['status'] === 'created') {
                 $created[] = [
                     'name' => $result['user']->name,
                     'email' => $result['user']->email,
                     'temporary_password' => $result['temporary_password'],
+                    'role' => $roleLabel,
                     'firm' => $firmLabel,
                 ];
                 app(FunctionalMailService::class)->advisorInvite(
@@ -343,6 +416,7 @@ class AdvisorImportService
                 $reactivated[] = [
                     'name' => $result['user']->name,
                     'email' => $result['user']->email,
+                    'role' => $roleLabel,
                     'firm' => $firmLabel,
                 ];
                 app(FunctionalMailService::class)->advisorReactivated($result['user']);
@@ -350,12 +424,16 @@ class AdvisorImportService
                 $updated[] = [
                     'name' => $result['user']->name,
                     'email' => $result['user']->email,
+                    'role' => $roleLabel,
                     'firm' => $firmLabel,
                 ];
             }
         }
 
         app(FunctionalMailService::class)->adminAdvisorImportSummary($created, $reactivated);
+
+        $billable = count(array_filter($created, fn ($row) => $this->previewRowIsAdvisor($hub, $row)))
+            + count(array_filter($reactivated, fn ($row) => $this->previewRowIsAdvisor($hub, $row)));
 
         return [
             'created' => $created,
@@ -368,7 +446,7 @@ class AdvisorImportService
                 'updated' => count($updated),
                 'reactivated' => count($reactivated),
                 'skipped' => count($skipped),
-                'billable_batch' => count($created) + count($reactivated),
+                'billable_batch' => $billable,
             ],
         ];
     }
@@ -455,7 +533,79 @@ class AdvisorImportService
     }
 
     /**
-     * @return list<array{name?: string, email?: string, password?: string}>
+     * Downloadable Excel template with role/firm dropdowns for this hub.
+     */
+    public function templateXlsx(?Hub $hub = null, ?string $connection = null): string
+    {
+        $hub ??= $this->hubs->current();
+        $connection ??= config('database.default');
+
+        $roleLabels = array_map(
+            fn (array $role) => $role['label'],
+            $this->importableRoleOptions($hub)
+        );
+
+        $firmNames = Firm::on($connection)
+            ->orderBy('name')
+            ->pluck('name')
+            ->map(fn ($name) => (string) $name)
+            ->all();
+
+        return (new AdvisorImportXlsxTemplate)->build($roleLabels, $firmNames);
+    }
+
+    /**
+     * @return list<array{key: string, label: string}>
+     */
+    public function importableRoleOptions(Hub $hub): array
+    {
+        $roles = [];
+        foreach (self::IMPORTABLE_ROLES as $role) {
+            $roles[] = [
+                'key' => $role,
+                'label' => $hub->roleLabel($role),
+            ];
+        }
+
+        return $roles;
+    }
+
+    /**
+     * Resolve a sheet role value (key or display/renamed label) to a role key.
+     */
+    public function resolveRole(Hub $hub, string $value): ?string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+
+        $normalized = Str::lower($value);
+        $normalizedKey = str_replace([' ', '-'], '_', $normalized);
+
+        if (ActingHubService::isControlPlaneRole($normalizedKey)) {
+            return null;
+        }
+
+        foreach ($this->importableRoleOptions($hub) as $role) {
+            $key = $role['key'];
+            $label = Str::lower($role['label']);
+            $default = Str::lower(User::ROLE_LABELS[$key] ?? $key);
+
+            if (
+                $normalizedKey === $key
+                || $normalized === $label
+                || $normalized === $default
+            ) {
+                return $key;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return list<array{name?: string, email?: string, password?: string, role?: string, firm?: string}>
      */
     public function parseFile(UploadedFile $file): array
     {
@@ -466,99 +616,25 @@ class AdvisorImportService
             throw new RuntimeException('Unable to read uploaded file.');
         }
 
-        if (in_array($extension, ['csv', 'txt', ''], true)) {
-            return $this->parseCsv($path);
-        }
-
         if ($extension === 'xlsx') {
             return $this->parseXlsx($path);
         }
 
         if ($extension === 'xls') {
             throw new RuntimeException(
-                'Legacy Excel (.xls) is not supported yet. Please save the sheet as .xlsx or CSV and upload that file.'
+                'Legacy Excel (.xls) is not supported. Please save the sheet as .xlsx and upload that file.'
             );
         }
 
-        throw new RuntimeException('Unsupported file type. Upload a CSV or Excel (.xlsx) file.');
+        if (in_array($extension, ['csv', 'txt'], true)) {
+            throw new RuntimeException('CSV is no longer supported. Please upload an Excel (.xlsx) file.');
+        }
+
+        throw new RuntimeException('Unsupported file type. Upload an Excel (.xlsx) file.');
     }
 
     /**
-     * @return list<array{name?: string, email?: string, password?: string}>
-     */
-    private function parseCsv(string $path): array
-    {
-        $handle = fopen($path, 'rb');
-        if ($handle === false) {
-            throw new RuntimeException('Unable to open CSV file.');
-        }
-
-        $header = null;
-        $rows = [];
-
-        try {
-            while (($data = fgetcsv($handle)) !== false) {
-                if ($data === [null] || $data === false) {
-                    continue;
-                }
-
-                if ($header === null && $this->rowIsEmpty($data)) {
-                    continue;
-                }
-
-                // Strip UTF-8 BOM from first cell
-                if ($header === null && isset($data[0])) {
-                    $data[0] = preg_replace('/^\xEF\xBB\xBF/', '', (string) $data[0]) ?? (string) $data[0];
-                }
-
-                if ($header === null) {
-                    $header = array_map(fn ($h) => $this->normalizeHeader((string) $h), $data);
-                    continue;
-                }
-
-                if ($this->rowIsEmpty($data)) {
-                    continue;
-                }
-
-                $assoc = [];
-                foreach ($header as $i => $key) {
-                    if ($key === null || $key === '') {
-                        continue;
-                    }
-                    $assoc[$key] = isset($data[$i]) ? trim((string) $data[$i]) : '';
-                }
-
-                // Map common aliases
-                $row = [
-                    'name' => $assoc['name'] ?? $assoc['full_name'] ?? $assoc['advisor_name'] ?? '',
-                    'email' => $assoc['email'] ?? $assoc['email_address'] ?? '',
-                    'password' => $assoc['password'] ?? $assoc['temporary_password'] ?? '',
-                    'firm' => $assoc['firm'] ?? $assoc['firm_name'] ?? $assoc['company'] ?? '',
-                ];
-
-                $rows[] = $row;
-            }
-        } finally {
-            fclose($handle);
-        }
-
-        if ($header === null) {
-            throw new RuntimeException('CSV file is empty. Include a header row: name,email');
-        }
-
-        if (! in_array('email', $header, true) && ! in_array('email_address', $header, true)) {
-            // Allow headerless single-column? No — require email header.
-            // If headers were wrong keys, still try positional fallback for 2+ columns.
-            if (count($rows) === 0) {
-                throw new RuntimeException('CSV must include an email column. Expected headers: name,email');
-            }
-        }
-
-        return $rows;
-    }
-
-    /**
-     * @return list<array{name?: string, email?: string, password?: string}>
+     * @return list<array{name?: string, email?: string, password?: string, role?: string, firm?: string}>
      */
     private function parseXlsx(string $path): array
     {
@@ -580,7 +656,7 @@ class AdvisorImportService
 
         $sheetRows = $xlsx->rows();
         if ($sheetRows === []) {
-            throw new RuntimeException('Excel file is empty. Include a header row: name, email, password');
+            throw new RuntimeException('Excel file is empty. Include a header row: name, email, password, role, firm');
         }
 
         $headerRow = null;
@@ -593,7 +669,7 @@ class AdvisorImportService
         }
 
         if ($headerRow === null) {
-            throw new RuntimeException('Excel file is empty. Include a header row: name, email, password');
+            throw new RuntimeException('Excel file is empty. Include a header row: name, email, password, role, firm');
         }
 
         $header = array_map(
@@ -619,13 +695,14 @@ class AdvisorImportService
                 'name' => $assoc['name'] ?? $assoc['full_name'] ?? $assoc['advisor_name'] ?? '',
                 'email' => $assoc['email'] ?? $assoc['email_address'] ?? '',
                 'password' => $assoc['password'] ?? $assoc['temporary_password'] ?? '',
+                'role' => $assoc['role'] ?? $assoc['user_role'] ?? '',
                 'firm' => $assoc['firm'] ?? $assoc['firm_name'] ?? $assoc['company'] ?? '',
             ];
         }
 
         if (! in_array('email', $header, true) && ! in_array('email_address', $header, true)) {
             if (count($rows) === 0) {
-                throw new RuntimeException('Excel sheet must include an email column. Expected headers: name, email');
+                throw new RuntimeException('Excel sheet must include an email column. Expected headers: name, email, password, role, firm');
             }
         }
 
@@ -654,14 +731,38 @@ class AdvisorImportService
         return true;
     }
 
-    public function templateCsv(): string
+    private function roleIsAdvisor(string $role): bool
     {
-        $lines = [
-            'name,email,password,firm',
-            'Jane Advisor,jane@example.com,,Acme Wealth',
-            'John Advisor,john@example.com,OptionalPassword123,Acme Wealth',
-        ];
+        return $role === User::ROLE_ADVISOR;
+    }
 
-        return implode("\n", $lines)."\n";
+    /**
+     * @param  array{role?: ?string}  $row
+     */
+    private function previewRowIsAdvisor(Hub $hub, array $row): bool
+    {
+        $labelOrKey = (string) ($row['role'] ?? '');
+        $resolved = $this->resolveRole($hub, $labelOrKey);
+
+        return $resolved !== null && $this->roleIsAdvisor($resolved);
+    }
+
+    private function invalidRoleReason(Hub $hub, string $roleInput): string
+    {
+        $trimmed = trim($roleInput);
+        if ($trimmed === '') {
+            return 'Role is required. Use a role from the template dropdown.';
+        }
+
+        $normalizedKey = str_replace([' ', '-'], '_', Str::lower($trimmed));
+        if (ActingHubService::isControlPlaneRole($normalizedKey)) {
+            return 'Role "'.$trimmed.'" is not allowed on this hub. Power Admin and FinProms Admin cannot be imported.';
+        }
+
+        $allowed = collect($this->importableRoleOptions($hub))
+            ->pluck('label')
+            ->implode(', ');
+
+        return 'Unknown role "'.$trimmed.'". Allowed roles: '.$allowed.'.';
     }
 }

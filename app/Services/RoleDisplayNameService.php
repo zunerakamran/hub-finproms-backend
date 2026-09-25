@@ -34,6 +34,9 @@ class RoleDisplayNameService
         $labels = $this->labels($hub);
         $roles = [];
         foreach (CapabilitiesMatrixService::MATRIX_ROLES as $role) {
+            if ($hub->isWhiteLabel() && ActingHubService::isControlPlaneRole($role)) {
+                continue;
+            }
             $roles[] = [
                 'key' => $role,
                 'label' => $labels[$role] ?? $role,
@@ -55,6 +58,9 @@ class RoleDisplayNameService
     {
         $cleaned = [];
         foreach (CapabilitiesMatrixService::MATRIX_ROLES as $role) {
+            if ($hub->isWhiteLabel() && ActingHubService::isControlPlaneRole($role)) {
+                continue;
+            }
             if (! array_key_exists($role, $names)) {
                 continue;
             }
@@ -75,6 +81,10 @@ class RoleDisplayNameService
         // Roles omitted from the request keep existing overrides.
         $existing = is_array($hub->role_display_names) ? $hub->role_display_names : [];
         foreach (CapabilitiesMatrixService::MATRIX_ROLES as $role) {
+            if ($hub->isWhiteLabel() && ActingHubService::isControlPlaneRole($role)) {
+                unset($existing[$role]);
+                continue;
+            }
             if (array_key_exists($role, $names)) {
                 if (isset($cleaned[$role])) {
                     $existing[$role] = $cleaned[$role];

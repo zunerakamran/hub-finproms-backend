@@ -122,9 +122,9 @@ class AdvisorController extends Controller
         $file = $validated['file'];
         $extension = strtolower($file->getClientOriginalExtension() ?: '');
 
-        if (! in_array($extension, ['csv', 'txt', 'xlsx', 'xls'], true)) {
+        if (! in_array($extension, ['xlsx', 'xls'], true)) {
             return response()->json([
-                'message' => 'Please upload a CSV or Excel file (.xlsx).',
+                'message' => 'Please upload an Excel file (.xlsx).',
             ], 422);
         }
 
@@ -266,14 +266,24 @@ class AdvisorController extends Controller
 
     public function template(Request $request): StreamedResponse
     {
-        $this->assertImportEnabled($request);
+        $hub = $this->assertImportEnabled($request);
 
-        $csv = $this->importService->templateCsv();
+        try {
+            if ($this->shouldUseRemote($request, $hub)) {
+                $xlsx = $this->remoteDb->run($hub, function (string $connection) use ($hub) {
+                    return $this->importService->templateXlsx($hub, $connection);
+                });
+            } else {
+                $xlsx = $this->importService->templateXlsx($hub);
+            }
+        } catch (InvalidArgumentException|\RuntimeException $e) {
+            abort(response()->json(['message' => $e->getMessage()], 422));
+        }
 
-        return response()->streamDownload(function () use ($csv) {
-            echo $csv;
-        }, 'advisor-import-template.csv', [
-            'Content-Type' => 'text/csv; charset=UTF-8',
+        return response()->streamDownload(function () use ($xlsx) {
+            echo $xlsx;
+        }, 'advisor-import-template.xlsx', [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         ]);
     }
 

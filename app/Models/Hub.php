@@ -668,8 +668,8 @@ class Hub extends Model
 
         // --- 5. Advisors & private billing ---
         'advisor_excel_import' => [
-            'label' => 'Import advisors (Excel/CSV)',
-            'description' => 'Hub admin and Power Admin (when enabled) can import advisors from an Excel/CSV sheet.',
+            'label' => 'Import advisors (Excel)',
+            'description' => 'Hub admin and Power Admin (when enabled) can import advisors from an Excel sheet.',
             'group' => self::GROUP_DASHBOARD_ADVISORS,
             'default_shared' => false,
             'default_white_label' => true,
