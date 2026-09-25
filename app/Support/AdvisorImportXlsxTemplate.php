@@ -20,13 +20,20 @@ class AdvisorImportXlsxTemplate
         $roleLabels = array_values(array_filter(array_map('strval', $roleLabels), fn ($v) => trim($v) !== ''));
         $firmNames = array_values(array_filter(array_map('strval', $firmNames), fn ($v) => trim($v) !== ''));
 
-        $sampleRole = $roleLabels[0] ?? 'Advisor';
+        $sampleRole = 'User';
+        foreach ($roleLabels as $label) {
+            if (strcasecmp(str_replace([' ', '-'], '_', $label), 'user') === 0
+                || strcasecmp($label, 'User') === 0
+            ) {
+                $sampleRole = $label;
+                break;
+            }
+        }
         $sampleFirm = $firmNames[0] ?? '';
 
         $importRows = [
             ['name', 'email', 'password', 'role', 'firm'],
-            ['Jane Advisor', 'jane@example.com', '', $sampleRole, $sampleFirm],
-            ['John Advisor', 'john@example.com', 'OptionalPassword123', $sampleRole, $sampleFirm],
+            ['User', 'user@example.com', '', $sampleRole, $sampleFirm],
         ];
 
         $listRows = [['role', 'firm']];
