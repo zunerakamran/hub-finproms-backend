@@ -10,6 +10,33 @@ use Illuminate\Support\Facades\DB;
 class SubscriberCreditsService
 {
     /**
+     * Apply the hub's current subscriber credit allotment to one Excel-imported user.
+     * Unlimited → flag on, balance left alone (or 0 on fresh create).
+     * Limited → flag off, balance SET to the hub allotment (not incremented).
+     */
+    public function applyToImportedSubscriber(User $user, Hub $hub, bool $resetBalance = true): void
+    {
+        if ($hub->givesUnlimitedSubscriberCredits()) {
+            $user->has_unlimited_credits = true;
+            if ($resetBalance && $user->credits === null) {
+                $user->credits = 0;
+            }
+            $user->save();
+            $this->syncSubscriptionCreditsGranted($user, 0);
+
+            return;
+        }
+
+        $allotment = (int) $hub->subscriberCreditsPerPeriod();
+        $user->has_unlimited_credits = false;
+        if ($resetBalance) {
+            $user->credits = $allotment;
+        }
+        $user->save();
+        $this->syncSubscriptionCreditsGranted($user, $allotment);
+    }
+
+    /**
      * Apply the hub's current subscriber credit allotment to one advisor.
      * Unlimited → flag on, balance left alone (or 0 on fresh create).
      * Limited → flag off, balance SET to the hub allotment (not incremented).
@@ -20,24 +47,7 @@ class SubscriberCreditsService
             return;
         }
 
-        if ($hub->givesUnlimitedSubscriberCredits()) {
-            $advisor->has_unlimited_credits = true;
-            if ($resetBalance && $advisor->credits === null) {
-                $advisor->credits = 0;
-            }
-            $advisor->save();
-            $this->syncSubscriptionCreditsGranted($advisor, 0);
-
-            return;
-        }
-
-        $allotment = $hub->subscriberCreditsPerPeriod();
-        $advisor->has_unlimited_credits = false;
-        if ($resetBalance) {
-            $advisor->credits = $allotment;
-        }
-        $advisor->save();
-        $this->syncSubscriptionCreditsGranted($advisor, $allotment);
+        $this->applyToImportedSubscriber($advisor, $hub, $resetBalance);
     }
 
     /**

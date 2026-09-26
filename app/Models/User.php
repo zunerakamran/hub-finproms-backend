@@ -275,8 +275,9 @@ class User extends Authenticatable
     }
 
     /**
-     * Staff and Excel-invited advisors may sign in when the hub is invite-only.
-     * General members (self-registered users) may not. Suspended / discontinued advisors may not.
+     * Staff and Excel-imported invitees may sign in when the hub is invite-only.
+     * Self-registered public members are not created on invite-only hubs.
+     * Suspended / discontinued accounts may not sign in.
      */
     public function mayLoginOnInviteOnlyHub(): bool
     {
@@ -284,11 +285,22 @@ class User extends Authenticatable
             return false;
         }
 
+        // Every Excel-importable role (including User) is on the invite list.
+        if (in_array((string) $this->role, [
+            self::ROLE_CLIENT_ADMIN,
+            self::ROLE_MANAGER,
+            self::ROLE_APPROVER,
+            self::ROLE_ADVISOR,
+            self::ROLE_ADMIN_STAFF,
+            self::ROLE_USER,
+            'admin', // legacy
+        ], true)) {
+            return true;
+        }
+
         return $this->isPowerAdmin()
-            || $this->isClientAdmin()
-            || $this->isApprover()
-            || $this->isAdvisor()
-            || $this->isAdminStaff();
+            || $this->isFinpromsAdmin()
+            || $this->isAdvisor();
     }
 
     /**

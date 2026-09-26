@@ -261,4 +261,56 @@ class AdvisorImportExcelTest extends TestCase
         $this->assertContains('module_social_media_compliance', $modules);
         $this->assertNotContains('module_white_label_hub', $modules);
     }
+
+    public function test_imported_user_role_receives_hub_credits_and_can_login(): void
+    {
+        $hub = $this->createPrivateHub();
+        $hub->subscriber_credits = 250;
+        $hub->save();
+        app(HubService::class)->forgetCurrentCache();
+
+        Firm::query()->create(['name' => 'Acme Wealth']);
+
+        $file = ExcelUploadFactory::make([
+            ['name', 'email', 'password', 'role', 'firm'],
+            ['Pat', 'pat.user@example.com', 'Secret123!', 'User', 'Acme Wealth'],
+        ]);
+
+        $result = app(AdvisorImportService::class)->import($file, $hub);
+        $this->assertSame(1, $result['summary']['created']);
+
+        $user = User::query()->where('email', 'pat.user@example.com')->first();
+        $this->assertNotNull($user);
+        $this->assertSame(User::ROLE_USER, $user->role);
+        $this->assertSame(250, (int) $user->credits);
+        $this->assertFalse((bool) $user->has_unlimited_credits);
+        $this->assertTrue($user->mayLoginOnInviteOnlyHub());
+
+        $login = $this->postJson('/api/auth/login', [
+            'email' => 'pat.user@example.com',
+            'password' => 'Secret123!',
+        ]);
+        $login->assertOk()->assertJsonPath('user.email', 'pat.user@example.com');
+    }
+
+    public function test_imported_user_gets_unlimited_credits_when_hub_allotment_is_null(): void
+    {
+        $hub = $this->createPrivateHub();
+        $hub->subscriber_credits = null;
+        $hub->save();
+        app(HubService::class)->forgetCurrentCache();
+
+        Firm::query()->create(['name' => 'Acme Wealth']);
+
+        $file = ExcelUploadFactory::make([
+            ['name', 'email', 'password', 'role', 'firm'],
+            ['Sam', 'sam.user@example.com', 'Secret123!', 'User', 'Acme Wealth'],
+        ]);
+
+        app(AdvisorImportService::class)->import($file, $hub);
+
+        $user = User::query()->where('email', 'sam.user@example.com')->first();
+        $this->assertTrue((bool) $user->has_unlimited_credits);
+        $this->assertTrue($user->mayLoginOnInviteOnlyHub());
+    }
 }

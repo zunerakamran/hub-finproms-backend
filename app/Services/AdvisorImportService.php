@@ -346,9 +346,9 @@ class AdvisorImportService
 
                         if ($isAdvisor) {
                             $this->ensureAdvisorSubscription($user);
-                            if ($wasInactive) {
-                                $this->subscriberCredits->applyToAdvisor($user->fresh(), $hub, true);
-                            }
+                        }
+                        if ($wasInactive) {
+                            $this->subscriberCredits->applyToImportedSubscriber($user->fresh(), $hub, true);
                         }
 
                         return [
@@ -383,8 +383,8 @@ class AdvisorImportService
 
                     if ($isAdvisor) {
                         $this->ensureAdvisorSubscription($user);
-                        $this->subscriberCredits->applyToAdvisor($user->fresh(), $hub, true);
                     }
+                    $this->subscriberCredits->applyToImportedSubscriber($user->fresh(), $hub, true);
 
                     return [
                         'status' => 'created',

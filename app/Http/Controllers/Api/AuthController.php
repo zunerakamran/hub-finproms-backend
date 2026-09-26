@@ -206,7 +206,7 @@ class AuthController extends Controller
             }
 
             return response()->json([
-                'message' => 'This hub is invite-only. Only advisors imported from the invite list can sign in.',
+                'message' => 'This hub is invite-only. Only users imported from the invite list can sign in.',
                 'registration_enabled' => false,
                 'invite_only' => true,
             ], 403);
