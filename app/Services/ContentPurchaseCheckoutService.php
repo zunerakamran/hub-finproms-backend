@@ -25,10 +25,25 @@ class ContentPurchaseCheckoutService
     ) {}
 
     /**
+     * Cash checkout (Stripe / bank transfer) is shared-hub only.
+     * White-labelled hubs buy posts/reels/bundles with credits only.
+     */
+    public function cashPaymentsAllowed(): bool
+    {
+        $hub = $this->hubs->current();
+
+        return $hub->isShared() && $this->hubs->can('one_off_purchase');
+    }
+
+    /**
      * @return list<array<string, mixed>>
      */
     public function availablePaymentMethods(): array
     {
+        if (! $this->cashPaymentsAllowed()) {
+            return [];
+        }
+
         return $this->paymentSettings->publicMethods(
             fn () => $this->bankTransfer->bankDetails()
         );
@@ -36,7 +51,7 @@ class ContentPurchaseCheckoutService
 
     public function oneOffPaymentsEnabled(): bool
     {
-        return $this->hubs->can('one_off_purchase');
+        return $this->cashPaymentsAllowed();
     }
 
     /**
@@ -167,7 +182,13 @@ class ContentPurchaseCheckoutService
 
     private function assertCanCheckout(User $user, string $itemType, int $itemId, string $paymentMethod): void
     {
-        if (! $this->oneOffPaymentsEnabled()) {
+        if (! $this->hubs->current()->isShared()) {
+            throw new \InvalidArgumentException(
+                'White-labelled hubs only support buying posts and bundles with credits.'
+            );
+        }
+
+        if (! $this->hubs->can('one_off_purchase')) {
             throw new \InvalidArgumentException('One-off purchases are disabled for this hub. An active subscription is required.');
         }
 

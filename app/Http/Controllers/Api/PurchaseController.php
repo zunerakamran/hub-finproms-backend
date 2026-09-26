@@ -60,11 +60,15 @@ class PurchaseController extends Controller
         }
 
         if (! $unlimited && $user->credits < $post->credits_cost) {
+            $cashAllowed = $this->contentCheckouts->cashPaymentsAllowed();
+
             return response()->json([
-                'message' => 'Insufficient credits. Pay with an enabled payment method, or buy a plan — 1 credit = £1.',
+                'message' => $cashAllowed
+                    ? 'Insufficient credits. Pay with an enabled payment method, or buy a plan — 1 credit = £1.'
+                    : 'Insufficient credits.',
                 'credits' => $user->credits,
                 'required' => $post->credits_cost,
-                'payment_methods' => $this->hubs->can('one_off_purchase')
+                'payment_methods' => $cashAllowed
                     ? $this->contentCheckouts->availablePaymentMethods()
                     : [],
             ], 422);
@@ -152,11 +156,15 @@ class PurchaseController extends Controller
         }
 
         if (! $unlimited && $user->credits < $bundle->credits_cost) {
+            $cashAllowed = $this->contentCheckouts->cashPaymentsAllowed();
+
             return response()->json([
-                'message' => 'Insufficient credits. Pay with an enabled payment method, or buy a plan — 1 credit = £1.',
+                'message' => $cashAllowed
+                    ? 'Insufficient credits. Pay with an enabled payment method, or buy a plan — 1 credit = £1.'
+                    : 'Insufficient credits.',
                 'credits' => $user->credits,
                 'required' => $bundle->credits_cost,
-                'payment_methods' => $this->hubs->can('one_off_purchase')
+                'payment_methods' => $cashAllowed
                     ? $this->contentCheckouts->availablePaymentMethods()
                     : [],
             ], 422);
@@ -322,7 +330,10 @@ class PurchaseController extends Controller
         try {
             $result = $checkout($validated['payment_method']);
         } catch (\InvalidArgumentException $e) {
-            $status = str_contains(strtolower($e->getMessage()), 'disabled') ? 403 : 422;
+            $message = strtolower($e->getMessage());
+            $status = str_contains($message, 'disabled') || str_contains($message, 'white-labelled')
+                ? 403
+                : 422;
 
             return response()->json(['message' => $e->getMessage()], $status);
         } catch (ApiErrorException $e) {

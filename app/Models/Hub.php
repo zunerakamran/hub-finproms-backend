@@ -482,7 +482,7 @@ class Hub extends Model
         ],
         'one_off_purchase' => [
             'label' => 'One-off purchase (non-subscribers)',
-            'description' => 'Non-subscribers can buy posts/reels and post bundles without a subscription (1 credit = £1), using credits or an enabled payment method (Stripe / bank transfer).',
+            'description' => 'Non-subscribers can buy posts/reels and post bundles without a subscription (1 credit = £1). Shared hub: credits or dashboard payment methods (Stripe / bank transfer). White-labelled hubs: credits only.',
             'group' => self::GROUP_BEHAVIOUR,
             'default_shared' => true,
             'default_white_label' => false,
@@ -570,7 +570,7 @@ class Hub extends Model
         ],
         'member_purchase_content' => [
             'label' => 'Purchase / spend credits on content',
-            'description' => 'Members can buy posts/reels with credits.',
+            'description' => 'Members can buy posts/reels/bundles. Shared hub also allows paying via enabled Stripe / bank transfer; white-labelled hubs use credits only.',
             'group' => self::GROUP_MEMBER,
             'default_shared' => true,
             'default_white_label' => true,
