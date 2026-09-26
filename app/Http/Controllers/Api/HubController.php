@@ -60,9 +60,8 @@ class HubController extends Controller
                 }
             } else {
                 $effective = [];
-                $role = $this->matrix->effectiveRoleFor($user);
                 foreach (array_keys($payload['checklist']) as $flag) {
-                    $effective[$flag] = $this->matrix->roleCan($hub, $role, $flag);
+                    $effective[$flag] = $this->matrix->userCan($hub, $user, $flag);
                 }
                 if ($user->isPowerAdmin()) {
                     foreach (app(\App\Services\PowerAdminCapabilitiesService::class)->resolved() as $key => $enabled) {

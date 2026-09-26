@@ -708,10 +708,70 @@ class CapabilitiesMatrixService
 
     /**
      * Whether this user currently has a capability (Admin-staff may mirror advisor).
+     * Also enforces per-user module allow-lists when a flag requires a module.
      */
     public function userCan(Hub $hub, User $user, string $flag): bool
     {
-        return $this->roleCan($hub, $this->effectiveRoleFor($user), $flag);
+        if (! $this->roleCan($hub, $this->effectiveRoleFor($user), $flag)) {
+            return false;
+        }
+
+        return $this->userPassesModuleGate($hub, $user, $flag);
+    }
+
+    /**
+     * Control-plane roles are never module-restricted per user.
+     * Module flags and module-scoped caps/functionalities require user allow-list access.
+     * When Admin-staff acts as an advisor, the advisor's module allow-list applies.
+     */
+    private function userPassesModuleGate(Hub $hub, User $user, string $flag): bool
+    {
+        if (ActingHubService::isControlPlaneRole((string) $user->role)) {
+            return true;
+        }
+
+        $required = $this->requiredModuleForFlag($flag);
+        if ($required === null) {
+            return true;
+        }
+
+        $subject = app(ActingAdvisorService::class)->requireSubject($user);
+
+        return $subject->hasModuleAccess($hub, $required);
+    }
+
+    /**
+     * Module key a capability / functionality / module flag depends on, if any.
+     */
+    private function requiredModuleForFlag(string $flag): ?string
+    {
+        if (Hub::isModuleKey($flag)) {
+            return $flag;
+        }
+
+        if (Hub::isSocialMediaTemplateLibraryCapability($flag)
+            || Hub::isSocialMediaTemplateLibraryFunctionality($flag)
+        ) {
+            return 'module_social_media_template_library';
+        }
+
+        if (Hub::isSocialMediaComplianceCapability($flag)) {
+            return 'module_social_media_compliance';
+        }
+
+        if (Hub::isGeneralComplianceCapability($flag)) {
+            return 'module_general_compliance';
+        }
+
+        if (Hub::isWebsiteTemplateLibraryCapability($flag)) {
+            return 'module_website_template_library';
+        }
+
+        if (Hub::isWebsiteComplianceCapability($flag)) {
+            return 'module_website_compliance';
+        }
+
+        return null;
     }
 
     /**

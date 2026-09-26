@@ -104,6 +104,7 @@ class User extends Authenticatable
         'acting_hub_id',
         'acting_advisor_id',
         'firm_id',
+        'modules',
     ];
 
     protected $hidden = [
@@ -128,7 +129,61 @@ class User extends Authenticatable
             'is_suspended' => 'boolean',
             'is_discontinued' => 'boolean',
             'discontinued_at' => 'datetime',
+            'modules' => 'array',
         ];
+    }
+
+    /**
+     * Whether this user may use a product module on the given hub.
+     * null modules = unrestricted (legacy users keep full hub access).
+     * The hub base module is always granted when the hub has it enabled.
+     */
+    public function hasModuleAccess(Hub $hub, string $moduleKey): bool
+    {
+        if (! Hub::isModuleKey($moduleKey)) {
+            return true;
+        }
+
+        if (! $hub->moduleEffectivelyEnabled($moduleKey)) {
+            return false;
+        }
+
+        if ($this->modules === null) {
+            return true;
+        }
+
+        if ($moduleKey === $hub->baseModuleKey()) {
+            return true;
+        }
+
+        $allowed = is_array($this->modules) ? $this->modules : [];
+
+        return in_array($moduleKey, $allowed, true);
+    }
+
+    /**
+     * Effective module keys for this user on the hub (hub-enabled ∩ user allow-list).
+     *
+     * @return list<string>
+     */
+    public function resolvedModules(Hub $hub): array
+    {
+        $enabled = $hub->enabledModuleKeys();
+        if ($this->modules === null) {
+            return $enabled;
+        }
+
+        $allowed = is_array($this->modules) ? $this->modules : [];
+        $base = $hub->baseModuleKey();
+        $out = [];
+
+        foreach ($enabled as $key) {
+            if ($key === $base || in_array($key, $allowed, true)) {
+                $out[] = $key;
+            }
+        }
+
+        return array_values($out);
     }
 
     public function isSuspended(): bool

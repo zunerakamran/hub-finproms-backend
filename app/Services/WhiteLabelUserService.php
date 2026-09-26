@@ -226,8 +226,36 @@ class WhiteLabelUserService
             'is_discontinued' => (bool) $user->is_discontinued,
             'firm_id' => $user->firm_id ? (int) $user->firm_id : null,
             'firm' => $this->serializeFirm($user),
+            'modules' => $this->serializeModules($user, $hub),
             'created_at' => $user->created_at?->toIso8601String(),
             'updated_at' => $user->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @return array{keys: list<string>|null, labels: list<string>, unrestricted: bool}
+     */
+    private function serializeModules(User $user, ?Hub $hub): array
+    {
+        $unrestricted = $user->modules === null;
+        if (! $hub) {
+            $keys = is_array($user->modules) ? array_values($user->modules) : null;
+
+            return [
+                'keys' => $keys,
+                'labels' => [],
+                'unrestricted' => $unrestricted,
+            ];
+        }
+
+        $keys = $user->resolvedModules($hub);
+        $labels = array_map(fn (string $key) => $hub->moduleLabel($key), $keys);
+
+        return [
+            'keys' => $unrestricted ? null : (is_array($user->modules) ? array_values($user->modules) : []),
+            'labels' => $labels,
+            'unrestricted' => $unrestricted,
+            'effective_keys' => $keys,
         ];
     }
 

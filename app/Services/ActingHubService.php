@@ -233,18 +233,17 @@ class ActingHubService
     {
         $current = $this->hubs->current();
         $acting = $this->actingHub($user);
-        $role = $this->matrix->effectiveRoleFor($user);
 
         $flags = array_keys($acting->resolvedChecklist());
         $effective = [];
 
         foreach ($flags as $flag) {
             $hubForFlag = $this->capabilityHub($user, $flag);
-            $effective[$flag] = $this->matrix->roleCan($hubForFlag, $role, $flag);
+            $effective[$flag] = $this->matrix->userCan($hubForFlag, $user, $flag);
         }
 
         // Always expose the control flag from the shared deploy hub.
-        $effective[self::CAPABILITY] = $this->matrix->roleCan($current, $role, self::CAPABILITY);
+        $effective[self::CAPABILITY] = $this->matrix->userCan($current, $user, self::CAPABILITY);
 
         if ($user->isPowerAdmin()) {
             foreach (app(PowerAdminCapabilitiesService::class)->resolved() as $key => $enabled) {

@@ -56,8 +56,8 @@ class AdvisorImportService
      * Classify rows without creating users. Used when payment is required first.
      *
      * @return array{
-     *   pending: list<array{action: string, name: string, email: string, password: string, role: string, firm_id: ?int, firm: ?string}>,
-     *   preview: array{created: list<array{name: string, email: string, role: ?string, firm: ?string}>, updated: list<array{name: string, email: string, role: ?string, firm: ?string}>, reactivated: list<array{name: string, email: string, role: ?string, firm: ?string}>},
+     *   pending: list<array{action: string, name: string, email: string, password: string, role: string, firm_id: ?int, firm: ?string, modules: list<string>}>,
+     *   preview: array{created: list<array{name: string, email: string, role: ?string, firm: ?string, modules: list<string>}>, updated: list<array{name: string, email: string, role: ?string, firm: ?string, modules: list<string>}>, reactivated: list<array{name: string, email: string, role: ?string, firm: ?string, modules: list<string>}>},
      *   skipped: list<array{row: int, email: ?string, reason: string}>,
      *   summary: array{total_rows: int, created: int, updated: int, reactivated: int, skipped: int, billable_batch: int}
      * }
@@ -70,7 +70,7 @@ class AdvisorImportService
 
         if ($rows === []) {
             throw new RuntimeException(
-                'No user rows were found. Make sure the first non-empty row contains headers like name, email, password, role, firm.'
+                'No user rows were found. Make sure the first non-empty row contains headers like name, email, password, role, firm, modules.'
             );
         }
 
@@ -88,6 +88,7 @@ class AdvisorImportService
             $password = trim((string) ($row['password'] ?? ''));
             $roleInput = trim((string) ($row['role'] ?? ''));
             $firmName = trim((string) ($row['firm'] ?? ''));
+            $modulesInput = trim((string) ($row['modules'] ?? ''));
 
             if ($email === '' && $name === '') {
                 continue;
@@ -138,9 +139,11 @@ class AdvisorImportService
                 continue;
             }
 
+            $modules = $this->resolveModules($hub, $modulesInput);
             $firmId = (int) $firm->id;
             $resolvedFirmName = (string) $firm->name;
             $roleLabel = $hub->roleLabel($role);
+            $moduleLabels = array_map(fn (string $key) => $hub->moduleLabel($key), $modules);
 
             $user = User::on($connection)->where('email', $email)->first();
 
@@ -164,6 +167,7 @@ class AdvisorImportService
                     'role' => $role,
                     'firm_id' => $firmId,
                     'firm' => $resolvedFirmName,
+                    'modules' => $modules,
                 ];
 
                 $previewRow = [
@@ -171,6 +175,7 @@ class AdvisorImportService
                     'email' => $email,
                     'role' => $roleLabel,
                     'firm' => $resolvedFirmName,
+                    'modules' => $moduleLabels,
                 ];
 
                 if ($action === 'reactivate') {
@@ -193,12 +198,14 @@ class AdvisorImportService
                 'role' => $role,
                 'firm_id' => $firmId,
                 'firm' => $resolvedFirmName,
+                'modules' => $modules,
             ];
             $previewCreated[] = [
                 'name' => $name,
                 'email' => $email,
                 'role' => $roleLabel,
                 'firm' => $resolvedFirmName,
+                'modules' => $moduleLabels,
             ];
             if ($this->roleIsAdvisor($role)) {
                 $billableBatch++;
@@ -227,12 +234,12 @@ class AdvisorImportService
     /**
      * Apply a previously staged import plan (after payment method is chosen).
      *
-     * @param  list<array{action: string, name: string, email: string, password?: string, role?: string, firm_id?: ?int}>  $pending
+     * @param  list<array{action: string, name: string, email: string, password?: string, role?: string, firm_id?: ?int, modules?: list<string>}>  $pending
      * @param  list<array{row: int, email: ?string, reason: string}>  $skipped
      * @return array{
-     *   created: list<array{name: string, email: string, temporary_password: ?string, role: ?string, firm: ?string}>,
-     *   updated: list<array{name: string, email: string, role: ?string, firm: ?string}>,
-     *   reactivated: list<array{name: string, email: string, role: ?string, firm: ?string}>,
+     *   created: list<array{name: string, email: string, temporary_password: ?string, role: ?string, firm: ?string, modules: list<string>}>,
+     *   updated: list<array{name: string, email: string, role: ?string, firm: ?string, modules: list<string>}>,
+     *   reactivated: list<array{name: string, email: string, role: ?string, firm: ?string, modules: list<string>}>,
      *   skipped: list<array{row: int, email: ?string, reason: string}>,
      *   summary: array{total_rows: int, created: int, updated: int, reactivated: int, skipped: int, billable_batch: int}
      * }
@@ -259,6 +266,9 @@ class AdvisorImportService
             $firmId = isset($row['firm_id']) && $row['firm_id'] !== null && $row['firm_id'] !== ''
                 ? (int) $row['firm_id']
                 : null;
+            $modules = isset($row['modules']) && is_array($row['modules'])
+                ? $hub->normalizeUserModules($row['modules'])
+                : $hub->normalizeUserModules([]);
 
             if ($email === '' || ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
                 $skipped[] = [
@@ -302,6 +312,7 @@ class AdvisorImportService
                     $role,
                     $isAdvisor,
                     $firmId,
+                    $modules,
                     $hub,
                     $connection
                 ) {
@@ -326,6 +337,7 @@ class AdvisorImportService
                             'is_discontinued' => false,
                             'discontinued_at' => null,
                             'firm_id' => $firmId,
+                            'modules' => $modules,
                         ]);
                         if (! $isAdvisor) {
                             $user->allows_admin_staff_acting = false;
@@ -366,6 +378,7 @@ class AdvisorImportService
                         'is_suspended' => false,
                         'is_discontinued' => false,
                         'firm_id' => $firmId,
+                        'modules' => $modules,
                     ]);
 
                     if ($isAdvisor) {
@@ -399,6 +412,10 @@ class AdvisorImportService
 
             $firmLabel = $result['user']->firm?->name ?? ($row['firm'] ?? null);
             $roleLabel = $hub->roleLabel((string) $result['user']->role);
+            $moduleLabels = array_map(
+                fn (string $key) => $hub->moduleLabel($key),
+                is_array($result['user']->modules) ? $result['user']->modules : $modules
+            );
 
             if ($result['status'] === 'created') {
                 $created[] = [
@@ -407,6 +424,7 @@ class AdvisorImportService
                     'temporary_password' => $result['temporary_password'],
                     'role' => $roleLabel,
                     'firm' => $firmLabel,
+                    'modules' => $moduleLabels,
                 ];
                 app(FunctionalMailService::class)->advisorInvite(
                     $result['user'],
@@ -418,6 +436,7 @@ class AdvisorImportService
                     'email' => $result['user']->email,
                     'role' => $roleLabel,
                     'firm' => $firmLabel,
+                    'modules' => $moduleLabels,
                 ];
                 app(FunctionalMailService::class)->advisorReactivated($result['user']);
             } else {
@@ -426,6 +445,7 @@ class AdvisorImportService
                     'email' => $result['user']->email,
                     'role' => $roleLabel,
                     'firm' => $firmLabel,
+                    'modules' => $moduleLabels,
                 ];
             }
         }
@@ -533,7 +553,7 @@ class AdvisorImportService
     }
 
     /**
-     * Downloadable Excel template with role/firm dropdowns for this hub.
+     * Downloadable Excel template with role/firm/modules dropdowns for this hub.
      */
     public function templateXlsx(?Hub $hub = null, ?string $connection = null): string
     {
@@ -551,7 +571,12 @@ class AdvisorImportService
             ->map(fn ($name) => (string) $name)
             ->all();
 
-        return (new AdvisorImportXlsxTemplate)->build($roleLabels, $firmNames);
+        $moduleLabels = array_map(
+            fn (array $module) => $module['label'],
+            $hub->enabledModuleOptions()
+        );
+
+        return (new AdvisorImportXlsxTemplate)->build($roleLabels, $firmNames, $moduleLabels);
     }
 
     /**
@@ -605,7 +630,62 @@ class AdvisorImportService
     }
 
     /**
-     * @return list<array{name?: string, email?: string, password?: string, role?: string, firm?: string}>
+     * Parse modules cell (comma / semicolon / pipe separated labels or keys).
+     * Only hub-enabled modules are kept; base module is always included.
+     * Unknown or hub-disabled modules are ignored (no access granted).
+     *
+     * @return list<string>
+     */
+    public function resolveModules(Hub $hub, string $value): array
+    {
+        $tokens = preg_split('/[,;|]+/', $value) ?: [];
+        $requested = [];
+
+        foreach ($tokens as $token) {
+            $token = trim((string) $token);
+            if ($token === '') {
+                continue;
+            }
+            $resolved = $this->resolveModuleKey($hub, $token);
+            if ($resolved !== null) {
+                $requested[] = $resolved;
+            }
+        }
+
+        return $hub->normalizeUserModules($requested);
+    }
+
+    /**
+     * Resolve a single module token (key or label) to a module key if hub-enabled.
+     */
+    public function resolveModuleKey(Hub $hub, string $value): ?string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+
+        $normalized = Str::lower($value);
+        $normalizedKey = str_replace([' ', '-'], '_', $normalized);
+
+        foreach ($hub->enabledModuleOptions() as $module) {
+            $key = $module['key'];
+            $label = Str::lower($module['label']);
+
+            if (
+                $normalizedKey === $key
+                || $normalized === $label
+                || $normalizedKey === str_replace([' ', '-'], '_', $label)
+            ) {
+                return $key;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return list<array{name?: string, email?: string, password?: string, role?: string, firm?: string, modules?: string}>
      */
     public function parseFile(UploadedFile $file): array
     {
@@ -634,7 +714,7 @@ class AdvisorImportService
     }
 
     /**
-     * @return list<array{name?: string, email?: string, password?: string, role?: string, firm?: string}>
+     * @return list<array{name?: string, email?: string, password?: string, role?: string, firm?: string, modules?: string}>
      */
     private function parseXlsx(string $path): array
     {
@@ -656,7 +736,7 @@ class AdvisorImportService
 
         $sheetRows = $xlsx->rows();
         if ($sheetRows === []) {
-            throw new RuntimeException('Excel file is empty. Include a header row: name, email, password, role, firm');
+            throw new RuntimeException('Excel file is empty. Include a header row: name, email, password, role, firm, modules');
         }
 
         $headerRow = null;
@@ -669,7 +749,7 @@ class AdvisorImportService
         }
 
         if ($headerRow === null) {
-            throw new RuntimeException('Excel file is empty. Include a header row: name, email, password, role, firm');
+            throw new RuntimeException('Excel file is empty. Include a header row: name, email, password, role, firm, modules');
         }
 
         $header = array_map(
@@ -697,12 +777,13 @@ class AdvisorImportService
                 'password' => $assoc['password'] ?? $assoc['temporary_password'] ?? '',
                 'role' => $assoc['role'] ?? $assoc['user_role'] ?? '',
                 'firm' => $assoc['firm'] ?? $assoc['firm_name'] ?? $assoc['company'] ?? '',
+                'modules' => $assoc['modules'] ?? $assoc['module'] ?? $assoc['allowed_modules'] ?? '',
             ];
         }
 
         if (! in_array('email', $header, true) && ! in_array('email_address', $header, true)) {
             if (count($rows) === 0) {
-                throw new RuntimeException('Excel sheet must include an email column. Expected headers: name, email, password, role, firm');
+                throw new RuntimeException('Excel sheet must include an email column. Expected headers: name, email, password, role, firm, modules');
             }
         }
 

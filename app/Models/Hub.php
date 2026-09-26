@@ -222,6 +222,87 @@ class Hub extends Model
     }
 
     /**
+     * Module keys that are effectively enabled on this hub (checked + deps met).
+     *
+     * @return list<string>
+     */
+    public function enabledModuleKeys(): array
+    {
+        $keys = [];
+        foreach ($this->moduleKeysForPage() as $key) {
+            if ($this->moduleEffectivelyEnabled($key)) {
+                $keys[] = $key;
+            }
+        }
+
+        return $keys;
+    }
+
+    /**
+     * Display label for a module key.
+     */
+    public function moduleLabel(string $key): string
+    {
+        return (string) (self::CHECKLIST_DEFINITIONS[$key]['label'] ?? $key);
+    }
+
+    /**
+     * Enabled modules as import/template options.
+     *
+     * @return list<array{key: string, label: string}>
+     */
+    public function enabledModuleOptions(): array
+    {
+        $options = [];
+        foreach ($this->enabledModuleKeys() as $key) {
+            $options[] = [
+                'key' => $key,
+                'label' => $this->moduleLabel($key),
+            ];
+        }
+
+        return $options;
+    }
+
+    /**
+     * Normalize a requested module allow-list for a user on this hub.
+     * Always includes the mandatory base module; drops disabled/unknown keys;
+     * pulls in enabled dependencies for selected modules.
+     *
+     * @param  list<string>  $requestedKeys
+     * @return list<string>
+     */
+    public function normalizeUserModules(array $requestedKeys): array
+    {
+        $enabled = $this->enabledModuleKeys();
+        $enabledSet = array_fill_keys($enabled, true);
+        $base = $this->baseModuleKey();
+        $resolved = [$base];
+
+        foreach ($requestedKeys as $key) {
+            $key = (string) $key;
+            if ($key === '' || ! isset($enabledSet[$key])) {
+                continue;
+            }
+            $resolved[] = $key;
+            foreach ($this->moduleDependenciesFor($key) as $dep) {
+                if (isset($enabledSet[$dep]) || $dep === $base) {
+                    $resolved[] = $dep;
+                }
+            }
+        }
+
+        $ordered = [];
+        foreach ($this->moduleKeysForPage() as $key) {
+            if (in_array($key, $resolved, true) && isset($enabledSet[$key])) {
+                $ordered[] = $key;
+            }
+        }
+
+        return array_values($ordered);
+    }
+
+    /**
      * Resolve dependency keys for a module on this hub (__base__ → shared/white-label key).
      *
      * @return list<string>

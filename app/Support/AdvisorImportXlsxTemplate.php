@@ -3,7 +3,8 @@
 namespace App\Support;
 
 /**
- * Builds the advisor/user import Excel template with role + firm dropdowns.
+ * Builds the advisor/user import Excel template with role + firm + modules dropdowns.
+ * Modules cell accepts multiple comma/semicolon/pipe-separated labels from the Lists sheet.
  */
 class AdvisorImportXlsxTemplate
 {
@@ -14,11 +15,13 @@ class AdvisorImportXlsxTemplate
     /**
      * @param  list<string>  $roleLabels  Display labels (renamed roles) shown in the dropdown
      * @param  list<string>  $firmNames
+     * @param  list<string>  $moduleLabels  Hub-enabled module labels only
      */
-    public function build(array $roleLabels, array $firmNames): string
+    public function build(array $roleLabels, array $firmNames, array $moduleLabels = []): string
     {
         $roleLabels = array_values(array_filter(array_map('strval', $roleLabels), fn ($v) => trim($v) !== ''));
         $firmNames = array_values(array_filter(array_map('strval', $firmNames), fn ($v) => trim($v) !== ''));
+        $moduleLabels = array_values(array_filter(array_map('strval', $moduleLabels), fn ($v) => trim($v) !== ''));
 
         $sampleRole = 'User';
         foreach ($roleLabels as $label) {
@@ -30,23 +33,27 @@ class AdvisorImportXlsxTemplate
             }
         }
         $sampleFirm = $firmNames[0] ?? '';
+        // Sample: mandatory base (first) plus any other enabled modules, comma-separated.
+        $sampleModules = implode(', ', $moduleLabels);
 
         $importRows = [
-            ['name', 'email', 'password', 'role', 'firm'],
-            ['User', 'user@example.com', '', $sampleRole, $sampleFirm],
+            ['name', 'email', 'password', 'role', 'firm', 'modules'],
+            ['User', 'user@example.com', '', $sampleRole, $sampleFirm, $sampleModules],
         ];
 
-        $listRows = [['role', 'firm']];
-        $max = max(count($roleLabels), count($firmNames), 1);
+        $listRows = [['role', 'firm', 'module']];
+        $max = max(count($roleLabels), count($firmNames), count($moduleLabels), 1);
         for ($i = 0; $i < $max; $i++) {
             $listRows[] = [
                 $roleLabels[$i] ?? '',
                 $firmNames[$i] ?? '',
+                $moduleLabels[$i] ?? '',
             ];
         }
 
         $roleEnd = max(count($roleLabels), 1) + 1; // header is row 1
         $firmEnd = max(count($firmNames), 1) + 1;
+        $moduleEnd = max(count($moduleLabels), 1) + 1;
 
         $roleFormula = count($roleLabels) > 0
             ? 'Lists!$A$2:$A$'.$roleEnd
@@ -54,6 +61,9 @@ class AdvisorImportXlsxTemplate
         $firmFormula = count($firmNames) > 0
             ? 'Lists!$B$2:$B$'.$firmEnd
             : '"No firms configured"';
+        $moduleFormula = count($moduleLabels) > 0
+            ? 'Lists!$C$2:$C$'.$moduleEnd
+            : '"No modules enabled"';
 
         $files = [
             '[Content_Types].xml' => $this->contentTypes(),
@@ -61,7 +71,7 @@ class AdvisorImportXlsxTemplate
             'xl/workbook.xml' => $this->workbook(),
             'xl/_rels/workbook.xml.rels' => $this->workbookRels(),
             'xl/styles.xml' => $this->styles(),
-            'xl/worksheets/sheet1.xml' => $this->importSheet($importRows, $roleFormula, $firmFormula),
+            'xl/worksheets/sheet1.xml' => $this->importSheet($importRows, $roleFormula, $firmFormula, $moduleFormula),
             'xl/worksheets/sheet2.xml' => $this->listsSheet($listRows),
         ];
 
@@ -132,12 +142,14 @@ class AdvisorImportXlsxTemplate
     /**
      * @param  list<list<string>>  $rows
      */
-    private function importSheet(array $rows, string $roleFormula, string $firmFormula): string
+    private function importSheet(array $rows, string $roleFormula, string $firmFormula, string $moduleFormula): string
     {
         $sheetData = $this->sheetDataXml($rows, boldHeader: true);
 
         // showDropDown="0" means show the arrow (OOXML inverted flag).
-        $validations = '<dataValidations count="2">'
+        // Modules: dropdown lists hub-enabled modules; multiple may be entered
+        // comma/semicolon/pipe-separated in the same cell.
+        $validations = '<dataValidations count="3">'
             .'<dataValidation type="list" allowBlank="1" showDropDown="0" showErrorMessage="1"'
             .' errorStyle="stop" errorTitle="Invalid role"'
             .' error="Select a role from the list. Power Admin and FinProms Admin cannot be imported."'
@@ -149,6 +161,13 @@ class AdvisorImportXlsxTemplate
             .' error="Select a firm that already exists on this hub."'
             .' sqref="E2:E1048576">'
             .'<formula1>'.$this->esc($firmFormula).'</formula1>'
+            .'</dataValidation>'
+            .'<dataValidation type="list" allowBlank="1" showDropDown="0" showErrorMessage="0"'
+            .' promptTitle="Modules"'
+            .' prompt="Pick from the list or enter multiple hub-enabled modules separated by commas."'
+            .' showInputMessage="1"'
+            .' sqref="F2:F1048576">'
+            .'<formula1>'.$this->esc($moduleFormula).'</formula1>'
             .'</dataValidation>'
             .'</dataValidations>';
 

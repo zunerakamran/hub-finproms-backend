@@ -139,4 +139,86 @@ class AdvisorImportExcelTest extends TestCase
         $this->assertSame(User::ROLE_MANAGER, $plan['pending'][0]['role']);
         $this->assertSame(0, $plan['summary']['billable_batch']);
     }
+
+    public function test_import_assigns_multiple_modules_and_ignores_disabled(): void
+    {
+        $hub = $this->createPrivateHub([
+            'module_social_media_template_library' => true,
+            'module_social_media_compliance' => true,
+            'module_website_template_library' => false,
+            'module_website_compliance' => false,
+            'module_general_compliance' => true,
+        ]);
+        Firm::query()->create(['name' => 'Acme Wealth']);
+
+        $file = ExcelUploadFactory::make([
+            ['name', 'email', 'password', 'role', 'firm', 'modules'],
+            [
+                'Jane',
+                'jane.modules@example.com',
+                'Secret123!',
+                'Team Lead',
+                'Acme Wealth',
+                'Social Media Pre Approval Workflow, Generic Content Pre Approval Workflow, Website Template Library',
+            ],
+        ]);
+
+        $result = app(AdvisorImportService::class)->import($file, $hub);
+
+        $this->assertSame(1, $result['summary']['created']);
+        $user = User::query()->where('email', 'jane.modules@example.com')->first();
+        $this->assertNotNull($user);
+        $this->assertContains('module_shared_hub', $user->modules);
+        $this->assertContains('module_social_media_template_library', $user->modules); // dep of SMC
+        $this->assertContains('module_social_media_compliance', $user->modules);
+        $this->assertContains('module_general_compliance', $user->modules);
+        $this->assertNotContains('module_website_template_library', $user->modules);
+
+        $matrix = app(\App\Services\CapabilitiesMatrixService::class);
+        $this->assertTrue($user->hasModuleAccess($hub, 'module_social_media_compliance'));
+        $this->assertFalse($user->hasModuleAccess($hub, 'module_website_template_library'));
+        $this->assertTrue($matrix->userCan($hub, $user, 'module_general_compliance'));
+        $this->assertFalse($matrix->userCan($hub, $user, 'module_website_template_library'));
+    }
+
+    public function test_import_without_modules_column_assigns_only_base_module(): void
+    {
+        $hub = $this->createPrivateHub([
+            'module_social_media_template_library' => true,
+            'module_general_compliance' => true,
+        ]);
+        Firm::query()->create(['name' => 'Acme Wealth']);
+
+        $file = ExcelUploadFactory::make([
+            ['name', 'email', 'password', 'role', 'firm'],
+            ['Lead', 'lead.base@example.com', '', 'Team Lead', 'Acme Wealth'],
+        ]);
+
+        $result = app(AdvisorImportService::class)->import($file, $hub);
+        $this->assertSame(1, $result['summary']['created']);
+
+        $user = User::query()->where('email', 'lead.base@example.com')->first();
+        $this->assertSame(['module_shared_hub'], $user->modules);
+        $this->assertTrue($user->hasModuleAccess($hub, 'module_shared_hub'));
+        $this->assertFalse($user->hasModuleAccess($hub, 'module_general_compliance'));
+    }
+
+    public function test_template_includes_enabled_module_labels(): void
+    {
+        $hub = $this->createPrivateHub([
+            'module_social_media_template_library' => true,
+            'module_general_compliance' => true,
+            'module_website_template_library' => false,
+        ]);
+
+        $labels = array_column($hub->enabledModuleOptions(), 'label');
+        $this->assertContains('Shared Hub', $labels);
+        $this->assertContains('Social Media Template Library', $labels);
+        $this->assertContains('Generic Content Pre Approval Workflow', $labels);
+        $this->assertNotContains('Website Template Library', $labels);
+
+        $binary = app(AdvisorImportService::class)->templateXlsx($hub);
+        $this->assertNotSame('', $binary);
+        $this->assertStringContainsString('PK', substr($binary, 0, 2));
+    }
 }
