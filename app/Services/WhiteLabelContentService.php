@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Hub;
 use App\Models\User;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -82,7 +83,8 @@ class WhiteLabelContentService
 
             $attachmentMeta = $this->storeAttachmentAsPublicUrl($attachment);
             $now = now();
-            $id = (int) DB::connection($connection)->table('posts')->insertGetId([
+            $this->ensureCanvaLinkColumn($connection);
+            $insert = [
                 'created_by' => $this->resolveRemoteCreatorId($connection),
                 'title' => $payload['title'],
                 'description' => $payload['description'] ?? null,
@@ -99,7 +101,11 @@ class WhiteLabelContentService
                 'buy_count' => 0,
                 'created_at' => $now,
                 'updated_at' => $now,
-            ]);
+            ];
+            if (Schema::connection($connection)->hasColumn('posts', 'canva_link')) {
+                $insert['canva_link'] = $this->normalizeCanvaLink($payload['canva_link'] ?? null);
+            }
+            $id = (int) DB::connection($connection)->table('posts')->insertGetId($insert);
 
             $row = DB::connection($connection)->table('posts')->where('id', $id)->first();
 
@@ -154,6 +160,12 @@ class WhiteLabelContentService
             }
             if (array_key_exists('is_active', $payload)) {
                 $updates['is_active'] = (bool) $payload['is_active'];
+            }
+            if (array_key_exists('canva_link', $payload)) {
+                $this->ensureCanvaLinkColumn($connection);
+                if (Schema::connection($connection)->hasColumn('posts', 'canva_link')) {
+                    $updates['canva_link'] = $this->normalizeCanvaLink($payload['canva_link']);
+                }
             }
 
             if (isset($updates['type'])) {
@@ -774,8 +786,31 @@ class WhiteLabelContentService
             'attachment_mime' => $row->attachment_mime,
             'attachment_url' => $url,
             'cover_url' => $url,
+            'canva_link' => property_exists($row, 'canva_link') ? ($row->canva_link ?: null) : null,
             'updated_at' => $row->updated_at,
         ];
+    }
+
+    private function ensureCanvaLinkColumn(string $connection): void
+    {
+        if (Schema::connection($connection)->hasColumn('posts', 'canva_link')) {
+            return;
+        }
+
+        Schema::connection($connection)->table('posts', function (Blueprint $table) {
+            $table->string('canva_link', 2048)->nullable();
+        });
+    }
+
+    private function normalizeCanvaLink(mixed $link): ?string
+    {
+        if (! is_string($link)) {
+            return null;
+        }
+
+        $link = trim($link);
+
+        return $link !== '' ? $link : null;
     }
 
     /**

@@ -191,6 +191,9 @@ class PostController extends Controller
                     'is_active' => filter_var($request->input('is_active'), FILTER_VALIDATE_BOOLEAN),
                 ]);
             }
+            if ($request->has('canva_link') && trim((string) $request->input('canva_link')) === '') {
+                $request->merge(['canva_link' => null]);
+            }
 
             $validated = $request->validate([
                 'title' => ['required', 'string', 'max:255'],
@@ -200,6 +203,7 @@ class PostController extends Controller
                 'tags' => ['nullable', 'array'],
                 'tags.*' => ['string', 'max:100'],
                 'credits_cost' => ['required', 'integer', 'min:1'],
+                'canva_link' => ['nullable', 'url', 'max:2048'],
                 'is_active' => ['sometimes', 'boolean'],
                 'attachment' => ['nullable', 'file', 'max:102400'],
             ]);
@@ -222,6 +226,7 @@ class PostController extends Controller
             'attachment_path' => $attachment['path'] ?? null,
             'attachment_name' => $attachment['name'] ?? null,
             'attachment_mime' => $attachment['mime'] ?? null,
+            'canva_link' => $this->normalizeCanvaLink($validated['canva_link'] ?? null),
             'is_active' => $validated['is_active'] ?? true,
         ]);
 
@@ -245,6 +250,9 @@ class PostController extends Controller
                     'is_active' => filter_var($request->input('is_active'), FILTER_VALIDATE_BOOLEAN),
                 ]);
             }
+            if ($request->has('canva_link') && trim((string) $request->input('canva_link')) === '') {
+                $request->merge(['canva_link' => null]);
+            }
 
             $validated = $request->validate([
                 'title' => ['sometimes', 'string', 'max:255'],
@@ -254,6 +262,7 @@ class PostController extends Controller
                 'tags' => ['nullable', 'array'],
                 'tags.*' => ['string', 'max:100'],
                 'credits_cost' => ['sometimes', 'integer', 'min:1'],
+                'canva_link' => ['nullable', 'url', 'max:2048'],
                 'is_active' => ['sometimes', 'boolean'],
                 'attachment' => ['nullable', 'file', 'max:102400'],
             ]);
@@ -282,6 +291,9 @@ class PostController extends Controller
             'category' => $validated['category'] ?? $model->category,
             'tags' => array_key_exists('tags', $validated) ? $this->normalizeTags($validated['tags']) : $model->tags,
             'credits_cost' => $validated['credits_cost'] ?? $model->credits_cost,
+            'canva_link' => array_key_exists('canva_link', $validated)
+                ? $this->normalizeCanvaLink($validated['canva_link'])
+                : $model->canva_link,
             'is_active' => array_key_exists('is_active', $validated) ? $validated['is_active'] : $model->is_active,
         ]);
 
@@ -340,6 +352,10 @@ class PostController extends Controller
     {
         $required = $updating ? 'sometimes' : 'required';
 
+        if ($request->has('canva_link') && trim((string) $request->input('canva_link')) === '') {
+            $request->merge(['canva_link' => null]);
+        }
+
         $rules = [
             'title' => [$required, 'string', 'max:255'],
             'description' => ['nullable', 'string'],
@@ -347,6 +363,7 @@ class PostController extends Controller
             'category' => [$required, 'string', 'max:100', Rule::exists('categories', 'name')],
             'tags' => ['nullable'],
             'credits_cost' => [$required, 'integer', 'min:1'],
+            'canva_link' => ['nullable', 'url', 'max:2048'],
             'is_active' => ['sometimes', 'boolean'],
             'attachment' => [
                 $updating ? 'sometimes' : 'nullable',
@@ -357,6 +374,10 @@ class PostController extends Controller
         ];
 
         $validated = $request->validate($rules);
+
+        if (array_key_exists('canva_link', $validated)) {
+            $validated['canva_link'] = $this->normalizeCanvaLink($validated['canva_link']);
+        }
 
         if (array_key_exists('tags', $validated) || $request->has('tags')) {
             $normalizedTags = $this->normalizeTags($validated['tags'] ?? $request->input('tags'));
@@ -505,7 +526,7 @@ class PostController extends Controller
         $post->setAttribute('content_visible', $contentVisible);
 
         if (! $canAccessAttachment) {
-            $post->makeHidden(['attachment_path', 'attachment_url', 'attachment_name', 'attachment_mime']);
+            $post->makeHidden(['attachment_path', 'attachment_url', 'attachment_name', 'attachment_mime', 'canva_link']);
         }
 
         if (! $contentVisible) {
@@ -518,6 +539,7 @@ class PostController extends Controller
                 'attachment_url',
                 'attachment_name',
                 'attachment_mime',
+                'canva_link',
             ]);
             $post->setAttribute('description', null);
             $post->setAttribute('tags', []);
@@ -528,5 +550,12 @@ class PostController extends Controller
         }
 
         return $post;
+    }
+
+    private function normalizeCanvaLink(?string $link): ?string
+    {
+        $link = is_string($link) ? trim($link) : null;
+
+        return $link !== '' ? $link : null;
     }
 }

@@ -27,6 +27,7 @@ class Post extends Model
         'attachment_path',
         'attachment_name',
         'attachment_mime',
+        'canva_link',
         'is_active',
         'views_count',
         'reach_count',

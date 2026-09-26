@@ -66,6 +66,9 @@ class HubContentController extends Controller
                 'is_active' => filter_var($request->input('is_active'), FILTER_VALIDATE_BOOLEAN),
             ]);
         }
+        if ($request->has('canva_link') && trim((string) $request->input('canva_link')) === '') {
+            $request->merge(['canva_link' => null]);
+        }
 
         $validated = $request->validate([
             'title' => ['required', 'string', 'max:255'],
@@ -75,6 +78,7 @@ class HubContentController extends Controller
             'tags' => ['nullable', 'array'],
             'tags.*' => ['string', 'max:100'],
             'credits_cost' => ['required', 'integer', 'min:1'],
+            'canva_link' => ['nullable', 'url', 'max:2048'],
             'is_active' => ['sometimes', 'boolean'],
             'attachment' => ['nullable', 'file', 'max:102400'],
         ]);
@@ -258,6 +262,9 @@ class HubContentController extends Controller
                 'is_active' => filter_var($request->input('is_active'), FILTER_VALIDATE_BOOLEAN),
             ]);
         }
+        if ($request->has('canva_link') && trim((string) $request->input('canva_link')) === '') {
+            $request->merge(['canva_link' => null]);
+        }
 
         $validated = $request->validate([
             'title' => ['sometimes', 'string', 'max:255'],
@@ -267,6 +274,7 @@ class HubContentController extends Controller
             'tags' => ['nullable', 'array'],
             'tags.*' => ['string', 'max:100'],
             'credits_cost' => ['sometimes', 'integer', 'min:1'],
+            'canva_link' => ['nullable', 'url', 'max:2048'],
             'is_active' => ['sometimes', 'boolean'],
             'attachment' => ['nullable', 'file', 'max:102400'],
         ]);

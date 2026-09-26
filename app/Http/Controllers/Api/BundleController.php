@@ -107,7 +107,7 @@ class BundleController extends Controller
             $postPurchased = $isPurchased || ($billingUser?->hasPurchased($post) ?? false);
             $post->setAttribute('is_purchased', $postPurchased);
             if (! $postPurchased && ! $isAdmin) {
-                $post->makeHidden(['attachment_path', 'attachment_url', 'attachment_name', 'attachment_mime']);
+                $post->makeHidden(['attachment_path', 'attachment_url', 'attachment_name', 'attachment_mime', 'canva_link']);
             }
             $this->applyPostMetricVisibility($post, $metricVisibility);
         });

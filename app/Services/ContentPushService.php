@@ -10,7 +10,9 @@ use App\Models\Hub;
 use App\Models\Post;
 use App\Models\Tag;
 use App\Models\User;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
@@ -297,7 +299,7 @@ class ContentPushService
         $attachmentPath = $this->remoteAttachmentPath($post);
         $now = now();
 
-        return (int) DB::connection($connection)->table('posts')->insertGetId([
+        $insert = [
             'created_by' => $createdBy,
             'title' => $post->title,
             'description' => $post->description,
@@ -314,7 +316,18 @@ class ContentPushService
             'buy_count' => 0,
             'created_at' => $now,
             'updated_at' => $now,
-        ]);
+        ];
+
+        if (Schema::connection($connection)->hasColumn('posts', 'canva_link')) {
+            $insert['canva_link'] = $post->canva_link;
+        } elseif (filled($post->canva_link)) {
+            Schema::connection($connection)->table('posts', function (Blueprint $table) {
+                $table->string('canva_link', 2048)->nullable();
+            });
+            $insert['canva_link'] = $post->canva_link;
+        }
+
+        return (int) DB::connection($connection)->table('posts')->insertGetId($insert);
     }
 
     private function upsertCategoryOnRemote(string $connection, Category $category): int
