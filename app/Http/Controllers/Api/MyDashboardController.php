@@ -130,7 +130,7 @@ class MyDashboardController extends Controller
         $hubUnlimited = $hub->can('unlimited_credits');
 
         return response()->json([
-            'credits' => $this->creditsReport->forUser($subject, $hubUnlimited, $isActing),
+            'credits' => $this->creditsReport->forUser($subject, $hub, $hubUnlimited, $isActing),
         ]);
     }
 }

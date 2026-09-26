@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Hub;
 use App\Models\User;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -9,33 +10,39 @@ use Illuminate\Support\Collection;
 class CreditsReportService
 {
     /**
-     * Build a member-facing credits report from subscriptions (earned)
-     * and post/bundle purchases (spent).
+     * Build a member-facing credits report.
+     * Shared hubs: earned from paid plans + spent on unlocks.
+     * White-labelled hubs: no plans — allotment from hub subscriber credits + spends.
      *
-     * @return array{
-     *   balance: int,
-     *   has_unlimited_credits: bool,
-     *   total_earned: int,
-     *   total_spent: int,
-     *   transaction_count: int,
-     *   days_with_activity: int,
-     *   is_acting: bool,
-     *   subject_name: string,
-     *   ledger: list<array<string, mixed>>,
-     *   daily: list<array<string, mixed>>
-     * }
+     * @return array<string, mixed>
      */
-    public function forUser(User $subject, bool $hubUnlimited, bool $isActing): array
+    public function forUser(User $subject, Hub $hub, bool $hubUnlimited, bool $isActing): array
     {
-        $ledger = $this->buildLedger($subject);
+        $isWhiteLabel = $hub->isWhiteLabel();
+        $ledger = $this->buildLedger($subject, $isWhiteLabel);
         $daily = $this->buildDaily($ledger);
 
         $totalEarned = (int) $ledger->where('direction', 'in')->sum('credits');
         $totalSpent = (int) $ledger->where('direction', 'out')->sum('credits');
 
+        $allotment = null;
+        if ($isWhiteLabel) {
+            $config = $hub->subscriberCreditsConfig();
+            $allotment = [
+                'unlimited' => (bool) $config['unlimited'],
+                'credits' => $config['credits'],
+                'label' => $config['unlimited']
+                    ? 'Unlimited subscriber credits'
+                    : ((int) $config['credits']).' credits per subscriber period',
+            ];
+        }
+
         return [
             'balance' => (int) $subject->credits,
             'has_unlimited_credits' => $subject->hasUnlimitedCredits($hubUnlimited),
+            'plans_enabled' => ! $isWhiteLabel,
+            'is_white_label' => $isWhiteLabel,
+            'allotment' => $allotment,
             'total_earned' => $totalEarned,
             'total_spent' => $totalSpent,
             'transaction_count' => $ledger->count(),
@@ -47,31 +54,34 @@ class CreditsReportService
         ];
     }
 
-    private function buildLedger(User $subject): Collection
+    private function buildLedger(User $subject, bool $isWhiteLabel): Collection
     {
         $entries = collect();
 
-        $subscriptions = $subject->subscriptions()
-            ->with('plan:id,name')
-            ->where('payment_status', 'paid')
-            ->where('credits_granted', '>', 0)
-            ->get(['id', 'subscription_plan_id', 'credits_granted', 'starts_at', 'created_at', 'status']);
+        // White-labelled hubs have no subscription plans.
+        if (! $isWhiteLabel) {
+            $subscriptions = $subject->subscriptions()
+                ->with('plan:id,name')
+                ->where('payment_status', 'paid')
+                ->where('credits_granted', '>', 0)
+                ->get(['id', 'subscription_plan_id', 'credits_granted', 'starts_at', 'created_at', 'status']);
 
-        foreach ($subscriptions as $subscription) {
-            $at = $subscription->starts_at ?? $subscription->created_at;
-            $planName = $subscription->plan?->name ?: 'Subscription';
-            $entries->push([
-                'id' => 'sub-'.$subscription->id,
-                'direction' => 'in',
-                'type' => 'subscription',
-                'type_label' => 'Plan credits',
-                'description' => $planName.' · '.$subscription->credits_granted.' credits granted',
-                'item_title' => $planName,
-                'credits' => (int) $subscription->credits_granted,
-                'occurred_at' => optional($at)?->toIso8601String(),
-                'date' => optional($at)?->toDateString(),
-                'reference_id' => (int) $subscription->id,
-            ]);
+            foreach ($subscriptions as $subscription) {
+                $at = $subscription->starts_at ?? $subscription->created_at;
+                $planName = $subscription->plan?->name ?: 'Subscription';
+                $entries->push([
+                    'id' => 'sub-'.$subscription->id,
+                    'direction' => 'in',
+                    'type' => 'subscription',
+                    'type_label' => 'Plan credits',
+                    'description' => $planName.' · '.$subscription->credits_granted.' credits granted',
+                    'item_title' => $planName,
+                    'credits' => (int) $subscription->credits_granted,
+                    'occurred_at' => optional($at)?->toIso8601String(),
+                    'date' => optional($at)?->toDateString(),
+                    'reference_id' => (int) $subscription->id,
+                ]);
+            }
         }
 
         $postPurchases = $subject->purchases()
