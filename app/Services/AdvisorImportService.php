@@ -571,12 +571,9 @@ class AdvisorImportService
             ->map(fn ($name) => (string) $name)
             ->all();
 
-        $moduleLabels = array_map(
-            fn (array $module) => $module['label'],
-            $hub->enabledModuleOptions()
-        );
+        $modulePackages = $hub->importModulePackageLabels();
 
-        return (new AdvisorImportXlsxTemplate)->build($roleLabels, $firmNames, $moduleLabels);
+        return (new AdvisorImportXlsxTemplate)->build($roleLabels, $firmNames, $modulePackages);
     }
 
     /**
@@ -657,6 +654,7 @@ class AdvisorImportService
 
     /**
      * Resolve a single module token (key or label) to a module key if hub-enabled.
+     * Base Shared / White Label Hub is recognised but omitted from template packages.
      */
     public function resolveModuleKey(Hub $hub, string $value): ?string
     {
@@ -677,6 +675,11 @@ class AdvisorImportService
                 || $normalized === $label
                 || $normalizedKey === str_replace([' ', '-'], '_', $label)
             ) {
+                // Opposite locked base (e.g. White Label on a shared hub) is ignored.
+                if (Hub::isLockedModuleKey($key) && $key !== $hub->baseModuleKey()) {
+                    return null;
+                }
+
                 return $key;
             }
         }

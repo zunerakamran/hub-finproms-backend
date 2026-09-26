@@ -4,7 +4,10 @@ namespace App\Support;
 
 /**
  * Builds the advisor/user import Excel template with role + firm + modules dropdowns.
- * Modules cell accepts multiple comma/semicolon/pipe-separated labels from the Lists sheet.
+ *
+ * Modules dropdown lists dependency-valid multi-module packages (base Shared /
+ * White Label Hub is never shown — it is always assigned on import).
+ * Users may also type comma-separated module labels manually.
  */
 class AdvisorImportXlsxTemplate
 {
@@ -15,13 +18,13 @@ class AdvisorImportXlsxTemplate
     /**
      * @param  list<string>  $roleLabels  Display labels (renamed roles) shown in the dropdown
      * @param  list<string>  $firmNames
-     * @param  list<string>  $moduleLabels  Hub-enabled module labels only
+     * @param  list<string>  $modulePackages  Dependency-valid multi-module package labels
      */
-    public function build(array $roleLabels, array $firmNames, array $moduleLabels = []): string
+    public function build(array $roleLabels, array $firmNames, array $modulePackages = []): string
     {
         $roleLabels = array_values(array_filter(array_map('strval', $roleLabels), fn ($v) => trim($v) !== ''));
         $firmNames = array_values(array_filter(array_map('strval', $firmNames), fn ($v) => trim($v) !== ''));
-        $moduleLabels = array_values(array_filter(array_map('strval', $moduleLabels), fn ($v) => trim($v) !== ''));
+        $modulePackages = array_values(array_filter(array_map('strval', $modulePackages), fn ($v) => trim($v) !== ''));
 
         $sampleRole = 'User';
         foreach ($roleLabels as $label) {
@@ -33,27 +36,36 @@ class AdvisorImportXlsxTemplate
             }
         }
         $sampleFirm = $firmNames[0] ?? '';
-        // Sample: mandatory base (first) plus any other enabled modules, comma-separated.
-        $sampleModules = implode(', ', $moduleLabels);
+        // Prefer a multi-module package for the sample when available.
+        $sampleModules = '';
+        foreach ($modulePackages as $package) {
+            if (str_contains($package, ',')) {
+                $sampleModules = $package;
+                break;
+            }
+        }
+        if ($sampleModules === '') {
+            $sampleModules = $modulePackages[0] ?? '';
+        }
 
         $importRows = [
             ['name', 'email', 'password', 'role', 'firm', 'modules'],
             ['User', 'user@example.com', '', $sampleRole, $sampleFirm, $sampleModules],
         ];
 
-        $listRows = [['role', 'firm', 'module']];
-        $max = max(count($roleLabels), count($firmNames), count($moduleLabels), 1);
+        $listRows = [['role', 'firm', 'modules_package']];
+        $max = max(count($roleLabels), count($firmNames), count($modulePackages), 1);
         for ($i = 0; $i < $max; $i++) {
             $listRows[] = [
                 $roleLabels[$i] ?? '',
                 $firmNames[$i] ?? '',
-                $moduleLabels[$i] ?? '',
+                $modulePackages[$i] ?? '',
             ];
         }
 
         $roleEnd = max(count($roleLabels), 1) + 1; // header is row 1
         $firmEnd = max(count($firmNames), 1) + 1;
-        $moduleEnd = max(count($moduleLabels), 1) + 1;
+        $moduleEnd = max(count($modulePackages), 1) + 1;
 
         $roleFormula = count($roleLabels) > 0
             ? 'Lists!$A$2:$A$'.$roleEnd
@@ -61,7 +73,7 @@ class AdvisorImportXlsxTemplate
         $firmFormula = count($firmNames) > 0
             ? 'Lists!$B$2:$B$'.$firmEnd
             : '"No firms configured"';
-        $moduleFormula = count($moduleLabels) > 0
+        $moduleFormula = count($modulePackages) > 0
             ? 'Lists!$C$2:$C$'.$moduleEnd
             : '"No modules enabled"';
 
@@ -147,8 +159,7 @@ class AdvisorImportXlsxTemplate
         $sheetData = $this->sheetDataXml($rows, boldHeader: true);
 
         // showDropDown="0" means show the arrow (OOXML inverted flag).
-        // Modules: dropdown lists hub-enabled modules; multiple may be entered
-        // comma/semicolon/pipe-separated in the same cell.
+        // Modules: each list entry is a dependency-valid package (one or many modules).
         $validations = '<dataValidations count="3">'
             .'<dataValidation type="list" allowBlank="1" showDropDown="0" showErrorMessage="1"'
             .' errorStyle="stop" errorTitle="Invalid role"'
@@ -163,8 +174,8 @@ class AdvisorImportXlsxTemplate
             .'<formula1>'.$this->esc($firmFormula).'</formula1>'
             .'</dataValidation>'
             .'<dataValidation type="list" allowBlank="1" showDropDown="0" showErrorMessage="0"'
-            .' promptTitle="Modules"'
-            .' prompt="Pick from the list or enter multiple hub-enabled modules separated by commas."'
+            .' promptTitle="Modules (multi-select packages)"'
+            .' prompt="Pick a package from the list (includes multi-module options that respect dependencies). Leave blank for base hub only. Shared / White Label Hub is always assigned."'
             .' showInputMessage="1"'
             .' sqref="F2:F1048576">'
             .'<formula1>'.$this->esc($moduleFormula).'</formula1>'

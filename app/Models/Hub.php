@@ -265,6 +265,115 @@ class Hub extends Model
     }
 
     /**
+     * Product modules assignable via Excel import (excludes mandatory Shared / White Label Hub).
+     *
+     * @return list<array{key: string, label: string}>
+     */
+    public function importableModuleOptions(): array
+    {
+        $base = $this->baseModuleKey();
+        $options = [];
+        foreach ($this->enabledModuleKeys() as $key) {
+            if ($key === $base || self::isLockedModuleKey($key)) {
+                continue;
+            }
+            $options[] = [
+                'key' => $key,
+                'label' => $this->moduleLabel($key),
+            ];
+        }
+
+        return $options;
+    }
+
+    /**
+     * Dependency-valid multi-module packages for the Excel modules dropdown.
+     * Each package is a comma-separated label string (base hub module never included).
+     *
+     * Trees (independent):
+     * - Social Media Template Library (± Pre Approval)
+     * - Website Template Library (± Content Pre Approval)
+     * - Generic Content Pre Approval
+     *
+     * @return list<string>
+     */
+    public function importModulePackageLabels(): array
+    {
+        $enabled = array_fill_keys($this->enabledModuleKeys(), true);
+        $base = $this->baseModuleKey();
+
+        $trees = [];
+
+        // Social media tree
+        $smTree = [];
+        if (! empty($enabled['module_social_media_template_library'])) {
+            $smTree[] = ['module_social_media_template_library'];
+            if (! empty($enabled['module_social_media_compliance'])) {
+                $smTree[] = [
+                    'module_social_media_template_library',
+                    'module_social_media_compliance',
+                ];
+            }
+        }
+        if ($smTree !== []) {
+            $trees[] = $smTree;
+        }
+
+        // Website tree
+        $webTree = [];
+        if (! empty($enabled['module_website_template_library'])) {
+            $webTree[] = ['module_website_template_library'];
+            if (! empty($enabled['module_website_compliance'])) {
+                $webTree[] = [
+                    'module_website_template_library',
+                    'module_website_compliance',
+                ];
+            }
+        }
+        if ($webTree !== []) {
+            $trees[] = $webTree;
+        }
+
+        // Generic compliance (standalone)
+        if (! empty($enabled['module_general_compliance'])) {
+            $trees[] = [['module_general_compliance']];
+        }
+
+        if ($trees === []) {
+            return [];
+        }
+
+        $combinations = [[]];
+        foreach ($trees as $treePackages) {
+            $next = [];
+            foreach ($combinations as $existing) {
+                $next[] = $existing; // omit this tree
+                foreach ($treePackages as $package) {
+                    $next[] = array_merge($existing, $package);
+                }
+            }
+            $combinations = $next;
+        }
+
+        $labels = [];
+        foreach ($combinations as $keys) {
+            $keys = array_values(array_filter(
+                $keys,
+                fn (string $key) => $key !== $base && ! empty($enabled[$key])
+            ));
+            if ($keys === []) {
+                continue;
+            }
+            $labels[] = implode(', ', array_map(
+                fn (string $key) => $this->moduleLabel($key),
+                $keys
+            ));
+        }
+
+        return array_values(array_unique($labels));
+    }
+
+    /**
      * Normalize a requested module allow-list for a user on this hub.
      * Always includes the mandatory base module; drops disabled/unknown keys;
      * pulls in enabled dependencies for selected modules.
@@ -282,6 +391,10 @@ class Hub extends Model
         foreach ($requestedKeys as $key) {
             $key = (string) $key;
             if ($key === '' || ! isset($enabledSet[$key])) {
+                continue;
+            }
+            // Never treat the opposite hub-type base as assignable.
+            if (self::isLockedModuleKey($key) && $key !== $base) {
                 continue;
             }
             $resolved[] = $key;

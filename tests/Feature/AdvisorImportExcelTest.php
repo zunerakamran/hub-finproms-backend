@@ -207,18 +207,58 @@ class AdvisorImportExcelTest extends TestCase
     {
         $hub = $this->createPrivateHub([
             'module_social_media_template_library' => true,
+            'module_social_media_compliance' => true,
             'module_general_compliance' => true,
             'module_website_template_library' => false,
         ]);
 
-        $labels = array_column($hub->enabledModuleOptions(), 'label');
-        $this->assertContains('Shared Hub', $labels);
-        $this->assertContains('Social Media Template Library', $labels);
-        $this->assertContains('Generic Content Pre Approval Workflow', $labels);
-        $this->assertNotContains('Website Template Library', $labels);
+        $importable = array_column($hub->importableModuleOptions(), 'label');
+        $this->assertNotContains('Shared Hub', $importable);
+        $this->assertNotContains('White Label Hub', $importable);
+        $this->assertContains('Social Media Template Library', $importable);
+        $this->assertContains('Social Media Pre Approval Workflow', $importable);
+        $this->assertContains('Generic Content Pre Approval Workflow', $importable);
+        $this->assertNotContains('Website Template Library', $importable);
+
+        $packages = $hub->importModulePackageLabels();
+        $this->assertContains('Social Media Template Library', $packages);
+        $this->assertContains(
+            'Social Media Template Library, Social Media Pre Approval Workflow',
+            $packages
+        );
+        $this->assertContains('Generic Content Pre Approval Workflow', $packages);
+        $this->assertContains(
+            'Social Media Template Library, Social Media Pre Approval Workflow, Generic Content Pre Approval Workflow',
+            $packages
+        );
+        // Dependent module never appears alone (dependency rule).
+        $this->assertNotContains('Social Media Pre Approval Workflow', $packages);
+        foreach ($packages as $package) {
+            $this->assertStringNotContainsString('Shared Hub', $package);
+            $this->assertStringNotContainsString('White Label Hub', $package);
+        }
 
         $binary = app(AdvisorImportService::class)->templateXlsx($hub);
         $this->assertNotSame('', $binary);
         $this->assertStringContainsString('PK', substr($binary, 0, 2));
+    }
+
+    public function test_resolve_modules_adds_dependencies_and_ignores_base_label(): void
+    {
+        $hub = $this->createPrivateHub([
+            'module_social_media_template_library' => true,
+            'module_social_media_compliance' => true,
+            'module_general_compliance' => true,
+        ]);
+
+        $modules = app(AdvisorImportService::class)->resolveModules(
+            $hub,
+            'Social Media Pre Approval Workflow, White Label Hub'
+        );
+
+        $this->assertContains('module_shared_hub', $modules);
+        $this->assertContains('module_social_media_template_library', $modules);
+        $this->assertContains('module_social_media_compliance', $modules);
+        $this->assertNotContains('module_white_label_hub', $modules);
     }
 }
