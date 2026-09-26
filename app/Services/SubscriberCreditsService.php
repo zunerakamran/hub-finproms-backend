@@ -138,6 +138,11 @@ class SubscriberCreditsService
 
         if ($subscription) {
             $subscription->credits_granted = $creditsGranted;
+            if (! $subscription->starts_at) {
+                $subscription->starts_at = now();
+            }
+            // Monthly autorenew: keep a rolling one-month period from now.
+            $subscription->ends_at = now()->addMonth();
             $subscription->save();
         }
     }

@@ -4,12 +4,15 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Hub;
+use App\Models\UserSubscription;
 use App\Services\ActingAdvisorService;
 use App\Services\CapabilitiesMatrixService;
 use App\Services\CreditsReportService;
 use App\Services\HubService;
+use Carbon\CarbonInterface;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 
 class MyDashboardController extends Controller
 {
@@ -85,7 +88,7 @@ class MyDashboardController extends Controller
                         'credits_granted' => (int) $row->credits_granted,
                         'amount_paid' => $row->amount_paid,
                         'starts_at' => optional($row->starts_at)?->toIso8601String(),
-                        'ends_at' => optional($row->ends_at)?->toIso8601String(),
+                        'ends_at' => $this->subscriptionEndsAt($row)?->toIso8601String(),
                         'plan' => $row->plan ? [
                             'id' => $row->plan->id,
                             'name' => $row->plan->name,
@@ -124,7 +127,7 @@ class MyDashboardController extends Controller
                     'status' => $activeSubscription->status,
                     'credits_granted' => (int) $activeSubscription->credits_granted,
                     'starts_at' => optional($activeSubscription->starts_at)?->toIso8601String(),
-                    'ends_at' => optional($activeSubscription->ends_at)?->toIso8601String(),
+                    'ends_at' => $this->subscriptionEndsAt($activeSubscription)?->toIso8601String(),
                     'plan' => $activeSubscription->plan ? [
                         'id' => $activeSubscription->plan->id,
                         'name' => $activeSubscription->plan->name,
@@ -185,5 +188,22 @@ class MyDashboardController extends Controller
         return response()->json([
             'credits' => $this->creditsReport->forUser($subject, $hub, $hubUnlimited, $isActing),
         ]);
+    }
+
+    /**
+     * Prefer stored ends_at; for open-ended private allotments default to one month after start.
+     */
+    private function subscriptionEndsAt(UserSubscription $subscription): ?CarbonInterface
+    {
+        if ($subscription->ends_at) {
+            return $subscription->ends_at;
+        }
+
+        $start = $subscription->starts_at ?? $subscription->created_at;
+        if (! $start) {
+            return null;
+        }
+
+        return Carbon::parse($start)->addMonth();
     }
 }

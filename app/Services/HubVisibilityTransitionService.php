@@ -225,11 +225,16 @@ class HubVisibilityTransitionService
         if ($existing) {
             $existing->status = 'active';
             $existing->payment_status = 'paid';
-            $existing->ends_at = null;
+            if (! $existing->starts_at) {
+                $existing->starts_at = now();
+            }
+            $existing->ends_at = $existing->starts_at->copy()->addMonth();
             $existing->save();
 
             return;
         }
+
+        $startsAt = now();
 
         UserSubscription::on($user->getConnectionName())->create([
             'user_id' => $user->id,
@@ -240,8 +245,8 @@ class HubVisibilityTransitionService
             'payment_method' => 'advisor_import',
             'payment_status' => 'paid',
             'payment_reference' => 'ADV-'.Str::upper(Str::random(8)),
-            'starts_at' => now(),
-            'ends_at' => null,
+            'starts_at' => $startsAt,
+            'ends_at' => $startsAt->copy()->addMonth(),
         ]);
     }
 }
