@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Hub;
 use App\Services\ActingAdvisorService;
 use App\Services\CapabilitiesMatrixService;
+use App\Services\CreditsReportService;
 use App\Services\HubService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -15,7 +16,8 @@ class MyDashboardController extends Controller
     public function __construct(
         private readonly HubService $hubs,
         private readonly CapabilitiesMatrixService $matrix,
-        private readonly ActingAdvisorService $actingAdvisors
+        private readonly ActingAdvisorService $actingAdvisors,
+        private readonly CreditsReportService $creditsReport
     ) {}
 
     /**
@@ -108,5 +110,27 @@ class MyDashboardController extends Controller
         }
 
         return response()->json($payload);
+    }
+
+    /**
+     * Full credits activity report for the billing subject (earned, spent, remaining, by day).
+     */
+    public function credits(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $hub = $this->hubs->current();
+        $role = $this->matrix->effectiveRoleFor($user);
+
+        if (! $this->matrix->roleCan($hub, $role, 'general_show_credits')) {
+            return response()->json(['message' => 'Unauthorized.'], 403);
+        }
+
+        $subject = $this->actingAdvisors->billingSubject($user);
+        $isActing = (int) $subject->id !== (int) $user->id;
+        $hubUnlimited = $hub->can('unlimited_credits');
+
+        return response()->json([
+            'credits' => $this->creditsReport->forUser($subject, $hubUnlimited, $isActing),
+        ]);
     }
 }

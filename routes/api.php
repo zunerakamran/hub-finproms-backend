@@ -103,6 +103,7 @@ Route::middleware('hub_can:member_view_plans')->group(function () {
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/my-dashboard', [MyDashboardController::class, 'show']);
+    Route::get('/my-credits', [MyDashboardController::class, 'credits']);
 
     Route::get('/acting-advisor', [ActingAdvisorController::class, 'show']);
     Route::put('/acting-advisor', [ActingAdvisorController::class, 'update']);
