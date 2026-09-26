@@ -71,15 +71,68 @@ class MyDashboardController extends Controller
         }
 
         if ($sections['general_show_subscription']) {
-            $activePlan = $subject->activePlan();
+            $activeSubscription = $subject->activeSubscription();
             $subscriptions = $subject->subscriptions()
                 ->with('plan:id,name,price,credits,duration_days')
                 ->latest()
-                ->limit(10)
-                ->get();
+                ->limit(25)
+                ->get()
+                ->map(function ($row) {
+                    return [
+                        'id' => $row->id,
+                        'status' => $row->status,
+                        'payment_status' => $row->payment_status,
+                        'credits_granted' => (int) $row->credits_granted,
+                        'amount_paid' => $row->amount_paid,
+                        'starts_at' => optional($row->starts_at)?->toIso8601String(),
+                        'ends_at' => optional($row->ends_at)?->toIso8601String(),
+                        'plan' => $row->plan ? [
+                            'id' => $row->plan->id,
+                            'name' => $row->plan->name,
+                            'price' => $row->plan->price,
+                            'credits' => $row->plan->credits,
+                            'duration_days' => $row->plan->duration_days,
+                        ] : null,
+                    ];
+                })
+                ->values()
+                ->all();
+
+            $isPrivateHub = $hub->isWhiteLabel() || $hub->isPrivateInviteOnly();
+            $allotment = null;
+            if ($isPrivateHub) {
+                $config = $hub->subscriberCreditsConfig();
+                $allotment = [
+                    'unlimited' => (bool) $config['unlimited'],
+                    'credits' => $config['credits'],
+                    'label' => $config['unlimited']
+                        ? 'Unlimited credits'
+                        : ((int) $config['credits']).' credits per subscriber period',
+                ];
+            }
 
             $payload['subscription'] = [
-                'active_plan' => $activePlan,
+                'plans_enabled' => ! $hub->isWhiteLabel(),
+                'is_private_hub' => $isPrivateHub,
+                'is_white_label' => $hub->isWhiteLabel(),
+                'allotment' => $allotment,
+                'balance' => (int) $subject->credits,
+                'has_unlimited_credits' => $subject->hasUnlimitedCredits($hubUnlimited),
+                'active_plan' => $activeSubscription?->plan,
+                'active_subscription' => $activeSubscription ? [
+                    'id' => $activeSubscription->id,
+                    'status' => $activeSubscription->status,
+                    'credits_granted' => (int) $activeSubscription->credits_granted,
+                    'starts_at' => optional($activeSubscription->starts_at)?->toIso8601String(),
+                    'ends_at' => optional($activeSubscription->ends_at)?->toIso8601String(),
+                    'plan' => $activeSubscription->plan ? [
+                        'id' => $activeSubscription->plan->id,
+                        'name' => $activeSubscription->plan->name,
+                        'price' => $activeSubscription->plan->price,
+                        'credits' => $activeSubscription->plan->credits,
+                        'duration_days' => $activeSubscription->plan->duration_days,
+                    ] : null,
+                ] : null,
                 'subscriptions' => $subscriptions,
             ];
         }
