@@ -163,15 +163,18 @@ class SocialMediaComplianceController extends Controller
         $hub = $this->smcHub($user);
 
         $validated = $request->validate([
-            'post_id' => ['required', 'integer', 'exists:posts,id'],
             'description' => ['required', 'string', 'max:10000'],
-            'image' => ['nullable', 'image', 'max:5120'],
+            'attachment' => [
+                'required',
+                'file',
+                'max:102400',
+                'mimes:jpg,jpeg,png,gif,webp,mp4,mov,webm',
+            ],
         ]);
 
         $compliance = $this->compliance->submit($hub, $user, [
-            'post_id' => (int) $validated['post_id'],
             'description' => $validated['description'],
-            'image' => $request->file('image'),
+            'attachment' => $request->file('attachment'),
         ], $request);
 
         return response()->json([
@@ -188,12 +191,17 @@ class SocialMediaComplianceController extends Controller
 
         $validated = $request->validate([
             'description' => ['required', 'string', 'max:10000'],
-            'image' => ['nullable', 'image', 'max:5120'],
+            'attachment' => [
+                'nullable',
+                'file',
+                'max:102400',
+                'mimes:jpg,jpeg,png,gif,webp,mp4,mov,webm',
+            ],
         ]);
 
         $compliance = $this->compliance->resubmit($hub, $user, $socialMediaComplianceRequest, [
             'description' => $validated['description'],
-            'image' => $request->file('image'),
+            'attachment' => $request->file('attachment'),
         ], $request);
 
         return response()->json([
@@ -209,14 +217,19 @@ class SocialMediaComplianceController extends Controller
         $hub = $this->smcHub($user);
 
         $request->validate([
-            'image' => ['nullable', 'image', 'max:5120'],
+            'attachment' => [
+                'nullable',
+                'file',
+                'max:102400',
+                'mimes:jpg,jpeg,png,gif,webp,mp4,mov,webm',
+            ],
         ]);
 
         $compliance = $this->compliance->confirmApprovedWithFeedback(
             $hub,
             $user,
             $socialMediaComplianceRequest,
-            ['image' => $request->file('image')],
+            ['attachment' => $request->file('attachment')],
             $request
         );
 

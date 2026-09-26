@@ -794,7 +794,7 @@ class Hub extends Model
         // --- Social Media Pre Approval (blurred while module_social_media_compliance is off) ---
         'smc_submit_request' => [
             'label' => 'Submit social media compliance requests',
-            'description' => 'Submit a purchased post for social media compliance review (and resubmit after rejection / confirm after approved-with-feedback).',
+            'description' => 'Submit social media content (image or video) for compliance review (and resubmit after rejection / confirm after approved-with-feedback).',
             'group' => self::GROUP_SOCIAL_MEDIA_COMPLIANCE,
             'default_shared' => false,
             'default_white_label' => false,

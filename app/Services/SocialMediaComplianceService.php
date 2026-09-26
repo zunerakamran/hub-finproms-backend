@@ -6,7 +6,6 @@ use App\Models\Firm;
 use App\Models\SocialMediaComplianceRequest;
 use App\Models\SocialMediaComplianceRequestVersion;
 use App\Models\Hub;
-use App\Models\Post;
 use App\Models\User;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\UploadedFile;
@@ -71,8 +70,8 @@ class SocialMediaComplianceService
 
     /**
      * @param  array{
-     *   post_id: int,
      *   description?: ?string,
+     *   attachment?: ?UploadedFile,
      *   image?: ?UploadedFile
      * }  $data
      */
@@ -83,16 +82,6 @@ class SocialMediaComplianceService
         $subject = $this->actingAdvisors->requireSubject($user);
         $onBehalfById = $this->actingAdvisors->onBehalfById($user, $subject);
 
-        $post = Post::query()->findOrFail((int) $data['post_id']);
-
-        if (! $subject->hasPurchased($post)) {
-            throw ValidationException::withMessages([
-                'post_id' => $onBehalfById
-                    ? 'You can only submit posts the selected advisor has purchased for social media compliance.'
-                    : 'You can only submit posts you have purchased for social media compliance.',
-            ]);
-        }
-
         $description = trim((string) ($data['description'] ?? ''));
         if ($description === '') {
             throw ValidationException::withMessages([
@@ -100,12 +89,19 @@ class SocialMediaComplianceService
             ]);
         }
 
-        [$imagePath, $imageUrl] = $this->resolveImage($data['image'] ?? null, $post);
+        $attachment = $data['attachment'] ?? $data['image'] ?? null;
+        if (! $attachment instanceof UploadedFile) {
+            throw ValidationException::withMessages([
+                'attachment' => 'Please upload an image or video attachment.',
+            ]);
+        }
 
-        $compliance = DB::transaction(function () use ($subject, $user, $onBehalfById, $post, $description, $imagePath, $imageUrl) {
+        [$imagePath, $imageUrl] = $this->storeUploadedMedia($attachment);
+
+        $compliance = DB::transaction(function () use ($subject, $user, $onBehalfById, $description, $imagePath, $imageUrl) {
             $compliance = SocialMediaComplianceRequest::query()->create([
                 'user_id' => $subject->id,
-                'post_id' => $post->id,
+                'post_id' => null,
                 'name' => $subject->name,
                 'current_version' => 1,
                 'submission_date' => now(),
@@ -132,7 +128,7 @@ class SocialMediaComplianceService
 
         $this->activityLogs->log([
             'action' => 'smc.submit',
-            'description' => 'Submitted social media compliance request #'.$compliance->id.' for post #'.$post->id
+            'description' => 'Submitted social media compliance request #'.$compliance->id
                 .($onBehalfById ? ' on behalf of user #'.$subject->id : ''),
             'user' => $user,
             'hub' => $hub,
@@ -140,7 +136,6 @@ class SocialMediaComplianceService
             'request' => $request,
             'status_code' => 201,
             'properties' => [
-                'post_id' => $post->id,
                 'version' => 1,
                 'status' => SocialMediaComplianceRequest::STATUS_PENDING,
                 'on_behalf_of_user_id' => $onBehalfById ? $subject->id : null,
@@ -151,7 +146,7 @@ class SocialMediaComplianceService
     }
 
     /**
-     * @param  array{description: string, image?: ?UploadedFile}  $data
+     * @param  array{description: string, attachment?: ?UploadedFile, image?: ?UploadedFile}  $data
      */
     public function resubmit(Hub $hub, User $user, SocialMediaComplianceRequest $compliance, array $data, $request = null): SocialMediaComplianceRequest
     {
@@ -174,8 +169,9 @@ class SocialMediaComplianceService
 
         $imagePath = $current->image_path;
         $imageUrl = $current->image_url;
-        if (! empty($data['image']) && $data['image'] instanceof UploadedFile) {
-            [$imagePath, $imageUrl] = $this->storeUploadedImage($data['image']);
+        $upload = $data['attachment'] ?? $data['image'] ?? null;
+        if ($upload instanceof UploadedFile) {
+            [$imagePath, $imageUrl] = $this->storeUploadedMedia($upload);
         }
 
         $newVersion = (int) $compliance->current_version + 1;
@@ -251,10 +247,11 @@ class SocialMediaComplianceService
         $imagePath = $current->image_path;
         $imageUrl = $current->image_url;
         $feedback = $current->feedback;
-        $hasNewImage = ! empty($data['image']) && $data['image'] instanceof UploadedFile;
+        $upload = $data['attachment'] ?? $data['image'] ?? null;
+        $hasNewImage = $upload instanceof UploadedFile;
 
         if ($hasNewImage) {
-            [$imagePath, $imageUrl] = $this->storeUploadedImage($data['image']);
+            [$imagePath, $imageUrl] = $this->storeUploadedMedia($upload);
         } else {
             $feedback = '';
         }
@@ -828,29 +825,11 @@ class SocialMediaComplianceService
     }
 
     /**
-     * @return array{0: ?string, 1: ?string}
-     */
-    private function resolveImage(?UploadedFile $image, Post $post): array
-    {
-        if ($image) {
-            return $this->storeUploadedImage($image);
-        }
-
-        if ($post->attachment_path) {
-            return [$post->attachment_path, $post->attachment_url];
-        }
-
-        throw ValidationException::withMessages([
-            'image' => 'An image is required (upload one or use a post that has an attachment).',
-        ]);
-    }
-
-    /**
      * @return array{0: string, 1: string}
      */
-    private function storeUploadedImage(UploadedFile $image): array
+    private function storeUploadedMedia(UploadedFile $file): array
     {
-        $path = $image->store('social-media-compliance', 'public');
+        $path = $file->store('social-media-compliance', 'public');
 
         return [$path, Storage::disk('public')->url($path)];
     }
