@@ -19,19 +19,32 @@ class HubService
                 return $hub;
             }
 
-            // Fallback: ensure shared hub always exists for this codebase.
+            // Fallback: ensure a hub row always exists for this deploy's slug.
+            $configuredType = strtolower(trim((string) config('hub.type', '')));
+            $type = match (true) {
+                in_array($configuredType, Hub::TYPES, true) => $configuredType,
+                $slug === 'central' => Hub::TYPE_CENTRAL,
+                $slug === 'shared' || str_starts_with($slug, 'shared-') => Hub::TYPE_SHARED,
+                default => Hub::TYPE_WHITE_LABEL,
+            };
+            $name = match ($type) {
+                Hub::TYPE_CENTRAL => 'Central Hub Controller',
+                Hub::TYPE_SHARED => $slug === 'shared' ? 'Shared Hub' : 'Hub',
+                default => 'Hub',
+            };
+
             return Hub::query()->firstOrCreate(
-                ['slug' => 'shared'],
+                ['slug' => $slug],
                 [
-                    'name' => 'Shared Hub',
-                    'type' => Hub::TYPE_SHARED,
+                    'name' => $name,
+                    'type' => $type,
                     'is_active' => true,
                     'primary_color' => null,
                     'secondary_color' => null,
                     'logo_url' => null,
                     'white_logo_url' => null,
                     'favicon_url' => null,
-                    'checklist' => Hub::defaultChecklist(Hub::TYPE_SHARED),
+                    'checklist' => Hub::defaultChecklist($type),
                 ]
             );
         });
@@ -67,6 +80,10 @@ class HubService
 
         $clean['module_shared_hub'] = $type === Hub::TYPE_SHARED;
         $clean['module_white_label_hub'] = $type === Hub::TYPE_WHITE_LABEL;
+        if ($type === Hub::TYPE_CENTRAL) {
+            $clean['module_shared_hub'] = false;
+            $clean['module_white_label_hub'] = false;
+        }
         $clean = Hub::applyModuleDependencyRules($clean, $type);
 
         return $this->applyExclusivity($clean, array_keys($input));

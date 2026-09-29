@@ -16,7 +16,7 @@ class User extends Authenticatable
     /** @use HasFactory<UserFactory> */
     use HasApiTokens, HasFactory, Notifiable;
 
-    /** Platform developers / us — shared hub Power Admin control plane. */
+    /** Platform developers / us — Central Hub Controller Power Admin control plane. */
     public const ROLE_POWER_ADMIN = 'power_admin';
 
     /** Shared hub operator (FinProms). */

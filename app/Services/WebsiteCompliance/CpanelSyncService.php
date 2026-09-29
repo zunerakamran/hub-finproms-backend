@@ -414,7 +414,7 @@ class CpanelSyncService
             }
 
             $acting = app(\App\Services\ActingHubService::class);
-            if (! $acting->isActingOnWhiteLabel($user)) {
+            if (! $acting->isActingRemotely($user)) {
                 return null;
             }
 

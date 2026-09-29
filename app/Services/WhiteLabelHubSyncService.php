@@ -24,14 +24,14 @@ class WhiteLabelHubSyncService
      */
     public function pushSettings(Hub $hub): void
     {
-        if ($hub->isShared()) {
+        if ($hub->isControlPlane()) {
             return;
         }
 
         if (! $hub->hasRemoteDatabaseConfigured()) {
             throw new InvalidArgumentException(
                 'Remote database credentials are incomplete for hub "'.$hub->name.'". '
-                .'White-labelled functionalities and users cannot be updated until deploy wiring is complete.'
+                .'Remote functionalities and users cannot be updated until deploy wiring is complete.'
             );
         }
 

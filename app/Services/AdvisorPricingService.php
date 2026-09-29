@@ -212,7 +212,7 @@ class AdvisorPricingService
      */
     public function currentAdvisorCountForHub(Hub $hub): int
     {
-        if ($hub->isShared() || ! $hub->hasRemoteDatabaseConfigured()) {
+        if ($hub->isControlPlane() || ! $hub->hasRemoteDatabaseConfigured()) {
             return $this->currentAdvisorCount();
         }
 

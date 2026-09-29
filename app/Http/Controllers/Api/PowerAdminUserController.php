@@ -577,7 +577,7 @@ class PowerAdminUserController extends Controller
     private function actingWhiteLabelHub(Request $request): ?Hub
     {
         $user = $request->user();
-        if (! $user || ! $this->actingHubs->isActingOnWhiteLabel($user)) {
+        if (! $user || ! $this->actingHubs->isActingRemotely($user)) {
             return null;
         }
 

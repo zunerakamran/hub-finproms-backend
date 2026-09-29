@@ -298,7 +298,7 @@ class EmailTemplateService
 
     private function syncWhiteLabelIfNeeded(Hub $hub): void
     {
-        if ($hub->isShared() || ! $hub->hasRemoteDatabaseConfigured()) {
+        if ($hub->isControlPlane() || ! $hub->hasRemoteDatabaseConfigured()) {
             return;
         }
 

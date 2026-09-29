@@ -11,7 +11,7 @@ use InvalidArgumentException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
- * When the shared-hub hub switcher is on a white-labelled hub, manage content there.
+ * When the Central Hub switcher is on a remote content hub, manage content there.
  */
 trait CreatesOnActingWhiteLabelHub
 {
@@ -22,20 +22,22 @@ trait CreatesOnActingWhiteLabelHub
             return null;
         }
 
-        // Public member catalog (shared frontend) must always read the deploy hub DB.
-        // Acting-hub scoping is for dashboard management of white-labelled content only.
+        // Public member catalog (Shared frontend) must always read the deploy hub DB.
+        // Acting-hub scoping is for dashboard management of remote content hubs only.
         if ($this->isPublicCatalogRead($request)) {
             return null;
         }
 
         $acting = app(ActingHubService::class);
-        if (! $acting->isActingOnWhiteLabel($user)) {
+        if (! $acting->isActingRemotely($user)) {
             return null;
         }
 
         try {
-            return $acting->requireActingWhiteLabel($user);
+            return $acting->requireActingContentHub($user);
         } catch (InvalidArgumentException) {
+            return null;
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpException) {
             return null;
         }
     }

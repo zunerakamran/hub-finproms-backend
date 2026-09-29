@@ -7,9 +7,24 @@ use Illuminate\Support\Facades\Storage;
 
 class Hub extends Model
 {
+    /** Central Hub Controller — platform control plane (not a member content catalog). */
+    public const TYPE_CENTRAL = 'central';
+
+    /** Shared content hub (FinProms catalog) — controllable remotely from Central. */
     public const TYPE_SHARED = 'shared';
 
     public const TYPE_WHITE_LABEL = 'white_label';
+
+    /**
+     * Valid hub type values (registry + deploy identity).
+     *
+     * @var list<string>
+     */
+    public const TYPES = [
+        self::TYPE_CENTRAL,
+        self::TYPE_SHARED,
+        self::TYPE_WHITE_LABEL,
+    ];
 
     public const GROUP_BEHAVIOUR = 'behaviour';
 
@@ -213,6 +228,10 @@ class Hub extends Model
      */
     public function baseModuleKey(): string
     {
+        if ($this->isCentral()) {
+            return 'module_shared_hub'; // unused on control plane; packaging N/A
+        }
+
         return $this->isShared() ? 'module_shared_hub' : 'module_white_label_hub';
     }
 
@@ -453,10 +472,16 @@ class Hub extends Model
      */
     public static function applyModuleDependencyRules(array $checklist, string $type): array
     {
+        $isCentral = $type === self::TYPE_CENTRAL;
         $isShared = $type === self::TYPE_SHARED;
+        // Central is not a content packaging hub — both base modules stay off.
         $checklist['module_shared_hub'] = $isShared;
-        $checklist['module_white_label_hub'] = ! $isShared;
+        $checklist['module_white_label_hub'] = $type === self::TYPE_WHITE_LABEL;
         $base = $isShared ? 'module_shared_hub' : 'module_white_label_hub';
+        if ($isCentral) {
+            $checklist['module_shared_hub'] = false;
+            $checklist['module_white_label_hub'] = false;
+        }
 
         // Cascade in MODULE_KEYS order so parents are resolved before children.
         foreach (self::MODULE_KEYS as $key) {
@@ -699,10 +724,10 @@ class Hub extends Model
             'default_white_label' => false,
         ],
         'receive_content_from_shared' => [
-            'label' => 'Receive content from shared hub',
-            'description' => 'Shared hub can push/select posts onto this hub.',
+            'label' => 'Receive content from Central Hub',
+            'description' => 'Central Hub Controller can push/select posts onto this hub (Shared or White-label). Legacy key name kept for compatibility.',
             'group' => self::GROUP_BEHAVIOUR,
-            'default_shared' => false,
+            'default_shared' => true,
             'default_white_label' => true,
         ],
         'advisor_subscriber_billing' => [
@@ -986,10 +1011,10 @@ class Hub extends Model
             'default_white_label' => false,
         ],
         'dashboard_control_white_label_hubs' => [
-            'label' => 'Control white labelled hubs',
-            'description' => 'On the shared hub dashboard, unlocks a hub switcher. Selecting a white-labelled hub shows that hub’s dashboard tools (based on its Capabilities matrix). Creating users / posts / types / categories / tags / bundles while that hub is selected writes only to that hub’s own database — not the shared catalog.',
+            'label' => 'Control hubs remotely',
+            'description' => 'On the Central Hub Controller dashboard, unlocks a hub switcher. Selecting a Shared or White-labelled hub shows that hub’s dashboard tools (based on its Capabilities matrix). Creating users / posts / types / categories / tags / bundles while that hub is selected writes only to that hub’s own database — not the Central Hub catalog. Off on Shared / White-label content hubs.',
             'group' => self::GROUP_DASHBOARD_HUB,
-            'default_shared' => true,
+            'default_shared' => false,
             'default_white_label' => false,
         ],
         'dashboard_manage_modules' => [
@@ -1390,6 +1415,11 @@ class Hub extends Model
         ];
     }
 
+    public function isCentral(): bool
+    {
+        return $this->type === self::TYPE_CENTRAL;
+    }
+
     public function isShared(): bool
     {
         return $this->type === self::TYPE_SHARED;
@@ -1398,6 +1428,28 @@ class Hub extends Model
     public function isWhiteLabel(): bool
     {
         return $this->type === self::TYPE_WHITE_LABEL;
+    }
+
+    /**
+     * Whether this hub instance is the platform control plane (Central Hub Controller).
+     * Legacy: a Shared deploy can still act as control plane when HUB_IS_CONTROL_PLANE=true
+     * until migrated to type=central.
+     */
+    public function isControlPlane(): bool
+    {
+        if ($this->isCentral()) {
+            return true;
+        }
+
+        return $this->isShared() && (bool) config('hub.is_control_plane', false);
+    }
+
+    /**
+     * Shared or White-label content hub (not Central).
+     */
+    public function isContentHub(): bool
+    {
+        return $this->isShared() || $this->isWhiteLabel();
     }
 
     public function isPrivateInviteOnly(): bool
@@ -1519,7 +1571,11 @@ class Hub extends Model
      */
     public static function defaultChecklist(string $type = self::TYPE_WHITE_LABEL): array
     {
-        $key = $type === self::TYPE_SHARED ? 'default_shared' : 'default_white_label';
+        // Central and Shared use the "default_shared" product defaults as a base;
+        // Central then strips content packaging and turns remote-control ON.
+        $key = in_array($type, [self::TYPE_SHARED, self::TYPE_CENTRAL], true)
+            ? 'default_shared'
+            : 'default_white_label';
         $defaults = [];
 
         foreach (self::CHECKLIST_DEFINITIONS as $flag => $meta) {
@@ -1528,6 +1584,30 @@ class Hub extends Model
 
         $defaults['module_shared_hub'] = $type === self::TYPE_SHARED;
         $defaults['module_white_label_hub'] = $type === self::TYPE_WHITE_LABEL;
+
+        if ($type === self::TYPE_SHARED) {
+            // Shared is a content hub (there may be many). Not the control plane.
+            $defaults['dashboard_control_white_label_hubs'] = false;
+            $defaults['receive_content_from_shared'] = true;
+            $defaults['charge_amount_per_module'] = false;
+        }
+
+        if ($type === self::TYPE_CENTRAL) {
+            $defaults['module_shared_hub'] = false;
+            $defaults['module_white_label_hub'] = false;
+            $defaults['charge_amount_per_module'] = false;
+            $defaults['one_off_purchase'] = false;
+            $defaults['public_subscribe'] = false;
+            $defaults['private_invite_only'] = false;
+            $defaults['receive_content_from_shared'] = false;
+            $defaults['advisor_subscriber_billing'] = false;
+            $defaults['dashboard_control_white_label_hubs'] = true;
+            // Central is not a member catalog — keep member purchase flags off.
+            $defaults['member_browse_catalog'] = false;
+            $defaults['member_view_plans'] = false;
+            $defaults['member_purchase_content'] = false;
+            $defaults['member_download_content'] = false;
+        }
 
         return $defaults;
     }
@@ -1764,7 +1844,9 @@ class Hub extends Model
         $hasDb = $this->hasRemoteDatabaseConfigured();
         $isActive = (bool) $this->is_active;
         $database = $this->remoteDatabaseForAdmin();
-        $needsRemoteDb = ! $this->isShared();
+        // Central itself does not need remote DB. Shared + White-label registry rows do
+        // (so Central can control them remotely).
+        $needsRemoteDb = $this->isContentHub();
 
         $checklist = [
             [
@@ -1782,8 +1864,8 @@ class Hub extends Model
             [
                 'key' => 'remote_db',
                 'label' => $needsRemoteDb
-                    ? 'White-labelled database credentials recorded (own DB)'
-                    : 'Shared hub uses its own .env database (not stored here)',
+                    ? 'Content hub database credentials recorded (own DB for remote control)'
+                    : 'Central Hub Controller uses its own .env database (not stored here)',
                 'done' => $needsRemoteDb ? $hasDb : true,
                 'required' => $needsRemoteDb,
             ],
@@ -1795,13 +1877,13 @@ class Hub extends Model
             ],
             [
                 'key' => 'hub_slug',
-                'label' => 'White-labelled backend uses HUB_SLUG='.$this->slug,
+                'label' => 'Content hub backend uses HUB_SLUG='.$this->slug,
                 'done' => true,
                 'required' => true,
             ],
             [
                 'key' => 'own_db_env',
-                'label' => 'White-labelled .env points at its OWN database (not shared)',
+                'label' => 'Content hub .env points at its OWN database (not Central)',
                 'done' => true,
                 'required' => $needsRemoteDb,
             ],
@@ -1966,6 +2048,9 @@ class Hub extends Model
             'name' => $this->name,
             'slug' => $this->slug,
             'type' => $this->type,
+            'is_central' => $this->isCentral(),
+            'is_control_plane' => $this->isControlPlane(),
+            'is_content_hub' => $this->isContentHub(),
             // Public site root for WC previews / placeholders (hub deploy wiring).
             'frontend_url' => $this->frontendBaseUrl(),
             'branding' => $this->brandingPayload(),
@@ -2060,6 +2145,9 @@ class Hub extends Model
             'name' => $this->name,
             'slug' => $this->slug,
             'type' => $this->type,
+            'is_central' => $this->isCentral(),
+            'is_control_plane' => $this->isControlPlane(),
+            'is_content_hub' => $this->isContentHub(),
             'is_active' => $this->is_active,
             'branding' => $this->brandingPayload(),
             'deploy' => $this->deployWiringForAdmin(),

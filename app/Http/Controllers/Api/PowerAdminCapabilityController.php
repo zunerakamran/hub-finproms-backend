@@ -67,7 +67,11 @@ class PowerAdminCapabilityController extends Controller
             : Hub::query()->where('slug', 'shared')->firstOrFail();
 
         $hubs = Hub::query()
-            ->orderByRaw('CASE WHEN type = ? THEN 0 ELSE 1 END', [Hub::TYPE_SHARED])
+            ->orderByRaw('CASE
+                WHEN type = ? THEN 0
+                WHEN type = ? THEN 1
+                ELSE 2
+            END', [Hub::TYPE_CENTRAL, Hub::TYPE_SHARED])
             ->orderBy('name')
             ->get(['id', 'name', 'slug', 'type']);
 
@@ -90,7 +94,7 @@ class PowerAdminCapabilityController extends Controller
         $hub = Hub::query()->findOrFail($validated['hub_id']);
         $actingWhiteLabel = null;
         $actor = $request->user();
-        if ($actor && $this->actingHubs->isActingOnWhiteLabel($actor)) {
+        if ($actor && $this->actingHubs->isActingRemotely($actor)) {
             $actingWhiteLabel = $this->actingHubs->actingHub($actor);
         }
         try {

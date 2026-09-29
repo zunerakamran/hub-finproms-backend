@@ -436,11 +436,13 @@ class CapabilitiesMatrixService
     private function sharedHub(): Hub
     {
         $current = app(HubService::class)->current();
-        if ($current->isShared()) {
+        if ($current->isControlPlane()) {
             return $current;
         }
 
-        return Hub::query()->where('type', Hub::TYPE_SHARED)->first() ?? $current;
+        return Hub::query()->where('type', Hub::TYPE_CENTRAL)->first()
+            ?? Hub::query()->where('type', Hub::TYPE_SHARED)->first()
+            ?? $current;
     }
 
     /**
@@ -563,10 +565,10 @@ class CapabilitiesMatrixService
             }
         }
 
-        // Control white-labelled hubs is a shared-hub tool; default on for FinProms admin there.
+        // Control hubs remotely is a Central Hub tool only.
         if (isset($matrix[User::ROLE_FINPROMS_ADMIN])) {
             $matrix[User::ROLE_FINPROMS_ADMIN][ActingHubService::CAPABILITY] =
-                $hubType === Hub::TYPE_SHARED;
+                $hubType === Hub::TYPE_CENTRAL;
         }
 
         // Subscriber credits also default on for FinProms admin on white-labelled hubs.

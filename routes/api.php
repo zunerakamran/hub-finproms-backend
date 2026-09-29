@@ -553,8 +553,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware(EnsureUserIsClientAdmin::class)->prefix('client-admin')->group($clientAdminRoutes);
     Route::middleware(EnsureUserIsClientAdmin::class)->prefix('admin')->group($clientAdminRoutes);
 
-    // power_admin control plane (gated by Power Admin capabilities — section 5.3)
-    Route::middleware(EnsureUserIsPowerAdmin::class)->prefix('power-admin')->group(function () {
+    // power_admin control plane — Central Hub Controller only
+    Route::middleware([EnsureUserIsPowerAdmin::class, 'control_plane'])->prefix('power-admin')->group(function () {
         Route::get('/ping', fn () => response()->json([
             'ok' => true,
             'role' => 'power_admin',

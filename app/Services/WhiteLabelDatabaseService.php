@@ -23,8 +23,12 @@ class WhiteLabelDatabaseService
      */
     public function assertConfigured(Hub $hub): void
     {
-        if ($hub->isShared()) {
-            throw new InvalidArgumentException('The shared hub does not use a remote database connection.');
+        if ($hub->isControlPlane()) {
+            throw new InvalidArgumentException('The Central Hub Controller does not use a remote database connection.');
+        }
+
+        if (! $hub->isContentHub()) {
+            throw new InvalidArgumentException('Only Shared and White-labelled hubs use remote database connections.');
         }
 
         if (! $hub->hasRemoteDatabaseConfigured()) {

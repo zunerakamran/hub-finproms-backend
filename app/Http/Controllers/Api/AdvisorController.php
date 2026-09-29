@@ -374,7 +374,7 @@ class AdvisorController extends Controller
 
         return $user
             && $hub->isWhiteLabel()
-            && $this->actingHubs->isActingOnWhiteLabel($user)
+            && $this->actingHubs->isActingRemotely($user)
             && $hub->hasRemoteDatabaseConfigured();
     }
 

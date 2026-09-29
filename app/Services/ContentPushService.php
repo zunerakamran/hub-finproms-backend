@@ -139,18 +139,18 @@ class ContentPushService
     private function pushModels(string $entityType, array $models, array $hubIds, ?User $actor): array
     {
         $sourceHub = $this->hubs->current();
-        if (! $sourceHub->isShared()) {
-            throw new InvalidArgumentException('Content can only be pushed from the shared hub.');
+        if (! $sourceHub->isControlPlane()) {
+            throw new InvalidArgumentException('Content can only be pushed from the Central Hub Controller.');
         }
 
         $targets = Hub::query()
             ->whereIn('id', $hubIds)
-            ->where('type', Hub::TYPE_WHITE_LABEL)
+            ->whereIn('type', [Hub::TYPE_SHARED, Hub::TYPE_WHITE_LABEL])
             ->where('is_active', true)
             ->get();
 
         if ($targets->isEmpty()) {
-            throw new InvalidArgumentException('No active white-labelled hubs selected.');
+            throw new InvalidArgumentException('No active content hubs selected.');
         }
 
         $results = [];

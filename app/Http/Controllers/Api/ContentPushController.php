@@ -118,10 +118,10 @@ class ContentPushController extends Controller
     {
         $this->assertSharedHub();
 
-        if ($hub->isShared()) {
+        if ($hub->isControlPlane()) {
             return response()->json([
                 'ok' => false,
-                'message' => 'Shared hub does not use a remote database.',
+                'message' => 'Central Hub Controller does not use a remote database.',
             ], 422);
         }
 
@@ -132,8 +132,8 @@ class ContentPushController extends Controller
 
     private function assertSharedHub(): void
     {
-        if (! $this->hubs->current()->isShared()) {
-            abort(403, 'Content push is only available on the shared hub.');
+        if (! $this->hubs->current()->isControlPlane()) {
+            abort(403, 'Content push is only available on the Central Hub Controller.');
         }
     }
 }

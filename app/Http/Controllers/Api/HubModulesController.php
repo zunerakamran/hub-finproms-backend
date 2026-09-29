@@ -157,7 +157,7 @@ class HubModulesController extends Controller
 
     private function syncWhiteLabelSettings(?Hub $hub): void
     {
-        if (! $hub || $hub->isShared() || ! $hub->hasRemoteDatabaseConfigured()) {
+        if (! $hub || $hub->isControlPlane() || ! $hub->hasRemoteDatabaseConfigured()) {
             return;
         }
 

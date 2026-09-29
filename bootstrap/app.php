@@ -15,6 +15,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'client_admin' => \App\Http\Middleware\EnsureUserIsClientAdmin::class,
             'power_admin' => \App\Http\Middleware\EnsureUserIsPowerAdmin::class,
+            'control_plane' => \App\Http\Middleware\EnsureControlPlane::class,
             'admin' => \App\Http\Middleware\EnsureUserIsClientAdmin::class,
             'hub_can' => \App\Http\Middleware\EnsureHubCapability::class,
             'pa_can' => \App\Http\Middleware\EnsurePowerAdminCapability::class,

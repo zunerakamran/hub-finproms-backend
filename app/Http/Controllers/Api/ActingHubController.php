@@ -4,13 +4,14 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Services\ActingHubService;
+use App\Services\HubService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use InvalidArgumentException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
 /**
- * Shared-hub dashboard hub switcher (Control white labelled hubs).
+ * Central Hub Controller dashboard hub switcher (Control hubs remotely).
  */
 class ActingHubController extends Controller
 {
@@ -52,10 +53,13 @@ class ActingHubController extends Controller
             return response()->json(['message' => $e->getMessage()], $e->getStatusCode());
         }
 
+        $current = app(HubService::class)->current();
+        $actingRemotely = (int) $hub->id !== (int) $current->id;
+
         return response()->json([
-            'message' => $hub->isWhiteLabel()
+            'message' => $actingRemotely
                 ? 'Now controlling '.$hub->name.'. Dashboard tools use this hub’s capabilities; users and content are saved to its database.'
-                : 'Switched back to the shared hub.',
+                : 'Switched back to Central Hub Controller.',
             'hub_switcher' => $this->actingHubs->switcherPayload($request->user()->fresh()),
         ]);
     }

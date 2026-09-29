@@ -1,19 +1,23 @@
-Hub FinProms — Deployment Notes
+﻿Hub FinProms — Deployment Notes
 ================================
-Last updated: 2026-09-15
+Last updated: 2026-09-29
 
-Repos
+================================================================================
 1. ARCHITECTURE (IMPORTANT)
 ================================================================================
 - Backend and frontend are SEPARATE repos:
   - Backend:  Desktop/hub-finproms-backend
   - Frontend: Desktop/hub-finproms-frontend
-- Shared hub and every white-label hub use the SAME codebase.
-- Each hub has its OWN database (do NOT share DBs between hubs).
-- HUB_SLUG in .env identifies which hub this deploy is.
-- Power Admin on the SHARED hub is the control plane (hub registry + wiring).
+- ONE codebase for three instance types:
+  A) Central Hub Controller — control plane ONLY (hub registry, Power Admin,
+     remote hub switcher). Not a member content catalog.
+  B) Shared hub(s) — content hubs (many allowed; each own DB + slug)
+  C) White-labelled hub(s) — private client content hubs
+- Each instance has its OWN database (do NOT share DBs between hubs).
+- HUB_SLUG identifies this deploy; set HUB_TYPE=shared|white_label|central when needed.
+- Power Admin / hub registry live ONLY on Central (HUB_IS_CONTROL_PLANE=true).
 
-Option B (used for both shared + myhub):
+Option B (used for central + shared + white-label):
   Frontend:  https://<domain>/
   API:       https://<domain>/api/...
   Laravel lives in: public_html/api/
@@ -21,15 +25,56 @@ Option B (used for both shared + myhub):
 
 
 ================================================================================
-2. SHARED HUB — https://sharedhub.fin-proms.com
+1A. CENTRAL HUB CONTROLLER (deploy this for the control plane)
 ================================================================================
+Deploy a NEW cPanel for Central. Central holds the hub registry for ALL Shared
+and White-label hubs. Shared content DBs must NOT keep that registry.
 
+Example domain: https://central.fin-proms.com  (use your real domain)
+
+Backend .env (public_html/api/.env):
+  HUB_SLUG=central
+  HUB_TYPE=central
+  HUB_IS_CONTROL_PLANE=true
+  HUB_PROMOTE_TO_CENTRAL=true
+  APP_URL=https://central.fin-proms.com
+  FRONTEND_URL=https://central.fin-proms.com
+  SANCTUM_STATEFUL_DOMAINS=central.fin-proms.com
+  DB_* = Central's OWN database
+  FILESYSTEM_PUBLIC_URL=https://central.fin-proms.com/api/media
+
+First install on Central:
+  composer install --no-dev --optimize-autoloader
+  php artisan migrate --force
+  php artisan db:seed --force   # ONLY on empty Central DB
+  php artisan config:cache
+
+Frontend:
+  npm run build:central
+  Upload dist-central/ into public_html
+  (.env.central → VITE_API_URL pointing at Central API)
+
+After Central is up:
+  1) Log in as Power Admin → Hubs → register each Shared + White-label
+  2) Set frontend_url + remote DB credentials (Wiring ready)
+  3) On each content hub: php artisan hub:strip-control-plane --force
+  4) On each Shared .env: HUB_IS_CONTROL_PLANE=false and HUB_TYPE=shared
+
+CODE STATUS: backend + frontend support for Central is in place. Ready to deploy
+Central when you have a cPanel + empty DB + domain and have updated .env.central.
+
+
+================================================================================
+2. SHARED HUB (CONTENT) — https://sharedhub.fin-proms.com
+================================================================================
+Shared is a CONTENT hub only (not the control plane). More than one Shared hub
+is allowed (unique HUB_SLUG each, e.g. shared, shared-uk); register all on Central.
 cPanel user example: sharedhubfp
 
 Folders:
   public_html/
-    index.html, assets/, .htaccess   ← frontend build
-    api/                             ← Laravel backend
+    index.html, assets/, .htaccess   â† frontend build
+    api/                             â† Laravel backend
 
 GitHub Actions FTP (IMPORTANT):
   The FTP account Directory in cPanel MUST be:
@@ -37,7 +82,7 @@ GitHub Actions FTP (IMPORTANT):
   If it is set to something like:
     /home/<cPanelUser>/sharedhub.fin-proms.com/ftpaccount
   builds upload "successfully" but the live site never updates.
-  Fix: cPanel → FTP Accounts → Change Directory → public_html
+  Fix: cPanel â†’ FTP Accounts â†’ Change Directory â†’ public_html
   Then re-run the frontend deploy workflow.
 
 .env essentials (public_html/api/.env):
@@ -47,6 +92,8 @@ GitHub Actions FTP (IMPORTANT):
   FRONTEND_URL=https://sharedhub.fin-proms.com
   SANCTUM_STATEFUL_DOMAINS=sharedhub.fin-proms.com
   HUB_SLUG=shared
+  HUB_TYPE=shared
+  HUB_IS_CONTROL_PLANE=false
   DB_HOST=localhost
   DB_DATABASE=<shared cPanel DB name>
   DB_USERNAME=<shared cPanel DB user>
@@ -56,6 +103,10 @@ GitHub Actions FTP (IMPORTANT):
   WEBSITE_COMPLIANCE_UPLOADS_ORIGIN=https://sharedhub.fin-proms.com/api
   SCHEDULER_SECRET=<long random secret>
   BANK_TRANSFER_ENABLED=false
+
+  After Central is live, strip leftover control-plane registry from this DB:
+    php artisan migrate --force
+    php artisan hub:strip-control-plane --force
 
   WARNING: Do NOT copy .env.example over production .env.
   WARNING: Do NOT run php artisan key:generate if APP_KEY already exists.
@@ -95,20 +146,20 @@ Smoke tests:
 
 
 ================================================================================
-3. WHITE-LABEL HUB — https://myhub.fin-proms.com
+3. WHITE-LABEL HUB â€” https://myhub.fin-proms.com
 ================================================================================
 
 cPanel user example: myhubfinproms
 Suggested slug: myhub
 
-Step A — Create hub on SHARED Power Admin first:
-  sharedhub → Power Admin → White-label hubs
-  Create hub with slug: myhub
+Step A â€” Create hub on CENTRAL Power Admin first:
+  Central â†’ Power Admin â†’ Hubs
+  Create White-labelled hub with slug: myhub
   Keep Active
 
-Step B — Own database on myhub cPanel (NOT shared DB)
+Step B â€” Own database on myhub cPanel (NOT shared DB)
 
-Step C — Backend in myhub public_html/api (same code)
+Step C â€” Backend in myhub public_html/api (same code)
 
 .env essentials (myhub public_html/api/.env):
   APP_ENV=production
@@ -117,6 +168,8 @@ Step C — Backend in myhub public_html/api (same code)
   FRONTEND_URL=https://myhub.fin-proms.com
   SANCTUM_STATEFUL_DOMAINS=myhub.fin-proms.com
   HUB_SLUG=myhub
+  HUB_TYPE=white_label
+  HUB_IS_CONTROL_PLANE=false
   DB_HOST=localhost
   DB_DATABASE=<myhub cPanel DB name>
   DB_USERNAME=<myhub cPanel DB user>
@@ -127,18 +180,18 @@ Step C — Backend in myhub public_html/api (same code)
   SCHEDULER_SECRET=<different long secret>
   BANK_TRANSFER_ENABLED=false
 
-  WARNING: DB_HOST must be "localhost" (not "loaclhost" — typo causes 500).
+  WARNING: DB_HOST must be "localhost" (not "loaclhost" â€” typo causes 500).
 
 Same artisan commands as shared (migrate/seed/config cache).
 Upload updated HubSeeder.php so HUB_SLUG=myhub is seeded (not only "shared").
 
-Step D — Frontend for myhub:
+Step D â€” Frontend for myhub:
   From hub-finproms-frontend:
     npm run build:myhub
-  Upload folder: dist-myhub/* → myhub public_html/
+  Upload folder: dist-myhub/* â†’ myhub public_html/
   API baked in as: https://myhub.fin-proms.com/api
 
-Step E — Wire on SHARED Power Admin (hub detail → deploy wiring):
+Step E â€” Wire on CENTRAL Power Admin (hub detail â†’ deploy wiring):
   Frontend URL:  https://myhub.fin-proms.com
   API URL:       https://myhub.fin-proms.com
   DB driver:     mysql
@@ -157,7 +210,7 @@ Smoke tests:
 
 
 ================================================================================
-4. public_html/.htaccess (BOTH hubs — Option B)
+4. public_html/.htaccess (BOTH hubs â€” Option B)
 ================================================================================
 Copy this into public_html/.htaccess (domain root, next to frontend):
 
@@ -169,7 +222,7 @@ Copy this into public_html/.htaccess (domain root, next to frontend):
   RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
   SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
 
-  # Already the real file path — stop here (prevents rewrite loops / 500)
+  # Already the real file path â€” stop here (prevents rewrite loops / 500)
   RewriteRule ^api/storage/app/public/ - [L]
 
   # Map public asset URLs to the real disk folder under the Laravel app
@@ -193,7 +246,7 @@ Copy this into public_html/.htaccess (domain root, next to frontend):
 - Uploads are stored in: api/storage/app/public/hubs/logos|favicons/
 - On cPanel, public/storage symlink is often broken after zip upload.
 - Prefer FILESYSTEM_PUBLIC_URL=https://<domain>/api/media
-  (served by PublicStorageController — no symlink required)
+  (served by PublicStorageController â€” no symlink required)
 - Also keep .htaccess storage rules above as backup.
 - After changing .env:
     php artisan config:clear
@@ -204,7 +257,7 @@ Copy this into public_html/.htaccess (domain root, next to frontend):
   the tenant hubs row (not relative paths). Shared must have a correct
   FILESYSTEM_PUBLIC_URL / APP_URL so those URLs are publicly reachable.
 - After deploying this sync fix, re-save logo/favicon once from Shared so
-  the white-label DB gets absolute URLs (or wait ≤60s for hub cache).
+  the white-label DB gets absolute URLs (or wait â‰¤60s for hub cache).
 
 Test logo URL examples:
   https://sharedhub.fin-proms.com/api/media/hubs/logos/<filename>
@@ -236,23 +289,23 @@ cd Desktop/hub-finproms-frontend
 
 Shared:
   npm run build
-  # or: npm run build:shared  → dist-shared/
-  Uses .env.production → https://sharedhub.fin-proms.com/api
+  # or: npm run build:shared  â†’ dist-shared/
+  Uses .env.production â†’ https://sharedhub.fin-proms.com/api
 
 Myhub:
   npm run build:myhub
-  → dist-myhub/
-  Uses .env.myhub → https://myhub.fin-proms.com/api
+  â†’ dist-myhub/
+  Uses .env.myhub â†’ https://myhub.fin-proms.com/api
 
 Local dev:
   .env keeps VITE_API_URL=http://127.0.0.1:8000/api
 
 
 ================================================================================
-8. WEBSITE COMPLIANCE — TEMPLATE4 SHOWCASE (myhub)
+8. WEBSITE COMPLIANCE â€” TEMPLATE4 SHOWCASE (myhub)
 ================================================================================
 template4 is owned by the myhub white-label deploy only.
-Do NOT seed or host it on sharedhub — shared DB must not store template4 rows.
+Do NOT seed or host it on sharedhub â€” shared DB must not store template4 rows.
 
 Deploy Desktop/template4-showcase to:
   https://myhub.fin-proms.com/template4/
@@ -304,13 +357,13 @@ from database/data/website-compliance/template4-dummy-content.json
 (Hero per-slide content, What we do boxes, etc.).
 
 Hub ownership (config/services.php hub_showcase_templates):
-  myhub  → template4
-  shared → (none)
+  myhub  â†’ template4
+  shared â†’ (none)
 Override per deploy with WC_SHOWCASE_TEMPLATES=slug1,slug2 if needed.
 
 Power Admin on sharedhub with hub switcher set to myhub reads/writes myhub's
 wc_* tables over the remote DB credentials on the hub registry. Ensure myhub
-has Remote database configured in Power Admin → Hub deploy wiring.
+has Remote database configured in Power Admin â†’ Hub deploy wiring.
 
 Update preview URL in DB (or re-seed WC templates):
   UPDATE wc_templates SET preview_url='https://myhub.fin-proms.com/template4/'
@@ -325,24 +378,24 @@ Root public_html/.htaccess already skips real directories (!-d), so /template4/
 will not be swallowed by the SPA once the folder exists.
 
 ================================================================================
-8b. WEBSITE COMPLIANCE — ADVISOR LIVE SITE (cPanel deploy)
+8b. WEBSITE COMPLIANCE â€” ADVISOR LIVE SITE (cPanel deploy)
 ================================================================================
 Advisor sites are a SEPARATE copy of template4-showcase + a LOCAL MySQL DB.
 Never reuse the myhub showcase cpanel-config.php on an advisor account.
 
 ----- A) On the advisor cPanel (one-time file setup) -----
-1. Create a MySQL database + user for THIS advisor (cPanel → MySQL Databases).
+1. Create a MySQL database + user for THIS advisor (cPanel â†’ MySQL Databases).
 2. Build the template locally:
      cd Desktop/template4-showcase
      npm install && npm run build
 3. Upload dist/* to the advisor document root, e.g.:
      public_html/   OR   public_html/template4/
    (Must include index.html, assets/, api.php, includes/, data/, .htaccess)
-4. Copy public/cpanel-config.advisor.example.php → cpanel-config.php next to api.php
+4. Copy public/cpanel-config.advisor.example.php â†’ cpanel-config.php next to api.php
    Set at minimum:
      DEPLOYMENT_MODE = advisor
      SECRET_API_KEY  = a shared secret you will also paste in the Deploy form
-     DB_*            = the advisor MySQL you created (or leave placeholders —
+     DB_*            = the advisor MySQL you created (or leave placeholders â€”
                        Deploy form can write them via write_config)
      UPLOADS_ORIGIN / LARAVEL_API_URL = https://myhub.fin-proms.com/api
      SITE_URL        = https://<advisor-domain>
@@ -350,7 +403,7 @@ Never reuse the myhub showcase cpanel-config.php on an advisor account.
 Smoke: open https://<advisor-domain>/api.php  (or .../template4/api.php)
 
 ----- B) Power Admin on sharedhub (hub switcher = myhub) -----
-1. Website Compliance → Deploy hub → open the pending advisor request
+1. Website Compliance â†’ Deploy hub â†’ open the pending advisor request
 2. Deploy to cPanel and fill:
      Site URL     = https://<advisor-domain>   (or .../template4 if nested)
      DB host      = localhost
@@ -370,11 +423,11 @@ If it says sync failed: check shared laravel.log and that
 ----- C) Verify -----
 - Live site: https://<advisor-domain>/
 - Branding (logo/favicon/colors) from the request should appear
-- Advisor can edit sections in myhub dashboard; PA approves → push to cPanel
+- Advisor can edit sections in myhub dashboard; PA approves â†’ push to cPanel
 
 
 ================================================================================
-9. OPTIONAL — SCHEDULER (Website Compliance scheduled publish)
+9. OPTIONAL â€” SCHEDULER (Website Compliance scheduled publish)
 ================================================================================
 cPanel Cron (every minute), per hub:
   cd /home/<cpanel_user>/public_html/api && php artisan schedule:run >> /dev/null 2>&1
@@ -396,7 +449,7 @@ Or temporarily:
 
 
 ================================================================================
-11. CHECKLIST — NEW WHITE-LABEL HUB
+11. CHECKLIST â€” NEW WHITE-LABEL HUB
 ================================================================================
 [ ] Create hub in Shared Power Admin (note slug)
 [ ] Point domain / SSL

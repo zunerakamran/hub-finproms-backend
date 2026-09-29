@@ -566,15 +566,15 @@ class HubContentController extends Controller
     private function assertCanControl(Request $request): void
     {
         $current = $this->hubs->current();
-        if (! $current->isShared()) {
-            throw new HttpException(403, 'Controlling white-labelled hubs is only available from the shared hub.');
+        if (! $current->isControlPlane()) {
+            throw new HttpException(403, 'Controlling hubs remotely is only available from the Central Hub Controller.');
         }
 
         $user = $request->user();
         if (! $user || ! $this->actingHubs->canControl($user)) {
             throw new HttpException(
                 403,
-                'Enable “Control white labelled hubs” in Capabilities to use this.'
+                'Enable “Control hubs remotely” in Capabilities to use this.'
             );
         }
     }

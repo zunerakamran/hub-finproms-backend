@@ -18,11 +18,11 @@ class WhiteLabelFirmService
 
     public function assertTarget(Hub $hub): void
     {
-        if ($hub->isShared()) {
-            throw new InvalidArgumentException('Select a white-labelled hub, not the shared hub.');
+        if ($hub->isControlPlane() || ! $hub->isContentHub()) {
+            throw new InvalidArgumentException('Select a Shared or White-labelled hub, not Central Hub.');
         }
         if (! $hub->is_active) {
-            throw new InvalidArgumentException('That white-labelled hub is inactive.');
+            throw new InvalidArgumentException('That hub is inactive.');
         }
         $this->remoteDb->assertConfigured($hub);
     }

@@ -9,19 +9,20 @@ use InvalidArgumentException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
 /**
- * Shared-hub "acting hub" context for Control white labelled hubs.
- * Selecting a white-labelled hub scopes dashboard users and content tools to that hub's DB.
+ * Central Hub Controller "acting hub" context for remote hub control.
+ * Selecting a Shared or White-labelled hub scopes dashboard users and content
+ * tools to that hub's own database.
  */
 class ActingHubService
 {
     public const CAPABILITY = 'dashboard_control_white_label_hubs';
 
     /**
-     * These roles only exist as users on the shared hub. The hub switcher
-     * capability (`dashboard_control_white_label_hubs`) always lives on shared.
+     * These roles only exist as users on the Central Hub Controller.
+     * The hub switcher capability always lives on the control plane.
      * All other hub dashboard / compliance matrix cells for these roles are
-     * stored per hub — including each white-labelled — so the navbar follows the
-     * selected hub's Capabilities matrix (see PROJECT_REQUIREMENTS §4.4).
+     * stored per hub — including each Shared / White-labelled — so the navbar
+     * follows the selected hub's Capabilities matrix (see PROJECT_REQUIREMENTS §4.4).
      *
      * @var list<string>
      */
@@ -39,7 +40,7 @@ class ActingHubService
     public function canControl(User $user): bool
     {
         $current = $this->hubs->current();
-        if (! $current->isShared()) {
+        if (! $current->isControlPlane()) {
             return false;
         }
 
@@ -47,7 +48,7 @@ class ActingHubService
     }
 
     /**
-     * Hub the user is currently operating (shared by default).
+     * Hub the user is currently operating (Central by default; or selected content hub).
      */
     public function actingHub(User $user): Hub
     {
@@ -68,7 +69,8 @@ class ActingHubService
             return $current;
         }
 
-        if ($hub->isShared()) {
+        // Selecting the control plane itself (or its own registry row) = home.
+        if ($hub->isControlPlane() || (int) $hub->id === (int) $current->id) {
             return $current;
         }
 
@@ -81,9 +83,22 @@ class ActingHubService
             return false;
         }
 
-        $hub = $this->actingHub($user);
+        return $this->actingHub($user)->isWhiteLabel();
+    }
 
-        return $hub->isWhiteLabel();
+    /**
+     * True when the switcher is on a remote content hub (Shared or White-label).
+     */
+    public function isActingRemotely(User $user): bool
+    {
+        if (! $this->canControl($user)) {
+            return false;
+        }
+
+        $acting = $this->actingHub($user);
+        $current = $this->hubs->current();
+
+        return (int) $acting->id !== (int) $current->id && $acting->isContentHub();
     }
 
     public static function isControlPlaneRole(string $role): bool
@@ -93,7 +108,7 @@ class ActingHubService
 
     /**
      * Hub whose data this request should read/write.
-     * Explicit hub_id wins; otherwise the switcher white-labelled hub; otherwise this deploy.
+     * Explicit hub_id wins; otherwise the switcher content hub; otherwise this deploy.
      */
     public function targetHub(?User $user, ?int $hubId = null): Hub
     {
@@ -106,7 +121,7 @@ class ActingHubService
             return $hub;
         }
 
-        if ($user && $this->isActingOnWhiteLabel($user)) {
+        if ($user && $this->isActingRemotely($user)) {
             return $this->actingHub($user);
         }
 
@@ -114,23 +129,23 @@ class ActingHubService
     }
 
     /**
-     * Capability checks for hub-level flags follow the acting white-labelled hub.
-     * Only the shared-hub switcher capability stays on the shared deploy hub.
+     * Capability checks for hub-level flags follow the acting content hub.
+     * Only the control-plane switcher capability stays on Central.
      */
     public function capabilityHub(User $user, string $capability): Hub
     {
         $current = $this->hubs->current();
 
-        // Hub switcher itself is always a shared-hub capability.
+        // Hub switcher itself is always a control-plane capability.
         if ($capability === self::CAPABILITY) {
             return $current;
         }
 
-        if (! $this->isActingOnWhiteLabel($user)) {
+        if (! $this->isActingRemotely($user)) {
             return $current;
         }
 
-        // While a white-labelled is selected, modules / functionalities / role
+        // While a content hub is selected, modules / functionalities / role
         // matrix cells (including Power Admin / FinProms) follow that hub.
         if (Hub::isModuleKey($capability)
             || Hub::isFunctionalityKey($capability)
@@ -150,7 +165,7 @@ class ActingHubService
         if (! $this->canControl($user)) {
             throw new HttpException(
                 403,
-                'Enable “Control white labelled hubs” in Capabilities to use the hub switcher.'
+                'Enable “Control hubs remotely” in Capabilities to use the hub switcher.'
             );
         }
 
@@ -163,6 +178,12 @@ class ActingHubService
         }
 
         $hub = Hub::query()->findOrFail($hubId);
+        if ($hub->isControlPlane()) {
+            $this->clearActingHub($user);
+
+            return $current->fresh() ?? $current;
+        }
+
         $this->assertSelectable($hub);
 
         $user->forceFill(['acting_hub_id' => $hub->id])->save();
@@ -180,41 +201,48 @@ class ActingHubService
     }
 
     /**
-     * Hubs shown in the switcher (shared + white-labelleds).
+     * Hubs shown in the switcher (Central home + Shared + White-labelleds).
      *
      * @return list<array<string, mixed>>
      */
     public function switcherHubs(): array
     {
-        $shared = $this->hubs->current();
+        $current = $this->hubs->current();
         $items = [];
 
-        if ($shared->isShared()) {
+        if ($current->isControlPlane()) {
             $items[] = [
-                'id' => $shared->id,
-                'name' => $shared->name,
-                'slug' => $shared->slug,
-                'type' => Hub::TYPE_SHARED,
+                'id' => $current->id,
+                'name' => $current->name,
+                'slug' => $current->slug,
+                'type' => $current->type,
                 'eligible' => true,
-                'label' => $shared->name.' (shared)',
+                'label' => $current->name.' (central)',
             ];
         }
 
         foreach (
             Hub::query()
-                ->where('type', Hub::TYPE_WHITE_LABEL)
+                ->whereIn('type', [Hub::TYPE_SHARED, Hub::TYPE_WHITE_LABEL])
                 ->where('is_active', true)
+                ->orderByRaw('CASE WHEN type = ? THEN 0 ELSE 1 END', [Hub::TYPE_SHARED])
                 ->orderBy('name')
                 ->get() as $hub
         ) {
+            // Skip the current control-plane row if it somehow shares type (legacy).
+            if ((int) $hub->id === (int) $current->id) {
+                continue;
+            }
+
             $eligible = $hub->can('receive_content_from_shared') && $hub->hasRemoteDatabaseConfigured();
+            $typeLabel = $hub->isShared() ? 'shared' : 'white-label';
             $items[] = [
                 'id' => $hub->id,
                 'name' => $hub->name,
                 'slug' => $hub->slug,
-                'type' => Hub::TYPE_WHITE_LABEL,
+                'type' => $hub->type,
                 'eligible' => $eligible,
-                'label' => $hub->name.($eligible ? '' : ' (not ready)'),
+                'label' => $hub->name.($eligible ? " ({$typeLabel})" : ' (not ready)'),
                 'reason' => $eligible ? null : $this->ineligibleReason($hub),
             ];
         }
@@ -225,7 +253,7 @@ class ActingHubService
     /**
      * Effective capabilities for the dashboard while a hub is selected.
      * Hub modules / functionalities / role matrix cells follow the acting
-     * tenant. Only `dashboard_control_white_label_hubs` stays on shared.
+     * tenant. Only `dashboard_control_white_label_hubs` stays on Central.
      *
      * @return array<string, bool>
      */
@@ -242,7 +270,7 @@ class ActingHubService
             $effective[$flag] = $this->matrix->userCan($hubForFlag, $user, $flag);
         }
 
-        // Always expose the control flag from the shared deploy hub.
+        // Always expose the control flag from the control-plane deploy hub.
         $effective[self::CAPABILITY] = $this->matrix->userCan($current, $user, self::CAPABILITY);
 
         if ($user->isPowerAdmin()) {
@@ -267,6 +295,7 @@ class ActingHubService
 
         $current = $this->hubs->current();
         $acting = $this->actingHub($user);
+        $actingRemotely = $this->isActingRemotely($user);
 
         return [
             'enabled' => true,
@@ -278,12 +307,22 @@ class ActingHubService
                 'slug' => $acting->slug,
                 'type' => $acting->type,
                 'is_white_label' => $acting->isWhiteLabel(),
+                'is_shared' => $acting->isShared(),
+                'is_content_hub' => $acting->isContentHub(),
                 'frontend_url' => $acting->frontendBaseUrl(),
                 'branding' => $acting->brandingPayload(),
                 'role_labels' => $acting->resolvedRoleLabels(),
                 'compliance_status_labels' => $acting->resolvedComplianceStatusLabels(),
             ],
             'is_acting_on_white_label' => $acting->isWhiteLabel(),
+            'is_acting_remotely' => $actingRemotely,
+            'control_plane_hub' => [
+                'id' => $current->id,
+                'name' => $current->name,
+                'slug' => $current->slug,
+                'type' => $current->type,
+            ],
+            // Legacy alias for older frontends.
             'shared_hub' => [
                 'id' => $current->id,
                 'name' => $current->name,
@@ -296,22 +335,38 @@ class ActingHubService
     }
 
     /**
-     * Resolve and assert the acting white-labelled hub for content writes.
+     * Resolve and assert the acting white-labelled hub for WL-only writes.
      */
     public function requireActingWhiteLabel(User $user): Hub
+    {
+        $hub = $this->requireActingContentHub($user);
+        if (! $hub->isWhiteLabel()) {
+            throw new HttpException(
+                422,
+                'Select a white-labelled hub in the hub switcher for this action.'
+            );
+        }
+
+        return $hub;
+    }
+
+    /**
+     * Resolve and assert the acting content hub (Shared or White-label) for remote writes.
+     */
+    public function requireActingContentHub(User $user): Hub
     {
         if (! $this->canControl($user)) {
             throw new HttpException(
                 403,
-                'Enable “Control white labelled hubs” in Capabilities to manage white-labelled content.'
+                'Enable “Control hubs remotely” in Capabilities to manage remote hub content.'
             );
         }
 
         $hub = $this->actingHub($user);
-        if (! $hub->isWhiteLabel()) {
+        if (! $this->isActingRemotely($user) || ! $hub->isContentHub()) {
             throw new HttpException(
                 422,
-                'Select a white-labelled hub in the hub switcher first. Shared hub content uses the normal create APIs.'
+                'Select a Shared or White-labelled hub in the hub switcher first. Central Hub is control plane only.'
             );
         }
 
@@ -322,15 +377,19 @@ class ActingHubService
 
     public function assertSelectable(Hub $hub): void
     {
-        if ($hub->isShared()) {
+        if ($hub->isControlPlane()) {
             return;
         }
 
+        if (! $hub->isContentHub()) {
+            throw new InvalidArgumentException('That hub cannot be controlled remotely.');
+        }
+
         if (! $hub->is_active) {
-            throw new InvalidArgumentException('That white-labelled hub is inactive.');
+            throw new InvalidArgumentException('That hub is inactive.');
         }
         if (! $hub->can('receive_content_from_shared')) {
-            throw new InvalidArgumentException('That hub does not allow content from the shared hub.');
+            throw new InvalidArgumentException('That hub does not allow content from Central Hub.');
         }
         $this->remoteDb->assertConfigured($hub);
     }

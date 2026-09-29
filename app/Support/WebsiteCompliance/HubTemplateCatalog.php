@@ -117,7 +117,7 @@ class HubTemplateCatalog
             }
 
             $acting = app(ActingHubService::class);
-            if (! $acting->isActingOnWhiteLabel($user)) {
+            if (! $acting->isActingRemotely($user)) {
                 return null;
             }
 

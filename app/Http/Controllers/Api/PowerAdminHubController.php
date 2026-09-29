@@ -33,7 +33,11 @@ class PowerAdminHubController extends Controller
     public function index(): JsonResponse
     {
         $hubs = Hub::query()
-            ->orderByRaw('CASE WHEN type = ? THEN 0 ELSE 1 END', [Hub::TYPE_SHARED])
+            ->orderByRaw('CASE
+                WHEN type = ? THEN 0
+                WHEN type = ? THEN 1
+                ELSE 2
+            END', [Hub::TYPE_CENTRAL, Hub::TYPE_SHARED])
             ->orderBy('name')
             ->get()
             ->map(fn (Hub $hub) => $hub->toAdminArray())
@@ -53,6 +57,7 @@ class PowerAdminHubController extends Controller
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'slug' => ['nullable', 'string', 'max:255', 'alpha_dash', 'unique:hubs,slug'],
+            'type' => ['sometimes', 'string', Rule::in([Hub::TYPE_SHARED, Hub::TYPE_WHITE_LABEL])],
             'primary_color' => ['nullable', 'string', 'max:32'],
             'secondary_color' => ['nullable', 'string', 'max:32'],
             'logo_url' => ['nullable', 'string', 'max:2048'],
@@ -70,19 +75,31 @@ class PowerAdminHubController extends Controller
             'checklist' => ['sometimes', 'array'],
         ]);
 
+        $type = $validated['type'] ?? Hub::TYPE_WHITE_LABEL;
+        if ($type === Hub::TYPE_CENTRAL) {
+            return response()->json([
+                'message' => 'Cannot create another Central Hub Controller via the registry.',
+            ], 422);
+        }
+
         $slug = $validated['slug'] ?? Str::slug($validated['name']);
         if ($slug === '' || Hub::query()->where('slug', $slug)->exists()) {
             $slug = Str::slug($validated['name']).'-'.Str::lower(Str::random(4));
         }
+        if ($slug === 'central') {
+            return response()->json([
+                'message' => 'The slug “central” is reserved for the Central Hub Controller.',
+            ], 422);
+        }
 
         $checklist = array_key_exists('checklist', $validated)
-            ? $this->hubs->sanitizeChecklist($validated['checklist'], Hub::TYPE_WHITE_LABEL)
-            : Hub::defaultChecklist(Hub::TYPE_WHITE_LABEL);
+            ? $this->hubs->sanitizeChecklist($validated['checklist'], $type)
+            : Hub::defaultChecklist($type);
 
         $hub = Hub::query()->create([
             'name' => $validated['name'],
             'slug' => $slug,
-            'type' => Hub::TYPE_WHITE_LABEL,
+            'type' => $type,
             'is_active' => $validated['is_active'] ?? true,
             'primary_color' => $validated['primary_color'] ?? null,
             'secondary_color' => $validated['secondary_color'] ?? null,
@@ -105,8 +122,10 @@ class PowerAdminHubController extends Controller
             $moduleInvoices = $this->moduleBilling->invoiceEnabledModules($hub->fresh(), $request->user());
         }
 
+        $label = $type === Hub::TYPE_SHARED ? 'Shared hub' : 'White-labelled hub';
+
         return response()->json([
-            'message' => 'White-labelled hub created.',
+            'message' => $label.' created.',
             'hub' => $hub->fresh()->toAdminArray(),
             'module_invoices' => collect($moduleInvoices)->map(fn ($invoice) => [
                 'id' => $invoice->id,
@@ -162,14 +181,14 @@ class PowerAdminHubController extends Controller
             'subscriber_credits' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:1000000'],
         ]);
 
-        // Shared hub slug/type stay stable.
-        if ($hub->isShared() && array_key_exists('slug', $validated)) {
+        // Central / Shared control-plane rows stay stable.
+        if ($hub->isControlPlane() && array_key_exists('slug', $validated)) {
             unset($validated['slug']);
         }
 
-        if ($hub->isShared() && array_key_exists('is_active', $validated) && ! $validated['is_active']) {
+        if ($hub->isControlPlane() && array_key_exists('is_active', $validated) && ! $validated['is_active']) {
             return response()->json([
-                'message' => 'The shared hub cannot be deactivated.',
+                'message' => 'The Central Hub Controller cannot be deactivated.',
             ], 422);
         }
 
@@ -446,7 +465,7 @@ class PowerAdminHubController extends Controller
      */
     private function syncWhiteLabelSettings(?Hub $hub): void
     {
-        if (! $hub || $hub->isShared() || ! $hub->hasRemoteDatabaseConfigured()) {
+        if (! $hub || $hub->isControlPlane() || ! $hub->hasRemoteDatabaseConfigured()) {
             return;
         }
 

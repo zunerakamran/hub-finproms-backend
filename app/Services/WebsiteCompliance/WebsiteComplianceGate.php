@@ -118,7 +118,7 @@ class WebsiteComplianceGate
             return false;
         }
 
-        return $this->actingHubs->isActingOnWhiteLabel($user);
+        return $this->actingHubs->isActingRemotely($user);
     }
 
     /**

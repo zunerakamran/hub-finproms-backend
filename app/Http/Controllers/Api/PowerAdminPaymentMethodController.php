@@ -33,7 +33,11 @@ class PowerAdminPaymentMethodController extends Controller
                 'stripe' => $hub->stripeConfigForAdmin(),
             ],
             'hubs' => Hub::query()
-                ->orderByRaw('CASE WHEN type = ? THEN 0 ELSE 1 END', [Hub::TYPE_SHARED])
+                ->orderByRaw('CASE
+                WHEN type = ? THEN 0
+                WHEN type = ? THEN 1
+                ELSE 2
+            END', [Hub::TYPE_CENTRAL, Hub::TYPE_SHARED])
                 ->orderBy('name')
                 ->get(['id', 'name', 'slug', 'type'])
                 ->values(),

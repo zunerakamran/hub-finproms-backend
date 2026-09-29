@@ -22,7 +22,7 @@ class ActiveSessionService
      */
     public function targetHub(?User $actor): Hub
     {
-        if ($actor && $this->actingHubs->isActingOnWhiteLabel($actor)) {
+        if ($actor && $this->actingHubs->isActingRemotely($actor)) {
             return $this->actingHubs->requireActingWhiteLabel($actor);
         }
 
@@ -40,11 +40,11 @@ class ActiveSessionService
     {
         $hub = $this->targetHub($actor);
 
-        if ($hub->isWhiteLabel() && $this->actingHubs->isActingOnWhiteLabel($actor)) {
+        if ($hub->isContentHub() && $this->actingHubs->isActingRemotely($actor)) {
             $this->remoteDb->assertConfigured($hub);
 
             return $this->remoteDb->run($hub, function (string $connection) use ($hub, $actor) {
-                // Current token lives on the shared/local DB — never "current" on remote.
+                // Current token lives on the control-plane/local DB — never "current" on remote.
                 return $this->listOnConnection($connection, $hub, $actor, null);
             });
         }
@@ -66,7 +66,7 @@ class ActiveSessionService
     {
         $hub = $this->targetHub($actor);
 
-        if ($hub->isWhiteLabel() && $this->actingHubs->isActingOnWhiteLabel($actor)) {
+        if ($hub->isContentHub() && $this->actingHubs->isActingRemotely($actor)) {
             $this->remoteDb->assertConfigured($hub);
 
             return $this->remoteDb->run($hub, function (string $connection) use ($hub, $actor, $userId) {
@@ -143,8 +143,8 @@ class ActiveSessionService
                 ->sortDesc()
                 ->first();
 
-            $actingOnRemote = $hub->isWhiteLabel()
-                && $this->actingHubs->isActingOnWhiteLabel($actor);
+            $actingOnRemote = $hub->isContentHub()
+                && $this->actingHubs->isActingRemotely($actor);
             $isCurrentUser = ! $actingOnRemote
                 && (int) $user->id === (int) $actor->id;
 
@@ -204,7 +204,7 @@ class ActiveSessionService
 
         $loggedOutSelf = $currentTokenId !== null
             && (int) $user->id === (int) $actor->id
-            && ! ($hub->isWhiteLabel() && $this->actingHubs->isActingOnWhiteLabel($actor));
+            && ! ($hub->isContentHub() && $this->actingHubs->isActingRemotely($actor));
 
         try {
             $this->activityLogs->log([

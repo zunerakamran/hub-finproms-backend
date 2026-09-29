@@ -190,7 +190,7 @@ class ShowcaseSectionService
     {
         $connection = WcDatabaseContext::connection();
 
-        return $connection ? Schema::connection($connection) : Schema::connection();
+        return Schema::connection($connection ?: (string) config('database.default'));
     }
 
     public static function contentIsEmpty(mixed $content): bool

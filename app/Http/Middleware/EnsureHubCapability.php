@@ -80,8 +80,8 @@ class EnsureHubCapability
     }
 
     /**
-     * Power Admin / FinProms Admin are shared-hub only. While the switcher is on a
-     * white-labelled with Website Compliance enabled, allow WC route caps remotely.
+     * Power Admin / FinProms Admin are control-plane only. While the switcher is on a
+     * remote content hub with Website Compliance enabled, allow WC route caps remotely.
      */
     private function controlPlaneRemoteWebsiteComplianceAllows(User $user, Hub $hubForCap, string $capability): bool
     {
@@ -89,7 +89,7 @@ class EnsureHubCapability
             return false;
         }
 
-        if (! $this->actingHubs->isActingOnWhiteLabel($user)) {
+        if (! $this->actingHubs->isActingRemotely($user)) {
             return false;
         }
 
