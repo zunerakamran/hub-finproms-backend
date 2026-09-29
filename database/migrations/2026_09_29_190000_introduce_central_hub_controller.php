@@ -39,10 +39,11 @@ return new class extends Migration
                     'updated_at' => now(),
                 ]);
             } else {
-                // Also handle legacy slug=shared → rename to central when promoting.
+                // HUB_SLUG=central with only a legacy slug=shared row → rename it.
+                // Do this whenever promoting to Central (not only with HUB_PROMOTE_TO_CENTRAL).
                 if ($slug === 'central') {
                     $legacy = DB::table('hubs')->where('slug', 'shared')->where('type', 'shared')->first();
-                    if ($legacy && filter_var(env('HUB_PROMOTE_TO_CENTRAL', false), FILTER_VALIDATE_BOOLEAN)) {
+                    if ($legacy) {
                         DB::table('hubs')->where('id', $legacy->id)->update([
                             'slug' => 'central',
                             'type' => Hub::TYPE_CENTRAL,

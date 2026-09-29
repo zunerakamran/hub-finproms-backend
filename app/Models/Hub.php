@@ -816,7 +816,7 @@ class Hub extends Model
         // --- Member capabilities ---
         'member_view_site_pages' => [
             'label' => 'View website pages (outside Dashboard)',
-            'description' => 'Allow opening the public/member website (home, posts, reels, bundles, plans, etc.). When off, the user only uses Dashboard tools. Default OFF on Central Hub Controller (control plane has no member website).',
+            'description' => 'Allow opening the public/member website (home, posts, reels, bundles, plans, etc.). When off, the user only uses Dashboard tools. Default OFF on Central Hub Controller; enable it (and Browse catalog / View plans) if you want the public site shell on Central.',
             'group' => self::GROUP_MEMBER,
             'default_shared' => true,
             'default_white_label' => true,

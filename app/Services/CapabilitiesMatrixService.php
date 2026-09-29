@@ -115,10 +115,8 @@ class CapabilitiesMatrixService
     {
         $power = $this->powerCapabilities->resolved();
         $roleCaps = $this->resolvedRoleCapabilities($hub);
-        $shared = $this->sharedHub();
-        $sharedRoleCaps = $hub->isWhiteLabel()
-            ? $this->resolvedRoleCapabilities($shared)
-            : $roleCaps;
+        $controlPlane = $this->controlPlaneHub();
+        $controlPlaneRoleCaps = $this->resolvedRoleCapabilities($controlPlane);
         $privateMode = $hub->isPrivateInviteOnly();
         $publicMode = $hub->isPublicSubscribe();
 
@@ -166,6 +164,9 @@ class CapabilitiesMatrixService
         $wtlModuleOn = $hub->hasWebsiteTemplateLibraryModule();
         $smtlModuleOn = $hub->hasSocialMediaTemplateLibraryModule();
         $modulePricingOn = $hub->can('charge_amount_per_module');
+        // Central has no product modules — do not grey-out hub-ops tools that are
+        // used for remote control / registry (modules page, firms, switcher, etc.).
+        $isCentralHub = $hub->isCentral();
 
         $groupSort = [];
         foreach (Hub::MATRIX_GROUP_ORDER as $index => $groupKey) {
@@ -190,20 +191,36 @@ class CapabilitiesMatrixService
             $requiresWtlModule = Hub::isWebsiteTemplateLibraryCapability($key);
             $requiresSmtlModule = Hub::isSocialMediaTemplateLibraryCapability($key);
             $requiresModulePricing = Hub::isModulePricingCapability($key);
-            $inactive = ($requiresPrivate && $publicMode)
-                || ($requiresPublic && $privateMode)
-                || ($requiresSmcModule && ! $smcModuleOn)
-                || ($requiresGcModule && ! $gcModuleOn)
-                || ($requiresWcModule && ! $wcModuleOn)
-                || ($requiresWtlModule && ! $wtlModuleOn)
-                || ($requiresSmtlModule && ! $smtlModuleOn)
-                || ($requiresModulePricing && ! $modulePricingOn);
+
+            // Central: product-module sections (SMC/GC/WC/WTL) stay inactive while
+            // those modules are off. Member / general caps (incl. View website pages)
+            // are editable — Power Admin may opt into a public site shell on Central.
+            $inactive = false;
+            if ($isCentralHub) {
+                if ($requiresSmcModule
+                    || $requiresGcModule
+                    || $requiresWcModule
+                    || $requiresWtlModule
+                    || ($requiresModulePricing && ! $modulePricingOn)
+                ) {
+                    $inactive = true;
+                }
+                // SMTL-gated *dashboard* tools stay usable for remote-control config;
+                // SMTL-gated *member* caps are editable too (site shell / catalog nav).
+            } else {
+                $inactive = ($requiresPrivate && $publicMode)
+                    || ($requiresPublic && $privateMode)
+                    || ($requiresSmcModule && ! $smcModuleOn)
+                    || ($requiresGcModule && ! $gcModuleOn)
+                    || ($requiresWcModule && ! $wcModuleOn)
+                    || ($requiresWtlModule && ! $wtlModuleOn)
+                    || ($requiresSmtlModule && ! $smtlModuleOn)
+                    || ($requiresModulePricing && ! $modulePricingOn);
+            }
 
             $inactiveReason = null;
             if ($inactive) {
-                if ($requiresSmtlModule && ! $smtlModuleOn) {
-                    $inactiveReason = 'module_social_media_template_library_off';
-                } elseif ($requiresSmcModule && ! $smcModuleOn) {
+                if ($requiresSmcModule && ! $smcModuleOn) {
                     $inactiveReason = 'module_social_media_compliance_off';
                 } elseif ($requiresGcModule && ! $gcModuleOn) {
                     $inactiveReason = 'module_general_compliance_off';
@@ -213,6 +230,8 @@ class CapabilitiesMatrixService
                     $inactiveReason = 'module_website_compliance_off';
                 } elseif ($requiresModulePricing && ! $modulePricingOn) {
                     $inactiveReason = 'charge_amount_per_module_off';
+                } elseif ($requiresSmtlModule && ! $smtlModuleOn) {
+                    $inactiveReason = 'module_social_media_template_library_off';
                 } elseif ($requiresPrivate) {
                     $inactiveReason = 'private_only';
                 } else {
@@ -226,9 +245,9 @@ class CapabilitiesMatrixService
                 $applicable = in_array($role, $applicableRoles, true);
                 $enabled = false;
                 if ($applicable) {
-                    // Hub switcher flag always reflects the shared hub matrix.
+                    // Hub switcher flag always reflects the control-plane (Central) matrix.
                     if ($key === ActingHubService::CAPABILITY) {
-                        $enabled = (bool) ($sharedRoleCaps[$role][$key] ?? false);
+                        $enabled = (bool) ($controlPlaneRoleCaps[$role][$key] ?? false);
                     } else {
                         $enabled = (bool) ($roleCaps[$role][$key] ?? false);
                     }
@@ -301,8 +320,11 @@ class CapabilitiesMatrixService
                 'name' => $hub->name,
                 'slug' => $hub->slug,
                 'type' => $hub->type,
+                'is_central' => $hub->isCentral(),
+                'is_control_plane' => $hub->isControlPlane(),
                 'private_invite_only' => $privateMode,
                 'public_subscribe' => $publicMode,
+                'module_central_hub' => $hub->isCentral(),
                 'module_white_label_hub' => $hub->hasWhiteLabelHubModule(),
                 'module_shared_hub' => $hub->hasSharedHubModule(),
                 'module_social_media_template_library' => $smtlModuleOn,
@@ -314,8 +336,9 @@ class CapabilitiesMatrixService
             ],
             'control_plane_roles' => ActingHubService::CONTROL_PLANE_ROLES,
             'control_plane_hub' => [
-                'id' => $shared->id,
-                'slug' => $shared->slug,
+                'id' => $controlPlane->id,
+                'slug' => $controlPlane->slug,
+                'type' => $controlPlane->type,
             ],
             'private_capability_keys' => Hub::PRIVATE_CAPABILITY_KEYS,
             'public_capability_keys' => Hub::PUBLIC_CAPABILITY_KEYS,
@@ -343,6 +366,10 @@ class CapabilitiesMatrixService
      */
     public function update(Hub $hub, array $payload, ?Hub $actingWhiteLabel = null): array
     {
+        // $actingWhiteLabel retained for call-site compatibility; matrix always
+        // saves onto $hub (the selected registry row).
+        unset($actingWhiteLabel);
+
         // Functionalities (formerly hub behaviour) are edited on the Hub checklist
         // screen only — ignore any legacy behaviour payload here.
 
@@ -361,14 +388,11 @@ class CapabilitiesMatrixService
             }
         }
 
-        $shared = $this->sharedHub();
-        if ($hub->isWhiteLabel()) {
-            $tenantHub = $hub;
-        } elseif ($actingWhiteLabel) {
-            $tenantHub = $actingWhiteLabel;
-        } else {
-            $tenantHub = $shared;
-        }
+        $controlPlane = $this->controlPlaneHub();
+        // Always persist the matrix onto the hub being edited (Central, Shared, or WL).
+        // Previously Shared edits were redirected onto the control-plane hub after
+        // Central was introduced, so enabled cells never appeared on the right hub.
+        $tenantHub = $hub;
 
         $matrixInput = isset($payload['matrix']) && is_array($payload['matrix'])
             ? $payload['matrix']
@@ -383,7 +407,7 @@ class CapabilitiesMatrixService
             array_flip(ActingHubService::CONTROL_PLANE_ROLES)
         );
 
-        // Hub switcher capability always lives on the shared hub.
+        // Hub switcher capability always lives on the Central / control-plane hub.
         $switcherInput = [];
         foreach (ActingHubService::CONTROL_PLANE_ROLES as $role) {
             if (! isset($controlPlaneInput[$role]) || ! is_array($controlPlaneInput[$role])) {
@@ -401,19 +425,26 @@ class CapabilitiesMatrixService
             }
         }
         if ($switcherInput !== []) {
-            $this->applyRoleMatrix($shared, $switcherInput, ActingHubService::CONTROL_PLANE_ROLES);
+            $this->applyRoleMatrix($controlPlane, $switcherInput, ActingHubService::CONTROL_PLANE_ROLES);
         }
 
-        if ($tenantHub->is($shared)) {
-            $this->applyRoleMatrix($shared, $controlPlaneInput, ActingHubService::CONTROL_PLANE_ROLES);
-            $this->applyRoleMatrix($shared, $tenantInput, $this->tenantRoles());
+        if ($tenantHub->isControlPlane() || (int) $tenantHub->id === (int) $controlPlane->id) {
+            $this->applyRoleMatrix($controlPlane, $controlPlaneInput, ActingHubService::CONTROL_PLANE_ROLES);
+            $this->applyRoleMatrix($controlPlane, $tenantInput, $this->tenantRoles());
         } else {
-            // Power Admin / FinProms hub tools are per white-labelled hub so the
-            // shared dashboard navbar follows that hub while it is selected.
+            // Power Admin / FinProms hub tools are per content hub so the
+            // dashboard navbar follows that hub while it is selected.
             $this->applyRoleMatrix($tenantHub, $controlPlaneInput, ActingHubService::CONTROL_PLANE_ROLES);
             $this->applyRoleMatrix($tenantHub, $tenantInput, $this->tenantRoles());
-            if ($tenantHub->hasRemoteDatabaseConfigured()) {
+            if ($tenantHub->isWhiteLabel() && $tenantHub->hasRemoteDatabaseConfigured()) {
                 app(WhiteLabelHubSyncService::class)->pushSettings($tenantHub->fresh());
+            } elseif ($tenantHub->isShared() && $tenantHub->hasRemoteDatabaseConfigured()) {
+                // Shared content hub with remote DB wiring — push role matrix remotely.
+                try {
+                    app(WhiteLabelHubSyncService::class)->pushSettings($tenantHub->fresh());
+                } catch (\Throwable $e) {
+                    report($e);
+                }
             }
         }
 
@@ -433,7 +464,7 @@ class CapabilitiesMatrixService
         ));
     }
 
-    private function sharedHub(): Hub
+    private function controlPlaneHub(): Hub
     {
         $current = app(HubService::class)->current();
         if ($current->isControlPlane()) {
@@ -441,8 +472,17 @@ class CapabilitiesMatrixService
         }
 
         return Hub::query()->where('type', Hub::TYPE_CENTRAL)->first()
+            ?? Hub::query()->where('type', Hub::TYPE_SHARED)->where('slug', 'shared')->first()
             ?? Hub::query()->where('type', Hub::TYPE_SHARED)->first()
             ?? $current;
+    }
+
+    /**
+     * @deprecated Use controlPlaneHub() — kept for any lingering call sites.
+     */
+    private function sharedHub(): Hub
+    {
+        return $this->controlPlaneHub();
     }
 
     /**
@@ -474,6 +514,27 @@ class CapabilitiesMatrixService
                     continue;
                 }
                 $roleCaps[$role][$key] = filter_var($value, FILTER_VALIDATE_BOOLEAN);
+            }
+        }
+
+        // Central: turning on “View website pages” also unlocks catalog/plans nav
+        // for that role (unless this same save explicitly turned those off).
+        if ($hub->isCentral()) {
+            foreach ($roles as $role) {
+                if (empty($roleCaps[$role]['member_view_site_pages'])) {
+                    continue;
+                }
+                $inputForRole = (isset($matrixInput[$role]) && is_array($matrixInput[$role]))
+                    ? $matrixInput[$role]
+                    : [];
+                foreach (['member_browse_catalog', 'member_view_plans'] as $companion) {
+                    if (array_key_exists($companion, $inputForRole)
+                        && ! filter_var($inputForRole[$companion], FILTER_VALIDATE_BOOLEAN)
+                    ) {
+                        continue;
+                    }
+                    $roleCaps[$role][$companion] = true;
+                }
             }
         }
 
@@ -689,43 +750,9 @@ class CapabilitiesMatrixService
         $defaults = $this->defaultRoleCapabilities($hub->type);
         $stored = is_array($hub->role_capabilities) ? $hub->role_capabilities : [];
 
-        // Bootstrap from legacy checklist if role_capabilities empty
+        // Empty role_capabilities: use typed defaults (do NOT overwrite from the
+        // hub checklist OR-flags — that wiped Power Admin defaults on Central).
         if ($stored === []) {
-            $checklist = $hub->resolvedChecklist();
-            foreach (Hub::CHECKLIST_DEFINITIONS as $key => $meta) {
-                if (($meta['group'] ?? null) === Hub::GROUP_BEHAVIOUR) {
-                    continue;
-                }
-                $enabled = (bool) ($checklist[$key] ?? false);
-                foreach ($this->rolesForCapability($key) as $role) {
-                    $defaults[$role][$key] = $enabled;
-                }
-            }
-
-            // Remaining roles must not inherit hub-wide dashboard / admin-email OR flags.
-            foreach ([User::ROLE_APPROVER, User::ROLE_ADVISOR, User::ROLE_ADMIN_STAFF, User::ROLE_USER] as $role) {
-                foreach (Hub::CHECKLIST_DEFINITIONS as $key => $meta) {
-                    $group = $meta['group'] ?? null;
-                    if (Hub::isDashboardCapabilityGroup($group) || $group === Hub::GROUP_ADMIN_EMAILS) {
-                        $defaults[$role][$key] = false;
-                    }
-                }
-            }
-
-            // Social Media Compliance never inherits from hub OR checklist on bootstrap.
-            foreach (self::MATRIX_ROLES as $role) {
-                foreach (Hub::SOCIAL_MEDIA_COMPLIANCE_CAPABILITY_KEYS as $key) {
-                    $defaults[$role][$key] = false;
-                }
-            }
-
-            // General Compliance never inherits from hub OR checklist on bootstrap.
-            foreach (self::MATRIX_ROLES as $role) {
-                foreach (Hub::GENERAL_COMPLIANCE_CAPABILITY_KEYS as $key) {
-                    $defaults[$role][$key] = false;
-                }
-            }
-
             return $defaults;
         }
 
@@ -733,6 +760,24 @@ class CapabilitiesMatrixService
             foreach ($caps as $key => $default) {
                 if (isset($stored[$role]) && is_array($stored[$role]) && array_key_exists($key, $stored[$role])) {
                     $defaults[$role][$key] = filter_var($stored[$role][$key], FILTER_VALIDATE_BOOLEAN);
+                }
+            }
+        }
+
+        // Ensure Central always keeps control-plane switcher defaults when missing
+        // from a partially-seeded role_capabilities blob (e.g. member-caps migrations).
+        if ($hub->isCentral() || $hub->isControlPlane()) {
+            $fresh = $this->defaultRoleCapabilities(Hub::TYPE_CENTRAL);
+            foreach (ActingHubService::CONTROL_PLANE_ROLES as $role) {
+                if (! isset($defaults[$role][ActingHubService::CAPABILITY])
+                    || (
+                        ! isset($stored[$role])
+                        || ! is_array($stored[$role])
+                        || ! array_key_exists(ActingHubService::CAPABILITY, $stored[$role])
+                    )
+                ) {
+                    $defaults[$role][ActingHubService::CAPABILITY] =
+                        (bool) ($fresh[$role][ActingHubService::CAPABILITY] ?? ($role === User::ROLE_POWER_ADMIN));
                 }
             }
         }
@@ -837,8 +882,15 @@ class CapabilitiesMatrixService
         }
 
         // Social Media Template Library caps are inactive while the module is off.
+        // Exception: on Central, member_* caps (View website pages, browse, plans, …)
+        // follow the matrix so enabling “View website pages” actually unlocks the
+        // public site shell even though Central has no content product modules.
         if (Hub::isSocialMediaTemplateLibraryCapability($flag) && ! $hub->hasSocialMediaTemplateLibraryModule()) {
-            return false;
+            $isCentralMemberCap = $hub->isCentral()
+                && (str_starts_with($flag, 'member_') || str_starts_with($flag, 'general_'));
+            if (! $isCentralMemberCap) {
+                return false;
+            }
         }
 
         // Social Media Pre Approval caps are inactive while the module is off.

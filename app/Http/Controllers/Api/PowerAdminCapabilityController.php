@@ -58,13 +58,20 @@ class PowerAdminCapabilityController extends Controller
      */
     public function matrix(Request $request): JsonResponse
     {
+        // Ensure platform pa_* defaults exist on a freshly seeded Central DB.
+        $this->capabilities->seedDefaults();
+
         $hubId = $request->integer('hub_id');
         if (! $hubId && $request->user()) {
             $hubId = $this->actingHubs->actingHub($request->user())->id;
         }
+        // Prefer explicit hub → acting hub → Central/control-plane row → any hub.
+        // Never hard-require slug=shared (fresh Central has no Shared registry row yet).
         $hub = $hubId
             ? Hub::query()->findOrFail($hubId)
-            : Hub::query()->where('slug', 'shared')->firstOrFail();
+            : (Hub::query()->where('type', Hub::TYPE_CENTRAL)->first()
+                ?? Hub::query()->where('type', Hub::TYPE_SHARED)->first()
+                ?? Hub::query()->orderBy('id')->firstOrFail());
 
         $hubs = Hub::query()
             ->orderByRaw('CASE

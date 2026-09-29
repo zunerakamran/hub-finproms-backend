@@ -32,6 +32,10 @@ class PowerAdminHubController extends Controller
 
     public function index(): JsonResponse
     {
+        // Ensure this deploy's Central row is type=central before listing
+        // (avoids 403 control-plane gates after a fresh Central install).
+        $this->hubs->current();
+
         $hubs = Hub::query()
             ->orderByRaw('CASE
                 WHEN type = ? THEN 0
@@ -40,7 +44,58 @@ class PowerAdminHubController extends Controller
             END', [Hub::TYPE_CENTRAL, Hub::TYPE_SHARED])
             ->orderBy('name')
             ->get()
-            ->map(fn (Hub $hub) => $hub->toAdminArray())
+            ->map(function (Hub $hub) {
+                try {
+                    return $hub->toAdminArray();
+                } catch (\Throwable $e) {
+                    report($e);
+
+                    return [
+                        'id' => $hub->id,
+                        'name' => $hub->name,
+                        'slug' => $hub->slug,
+                        'type' => $hub->type,
+                        'is_central' => $hub->isCentral(),
+                        'is_control_plane' => $hub->isControlPlane(),
+                        'is_content_hub' => $hub->isContentHub(),
+                        'is_active' => (bool) $hub->is_active,
+                        'branding' => [
+                            'application_name' => $hub->name,
+                            'logo_url' => null,
+                            'white_logo_url' => null,
+                            'favicon_url' => null,
+                            'auth_bg_image_url' => null,
+                            'from_email' => $hub->from_email,
+                            'primary_color' => $hub->primary_color,
+                            'secondary_color' => $hub->secondary_color,
+                            'color_scheme' => [
+                                'primary' => $hub->primary_color,
+                                'secondary' => $hub->secondary_color,
+                            ],
+                        ],
+                        'deploy' => [
+                            'ready' => false,
+                            'status' => 'error',
+                            'status_label' => 'Failed to load hub details: '.$e->getMessage(),
+                        ],
+                        'stripe' => [
+                            'key' => null,
+                            'secret_set' => false,
+                            'webhook_secret_set' => false,
+                            'currency' => null,
+                        ],
+                        'subscriber_credits' => [
+                            'unlimited' => true,
+                            'credits' => null,
+                        ],
+                        'checklist' => [],
+                        'checklist_groups' => [],
+                        'created_at' => $hub->created_at,
+                        'updated_at' => $hub->updated_at,
+                        'load_error' => $e->getMessage(),
+                    ];
+                }
+            })
             ->values();
 
         return response()->json([
@@ -118,14 +173,26 @@ class PowerAdminHubController extends Controller
         ]);
 
         $moduleInvoices = [];
+        $billingWarning = null;
         if ($request->user()) {
-            $moduleInvoices = $this->moduleBilling->invoiceEnabledModules($hub->fresh(), $request->user());
+            try {
+                $moduleInvoices = $this->moduleBilling->invoiceEnabledModules($hub->fresh(), $request->user());
+            } catch (\Throwable $e) {
+                // Never fail hub registration because module invoicing broke
+                // (e.g. incomplete Central seed / missing pricing rows).
+                report($e);
+                $billingWarning = 'Hub was registered, but module invoicing failed: '.$e->getMessage();
+            }
         }
 
         $label = $type === Hub::TYPE_SHARED ? 'Shared hub' : 'White-labelled hub';
+        $message = $label.' created.';
+        if ($billingWarning) {
+            $message .= ' '.$billingWarning;
+        }
 
         return response()->json([
-            'message' => $label.' created.',
+            'message' => $message,
             'hub' => $hub->fresh()->toAdminArray(),
             'module_invoices' => collect($moduleInvoices)->map(fn ($invoice) => [
                 'id' => $invoice->id,
