@@ -1,0 +1,8 @@
+{
+  "name": "hub-finproms-website-compliance-scripts",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "puppeteer": "^22.15.0"
+  }
+}

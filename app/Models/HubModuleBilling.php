@@ -1,0 +1,108 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Facades\Storage;
+
+class HubModuleBilling extends Model
+{
+    public const STATUS_PAID = 'paid';
+
+    public const STATUS_UNPAID = 'unpaid';
+
+    public const STATUS_CANCELED = 'canceled';
+
+    protected $fillable = [
+        'hub_id',
+        'module_key',
+        'billed_user_id',
+        'amount',
+        'currency',
+        'status',
+        'payment_status',
+        'meta',
+        'paid_at',
+        'paid_by_user_id',
+        'payment_method',
+        'payment_reference',
+        'payment_notes',
+        'payment_attachment_path',
+        'payment_attachment_name',
+        'payment_attachment_mime',
+    ];
+
+    protected function casts(): array
+    {
+        return [
+            'amount' => 'decimal:2',
+            'meta' => 'array',
+            'paid_at' => 'datetime',
+        ];
+    }
+
+    public function hub(): BelongsTo
+    {
+        return $this->belongsTo(Hub::class);
+    }
+
+    public function billedUser(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'billed_user_id');
+    }
+
+    public function paidBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'paid_by_user_id');
+    }
+
+    public function invoice(): HasOne
+    {
+        return $this->hasOne(Invoice::class, 'hub_module_billing_id');
+    }
+
+    public function paymentAttachmentUrl(): ?string
+    {
+        if (! $this->payment_attachment_path) {
+            return null;
+        }
+
+        return Storage::disk('public')->url($this->payment_attachment_path);
+    }
+
+    /**
+     * Settlement details for API / invoice UI.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function paymentDetailsForApi(): ?array
+    {
+        if ($this->status !== self::STATUS_PAID && ! $this->paid_at) {
+            return null;
+        }
+
+        $this->loadMissing('paidBy:id,name,email');
+
+        return [
+            'status' => $this->status,
+            'payment_status' => $this->payment_status,
+            'paid_at' => $this->paid_at?->toIso8601String(),
+            'payment_method' => $this->payment_method,
+            'payment_reference' => $this->payment_reference,
+            'payment_notes' => $this->payment_notes,
+            'paid_by' => $this->paidBy ? [
+                'id' => $this->paidBy->id,
+                'name' => $this->paidBy->name,
+                'email' => $this->paidBy->email,
+            ] : null,
+            'attachment' => $this->payment_attachment_path ? [
+                'name' => $this->payment_attachment_name,
+                'mime' => $this->payment_attachment_mime,
+                'url' => $this->paymentAttachmentUrl(),
+            ] : null,
+            'auto_paid_on_hub_enable' => (bool) ($this->meta['auto_paid_on_hub_enable'] ?? false),
+        ];
+    }
+}

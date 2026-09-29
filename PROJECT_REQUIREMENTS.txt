@@ -1,0 +1,689 @@
+================================================================================
+HUB FINPROMS — PROJECT REQUIREMENTS
+================================================================================
+Last updated: 2026-09-29
+Location: PROJECT_REQUIREMENTS.txt (project root)
+IMPORTANT: Refer to this document before and after every code change.
+IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
+           feature needs UI and API changes.
+================================================================================
+
+--------------------------------------------------------------------------------
+0. REPOSITORIES / PROJECT LOCATIONS
+--------------------------------------------------------------------------------
+- Backend:  Desktop/hub-finproms-backend  (this repo)
+- Frontend: Desktop/hub-finproms-frontend
+- Whenever implementing or changing a feature, apply related changes in the
+  frontend as well (UI, API calls, roles, branding, permissions, etc.).
+- Do not treat backend-only work as complete if the feature also requires
+  frontend updates.
+
+
+--------------------------------------------------------------------------------
+1. PRODUCT OVERVIEW
+--------------------------------------------------------------------------------
+- Shared hub for FinProms content: social media posts, reels, etc.
+- Users subscribe, receive credits, spend credits on posts/reels, then download.
+- Same codebase is reused for white-labelled hubs (multi-tenant style).
+- Branding (colours, logo, etc.) must come from the database so each hub
+  can look different without code changes.
+
+
+--------------------------------------------------------------------------------
+2. SHARED HUB — STEP 1 CORE FEATURES
+--------------------------------------------------------------------------------
+
+2.1 Content classification (THREE separate fields)
+- TYPE — what the item is: post, reel, etc. (managed list; drives reel play button).
+- CATEGORY — topical/grouping category (separate from type; e.g. product themes).
+- TAGS — free labels for filtering (separate from type and category).
+- Every content item has type + category + tags. Do NOT treat category as type.
+
+2.2 Content browsing & listing UX
+- Hub catalog / main member pages require login. Unauthenticated visitors are
+  sent to the login screen and must not see the hub main/catalog UI.
+- Users browse posts, reels, and other types.
+- Listing page uses a 3-column grid (2 columns on tablet, 1 on mobile).
+- For REELS: admin can upload a video when type is Reel.
+- Reel video autoplays (muted, looping) on listing and detail pages.
+- A play/pause “Reel” control sits at the top of the video to mark it as a reel
+  and let the viewer pause/resume.
+- Reels without a video still show the legacy centered play indicator on listing.
+- "NEW" banner on new posts/reels:
+  - Shown when the item is still within the "new" window.
+  - Duration (e.g. number of days) is taken from the DATABASE (configurable
+    setting), not hard-coded.
+
+2.3 Content metrics
+- Each post/reel tracks:
+  - reach — unique impression when a user scrolls the listing and the post
+    enters their viewport (POST /api/posts/reach with post_ids)
+  - views — when a user opens the post detail page (GET /api/posts/{id})
+  - buy count — when a user purchases the post
+- Metrics are stored and shown on listing/detail for members according to their
+  active subscription plan’s visibility flags (Power Admin / hub-admin can
+  configure these on each plan):
+  - Basic (default): reach only
+  - Standard (default): reach + views
+  - Premium (default): reach + views + buys
+- Hub admins, Power Admin, and unlimited-credit advisors see all three metrics.
+- Non-subscribers do not see metric counts.
+- Plan fields: show_reach, show_views, show_buys (editable via subscription plan
+  CRUD under Power Admin and hub-admin when dashboard_manage_plans is enabled).
+- API responses include visible_metrics so the frontend knows what to render.
+
+2.4 Subscriptions & Credits
+- Users subscribe and receive credits.
+- Credits are spent when buying posts/reels or post bundles.
+- After purchase, users can download the content.
+
+2.4a Post bundles
+- Capability-gated (Capabilities matrix: dashboard_manage_bundles) — roles that
+  Power Admin enables can create/edit bundles in the hub-admin dashboard.
+- A bundle has a title, description, and total credits_cost (bundle price).
+- Creators can include existing posts/reels and/or create new posts/reels and
+  attach them in the same flow.
+- Members browse bundles with the catalog; purchasing a bundle spends the
+  bundle’s total credits and unlocks every post in the bundle.
+- Invoices are generated for bundle purchases (type bundle_purchase).
+
+2.5 One-off / Non-subscriber Purchases
+- Users who are NOT subscribed can still buy individual posts/reels.
+- Pricing rule: 1 credit = 1 pound (£1).
+
+2.6 Invoices
+- Invoices are generated for:
+  a) Subscriptions
+  b) Individual post/reel purchases
+
+2.7 Roles & separate dashboards
+There is ONE universal dashboard shell at /my-dashboard for every role.
+What each user sees (sidebar + home cards) is driven by the Capabilities
+matrix (and Power Admin’s own pa_* checklist for platform tools).
+
+The member catalog (posts / bundles / plans) stays on the main website.
+Staff and members open Dashboard from the main site nav; login lands on
+/my-dashboard. Legacy /client-admin and /power-admin URLs redirect into
+/my-dashboard. Members never see tools that are not enabled for their role.
+
+ROLES (canonical list):
+
+  1) POWER ADMIN (power_admin) — platform developers / us
+     - Shared hub Power Admin control plane.
+     - Manages hubs, hub Functionalities + Modules checklist (section 5.1 / 5.1A),
+       user capabilities matrix (section 5.2), payment methods, and Power Admin's
+       OWN capability checklist (section 5.3).
+     - What a power_admin can do on that control plane is gated by the separate
+       Power Admin capabilities checklist (not the per-hub member/dashboard lists).
+
+  2) FINPROMS ADMIN (finproms_admin) — shared hub admin
+     - Day-to-day operator of the SHARED hub.
+     - Manages shared hub content, types, categories, tags, plans, settings, etc.
+     - Can generate AI posts and control white-labelled hubs (hub switcher)
+       (when those dashboard capabilities are enabled).
+     - Uses the hub-admin shell; capabilities come from the SHARED hub's
+       dashboard checklist (section 5.2).
+
+  3) CLIENT ADMIN (client_admin) — white-labelled hub admin
+     - Operator of ONE white-labelled hub.
+     - Restricted vs FinProms admin; only tools Power Admin enables for that hub.
+     - Uses the same hub-admin shell; capabilities from THAT hub's dashboard checklist.
+
+  4) MANAGER (manager) — hub staff (shared or white-label)
+     - Mid-level operational role (e.g. content/ops management without full
+       client_admin rights). Exact screens TBD; gated by hub dashboard checklist
+       and/or future manager-specific flags.
+
+  5) APPROVER (approver) — compliance / review
+     - Reviews/approves content (ties to compliance check flow, section 3.3).
+     - Not a full hub admin by default; approval UI to be built later.
+
+  6) ADVISOR (advisor) — reserved role label in the capabilities matrix
+     - Not assigned automatically on plan subscribe or Excel import.
+     - White-label invited advisors keep role=user; Excel import sets
+       is_advisor and has_unlimited_credits when hub behaviour allows.
+     - Uses member UI (same as user).
+
+  7) USER (user) — general user / subscriber
+     - Browse / subscribe / buy / download as user capability checklist allows.
+     - Role stays user after a paid public-hub plan subscription (credits only).
+     - Private-hub Excel-imported advisors also keep role=user (flags distinguish them).
+     - Label in the Capabilities matrix is "User" (not "Member").
+
+Notes:
+- Former "admin" → client_admin. Shared hub operator should use finproms_admin
+  going forward (existing client_admin on shared may be migrated).
+- Seeded shared-hub FinProms admin: finproms@hubfinproms.com (role=finproms_admin).
+- Advisor import keeps role=user and sets is_advisor / unlimited flags.
+- Public plan subscribe does NOT change role (stays user; credits only).
+- Role alone does not unlock every screen — Power Admin checklists still gate
+  member UI, hub-admin UI, and power_admin UI.
+
+
+--------------------------------------------------------------------------------
+3. SHARED HUB — FUTURE FEATURES
+--------------------------------------------------------------------------------
+
+3.1 AI Content Generation (later)
+- Posts/reels added to the hub will also be generated by AI.
+- FinProms admin (shared hub) generates AI content for white-labelled hubs.
+- AI will be trained / configured for:
+  - Types of posts and reels to generate
+  - What text/copy should be added
+
+3.2 In-app Post Editing (later)
+- Users who buy a post can edit that post within the application.
+
+3.3 Social Media Compliance
+- After purchase (and later editing), posts can go through a compliance check.
+- Power Admin enables the **Social Media Compliance** module per hub (Modules
+  checklist). Website Compliance is also available as a hub module (templates,
+  section editing, change-request approval, cPanel deploy).
+- While the module is off, all Social Media Compliance capabilities appear
+  blurred / inactive on the Capabilities matrix (same pattern as private/public).
+- Who can submit, assign, review, view queues, or open reports is controlled
+  only by the Capabilities matrix — not hard-coded to Approver / buyer roles.
+- Buyers submit a purchased post (description + image); managers assign to
+  reviewers; reviewers set Pending / Approved / Rejected / Approved with
+  Feedback; version history supports reject-resubmit and approve-with-feedback
+  confirm/reupload. Emails notify admins, assignees, and submitters.
+- All Social Media Compliance mutations and report/chart views are written to
+  activity_logs (actions: smc.submit / assign / unassign / review / resubmit /
+  confirm_feedback / reports.* / charts.*).
+
+3.3b General Compliance
+- Same review flow as Social Media Compliance (submit → assign → review →
+  versions / reports), but submissions are free-form: required description
+  textarea + multiple file attachments (PDF, Office, images, ZIP, etc.).
+- Power Admin enables the **General Compliance** module per hub. Capabilities
+  (`gc_*`) are blurred while the module is off.
+- Activity logs use `gc.*` actions.
+
+3.4 Other Features (later)
+- Additional features to be added over time; keep architecture flexible.
+
+
+--------------------------------------------------------------------------------
+4. WHITE-LABELLED HUBS
+--------------------------------------------------------------------------------
+
+4.1 Multi-instance / Same Codebase + Separate Databases
+- The shared hub is copied/reused to form white-labelled hubs.
+- There will be MANY white-labelled hubs.
+- Code must remain the SAME for shared hub and all white-labelled hubs.
+- Each hub (shared AND every white-label) has its OWN database — not a shared
+  multi-tenant DB. Content, users, and settings for a white-label live in that
+  hub's database only.
+- Everything that differs per hub (especially branding) must be driven by DB:
+  - Application name
+  - Colour scheme (primary / secondary)
+  - Logo
+  - Other tenant-specific settings as needed
+- Hub admins with `dashboard_manage_settings` can edit these branding fields
+  (plus NEW banner days) for the current hub via client-admin settings; they
+  are returned on public GET /hub under branding and applied in the UI.
+- Power Admin on the SHARED hub is the control plane. The shared DB stores a
+  hub registry for every white-label, including deploy wiring so shared can
+  reach that hub for management / content push:
+  - frontend_url — public site URL for that hub's deploy
+  - api_url — optional backend API base URL
+  - db_* — that white-label's database connection (host, port, database,
+    username, encrypted password, driver) so shared can push content / sync
+  - deploy_notes — free-text ops notes
+  - Deploy contract: white-label deploy uses the SAME codebase with its OWN
+    .env (its own DB_* + FRONTEND_URL / APP_URL). HUB_SLUG identifies the hub
+    on that deploy. Shared does NOT share the white-label database.
+  - When frontend_url is set, emails / Stripe return URLs prefer that hub URL
+    over the global FRONTEND_URL env (on that hub's own deploy).
+  - Power Admin hub detail shows a deploy checklist + copyable env snippet.
+    Registry "ready" = active + frontend_url + remote DB credentials set.
+  - Hub list badges: Wiring ready / Needs wiring.
+- Content push (shared → white-label): FinProms admin selects posts and target
+  hub(s); shared uses the stored remote DB connection (or API) to publish into
+  that white-label's own database. (Feature still to build.)
+
+4.2 Private Access (White-labelled)
+- White-labelled hubs are PRIVATE.
+- Public users cannot subscribe.
+- Client provides an Excel sheet of advisors.
+- Advisors from that sheet are added into the application.
+- Power Admin sets subscriber credits for the hub (dashboard + Capabilities):
+  - Capability: `dashboard_manage_subscriber_credits` (private-hub dashboard tool)
+  - Unlimited (default for white-label), OR
+  - A fixed number of credits per subscriber per billing period.
+- On Excel import, each new / reactivated advisor receives that allotment
+  (unlimited flag, or balance set to the hub credit number).
+- If Power Admin changes the credit number (or switches unlimited ↔ fixed)
+  after advisors are already subscribed, existing balances are NOT changed
+  mid-period; the new allotment is applied on the next monthly autorenew
+  to all active advisors.
+- Client admin (or Power Admin with import capability) can Discontinue an
+  individual advisor: permanent end of access (WP FPSUB end equivalent).
+  Discontinued advisors cannot log in, drop out of billing counts, and are
+  not restored when the hub flips private again. Re-importing the same email
+  restores them. Gated by Capabilities matrix key `advisor_discontinue`.
+- When Power Admin switches a hub from private → public (Functionalities):
+  - All Excel-imported advisors are SUSPENDED (not deleted): cannot log in,
+    lose unlimited/subscription access, excluded from advisor billing counts.
+  - Advisor Stripe auto-renew is canceled; pending advisor billings are canceled.
+  - Private-related functionalities are turned off and public ones turned on
+    (paid credits, one-off purchase, public subscribe; unlimited credits and
+    advisor subscriber billing off).
+- When the hub is switched back public → private:
+  - Previously suspended imported advisors are REACTIVATED with the hub’s
+    current subscriber-credit allotment and advisor_import subscriptions restored.
+  - Auto-renew is NOT restarted automatically; client admin pays again after
+    import / billing flow if needed.
+
+4.3 Pricing Tiers for White-labelled (Managed by Shared Hub)
+- Pricing depends on number of subscribers (advisors), e.g.:
+  - 0–99 subscribers → £25 / advisor / month
+  - 100–249 subscribers → £22
+  - 250–499 subscribers → £20
+  - 500+ subscribers → £15
+  - (Defaults copied from WordPress FP Subscriptions plugin; Power Admin can edit)
+- Import billing (WP-style): tier RATE is taken from TOTAL active advisors;
+  the invoice charges RATE × THIS IMPORT BATCH only (already-paid advisors
+  are not recharged). Example: 99 imported → £25×99; later +249 (total 348)
+  → £20×249 only.
+- Monthly auto-renew: ONE invoice for all active advisors =
+  rate(total) × total (single Stripe subscription per hub).
+- Shared hub manages these pricing rules.
+
+4.4 Content for white-labelled hubs (from shared control plane)
+- Capability: `dashboard_control_white_label_hubs` — “Control white labelled hubs”
+  (replaces the old per-form Hub dropdown / `dashboard_push_content`).
+- Users with this capability on the SHARED hub (typically Power Admin and
+  FinProms admin) get a hub switcher at the top of the shared dashboard.
+- Selecting the shared hub → normal shared catalog tools and capabilities.
+- Selecting a white-label hub → dashboard menus/tools follow THAT hub’s
+  Capabilities matrix for the user’s role (e.g. Manage posts). Creating
+  posts / types / categories / tags / bundles while that hub is selected
+  writes only to THAT hub’s own database — not the shared catalog.
+- APIs: `GET/PUT /client-admin/acting-hub` (and power-admin / admin aliases).
+  Authenticated `GET /hub` includes `hub_switcher` + acting effective caps.
+- Target white-label must have Functionalities `receive_content_from_shared`
+  and remote DB credentials configured.
+- Media for white-label posts is stored as a public URL reachable from shared
+  storage (file is uploaded via shared, path saved on the white-label DB).
+- While a white-label is selected, list/create/update/delete that hub’s content
+  via the normal dashboard endpoints (`/posts`, `/types`, `/categories`, `/tags`,
+  `/bundles`) or `/hub-content/...` — both use the acting hub (no `hub_id`).
+  IDs in those requests are remote white-label database IDs.
+
+4.5 Code Updates
+- Updates made in the shared hub codebase are also reflected in white-labelled
+  hubs (same codebase / deploy model).
+
+
+--------------------------------------------------------------------------------
+5. RIGHTS / PERMISSIONS CHECKLISTS (CRITICAL)
+--------------------------------------------------------------------------------
+- Because shared and white-labelled use the SAME code, behaviour differences
+  must be gated by checklists (feature flags / rights), not hard-coded forks.
+- Power Admin manages these checklists from the SHARED hub Power Admin
+  dashboard, for the shared hub AND for EACH white-labelled hub.
+- Opposite options (e.g. public vs private, paid vs unlimited credits) must be
+  mutually exclusive: checking one auto-unchecks the other.
+
+5.1 Hub Functionalities checklist (Power Admin → Functionalities)
+- Formerly "hub behaviour". Controls how the hub works for that tenant, e.g.:
+  - Public subscribe / self-registration vs private invite-only
+  - Paid credits vs unlimited credits
+  - One-off purchase for non-subscribers
+  - Receive content from shared hub
+  - Advisor subscriber billing (rate × advisors)
+  - Charge amount per module (one time) — `charge_amount_per_module`
+    - Default ON for white-labelled hubs; OFF for the shared hub
+    - When ON, enabling a billable product module generates a one-time invoice
+      at the configured catalogue price (see 5.1B)
+- Each hub (shared + each white-label) has its own configuration.
+- Edited ONLY from Hub Functionalities / hub checklist screens — not from the
+  Capabilities matrix (no duplication).
+
+5.1A Modules checklist (Power Admin → Modules, same hub checklist screen)
+- Per-hub module toggles (functionality group `modules`):
+  - Shared Hub / White Label Hub — locked base packaging module for hub type
+  - Social Media Template Library — posts / reels catalog
+  - Social Media Pre Approval Workflow — activates SMC capability section
+    (capabilities blurred while this module is off)
+  - Website Template Library — showcase templates / deployments
+  - Website Content Pre Approval Workflow — activates WC capability section
+    (capabilities blurred while this module is off)
+  - Generic Content Pre Approval Workflow — activates GC capability section
+    (capabilities blurred while this module is off)
+- Managed via `dashboard_manage_modules` / Modules API.
+- When `charge_amount_per_module` is ON, newly enabling a one-time-priced
+  module creates a one-time invoice (idempotent per hub + module). Website
+  Template Library is priced per website and does NOT invoice on enable alone.
+
+5.1B Module catalogue pricing (Modules pricing)
+- Official default catalogue (editable via capability / database):
+  1) Shared Hub / White Label Hub — £14,500 (one time)
+  2) Social Media Template Library — £0 (one time)
+  3) Social Media Pre Approval Workflow — £5,000 (one time)
+  4) Website Template Library — £300 per website
+  5) Website Content Pre Approval Workflow — £10,000 (one time)
+  6) Generic Content Pre Approval Workflow — £3,500 (one time)
+- Stored in `module_pricing` (amount + billing_unit: one_time | per_website).
+- Capabilities group “Modules pricing” (blurred while charge_amount_per_module off):
+  - `dashboard_manage_module_pricing` — Set module one-time / per-website prices
+  - `dashboard_view_module_invoices` — Who can see module enablement invoices
+  - `dashboard_mark_module_invoices_paid` — Manually mark an unpaid module invoice
+    as paid (required: payment method + notes; optional: reference + attachment).
+    Settlement details (who marked paid, method, notes, attachment URL) remain on
+    the invoice for later review by anyone with view access.
+- APIs: GET/PUT module-pricing; GET module-invoices; GET module-invoices/{id};
+  POST module-invoices/{id}/mark-paid (multipart; capability-gated)
+- Invoice type `module_billing`, cadence `types = one_time`
+- Payment status rules:
+  - Hub enable invoice (Shared Hub / White Label Hub module) — created as **paid**
+  - All other product-module invoices — created as **unpaid** until payment is
+    recorded via mark-as-paid (or Stripe collection TBD; do not auto-pay)
+- Frontend: Module prices + Module invoices under dashboard “Modules” section
+  (gated by caps). Types shown as badges; Charged by = FinProms (Stripe merchant TBD).
+  Unpaid invoice detail shows Mark as paid form when capability is on; paid
+  invoices show Payment details panel.
+
+5.2 User capabilities matrix (REQUIRED — Power Admin → Capabilities)
+- Power Admin manages what users can do from their dashboards / member UI,
+  for BOTH shared hub and white-labelled hubs — by ROLE (matrix).
+- Distinct from Functionalities (5.1). Do NOT repeat Functionalities here.
+- This is a role × capability matrix per hub, managed only from the
+  shared hub Power Admin dashboard. Examples of what it should control:
+
+  Member-facing (end users / advisors / staff columns):
+  - Browse catalog / posts / reels — available for ALL roles in the matrix
+    (Power Admin, FinProms admin, client admin, manager, approver, advisor, user)
+  - View plans / self-serve subscribe
+  - One-off purchase / spend credits
+  - Download purchased content
+  - In-app post editing (when built)
+  - Other member features as they are added
+
+  General options (dashboard) — member personal dashboard sections, ALL roles:
+  - Show subscription (active plan + recent subscriptions)
+  - Show remaining credits
+  - Show invoices (summary on /my-dashboard)
+  - Show purchases (summary on /my-dashboard)
+  - Members with any of these enabled see Dashboard in the member nav and can
+    open /my-dashboard (role=user lands here after login when enabled)
+
+  Hub-admin dashboard (FinProms admin on shared; client_admin on white-label):
+  - Manage posts/reels — enableable for ALL roles in the matrix
+    (Power Admin, FinProms admin, client admin, manager, approver, advisor, user);
+    remaining roles (approver / advisor / user) default OFF until Power Admin enables them
+  - Manage post bundles (group posts/reels; description + total credits) — same roles
+  - Manage types / categories / tags — same roles
+  - Manage subscription plans — same roles
+  - Manage settings (NEW banner, logo upload, color scheme, application name) — same roles
+  - Confirm bank transfers — same roles
+  - Import advisors (Excel/CSV) — same roles
+  - Discontinue advisors — separate capability; who can permanently end an
+    imported advisor’s access — same roles
+  - View activity logs / report — who can open the audit trail and activity
+    report for the hub — same roles
+  - Manage active sessions — see currently logged-in users and force-logout
+    any user (ends all of their API sessions on this hub) — same roles
+  - AI content generation / control white-labelled hubs — same roles
+    (typically FinProms admin / shared-only where appropriate)
+  - Any other admin dashboard screens/actions
+  - Approver / advisor / user only see the hub-admin shell when at least one
+    dashboard OR Social Media Compliance capability is enabled for their role
+
+  Social Media Compliance (blurred while module_social_media_compliance is off):
+  - smc_submit_request — submit / resubmit / confirm-feedback for purchased posts
+  - smc_view_own_requests — own request history & detail
+  - smc_assign_requests — assign / unassign reviewers
+  - smc_review_requests — set status + feedback
+  - smc_view_all_requests — full hub queue
+  - smc_view_reports — reports, CSV export, approver workload & advisor charts
+  - All roles available in the matrix; defaults OFF until Power Admin enables
+
+  General Compliance (blurred while module_general_compliance is off):
+  - gc_submit_request — submit / resubmit / confirm-feedback (description + files)
+  - gc_view_own_requests — own request history & detail
+  - gc_assign_requests — assign / unassign reviewers
+  - gc_review_requests — set status + feedback
+  - gc_view_all_requests — full hub queue
+  - gc_view_reports — reports, CSV export, approver workload & advisor charts
+  - All roles available in the matrix; defaults OFF until Power Admin enables
+
+  Hub-admin dashboard also includes:
+  - Manage hub modules (`dashboard_manage_modules`) — who may enable/disable
+    Social Media / Website / General Compliance modules for that hub
+
+  Modules pricing (blurred while charge_amount_per_module is off):
+  - `dashboard_manage_module_pricing` — set catalogue amounts / billing unit
+  - `dashboard_view_module_invoices` — view one-time module enablement invoices
+  - `dashboard_mark_module_invoices_paid` — mark unpaid module invoices paid with
+    required settlement info + optional attachment; details remain viewable later
+
+- White-label client_admin sees ONLY the dashboard items Power Admin enables
+  for that hub (restricted options).
+- FinProms admin on shared hub sees the shared-hub set of capabilities Power
+  Admin enables (typically broader, including AI / distribute to white-labels).
+- Do NOT hard-code "if shared show X else hide Y" in many places — use the
+  checklist so Power Admin can change it without code deploys.
+
+5.3 Power Admin capabilities checklist (SEPARATE — platform level)
+- Distinct from per-hub Functionalities (5.1) and user capabilities (5.2).
+- Controls what power_admin users can do on the Power Admin control plane
+  (shared hub /power-admin), for example:
+  - View platform dashboard
+  - Manage hubs (create/list/edit white-label hubs)
+  - Manage hub Functionalities and Modules checklists
+  - Manage payment methods
+  - Manage Power Admin / user capabilities matrix (this list + 5.2)
+  - Manage users / roles (create, update, delete, assign roles)
+- Stored as platform settings (not per-hub).
+- Edited from Power Admin → Capabilities (Power Admin column).
+- Power Admin nav/actions and APIs must respect these flags.
+
+
+--------------------------------------------------------------------------------
+6. POWER ADMIN (SHARED HUB CONTROL PLANE)
+--------------------------------------------------------------------------------
+- Role: power_admin (platform developers / us).
+- Dashboard is SEPARATE from the member app, FinProms admin, and white-label
+  client_admin (own shell/routes, e.g. /power-admin).
+- Power Admin logs into the SHARED hub and from there manages:
+  1) Hub registry (create/list white-labelled hubs, branding basics)
+  2) Hub Functionalities checklist per hub (section 5.1) — how the hub works
+  3) User capabilities matrix per hub (section 5.2) — what members and hub
+     admins can do on shared AND each white-labelled hub (by role)
+  4) Power Admin's OWN capabilities (section 5.3) — same Capabilities screen
+  5) Platform payment methods (Stripe / bank transfer), and other platform
+     settings as needed
+- Functionalities and Capabilities must NOT duplicate each other in the UI.
+- This is the central control plane for ALL tenant behaviour and UI capabilities.
+- Power Admin does NOT replace FinProms admin day-to-day content work; they
+  configure rights so FinProms admin and client_admins operate within bounds.
+
+
+--------------------------------------------------------------------------------
+6A. ACTIVITY LOGS & ACTIVITY REPORT
+--------------------------------------------------------------------------------
+- Every meaningful user activity is recorded in an activity_logs audit trail
+  (per hub), including:
+  - Auth: register, login, logout, failed login, blocked login (suspended /
+    discontinued / invite-only)
+  - Successful mutating API actions (POST / PUT / PATCH / DELETE): content,
+    plans, settings, advisor import/discontinue, billing, capabilities, hubs,
+    purchases, subscriptions, etc.
+- Sensitive fields (passwords, secrets, card data) are NEVER stored; payloads
+  are redacted / truncated.
+- Activity report (aggregates): totals, unique users/actions, counts by action,
+  by user, and by day — filterable by user, action, date range, and text search.
+- WHO CAN SEE the logs and report is gated by Capabilities matrix key
+  `dashboard_view_activity_logs` (hub-admin dashboard group). Applicable roles:
+  finproms_admin, client_admin, manager, and power_admin (when enabled for that
+  hub). Power Admin toggles this per hub / role on the Capabilities screen.
+- APIs (hub_can:dashboard_view_activity_logs):
+  - GET /api/client-admin/activity-logs (+ /power-admin/…) — paginated feed
+  - GET /api/client-admin/activity-logs/report (+ /power-admin/…) — aggregates
+- Frontend: Activity logs page under hub-admin and Power Admin shells, shown
+  only when the viewer’s role has the capability.
+
+
+--------------------------------------------------------------------------------
+6B. ACTIVE SESSIONS / FORCE LOGOUT
+--------------------------------------------------------------------------------
+- Capability: `dashboard_manage_active_sessions` (Hub operations group on the
+  Capabilities matrix). Applicable roles: all matrix roles; defaults ON for
+  hub-admin style roles, OFF for approver / advisor / admin-staff / user until
+  Power Admin enables them.
+- Users with this capability can:
+  - See which users currently have active login sessions (Sanctum tokens) on
+    the current hub (or acting white-label hub’s own database).
+  - Force-logout any listed user, which deletes all of that user’s tokens so
+    they must sign in again.
+- Force-logout of the viewer’s own account ends their session immediately.
+- Mutations are written to activity_logs (`auth.force_logout`).
+- APIs (hub_can:dashboard_manage_active_sessions):
+  - GET /api/client-admin/active-sessions (+ /power-admin/…) — logged-in users
+  - POST /api/client-admin/active-sessions/{userId}/force-logout (+ /power-admin/…)
+- Frontend: Active sessions page under /my-dashboard (nav + Capabilities gate).
+
+
+--------------------------------------------------------------------------------
+7. ARCHITECTURE PRINCIPLES (DERIVED FROM REQUIREMENTS)
+--------------------------------------------------------------------------------
+- Single codebase for shared + all white-labelled hubs.
+- Roles: power_admin, finproms_admin, client_admin, manager, approver, advisor, user.
+- Separate frontend shells: member catalog app, and one universal Dashboard
+  shell at /my-dashboard (tools from Capabilities + Power Admin pa_* checklist).
+  Legacy /client-admin and /power-admin routes redirect to /my-dashboard.
+- Tenant/hub configuration stored in database (branding, flags, rights).
+- Feature flags / rights checklists must drive behaviour AND dashboard menus,
+  not hard-coded forks. Power Admin has its own platform capability checklist
+  (separate from per-hub checklists).
+- Shared hub acts as content + configuration source of truth for white labels
+  (registry + remote DB credentials on shared; each white-label has its own DB).
+- Design for future: AI generation (FinProms admin), in-app edit, compliance,
+  more features.
+- Settings that vary (e.g. NEW-banner duration) come from the database.
+
+
+--------------------------------------------------------------------------------
+8. IMPLEMENTATION STATUS NOTES
+--------------------------------------------------------------------------------
+(Update this section as features are built.)
+
+STEP 1 — Shared hub core
+[x] Shared hub content browsing (posts) — basic exists
+[x] Content type (post, reel, etc.) — separate from category
+[x] Category — separate from type and tags
+[x] Tags — separate from type and category
+[x] Reel play button on listing page
+[x] Reel video upload (when type is Reel) + video_url / is_video API
+[x] Reel autoplay + top play/pause “Reel” control on listing & detail
+[x] Posts listing 3-column grid
+[x] NEW banner (duration from database)
+[x] Views, reach, buy count on content
+[x] Reach vs view separated (listing scroll reach vs detail view)
+[x] Plan-gated metric visibility (Basic=reach, Standard=+views, Premium=+buys)
+[x] Power Admin / hub-admin can toggle show_reach / show_views / show_buys on plans
+[x] Role rename: admin → client_admin
+[x] Separate client_admin dashboard (manage everything)
+[x] Universal /my-dashboard shell for all roles (Capabilities-driven menus)
+[x] Legacy /client-admin and /power-admin URLs redirect to /my-dashboard
+[x] client_admin / power_admin / my-dashboard tools live under one dashboard app
+[x] Subscriptions + credits (basic exists)
+[x] Plan subscribe / private Excel import keep role=user (advisor via is_advisor flag only)
+[x] Seeded finproms_admin user (finproms@hubfinproms.com)
+[x] Credit spend + download (basic exists)
+[x] Non-subscriber one-off purchase (1 credit = £1)
+[x] Post bundles — create with existing/new posts, description + total credits
+[x] Capability: dashboard_manage_bundles — who can create/manage bundles
+[x] Bundle browse + purchase (unlocks all posts in the bundle; invoice)
+[x] power_admin can manage payment methods (Stripe / bank transfer)
+[x] Hub model + rights/permissions checklist (DB-driven)
+[x] power_admin can list/create hubs and edit checklist per hub
+[x] Power Admin hub registry stores deploy wiring (frontend_url, api_url, deploy_notes)
+[x] Power Admin stores each white-label's own DB credentials (encrypted password)
+[x] Hub frontend_url preferred for emails / Stripe redirects when set
+[x] Deploy checklist + copyable HUB_SLUG env snippet on hub detail
+[x] Hub list shows Wiring ready / Needs wiring status
+[x] Control white labelled hubs via dashboard hub switcher (dashboard_control_white_label_hubs)
+[x] Acting-hub content create/list on white-label DB (posts, types, categories, tags, bundles)
+[x] Public GET /hub returns current hub branding + checklist
+[x] Checklist gates: public register, self-serve subscribe, one-off purchase, unlimited credits
+[x] Checklist opposite pairs auto-uncheck (public/private, paid/unlimited)
+[x] Frontend: power_admin hubs + checklist UI
+[x] White-labelled private advisor import (Excel/CSV)
+[x] Unlimited credits for white-labelled advisors (role/flag per user; checklist wired)
+[x] Power Admin can set hub subscriber credits (unlimited OR fixed number per period)
+[x] Capability: dashboard_manage_subscriber_credits — who can set private-hub subscriber credits
+[x] Power Admin / hub-admin Subscriber credits dashboard page (gated by Capabilities)
+[x] Fixed/unlimited allotment applied on Excel import; changed amount applies on autorenew
+[x] Subscriber-count pricing tiers (rate × advisors; managed by Power Admin)
+[x] Default advisor tiers copied from WP FP Subscriptions (£25/£22/£20/£15)
+[x] Post-import advisor billing + Stripe auto-renew / bank transfer + invoices
+[x] Capability: dashboard_view_advisor_invoices (role matrix)
+[x] Capability: dashboard_manage_advisor_pricing — who can set billing rates/quotas
+[x] Capability: dashboard_manage_advisor_renewal — auto-renew day (Power Admin / FinProms admin)
+[x] Client admin saved card + charge on each advisor import + invoice + Stripe auto-renew
+[x] Client admin Payment card dashboard (card entrance; not a capabilities-matrix flag)
+[x] Stripe import checkout charges card on file when client admin already saved a card
+[x] Private↔public hub transition: suspend/reactivate Excel advisors + stop auto-renew
+[x] Discontinue individual advisor (client/power admin; permanent end until re-import)
+[x] Capability: advisor_discontinue — who can end imported advisors (Capabilities matrix)
+[x] Activity logs — audit trail of user changes/activity (auth + mutating API)
+[x] Activity logs report — aggregates by action / user / day; filterable
+[x] Capability: dashboard_view_activity_logs — who can view logs & report
+[x] Active sessions — list logged-in users + force-logout (Sanctum tokens)
+[x] Capability: dashboard_manage_active_sessions — who can manage sessions
+[x] Frontend: Active sessions page under /my-dashboard (Capabilities-gated)
+[x] Private-only capabilities blurred/inactive on Capabilities matrix when hub is public
+    (incl. dashboard_manage_subscriber_credits)
+[x] Public-only capabilities blurred/inactive on Capabilities matrix when hub is private
+[x] Power Admin can manage subscription plans when dashboard_manage_plans is enabled
+[x] Hub Functionalities checklist (section 5.1) — Power Admin Functionalities screen only
+[x] User capabilities matrix (section 5.2) — roles × member/dashboard caps (no Functionalities duplication)
+[x] Wire hub-admin dashboard menus/actions to capability checklist (per-role; no hub-wide OR leak)
+[x] Wire member nav/actions to member capability checklist
+[x] Roles documented: power_admin, finproms_admin, client_admin, manager,
+    approver, advisor, user
+[x] Power Admin capabilities checklist (section 5.3) — separate from hub Functionalities
+[x] Wire Power Admin nav/APIs to Power Admin capabilities
+[x] Capabilities matrix UI — roles × user capabilities (incl. Power Admin) per hub
+[x] Member capabilities (incl. browse catalog) apply to all role columns in the matrix
+[x] Hub-admin dashboard capabilities apply to all role columns (remaining roles
+    approver / advisor / user default off; shell access when any dashboard cap is on)
+[x] Capabilities matrix role label: user column shown as "User" (not "Member")
+[x] Split UI: Functionalities vs Capabilities (no overlapping checklist items)
+[x] Member hub catalog requires login (guests see login screen only)
+[x] General options (dashboard) capabilities — show subscription / credits /
+    invoices / purchases on universal /my-dashboard
+[x] Universal Dashboard at /my-dashboard — hub tools + Power Admin platform
+    tools appear only when enabled in Capabilities / Power Admin checklist
+[x] Modules checklist — Social Media / Website / General Compliance toggles per hub
+[x] Functionality: charge_amount_per_module — Charge amount per module (one time)
+    (default ON white-label / OFF shared)
+[x] Module catalogue pricing (£14,500 hub / £0 SMTL / £5,000 SMC / £300 per website WTL /
+    £10,000 WC / £3,500 GC) — editable via dashboard_manage_module_pricing
+[x] Capabilities group Modules pricing — set prices + view module invoices +
+    mark module invoices as paid
+[x] One-time module invoices on enable (skip £0 and per-website until websites billed)
+[x] Hub-enable module invoice (Shared / White Label) created as paid; other module
+    invoices created as unpaid until payment is recorded
+[x] Manual mark module invoice paid (method + notes required; optional reference /
+    attachment) with persistent payment details on invoice view
+[x] Frontend: Module prices + Module invoices pages
+[x] Social Media Compliance capability section (blurred while module off)
+[x] Social Media Compliance API — submit / assign / review / versions / reports / charts
+[x] Social Media Compliance activity logging (smc.* actions in activity_logs)
+[x] Approver / manager dedicated front-end UIs (SMC & ops flows)
+[x] Power Admin user management UI (pa_manage_users_roles — create/update/delete/roles)
+[x] Control white labelled hubs via dashboard hub switcher (dashboard_control_white_label_hubs)
+[x] Acting-hub content create/list on white-label DB (posts, types, categories, tags, bundles)
+[ ] AI post/reel generation by FinProms admin (later)
+[ ] In-app post editing for buyers (later)
+[x] Social Media Compliance check flow (module + APIs)
+[x] General Compliance module + APIs (description + multi-file attachments)
+[x] Website Compliance module + APIs (templates, sections, change requests, cPanel deploy)
+
+================================================================================
+END OF REQUIREMENTS
+================================================================================

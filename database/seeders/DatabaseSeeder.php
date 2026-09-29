@@ -1,0 +1,26 @@
+<?php
+
+namespace Database\Seeders;
+
+use Illuminate\Database\Seeder;
+
+class DatabaseSeeder extends Seeder
+{
+    /**
+     * Seed the application's database.
+     */
+    public function run(): void
+    {
+        $this->call([
+            AdminUserSeeder::class,
+            PowerAdminUserSeeder::class,
+            SubscriptionPlanSeeder::class,
+            ContentTypeSeeder::class,
+            SettingsSeeder::class,
+            HubSeeder::class,
+            AdvisorPricingSeeder::class,
+            // Idempotent by template/page slug; safe to leave enabled.
+            WebsiteComplianceTemplateSeeder::class,
+        ]);
+    }
+}
