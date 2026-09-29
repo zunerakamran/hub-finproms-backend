@@ -51,7 +51,7 @@ class WhiteLabelHubSyncService
                 // (relative storage paths would 404 on the tenant host).
                 $payload = [
                     'name' => $hub->name,
-                    'type' => Hub::TYPE_WHITE_LABEL,
+                    'type' => $hub->isShared() ? Hub::TYPE_SHARED : Hub::TYPE_WHITE_LABEL,
                     'is_active' => $hub->is_active ? 1 : 0,
                     'primary_color' => $hub->primary_color,
                     'secondary_color' => $hub->secondary_color,

@@ -1457,7 +1457,8 @@ class Hub extends Model
     /**
      * Whether this hub instance is the platform control plane (Central Hub Controller).
      * Legacy: a Shared deploy can still act as control plane when HUB_IS_CONTROL_PLANE=true
-     * until migrated to type=central.
+     * until migrated to type=central — but only for THIS deploy's hub row, not every
+     * Shared hub registered in the Central registry.
      */
     public function isControlPlane(): bool
     {
@@ -1465,7 +1466,13 @@ class Hub extends Model
             return true;
         }
 
-        return $this->isShared() && (bool) config('hub.is_control_plane', false);
+        if (! $this->isShared() || ! (bool) config('hub.is_control_plane', false)) {
+            return false;
+        }
+
+        $deploySlug = (string) config('hub.current_slug', '');
+
+        return $deploySlug !== '' && $this->slug === $deploySlug;
     }
 
     /**

@@ -17,6 +17,7 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
+use Throwable;
 
 class PowerAdminHubController extends Controller
 {
@@ -107,6 +108,7 @@ class PowerAdminHubController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        $this->hubs->ensureRemoteDatabaseColumns();
         $this->normalizeOptionalUrlFields($request);
 
         $validated = $request->validate([
@@ -151,26 +153,34 @@ class PowerAdminHubController extends Controller
             ? $this->hubs->sanitizeChecklist($validated['checklist'], $type)
             : Hub::defaultChecklist($type);
 
-        $hub = Hub::query()->create([
-            'name' => $validated['name'],
-            'slug' => $slug,
-            'type' => $type,
-            'is_active' => $validated['is_active'] ?? true,
-            'primary_color' => $validated['primary_color'] ?? null,
-            'secondary_color' => $validated['secondary_color'] ?? null,
-            'logo_url' => $validated['logo_url'] ?? null,
-            'favicon_url' => $validated['favicon_url'] ?? null,
-            'frontend_url' => $validated['frontend_url'] ?? null,
-            'api_url' => $validated['api_url'] ?? null,
-            'deploy_notes' => $validated['deploy_notes'] ?? null,
-            'db_driver' => $validated['db_driver'] ?? 'mysql',
-            'db_host' => $validated['db_host'] ?? null,
-            'db_port' => $validated['db_port'] ?? null,
-            'db_database' => $validated['db_database'] ?? null,
-            'db_username' => $validated['db_username'] ?? null,
-            'db_password' => $validated['db_password'] ?? null,
-            'checklist' => $checklist,
-        ]);
+        try {
+            $hub = Hub::query()->create([
+                'name' => $validated['name'],
+                'slug' => $slug,
+                'type' => $type,
+                'is_active' => $validated['is_active'] ?? true,
+                'primary_color' => $validated['primary_color'] ?? null,
+                'secondary_color' => $validated['secondary_color'] ?? null,
+                'logo_url' => $validated['logo_url'] ?? null,
+                'favicon_url' => $validated['favicon_url'] ?? null,
+                'frontend_url' => $validated['frontend_url'] ?? null,
+                'api_url' => $validated['api_url'] ?? null,
+                'deploy_notes' => $validated['deploy_notes'] ?? null,
+                'db_driver' => $validated['db_driver'] ?? 'mysql',
+                'db_host' => $validated['db_host'] ?? null,
+                'db_port' => $validated['db_port'] ?? null,
+                'db_database' => $validated['db_database'] ?? null,
+                'db_username' => $validated['db_username'] ?? null,
+                'db_password' => $validated['db_password'] ?? null,
+                'checklist' => $checklist,
+            ]);
+        } catch (Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => 'Could not create hub: '.$e->getMessage(),
+            ], 422);
+        }
 
         $moduleInvoices = [];
         $billingWarning = null;
@@ -217,6 +227,7 @@ class PowerAdminHubController extends Controller
 
     public function update(Request $request, Hub $hub): JsonResponse
     {
+        $this->hubs->ensureRemoteDatabaseColumns();
         $this->normalizeOptionalUrlFields($request);
 
         $validated = $request->validate([
@@ -273,11 +284,19 @@ class PowerAdminHubController extends Controller
             unset($validated['db_password']);
         }
 
-        $hub->fill($validated);
-        if ($clearDbPassword) {
-            $hub->db_password = null;
+        try {
+            $hub->fill($validated);
+            if ($clearDbPassword) {
+                $hub->db_password = null;
+            }
+            $hub->save();
+        } catch (Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => 'Could not save hub wiring: '.$e->getMessage(),
+            ], 422);
         }
-        $hub->save();
 
         if ($creditsPayload !== []) {
             $user = $request->user();
@@ -306,18 +325,27 @@ class PowerAdminHubController extends Controller
 
         $this->hubs->forgetCurrentCache();
 
+        $syncWarning = null;
         try {
             $this->syncWhiteLabelSettings($hub->fresh());
         } catch (InvalidArgumentException $e) {
-            return response()->json([
-                'message' => $e->getMessage(),
-                'hub' => $hub->fresh()->toAdminArray(),
-            ], 422);
+            // Credentials may still be valid locally; remote host often unreachable
+            // from Central (e.g. tenant "localhost"). Keep the save; surface a warning.
+            $syncWarning = $e->getMessage();
+        } catch (Throwable $e) {
+            report($e);
+            $syncWarning = 'Remote sync failed: '.$e->getMessage();
+        }
+
+        $message = 'Hub updated successfully.';
+        if ($syncWarning) {
+            $message .= ' '.$syncWarning;
         }
 
         return response()->json([
-            'message' => 'Hub updated successfully.',
+            'message' => $message,
             'hub' => $hub->fresh()->toAdminArray(),
+            'sync_warning' => $syncWarning,
         ]);
     }
 

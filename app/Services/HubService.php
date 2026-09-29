@@ -3,13 +3,18 @@
 namespace App\Services;
 
 use App\Models\Hub;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Schema;
 use RuntimeException;
+use Throwable;
 
 class HubService
 {
     public function current(): Hub
     {
+        $this->ensureRemoteDatabaseColumns();
+
         $slug = (string) config('hub.current_slug', 'shared');
 
         return Cache::remember("hub:current:{$slug}", 60, function () use ($slug) {
@@ -95,6 +100,47 @@ class HubService
     {
         $slug = (string) config('hub.current_slug', 'shared');
         Cache::forget("hub:current:{$slug}");
+    }
+
+    /**
+     * Ensure remote-DB wiring columns exist (older Central deploys may have
+     * missed the migration — writing db_password then 500s with Unknown column).
+     */
+    public function ensureRemoteDatabaseColumns(): void
+    {
+        static $checked = false;
+        if ($checked) {
+            return;
+        }
+        $checked = true;
+
+        try {
+            if (! Schema::hasTable('hubs')) {
+                return;
+            }
+
+            $columns = [
+                'db_driver' => fn (Blueprint $table) => $table->string('db_driver', 32)->nullable(),
+                'db_host' => fn (Blueprint $table) => $table->string('db_host')->nullable(),
+                'db_port' => fn (Blueprint $table) => $table->unsignedSmallInteger('db_port')->nullable(),
+                'db_database' => fn (Blueprint $table) => $table->string('db_database')->nullable(),
+                'db_username' => fn (Blueprint $table) => $table->string('db_username')->nullable(),
+                'db_password' => fn (Blueprint $table) => $table->text('db_password')->nullable(),
+            ];
+
+            foreach ($columns as $name => $add) {
+                if (Schema::hasColumn('hubs', $name)) {
+                    continue;
+                }
+                Schema::table('hubs', function (Blueprint $table) use ($add) {
+                    $add($table);
+                });
+            }
+        } catch (Throwable $e) {
+            // Do not break Power Admin if ALTER is denied; save will surface a clear error.
+            report($e);
+            $checked = false;
+        }
     }
 
     public function can(string $flag): bool
