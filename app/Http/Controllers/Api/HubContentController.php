@@ -546,7 +546,7 @@ class HubContentController extends Controller
         $this->assertCanControl($request);
 
         try {
-            return $this->actingHubs->requireActingWhiteLabel($request->user());
+            return $this->actingHubs->requireActingContentHub($request->user());
         } catch (InvalidArgumentException $e) {
             throw new HttpException(422, $e->getMessage());
         }

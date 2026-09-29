@@ -436,10 +436,7 @@ class CapabilitiesMatrixService
             // dashboard navbar follows that hub while it is selected.
             $this->applyRoleMatrix($tenantHub, $controlPlaneInput, ActingHubService::CONTROL_PLANE_ROLES);
             $this->applyRoleMatrix($tenantHub, $tenantInput, $this->tenantRoles());
-            if ($tenantHub->isWhiteLabel() && $tenantHub->hasRemoteDatabaseConfigured()) {
-                app(WhiteLabelHubSyncService::class)->pushSettings($tenantHub->fresh());
-            } elseif ($tenantHub->isShared() && $tenantHub->hasRemoteDatabaseConfigured()) {
-                // Shared content hub with remote DB wiring — push role matrix remotely.
+            if ($tenantHub->isContentHub() && $tenantHub->hasRemoteDatabaseConfigured()) {
                 try {
                     app(WhiteLabelHubSyncService::class)->pushSettings($tenantHub->fresh());
                 } catch (\Throwable $e) {

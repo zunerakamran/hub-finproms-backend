@@ -18,12 +18,12 @@ class ActiveSessionService
     ) {}
 
     /**
-     * Hub whose users/sessions are being managed (acting white-label when switcher is on).
+     * Hub whose users/sessions are being managed (acting content hub when switcher is on).
      */
     public function targetHub(?User $actor): Hub
     {
         if ($actor && $this->actingHubs->isActingRemotely($actor)) {
-            return $this->actingHubs->requireActingWhiteLabel($actor);
+            return $this->actingHubs->requireActingContentHub($actor);
         }
 
         return $this->actingHubs->targetHub($actor);

@@ -98,7 +98,7 @@ class RoleDisplayNameService
         $hub->save();
         $this->hubs->forgetCurrentCache();
 
-        if ($hub->isWhiteLabel() && $hub->hasRemoteDatabaseConfigured()) {
+        if ($hub->isContentHub() && $hub->hasRemoteDatabaseConfigured()) {
             $this->whiteLabelSync->pushSettings($hub->fresh());
         }
 

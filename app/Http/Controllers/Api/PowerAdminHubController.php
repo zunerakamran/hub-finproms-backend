@@ -431,11 +431,11 @@ class PowerAdminHubController extends Controller
         $usersConnection = null;
         $syncWarning = null;
         try {
-            if ($hub->isWhiteLabel() && $hub->hasRemoteDatabaseConfigured()) {
+            if ($hub->isContentHub() && $hub->hasRemoteDatabaseConfigured()) {
                 $this->whiteLabelSync->pushSettings($hub);
                 $usersConnection = $this->remoteDb->connect($hub);
-            } elseif ($hub->isWhiteLabel()) {
-                $syncWarning = 'This hub has no remote database wiring, so the live white-labelled site was not updated.';
+            } elseif ($hub->isContentHub()) {
+                $syncWarning = 'This hub has no remote database wiring, so the live content hub site was not updated.';
             }
         } catch (InvalidArgumentException $e) {
             return response()->json([

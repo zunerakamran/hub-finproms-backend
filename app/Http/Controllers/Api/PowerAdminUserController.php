@@ -413,7 +413,7 @@ class PowerAdminUserController extends Controller
      */
     private function firmOptions(?Hub $hub = null): array
     {
-        if ($hub && $hub->isWhiteLabel()) {
+        if ($hub && $hub->isContentHub()) {
             try {
                 return $this->whiteLabelFirms->options($hub);
             } catch (InvalidArgumentException) {
@@ -582,7 +582,7 @@ class PowerAdminUserController extends Controller
         }
 
         try {
-            return $this->actingHubs->requireActingWhiteLabel($user);
+            return $this->actingHubs->requireActingContentHub($user);
         } catch (InvalidArgumentException $e) {
             throw new HttpException(422, $e->getMessage());
         }

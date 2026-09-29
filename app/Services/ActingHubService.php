@@ -315,6 +315,7 @@ class ActingHubService
                 'compliance_status_labels' => $acting->resolvedComplianceStatusLabels(),
             ],
             'is_acting_on_white_label' => $acting->isWhiteLabel(),
+            'is_acting_on_shared' => $acting->isShared() && $actingRemotely,
             'is_acting_remotely' => $actingRemotely,
             'control_plane_hub' => [
                 'id' => $current->id,
@@ -335,19 +336,14 @@ class ActingHubService
     }
 
     /**
-     * Resolve and assert the acting white-labelled hub for WL-only writes.
+     * Resolve and assert the acting content hub for remote writes.
+     * Legacy name kept for callers; Shared and White-label are both allowed.
+     *
+     * @deprecated Use requireActingContentHub()
      */
     public function requireActingWhiteLabel(User $user): Hub
     {
-        $hub = $this->requireActingContentHub($user);
-        if (! $hub->isWhiteLabel()) {
-            throw new HttpException(
-                422,
-                'Select a white-labelled hub in the hub switcher for this action.'
-            );
-        }
-
-        return $hub;
+        return $this->requireActingContentHub($user);
     }
 
     /**
@@ -371,6 +367,22 @@ class ActingHubService
         }
 
         $this->assertSelectable($hub);
+
+        return $hub;
+    }
+
+    /**
+     * White-label–only actions (subscriber credits, advisor billing, etc.).
+     */
+    public function requireActingWhiteLabelOnly(User $user): Hub
+    {
+        $hub = $this->requireActingContentHub($user);
+        if (! $hub->isWhiteLabel()) {
+            throw new HttpException(
+                422,
+                'Select a white-labelled hub in the hub switcher for this action.'
+            );
+        }
 
         return $hub;
     }

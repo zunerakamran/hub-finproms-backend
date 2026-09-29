@@ -157,7 +157,7 @@ class SettingController extends Controller
             $hub->save();
             $this->hubs->forgetCurrentCache();
             try {
-                if ($hub->isWhiteLabel() && $hub->hasRemoteDatabaseConfigured()) {
+                if ($hub->isContentHub() && $hub->hasRemoteDatabaseConfigured()) {
                     $this->whiteLabelSync->pushSettings($hub->fresh());
                 }
             } catch (InvalidArgumentException $e) {

@@ -86,7 +86,7 @@ trait CreatesOnActingWhiteLabelHub
         }
 
         return response()->json([
-            'message' => 'Post created on '.$hub->name.' (white-labelled database).',
+            'message' => 'Post created on '.$hub->name.' (remote hub database).',
             'post' => $post,
             'target_hub' => $this->targetHubPayload($hub),
         ], 201);

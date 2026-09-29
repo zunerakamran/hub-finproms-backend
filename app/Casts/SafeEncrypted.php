@@ -31,6 +31,14 @@ class SafeEncrypted implements CastsAttributes
             return null;
         }
 
+        if (! filled(config('app.key'))) {
+            throw new \RuntimeException(
+                'No application encryption key has been specified. '
+                .'On Central set APP_KEY in public_html/api/.env (restore the existing key if you have it, '
+                .'otherwise run: php artisan key:generate), then: php artisan config:clear && php artisan cache:clear'
+            );
+        }
+
         return Crypt::encryptString((string) $value);
     }
 }
