@@ -168,6 +168,7 @@ class Hub extends Model
      * @var list<string>
      */
     public const MODULE_KEYS = [
+        'module_central_hub',
         'module_shared_hub',
         'module_white_label_hub',
         'module_social_media_template_library',
@@ -196,24 +197,20 @@ class Hub extends Model
      * @var list<string>
      */
     public const LOCKED_MODULE_KEYS = [
+        'module_central_hub',
         'module_shared_hub',
         'module_white_label_hub',
     ];
 
     /**
      * Module dependency graph.
-     * `__base__` resolves to Shared Hub or White Label Hub for the current hub.
-     *
-     * 1 base → no deps
-     * 2 (SM template library) → 1
-     * 3 (SM pre-approval) → 1 + 2
-     * 4 (Website template library) → 1
-     * 5 (Website content pre-approval) → 1 + 4
-     * 6 (Generic content pre-approval) → 1
+     * `__base__` resolves to Shared Hub or White Label Hub for content hubs.
+     * Central Hub Controller has no product-module dependents.
      *
      * @var array<string, list<string>>
      */
     public const MODULE_DEPENDENCIES = [
+        'module_central_hub' => [],
         'module_shared_hub' => [],
         'module_white_label_hub' => [],
         'module_social_media_template_library' => ['__base__'],
@@ -229,19 +226,24 @@ class Hub extends Model
     public function baseModuleKey(): string
     {
         if ($this->isCentral()) {
-            return 'module_shared_hub'; // unused on control plane; packaging N/A
+            return 'module_central_hub';
         }
 
         return $this->isShared() ? 'module_shared_hub' : 'module_white_label_hub';
     }
 
     /**
-     * Ordered module keys for the Modules page (exactly 6 for this hub).
+     * Ordered module keys for the Modules page.
+     * Central Hub Controller only shows its locked base module (control plane — no content products).
      *
      * @return list<string>
      */
     public function moduleKeysForPage(): array
     {
+        if ($this->isCentral()) {
+            return ['module_central_hub'];
+        }
+
         return array_values(array_merge([$this->baseModuleKey()], self::PRODUCT_MODULE_KEYS));
     }
 
@@ -474,13 +476,21 @@ class Hub extends Model
     {
         $isCentral = $type === self::TYPE_CENTRAL;
         $isShared = $type === self::TYPE_SHARED;
-        // Central is not a content packaging hub — both base modules stay off.
+        $checklist['module_central_hub'] = $isCentral;
         $checklist['module_shared_hub'] = $isShared;
         $checklist['module_white_label_hub'] = $type === self::TYPE_WHITE_LABEL;
         $base = $isShared ? 'module_shared_hub' : 'module_white_label_hub';
+
         if ($isCentral) {
-            $checklist['module_shared_hub'] = false;
-            $checklist['module_white_label_hub'] = false;
+            // Control plane: only Central Hub Controller module; no content products.
+            foreach (self::PRODUCT_MODULE_KEYS as $productKey) {
+                $checklist[$productKey] = false;
+            }
+            foreach (self::SOCIAL_MEDIA_TEMPLATE_LIBRARY_FUNCTIONALITY_KEYS as $funcKey) {
+                $checklist[$funcKey] = false;
+            }
+
+            return $checklist;
         }
 
         // Cascade in MODULE_KEYS order so parents are resolved before children.
@@ -746,6 +756,13 @@ class Hub extends Model
         ],
 
         // --- Modules (hub Modules page) ---
+        'module_central_hub' => [
+            'label' => 'Central Hub Controller',
+            'description' => 'Platform control plane only: hub registry, Power Admin tools, and remote control of Shared / White-labelled hubs. Always on (and locked) for the Central Hub. No member catalog or content modules on this instance.',
+            'group' => self::GROUP_MODULES,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
         'module_shared_hub' => [
             'label' => 'Shared Hub',
             'description' => 'Shared hub product packaging. Always on (and locked) for the shared hub. Other modules depend on this base module.',
@@ -1582,6 +1599,7 @@ class Hub extends Model
             $defaults[$flag] = (bool) $meta[$key];
         }
 
+        $defaults['module_central_hub'] = $type === self::TYPE_CENTRAL;
         $defaults['module_shared_hub'] = $type === self::TYPE_SHARED;
         $defaults['module_white_label_hub'] = $type === self::TYPE_WHITE_LABEL;
 
@@ -1590,11 +1608,18 @@ class Hub extends Model
             $defaults['dashboard_control_white_label_hubs'] = false;
             $defaults['receive_content_from_shared'] = true;
             $defaults['charge_amount_per_module'] = false;
+            $defaults['module_central_hub'] = false;
         }
 
         if ($type === self::TYPE_CENTRAL) {
+            $defaults['module_central_hub'] = true;
             $defaults['module_shared_hub'] = false;
             $defaults['module_white_label_hub'] = false;
+            $defaults['module_social_media_template_library'] = false;
+            $defaults['module_social_media_compliance'] = false;
+            $defaults['module_website_template_library'] = false;
+            $defaults['module_website_compliance'] = false;
+            $defaults['module_general_compliance'] = false;
             $defaults['charge_amount_per_module'] = false;
             $defaults['one_off_purchase'] = false;
             $defaults['public_subscribe'] = false;
@@ -1634,6 +1659,9 @@ class Hub extends Model
     {
         $checklist = $this->resolvedChecklist();
 
+        if ($flag === 'module_central_hub') {
+            return $this->isCentral();
+        }
         if ($flag === 'module_shared_hub') {
             return $this->isShared();
         }
@@ -1700,7 +1728,7 @@ class Hub extends Model
                 $inactive = ! $smtlOn;
             }
 
-            if ($key === 'module_white_label_hub' || $key === 'module_shared_hub') {
+            if ($key === 'module_white_label_hub' || $key === 'module_shared_hub' || $key === 'module_central_hub') {
                 $locked = true;
             }
 

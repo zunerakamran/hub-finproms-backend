@@ -217,6 +217,9 @@ class HubModulesController extends Controller
             } elseif ($key === 'module_white_label_hub') {
                 $locked = true;
                 $lockedReason = 'white_label_hub';
+            } elseif ($key === 'module_central_hub') {
+                $locked = true;
+                $lockedReason = 'central_hub';
             }
 
             $enabled = (bool) ($resolved[$key] ?? false);
