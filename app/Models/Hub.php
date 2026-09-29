@@ -814,6 +814,13 @@ class Hub extends Model
         ],
 
         // --- Member capabilities ---
+        'member_view_site_pages' => [
+            'label' => 'View website pages (outside Dashboard)',
+            'description' => 'Allow opening the public/member website (home, posts, reels, bundles, plans, etc.). When off, the user only uses Dashboard tools. Default OFF on Central Hub Controller (control plane has no member website).',
+            'group' => self::GROUP_MEMBER,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
         'member_browse_catalog' => [
             'label' => 'Browse catalog (posts / reels)',
             'description' => 'Can browse the content catalog. Configurable per role in the Capabilities matrix (all roles).',
@@ -1627,7 +1634,8 @@ class Hub extends Model
             $defaults['receive_content_from_shared'] = false;
             $defaults['advisor_subscriber_billing'] = false;
             $defaults['dashboard_control_white_label_hubs'] = true;
-            // Central is not a member catalog — keep member purchase flags off.
+            // Central is not a member catalog — keep member website / purchase flags off.
+            $defaults['member_view_site_pages'] = false;
             $defaults['member_browse_catalog'] = false;
             $defaults['member_view_plans'] = false;
             $defaults['member_purchase_content'] = false;

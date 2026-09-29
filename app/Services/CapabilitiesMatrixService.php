@@ -533,15 +533,35 @@ class CapabilitiesMatrixService
 
         // Approver: browse-focused by default
         foreach (array_keys($matrix[User::ROLE_APPROVER] ?? []) as $key) {
-            if (str_starts_with($key, 'member_') && $key !== 'member_browse_catalog') {
+            if (
+                str_starts_with($key, 'member_')
+                && $key !== 'member_browse_catalog'
+                && $key !== 'member_view_site_pages'
+            ) {
                 $matrix[User::ROLE_APPROVER][$key] = false;
             }
         }
 
-        // Catalog browse is on for every role by default (staff + users).
+        // Catalog browse is on for every role by default (staff + users) on content hubs.
         foreach (self::MATRIX_ROLES as $role) {
             if (isset($matrix[$role])) {
                 $matrix[$role]['member_browse_catalog'] = true;
+                $matrix[$role]['member_view_site_pages'] = true;
+            }
+        }
+
+        // Central Hub Controller has no member website — keep site-page access off for every role.
+        if ($hubType === Hub::TYPE_CENTRAL) {
+            foreach (self::MATRIX_ROLES as $role) {
+                if (! isset($matrix[$role])) {
+                    continue;
+                }
+                $matrix[$role]['member_view_site_pages'] = false;
+                $matrix[$role]['member_browse_catalog'] = false;
+                $matrix[$role]['member_view_plans'] = false;
+                $matrix[$role]['member_purchase_content'] = false;
+                $matrix[$role]['member_download_content'] = false;
+                $matrix[$role]['member_in_app_edit'] = false;
             }
         }
 
