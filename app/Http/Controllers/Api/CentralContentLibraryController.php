@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Post;
 use App\Services\ContentPushService;
+use App\Services\ContentTaxonomyService;
 use App\Services\HubService;
 use App\Services\PostImportService;
 use Illuminate\Http\JsonResponse;
@@ -21,7 +22,8 @@ class CentralContentLibraryController extends Controller
     public function __construct(
         private readonly HubService $hubs,
         private readonly PostImportService $imports,
-        private readonly ContentPushService $pushes
+        private readonly ContentPushService $pushes,
+        private readonly ContentTaxonomyService $taxonomy
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -95,6 +97,12 @@ class CentralContentLibraryController extends Controller
         ]);
 
         $attachment = $this->storeAttachment($request);
+
+        $this->taxonomy->ensureNames(
+            $validated['type'],
+            array_values($validated['categories']),
+            array_values($validated['tags'] ?? [])
+        );
 
         $post = Post::query()->create([
             'created_by' => $request->user()->id,

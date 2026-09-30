@@ -885,11 +885,17 @@ class CapabilitiesMatrixService
         }
 
         // Ensure Central / control-plane always keeps switcher + Central library
-        // defaults when missing from a partially-seeded role_capabilities blob.
+        // + taxonomy manage defaults when missing from a partially-seeded blob.
         if ($hub->isCentral() || $hub->isControlPlane()) {
             $fresh = $this->defaultRoleCapabilities(Hub::TYPE_CENTRAL);
             foreach (ActingHubService::CONTROL_PLANE_ROLES as $role) {
-                foreach ([ActingHubService::CAPABILITY, 'dashboard_central_content_library'] as $planeKey) {
+                foreach ([
+                    ActingHubService::CAPABILITY,
+                    'dashboard_central_content_library',
+                    'dashboard_manage_types',
+                    'dashboard_manage_categories',
+                    'dashboard_manage_tags',
+                ] as $planeKey) {
                     $missingFromStored = ! isset($stored[$role])
                         || ! is_array($stored[$role])
                         || ! array_key_exists($planeKey, $stored[$role]);

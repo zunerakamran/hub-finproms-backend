@@ -20,7 +20,8 @@ use Throwable;
 class PostImportService
 {
     public function __construct(
-        private readonly PostImportXlsxTemplate $template
+        private readonly PostImportXlsxTemplate $template,
+        private readonly ContentTaxonomyService $taxonomy
     ) {}
 
     public function templateXlsx(): string
@@ -66,7 +67,7 @@ class PostImportService
                     $type = $this->resolveType((string) ($row['type'] ?? ''));
                     $categories = $this->splitList((string) ($row['categories'] ?? ''));
                     $tags = $this->splitList((string) ($row['tags'] ?? ''));
-                    $this->ensureTaxonomy($type, $categories, $tags);
+                    $this->taxonomy->ensureNames($type, $categories, $tags);
 
                     $credits = (int) ($row['credits_cost'] ?? 10);
                     if ($credits < 0) {
@@ -217,38 +218,5 @@ class PostImportService
             static fn ($part) => trim((string) $part),
             $parts
         ), static fn ($part) => $part !== '')));
-    }
-
-    /**
-     * @param  list<string>  $categories
-     * @param  list<string>  $tags
-     */
-    private function ensureTaxonomy(string $type, array $categories, array $tags): void
-    {
-        if ($type !== '' && ! ContentType::query()->where('name', $type)->exists()) {
-            ContentType::query()->create([
-                'name' => $type,
-                'slug' => str($type)->slug()->toString() ?: 'post',
-            ]);
-            Post::clearTypeSlugMap();
-        }
-
-        foreach ($categories as $name) {
-            if (! Category::query()->where('name', $name)->exists()) {
-                Category::query()->create([
-                    'name' => $name,
-                    'slug' => str($name)->slug()->toString() ?: 'category',
-                ]);
-            }
-        }
-
-        foreach ($tags as $name) {
-            if (! Tag::query()->where('name', $name)->exists()) {
-                Tag::query()->create([
-                    'name' => $name,
-                    'slug' => str($name)->slug()->toString() ?: 'tag',
-                ]);
-            }
-        }
     }
 }

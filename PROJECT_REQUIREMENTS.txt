@@ -407,6 +407,31 @@ Notes:
     White-labelled hubs. Copies are inserted into the target hub DB.
   - Distribution checks: archived posts only; AI posts only to hubs with
     `ai_posts`; manual posts only to hubs with `manual_posts`.
+  - Types / categories / tags with Central library:
+    - Central keeps its own taxonomy tables (`content_types`, `categories`,
+      `tags`) plus type/categories/tags names stored on each Central post.
+    - On create (one-by-one or Excel), Central upserts any new type /
+      category / tag names into Central’s own taxonomy tables so the library
+      form and Manage types/categories/tags stay in sync.
+    - The Central library create form accepts existing names or new free-text
+      names; Manage types / categories / tags pages on Central remain the
+      full CRUD admin for Central taxonomy.
+    - On distribute, the push upserts by **name** into the target hub’s own
+      DB: any type, category, and tag used on the Central post is created on
+      the target if missing (or refreshed if a matching name already exists),
+      then the post copy is inserted with the same type/categories/tags values.
+    - This is a copy/upsert, not a live link back to Central. Each Shared /
+      White-label hub keeps its own taxonomy tables; local-only types/
+      categories/tags on a hub are left alone unless a distributed post
+      carries that name.
+    - While the hub switcher is on a Shared / White-label hub, Manage types /
+      categories / tags writes only to THAT hub’s DB (for local catalog work),
+      not Central’s.
+    - Public member catalog taxonomy GETs (`/types`, `/categories`, `/tags`)
+      require `member_browse_catalog` OR (when authenticated) Central library /
+      manage-types/categories/tags capabilities — Central keeps member catalog
+      off, so Power Admin still loads taxonomy for the Central library form
+      via the dashboard capability OR.
 - Media for remote posts is stored as a public URL reachable from Central /
   source storage (file uploaded via controlling instance, path saved on the
   target hub DB).
@@ -862,6 +887,8 @@ STEP 1 — Shared hub core (content hub)
 [x] Control white labelled hubs via dashboard hub switcher (dashboard_control_white_label_hubs)
 [x] Acting-hub content create/list on white-label DB (posts, types, categories, tags, bundles)
 [x] Central content library (manual create + Excel bulk, archive + distribute; AI stub)
+[x] Central library taxonomy: Central-owned types/categories/tags; distribute
+    upserts names into target hub DB with the post copy
 [x] Shared/WL Manual posts ↔ AI posts functionality opposites for receive/distribute
 [ ] AI post/reel generation by FinProms admin (later)
 [ ] In-app post editing for buyers (later)
