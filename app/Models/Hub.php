@@ -1836,6 +1836,96 @@ class Hub extends Model
     }
 
     /**
+     * API base URL for this hub (registry api_url, else frontend_url/api).
+     * Used when Central resolves remote relative media paths.
+     */
+    public function apiBaseUrl(): ?string
+    {
+        if (filled($this->api_url)) {
+            return rtrim((string) $this->api_url, '/');
+        }
+
+        if (filled($this->frontend_url)) {
+            return rtrim((string) $this->frontend_url, '/').'/api';
+        }
+
+        return null;
+    }
+
+    /**
+     * Public media base for this hub’s /api/media/{path} files
+     * (e.g. https://sharedhub.example/api/media). Falls back to this deploy’s
+     * filesystem public URL when the hub has no wiring yet.
+     */
+    public function publicMediaBaseUrl(): string
+    {
+        $api = $this->apiBaseUrl();
+        if ($api !== null) {
+            return $api.'/media';
+        }
+
+        $configured = (string) config('filesystems.disks.public.url', '');
+        if ($configured !== '') {
+            return rtrim($configured, '/');
+        }
+
+        return rtrim((string) config('app.url'), '/').'/storage';
+    }
+
+    /**
+     * Turn a stored attachment path into a browser-loadable absolute URL for this hub.
+     * Absolute http(s) URLs are left unchanged (Central-hosted remote uploads).
+     * Relative / root-relative paths are pointed at this hub’s media base so Shared
+     * catalog files load when Central is acting remotely.
+     */
+    public function resolvePublicMediaUrl(?string $path): ?string
+    {
+        if (! filled($path)) {
+            return null;
+        }
+
+        $path = trim((string) $path);
+        if ($path === '') {
+            return null;
+        }
+
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            return $path;
+        }
+
+        $relative = $path;
+        if (str_starts_with($relative, '/')) {
+            if (preg_match('#^/(?:api/)?media/(.+)$#i', $relative, $matches)) {
+                $relative = $matches[1];
+            } elseif (preg_match('#^/storage/(.+)$#i', $relative, $matches)) {
+                $relative = $matches[1];
+            } else {
+                $api = $this->apiBaseUrl();
+                if ($api !== null) {
+                    // Root path on the hub API host (unusual).
+                    return $api.$relative;
+                }
+
+                return $path;
+            }
+        }
+
+        $relative = ltrim($relative, '/');
+        foreach (['storage/', 'api/media/', 'media/'] as $prefix) {
+            if (str_starts_with(strtolower($relative), $prefix)) {
+                $relative = substr($relative, strlen($prefix));
+                break;
+            }
+        }
+        $relative = ltrim($relative, '/');
+        if ($relative === '') {
+            return null;
+        }
+
+        return rtrim($this->publicMediaBaseUrl(), '/').'/'.$relative;
+    }
+
+    /**
      * Whether remote DB credentials are complete enough for content push.
      */
     public function hasRemoteDatabaseConfigured(): bool

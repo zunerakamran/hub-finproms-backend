@@ -310,6 +310,8 @@ class ActingHubService
                 'is_shared' => $acting->isShared(),
                 'is_content_hub' => $acting->isContentHub(),
                 'frontend_url' => $acting->frontendBaseUrl(),
+                'api_url' => $acting->apiBaseUrl(),
+                'media_base_url' => $acting->publicMediaBaseUrl(),
                 'branding' => $acting->brandingPayload(),
                 'role_labels' => $acting->resolvedRoleLabels(),
                 'compliance_status_labels' => $acting->resolvedComplianceStatusLabels(),

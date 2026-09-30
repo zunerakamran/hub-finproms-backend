@@ -63,7 +63,7 @@ class WhiteLabelContentService
                 ->get();
 
             return [
-                'data' => $rows->map(fn ($row) => $this->mapPostRow($row))->all(),
+                'data' => $rows->map(fn ($row) => $this->mapPostRow($hub, $row))->all(),
             ];
         } finally {
             $this->remoteDb->disconnect($hub);
@@ -116,7 +116,7 @@ class WhiteLabelContentService
 
             $row = DB::connection($connection)->table('posts')->where('id', $id)->first();
 
-            return $this->mapPostRow($row);
+            return $this->mapPostRow($hub, $row);
         } finally {
             $this->remoteDb->disconnect($hub);
         }
@@ -134,7 +134,7 @@ class WhiteLabelContentService
                 throw new InvalidArgumentException('Post not found on this white-labelled hub.');
             }
 
-            return $this->mapPostRow($row);
+            return $this->mapPostRow($hub, $row);
         } finally {
             $this->remoteDb->disconnect($hub);
         }
@@ -200,7 +200,7 @@ class WhiteLabelContentService
             DB::connection($connection)->table('posts')->where('id', $postId)->update($updates);
             $fresh = DB::connection($connection)->table('posts')->where('id', $postId)->first();
 
-            return $this->mapPostRow($fresh);
+            return $this->mapPostRow($hub, $fresh);
         } finally {
             $this->remoteDb->disconnect($hub);
         }
@@ -617,7 +617,7 @@ class WhiteLabelContentService
                 ->get();
 
             return [
-                'data' => $rows->map(function ($r) use ($connection) {
+                'data' => $rows->map(function ($r) use ($connection, $hub) {
                     $count = DB::connection($connection)->table('bundle_post')
                         ->where('bundle_id', $r->id)
                         ->count();
@@ -630,7 +630,7 @@ class WhiteLabelContentService
                         'is_active' => (bool) $r->is_active,
                         'posts_count' => $count,
                         'image_path' => $r->image_path ?? null,
-                        'image_url' => $this->resolveBundleImageUrl($r->image_path ?? null),
+                        'image_url' => $this->resolveBundleImageUrl($hub, $r->image_path ?? null),
                     ];
                 })->all(),
             ];
@@ -693,7 +693,7 @@ class WhiteLabelContentService
                 'posts_count' => count($postIds),
                 'is_active' => (bool) ($payload['is_active'] ?? true),
                 'image_path' => $insert['image_path'] ?? null,
-                'image_url' => $this->resolveBundleImageUrl($insert['image_path'] ?? null),
+                'image_url' => $this->resolveBundleImageUrl($hub, $insert['image_path'] ?? null),
             ];
         } finally {
             $this->remoteDb->disconnect($hub);
@@ -768,7 +768,7 @@ class WhiteLabelContentService
                 'is_active' => (bool) $fresh->is_active,
                 'posts_count' => $count,
                 'image_path' => $fresh->image_path ?? null,
-                'image_url' => $this->resolveBundleImageUrl($fresh->image_path ?? null),
+                'image_url' => $this->resolveBundleImageUrl($hub, $fresh->image_path ?? null),
             ];
         } finally {
             $this->remoteDb->disconnect($hub);
@@ -800,7 +800,7 @@ class WhiteLabelContentService
     /**
      * @return array<string, mixed>
      */
-    private function mapPostRow(object $row): array
+    private function mapPostRow(Hub $hub, object $row): array
     {
         $tags = $row->tags;
         if (is_string($tags)) {
@@ -820,12 +820,7 @@ class WhiteLabelContentService
         $categories = array_values(array_filter(array_map('strval', $categories)));
 
         $path = $row->attachment_path;
-        $url = null;
-        if ($path) {
-            $url = (str_starts_with((string) $path, 'http://') || str_starts_with((string) $path, 'https://'))
-                ? $path
-                : Storage::disk('public')->url($path);
-        }
+        $url = $hub->resolvePublicMediaUrl($path ? (string) $path : null);
 
         $mime = strtolower((string) ($row->attachment_mime ?? ''));
         $extension = strtolower(pathinfo((string) ($row->attachment_name ?? ''), PATHINFO_EXTENSION));
@@ -1035,18 +1030,8 @@ class WhiteLabelContentService
         ]);
     }
 
-    private function resolveBundleImageUrl(?string $path): ?string
+    private function resolveBundleImageUrl(Hub $hub, ?string $path): ?string
     {
-        if (! filled($path)) {
-            return null;
-        }
-
-        if (str_starts_with($path, 'http://')
-            || str_starts_with($path, 'https://')
-            || str_starts_with($path, '/')) {
-            return $path;
-        }
-
-        return Storage::disk('public')->url($path);
+        return $hub->resolvePublicMediaUrl($path);
     }
 }

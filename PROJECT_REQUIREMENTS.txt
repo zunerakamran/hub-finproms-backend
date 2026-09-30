@@ -320,6 +320,9 @@ Notes:
   - Hub detail is registry / deploy wiring only — Functionalities, Modules,
     Capabilities, and Subscriber credits are managed after selecting the hub
     in the Control hub switcher (not via boxes on hub detail).
+  - When Central acts on a Shared/White-label hub, relative post/bundle media
+    paths are resolved against that hub’s api_url / frontend_url media base
+    (not Central’s APP_URL), so Shared catalog images load in the dashboard.
     Registry "ready" = active + frontend_url + remote DB credentials set.
   - Hub list badges: Wiring ready / Needs wiring.
 - Content push / remote acting (Central → Shared or White-label): Power Admin
