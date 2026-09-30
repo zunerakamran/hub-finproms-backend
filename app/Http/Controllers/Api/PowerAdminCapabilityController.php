@@ -120,18 +120,21 @@ class PowerAdminCapabilityController extends Controller
     }
 
     /**
-     * Add a catalog or custom role to every hub’s Capabilities matrix.
+     * Add a catalog or custom role to the selected hub’s Capabilities matrix only.
      */
     public function addRole(Request $request): JsonResponse
     {
         $validated = $request->validate([
             'key' => ['sometimes', 'nullable', 'string', 'max:41'],
             'label' => ['sometimes', 'nullable', 'string', 'max:100'],
-            'hub_id' => ['sometimes', 'nullable', 'integer', 'exists:hubs,id'],
+            'hub_id' => ['required', 'integer', 'exists:hubs,id'],
         ]);
 
+        $hub = Hub::query()->findOrFail((int) $validated['hub_id']);
+
         try {
-            $added = $this->hubRoles->addRoleToAllHubs(
+            $added = $this->hubRoles->addRoleToHub(
+                $hub,
                 $validated['key'] ?? null,
                 $validated['label'] ?? null
             );
@@ -139,21 +142,14 @@ class PowerAdminCapabilityController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
-        $hubId = (int) ($validated['hub_id'] ?? 0);
-        if (! $hubId && $request->user()) {
-            $hubId = (int) $this->actingHubs->actingHub($request->user())->id;
-        }
-        $hub = $hubId
-            ? Hub::query()->findOrFail($hubId)
-            : (Hub::query()->where('type', Hub::TYPE_CENTRAL)->first()
-                ?? Hub::query()->orderBy('id')->firstOrFail());
+        $hub = $hub->fresh() ?? $hub;
 
         return response()->json([
-            'message' => 'Role added to all hubs.',
+            'message' => 'Role added to '.$hub->name.'.',
             'role' => $added['role'],
             'available_to_add' => $added['available_to_add'],
             'custom_roles' => $added['custom_roles'],
-            'added_to_all_hubs' => $added['added_to_all_hubs'],
+            'added_to_hub' => $added['added_to_hub'],
             'matrix' => $this->matrix->matrix($hub),
             'resolved' => $this->capabilities->resolved(),
         ]);

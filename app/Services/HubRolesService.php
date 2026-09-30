@@ -12,18 +12,22 @@ use Throwable;
 
 /**
  * Which role columns appear in the Capabilities matrix, and how new roles are
- * added across every hub.
+ * added for the hub currently being edited.
  *
  * Visibility = roles that currently have users on that hub
- *            ∪ roles Power Admin explicitly added for all hubs
+ *            ∪ roles Power Admin explicitly added for that hub
  *            ∪ (Power Admin on Central, so platform pa_* cells stay editable).
  *
- * Custom roles (beyond the built-in catalog) are stored platform-wide and
- * seeded onto every hub’s role_capabilities blob.
+ * Custom role definitions (key + default label) are stored platform-wide so
+ * rename / assign work; enabling a role on the matrix is always per hub.
  */
 class HubRolesService
 {
+    /** @deprecated Legacy global list — still read for backward compatibility. */
     public const SETTING_ADDED_ROLES = 'hub_roles_added_to_all';
+
+    /** Per-hub map: { "hubId": ["role_key", ...] } */
+    public const SETTING_ADDED_BY_HUB = 'hub_roles_added_by_hub';
 
     public const SETTING_CUSTOM_ROLES = 'hub_roles_custom';
 
@@ -93,11 +97,51 @@ class HubRolesService
     }
 
     /**
-     * Roles Power Admin has explicitly enabled on every hub (even with no users yet).
+     * Roles Power Admin has explicitly enabled on this hub (even with no users yet).
+     *
+     * @return list<string>
+     */
+    public function rolesAddedForHub(Hub $hub): array
+    {
+        $known = $this->allKnownRoles();
+        $out = [];
+
+        $map = $this->addedRolesByHubMap();
+        $hubKey = (string) $hub->id;
+        $list = $map[$hubKey] ?? $map[(string) (int) $hub->id] ?? [];
+        if (is_array($list)) {
+            foreach ($list as $role) {
+                $role = $this->normalizeRoleKey((string) $role);
+                if ($role !== '' && in_array($role, $known, true) && ! in_array($role, $out, true)) {
+                    $out[] = $role;
+                }
+            }
+        }
+
+        // Legacy “added to all hubs” list still counts for every hub.
+        foreach ($this->legacyRolesAddedToAllHubs() as $role) {
+            if (! in_array($role, $out, true)) {
+                $out[] = $role;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @deprecated Use rolesAddedForHub()
      *
      * @return list<string>
      */
     public function rolesAddedToAllHubs(): array
+    {
+        return $this->legacyRolesAddedToAllHubs();
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function legacyRolesAddedToAllHubs(): array
     {
         $raw = Setting::getValue(self::SETTING_ADDED_ROLES, null);
         if (! is_string($raw) || $raw === '') {
@@ -119,6 +163,31 @@ class HubRolesService
         }
 
         return $out;
+    }
+
+    /**
+     * @return array<string, list<string>>
+     */
+    private function addedRolesByHubMap(): array
+    {
+        $raw = Setting::getValue(self::SETTING_ADDED_BY_HUB, null);
+        if (! is_string($raw) || $raw === '') {
+            return [];
+        }
+
+        $decoded = json_decode($raw, true);
+
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    /**
+     * @param  list<string>  $roles
+     */
+    private function saveAddedRolesForHub(Hub $hub, array $roles): void
+    {
+        $map = $this->addedRolesByHubMap();
+        $map[(string) $hub->id] = array_values($roles);
+        Setting::setValue(self::SETTING_ADDED_BY_HUB, json_encode($map));
     }
 
     /**
@@ -197,7 +266,7 @@ class HubRolesService
     {
         $visible = array_values(array_unique(array_merge(
             $this->rolesPresentOnHub($hub),
-            $this->rolesAddedToAllHubs()
+            $this->rolesAddedForHub($hub)
         )));
 
         // Central always keeps the Power Admin column (platform pa_* checklist).
@@ -217,22 +286,41 @@ class HubRolesService
     }
 
     /**
-     * Roles that can still be added to all hubs (catalog + not yet added globally).
+     * Catalog roles not yet visible on this hub (can still be added here).
      *
      * @return list<array{key: string, label: string, is_custom: bool}>
      */
-    public function rolesAvailableToAdd(): array
+    public function rolesAvailableToAdd(Hub $hub): array
     {
-        $added = $this->rolesAddedToAllHubs();
+        $visible = $this->visibleMatrixRoles($hub);
         $out = [];
         foreach (self::CATALOG_ROLES as $role) {
-            if (in_array($role, $added, true)) {
+            if ($hub->isWhiteLabel() && ActingHubService::isControlPlaneRole($role)) {
+                continue;
+            }
+            if (in_array($role, $visible, true)) {
                 continue;
             }
             $out[] = [
                 'key' => $role,
                 'label' => $this->defaultLabel($role),
                 'is_custom' => false,
+            ];
+        }
+
+        // Existing custom definitions not yet on this hub.
+        foreach ($this->customRoles() as $custom) {
+            $key = $custom['key'];
+            if (in_array($key, $visible, true)) {
+                continue;
+            }
+            if ($hub->isWhiteLabel() && ActingHubService::isControlPlaneRole($key)) {
+                continue;
+            }
+            $out[] = [
+                'key' => $key,
+                'label' => $custom['label'],
+                'is_custom' => true,
             ];
         }
 
@@ -248,7 +336,7 @@ class HubRolesService
     {
         $visible = $this->visibleMatrixRoles($hub);
         $present = $this->rolesPresentOnHub($hub);
-        $added = $this->rolesAddedToAllHubs();
+        $added = $this->rolesAddedForHub($hub);
 
         $roles = [];
         foreach ($visible as $role) {
@@ -258,30 +346,39 @@ class HubRolesService
                 'default_label' => $this->defaultLabel($role),
                 'is_custom' => ! in_array($role, self::CATALOG_ROLES, true),
                 'present_on_hub' => in_array($role, $present, true),
+                'added_to_hub' => in_array($role, $added, true),
+                // Legacy alias for older frontends.
                 'added_to_all_hubs' => in_array($role, $added, true),
             ];
         }
 
         return [
             'roles' => $roles,
-            'available_to_add' => $this->rolesAvailableToAdd(),
+            'available_to_add' => $this->rolesAvailableToAdd($hub),
             'custom_roles' => $this->customRoles(),
+            'added_to_hub' => $added,
             'added_to_all_hubs' => $added,
         ];
     }
 
     /**
-     * Enable an existing catalog role on every hub, or create a new custom role.
+     * Enable an existing catalog/custom role on this hub, or create a new custom role here.
      *
      * @return array<string, mixed>
      */
-    public function addRoleToAllHubs(?string $key = null, ?string $label = null): array
+    public function addRoleToHub(Hub $hub, ?string $key = null, ?string $label = null): array
     {
+        if ($hub->isWhiteLabel() && $key !== null && $key !== '') {
+            $normalized = $this->normalizeRoleKey($key);
+            if (ActingHubService::isControlPlaneRole($normalized)) {
+                throw new InvalidArgumentException('Control-plane roles cannot be added on a white-labelled hub.');
+            }
+        }
+
         $key = $this->normalizeRoleKey((string) $key);
         $label = trim((string) $label);
 
         if ($key === '') {
-            // Creating a brand-new custom role — label required; key derived from label.
             if ($label === '') {
                 throw new InvalidArgumentException('Provide a role key or a display name for the new role.');
             }
@@ -300,6 +397,10 @@ class HubRolesService
         $reserved = ['admin', 'guest', 'super_admin', 'root'];
         if (in_array($key, $reserved, true)) {
             throw new InvalidArgumentException("Role key \"{$key}\" is reserved.");
+        }
+
+        if ($hub->isWhiteLabel() && ActingHubService::isControlPlaneRole($key)) {
+            throw new InvalidArgumentException('Control-plane roles cannot be added on a white-labelled hub.');
         }
 
         $isCatalog = in_array($key, self::CATALOG_ROLES, true);
@@ -321,13 +422,22 @@ class HubRolesService
             Setting::setValue(self::SETTING_CUSTOM_ROLES, json_encode(array_values($customs)));
         }
 
-        $added = $this->rolesAddedToAllHubs();
+        $added = $this->rolesAddedForHub($hub);
         if (! in_array($key, $added, true)) {
-            $added[] = $key;
-            Setting::setValue(self::SETTING_ADDED_ROLES, json_encode(array_values($added)));
+            $storedForHub = $this->addedRolesByHubMap()[(string) $hub->id] ?? [];
+            if (! is_array($storedForHub)) {
+                $storedForHub = [];
+            }
+            $storedForHub[] = $key;
+            $this->saveAddedRolesForHub($hub, array_values(array_unique(array_map(
+                fn ($role) => $this->normalizeRoleKey((string) $role),
+                $storedForHub
+            ))));
         }
 
-        $this->seedRoleCapabilitiesOnAllHubs($key);
+        $this->seedRoleCapabilitiesOnHub($hub, $key);
+
+        $hub = $hub->fresh() ?? $hub;
 
         return [
             'role' => [
@@ -335,12 +445,24 @@ class HubRolesService
                 'label' => $label !== '' ? $label : $this->defaultLabel($key),
                 'default_label' => $this->defaultLabel($key),
                 'is_custom' => ! $isCatalog,
-                'added_to_all_hubs' => true,
+                'added_to_hub' => true,
             ],
-            'added_to_all_hubs' => $this->rolesAddedToAllHubs(),
-            'available_to_add' => $this->rolesAvailableToAdd(),
+            'added_to_hub' => $this->rolesAddedForHub($hub),
+            'available_to_add' => $this->rolesAvailableToAdd($hub),
             'custom_roles' => $this->customRoles(),
         ];
+    }
+
+    /**
+     * @deprecated Use addRoleToHub()
+     *
+     * @return array<string, mixed>
+     */
+    public function addRoleToAllHubs(?string $key = null, ?string $label = null): array
+    {
+        $hub = $this->hubs->current();
+
+        return $this->addRoleToHub($hub, $key, $label);
     }
 
     /**
@@ -358,72 +480,77 @@ class HubRolesService
     }
 
     /**
-     * Seed default capability cells for a role on every hub registry row.
+     * Seed default capability cells for a role on one hub registry row.
      */
-    public function seedRoleCapabilitiesOnAllHubs(string $role): void
+    public function seedRoleCapabilitiesOnHub(Hub $hub, string $role): void
     {
         $role = $this->normalizeRoleKey($role);
         if ($role === '') {
             return;
         }
 
-        $matrix = app(CapabilitiesMatrixService::class);
-
-        foreach (Hub::query()->orderBy('id')->get() as $hub) {
-            if ($hub->isWhiteLabel() && ActingHubService::isControlPlaneRole($role)) {
-                continue;
-            }
-
-            $caps = $matrix->resolvedRoleCapabilities($hub);
-            if (isset($caps[$role]) && is_array($caps[$role]) && $caps[$role] !== []) {
-                // Keep existing cells; ensure key exists in stored blob.
-                $stored = is_array($hub->role_capabilities) ? $hub->role_capabilities : [];
-                if (! isset($stored[$role])) {
-                    $stored[$role] = $caps[$role];
-                    $hub->forceFill(['role_capabilities' => $stored])->save();
-                }
-
-                continue;
-            }
-
-            $defaults = $matrix->defaultRoleCapabilities($hub->type);
-            $seed = $defaults[User::ROLE_USER] ?? [];
-            if (isset($defaults[$role]) && is_array($defaults[$role])) {
-                $seed = $defaults[$role];
-            }
-
-            // Custom / newly added roles: conservative defaults (member browse on content hubs).
-            if (! isset($defaults[$role])) {
-                foreach (array_keys($seed) as $cap) {
-                    $meta = Hub::CHECKLIST_DEFINITIONS[$cap] ?? null;
-                    $group = $meta['group'] ?? null;
-                    if (Hub::isDashboardCapabilityGroup($group)
-                        || $group === Hub::GROUP_ADMIN_EMAILS
-                        || $group === Hub::GROUP_MODULE_PRICING
-                        || $group === Hub::GROUP_SOCIAL_MEDIA_COMPLIANCE
-                        || $group === Hub::GROUP_GENERAL_COMPLIANCE
-                        || $group === Hub::GROUP_WEBSITE_COMPLIANCE
-                        || $group === Hub::GROUP_WEBSITE_TEMPLATE_LIBRARY
-                    ) {
-                        $seed[$cap] = false;
-                    }
-                }
-                if ($hub->isCentral()) {
-                    $seed['member_view_site_pages'] = false;
-                    $seed['member_browse_catalog'] = false;
-                    $seed['member_view_plans'] = false;
-                    $seed['member_purchase_content'] = false;
-                    $seed['member_download_content'] = false;
-                    $seed['member_in_app_edit'] = false;
-                }
-            }
-
-            $stored = is_array($hub->role_capabilities) ? $hub->role_capabilities : [];
-            $stored[$role] = $seed;
-            $hub->forceFill(['role_capabilities' => $stored])->save();
+        if ($hub->isWhiteLabel() && ActingHubService::isControlPlaneRole($role)) {
+            return;
         }
 
+        $matrix = app(CapabilitiesMatrixService::class);
+        $caps = $matrix->resolvedRoleCapabilities($hub);
+        if (isset($caps[$role]) && is_array($caps[$role]) && $caps[$role] !== []) {
+            $stored = is_array($hub->role_capabilities) ? $hub->role_capabilities : [];
+            if (! isset($stored[$role])) {
+                $stored[$role] = $caps[$role];
+                $hub->forceFill(['role_capabilities' => $stored])->save();
+            }
+            $this->hubs->forgetCurrentCache();
+
+            return;
+        }
+
+        $defaults = $matrix->defaultRoleCapabilities($hub->type);
+        $seed = $defaults[User::ROLE_USER] ?? [];
+        if (isset($defaults[$role]) && is_array($defaults[$role])) {
+            $seed = $defaults[$role];
+        }
+
+        if (! isset($defaults[$role])) {
+            foreach (array_keys($seed) as $cap) {
+                $meta = Hub::CHECKLIST_DEFINITIONS[$cap] ?? null;
+                $group = $meta['group'] ?? null;
+                if (Hub::isDashboardCapabilityGroup($group)
+                    || $group === Hub::GROUP_ADMIN_EMAILS
+                    || $group === Hub::GROUP_MODULE_PRICING
+                    || $group === Hub::GROUP_SOCIAL_MEDIA_COMPLIANCE
+                    || $group === Hub::GROUP_GENERAL_COMPLIANCE
+                    || $group === Hub::GROUP_WEBSITE_COMPLIANCE
+                    || $group === Hub::GROUP_WEBSITE_TEMPLATE_LIBRARY
+                ) {
+                    $seed[$cap] = false;
+                }
+            }
+            if ($hub->isCentral()) {
+                $seed['member_view_site_pages'] = false;
+                $seed['member_browse_catalog'] = false;
+                $seed['member_view_plans'] = false;
+                $seed['member_purchase_content'] = false;
+                $seed['member_download_content'] = false;
+                $seed['member_in_app_edit'] = false;
+            }
+        }
+
+        $stored = is_array($hub->role_capabilities) ? $hub->role_capabilities : [];
+        $stored[$role] = $seed;
+        $hub->forceFill(['role_capabilities' => $stored])->save();
         $this->hubs->forgetCurrentCache();
+    }
+
+    /**
+     * @deprecated Use seedRoleCapabilitiesOnHub()
+     */
+    public function seedRoleCapabilitiesOnAllHubs(string $role): void
+    {
+        foreach (Hub::query()->orderBy('id')->get() as $hub) {
+            $this->seedRoleCapabilitiesOnHub($hub, $role);
+        }
     }
 
     /**

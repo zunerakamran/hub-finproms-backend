@@ -378,7 +378,8 @@ class CapabilitiesMatrixService
             'roles' => $roles,
             'available_to_add' => $rolesMeta['available_to_add'],
             'custom_roles' => $rolesMeta['custom_roles'],
-            'added_to_all_hubs' => $rolesMeta['added_to_all_hubs'],
+            'added_to_hub' => $rolesMeta['added_to_hub'],
+            'added_to_all_hubs' => $rolesMeta['added_to_hub'],
             'behaviour' => $behaviour,
             'rows' => $rows,
         ];
