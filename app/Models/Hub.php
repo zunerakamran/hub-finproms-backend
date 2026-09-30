@@ -561,14 +561,12 @@ class Hub extends Model
         'member_in_app_edit',
         'general_show_purchases',
         'dashboard_manage_posts',
-        'dashboard_view_posts',
+        // dashboard_view_* stay usable without SMTL so Shared / WL hubs can
+        // still list distributed catalog data when the member product is off.
         'dashboard_manage_bundles',
         'dashboard_manage_types',
-        'dashboard_view_types',
         'dashboard_manage_categories',
-        'dashboard_view_categories',
         'dashboard_manage_tags',
-        'dashboard_view_tags',
         'dashboard_ai_content',
     ];
 
