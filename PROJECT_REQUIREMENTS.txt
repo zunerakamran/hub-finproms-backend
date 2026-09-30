@@ -405,9 +405,9 @@ Notes:
   - AI posts tab is under development (empty stub).
   - Distribute non-archived (ready) library posts to Shared / White-labelled
     hubs. Copies are inserted into the target hub DB. Archive is optional:
-    it retires a post from the distribute pool (no remarks) but does not
-    delete or hide it from the Central library list. Unarchive restores it
-    to the distribute pool.
+    it retires a post from the distribute pool with required remarks but does
+    not delete or hide it from the Central library list. Unarchive clears
+    remarks and restores the post to the distribute pool.
   - Distribution checks: non-archived posts only; AI posts only to hubs with
     `ai_posts`; manual posts only to hubs with `manual_posts`.
   - Types / categories / tags with Central library:

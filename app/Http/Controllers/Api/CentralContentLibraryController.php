@@ -131,12 +131,20 @@ class CentralContentLibraryController extends Controller
     {
         $this->assertCentralLibrary();
 
+        $validated = $request->validate([
+            'remarks' => ['required', 'string', 'max:2000'],
+        ]);
+
         $model = Post::query()->findOrFail($post);
         if ($model->archived_at !== null) {
             return response()->json(['message' => 'Post is already archived.'], 422);
         }
 
-        $model->archive($request->user());
+        try {
+            $model->archive($validated['remarks'], $request->user());
+        } catch (InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
 
         return response()->json([
             'message' => 'Post archived. It stays in the Central library but can no longer be distributed.',
