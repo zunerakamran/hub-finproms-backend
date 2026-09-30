@@ -100,4 +100,42 @@ class CentralContentLibraryCapabilityTest extends TestCase
             ->assertForbidden()
             ->assertJsonPath('capability', 'dashboard_central_content_library');
     }
+
+    public function test_power_admin_can_list_taxonomy_on_central_without_member_catalog(): void
+    {
+        $matrix = app(CapabilitiesMatrixService::class);
+
+        Hub::query()->create([
+            'name' => 'Central Hub Controller',
+            'slug' => 'central',
+            'type' => Hub::TYPE_CENTRAL,
+            'is_active' => true,
+            'checklist' => Hub::defaultChecklist(Hub::TYPE_CENTRAL),
+            'role_capabilities' => $matrix->defaultRoleCapabilities(Hub::TYPE_CENTRAL),
+        ]);
+
+        Sanctum::actingAs(User::factory()->powerAdmin()->create());
+
+        $this->getJson('/api/types')->assertOk();
+        $this->getJson('/api/categories')->assertOk();
+        $this->getJson('/api/tags')->assertOk();
+    }
+
+    public function test_guests_cannot_list_taxonomy_on_central_via_library_or_flag(): void
+    {
+        $matrix = app(CapabilitiesMatrixService::class);
+
+        Hub::query()->create([
+            'name' => 'Central Hub Controller',
+            'slug' => 'central',
+            'type' => Hub::TYPE_CENTRAL,
+            'is_active' => true,
+            'checklist' => Hub::defaultChecklist(Hub::TYPE_CENTRAL),
+            'role_capabilities' => $matrix->defaultRoleCapabilities(Hub::TYPE_CENTRAL),
+        ]);
+
+        $this->getJson('/api/types')
+            ->assertForbidden()
+            ->assertJsonPath('message', 'This capability is disabled for this hub by Power Admin.');
+    }
 }

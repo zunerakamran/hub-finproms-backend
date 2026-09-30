@@ -10,6 +10,7 @@ use App\Services\CapabilitiesMatrixService;
 use App\Services\HubService;
 use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Symfony\Component\HttpFoundation\Response;
 
 class EnsureHubCapability
@@ -35,11 +36,21 @@ class EnsureHubCapability
         }
 
         $hub = $this->hubs->current();
-        $user = $request->user();
+        $user = $this->resolveUser($request);
 
         // Guest / no user: hub-level checklist only (public member routes).
+        // Dashboard / Power Admin flags in an OR list must not open public access
+        // when their checklist defaults are on (e.g. Central library on Central).
         if (! $user) {
             foreach ($capabilities as $capability) {
+                if (str_starts_with($capability, 'dashboard_')
+                    || str_starts_with($capability, 'pa_')
+                    || str_starts_with($capability, 'smc_')
+                    || str_starts_with($capability, 'gc_')
+                    || str_starts_with($capability, 'wc_')
+                ) {
+                    continue;
+                }
                 if ($hub->can($capability)) {
                     return $next($request);
                 }
@@ -123,5 +134,25 @@ class EnsureHubCapability
         }
 
         return $hubForCap->hasWebsiteComplianceModule();
+    }
+
+    /**
+     * Resolve the viewer for public routes that still send a Bearer token
+     * (e.g. GET /types from the dashboard) without auth:sanctum middleware.
+     */
+    private function resolveUser(Request $request): ?User
+    {
+        $user = $request->user() ?? $request->user('sanctum');
+        if ($user instanceof User) {
+            return $user;
+        }
+
+        if (! $request->bearerToken()) {
+            return null;
+        }
+
+        $user = Auth::guard('sanctum')->user();
+
+        return $user instanceof User ? $user : null;
     }
 }
