@@ -255,7 +255,8 @@ class ActingHubService
     /**
      * Effective capabilities for the dashboard while a hub is selected.
      * Hub modules / functionalities / role matrix cells follow the acting
-     * tenant. Only `dashboard_control_white_label_hubs` stays on Central.
+     * tenant. Plane-only tools (hub switcher, Central content library) always
+     * follow the Central / control-plane matrix — same as hub_can middleware.
      *
      * @return array<string, bool>
      */
@@ -278,13 +279,14 @@ class ActingHubService
             $effective[$flag] = $this->matrix->userCan($hubForFlag, $user, $flag);
         }
 
-        // Always expose the control flag from the control-plane deploy hub.
+        // Always expose plane-only flags from the control-plane deploy hub
+        // (including while the switcher is on a Shared / White-labelled hub).
         $effective[self::CAPABILITY] = $this->matrix->userCan($current, $user, self::CAPABILITY);
-
-        // Central content library only while home on Central (not while switcher is on Shared/WL).
-        $actingRemotely = $this->isActingRemotely($user);
-        $effective['dashboard_central_content_library'] = (! $actingRemotely)
-            && $this->matrix->userCan($current, $user, 'dashboard_central_content_library');
+        $effective['dashboard_central_content_library'] = $this->matrix->userCan(
+            $current,
+            $user,
+            'dashboard_central_content_library'
+        );
 
         if ($user->isPowerAdmin()) {
             foreach (app(PowerAdminCapabilitiesService::class)->resolved() as $key => $enabled) {

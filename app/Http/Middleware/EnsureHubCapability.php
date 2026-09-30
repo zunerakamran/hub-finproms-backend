@@ -59,12 +59,12 @@ class EnsureHubCapability
             // Central library must be evaluated on a fresh control-plane hub row
             // (matrix saves can leave request caches / stale models behind).
             if ($capability === 'dashboard_central_content_library') {
-                if (! $this->hubs->current()->isControlPlane()) {
-                    continue;
-                }
                 $this->matrix->forgetResolvedCaches();
                 $this->hubs->forgetCurrentCache();
                 $hubForCap = $this->hubs->current();
+                if (! $hubForCap->isControlPlane()) {
+                    continue;
+                }
             }
 
             if ($this->controlPlaneRemoteWebsiteComplianceAllows($user, $hubForCap, $capability)) {
