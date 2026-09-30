@@ -298,8 +298,11 @@ class CapabilitiesMatrixService
                 $applicable = in_array($role, $applicableRoles, true);
                 $enabled = false;
                 if ($applicable) {
-                    // Hub switcher flag always reflects the control-plane (Central) matrix.
-                    if ($key === ActingHubService::CAPABILITY) {
+                    // Hub switcher + Central content library always reflect the
+                    // control-plane (Central) matrix — never the acting Shared/WL row.
+                    if ($key === ActingHubService::CAPABILITY
+                        || $key === 'dashboard_central_content_library'
+                    ) {
                         $enabled = (bool) ($controlPlaneRoleCaps[$role][$key] ?? false);
                     } else {
                         $enabled = (bool) ($roleCaps[$role][$key] ?? false);
@@ -494,16 +497,20 @@ class CapabilitiesMatrixService
                 unset($tenantInput[$role]);
             }
         }
-        if ($switcherInput !== []) {
-            $this->applyRoleMatrix($controlPlane, $switcherInput, ActingHubService::CONTROL_PLANE_ROLES);
-        }
 
         if ($tenantHub->isControlPlane() || (int) $tenantHub->id === (int) $controlPlane->id) {
             $this->applyRoleMatrix($controlPlane, $controlPlaneInput, ActingHubService::CONTROL_PLANE_ROLES);
             $this->applyRoleMatrix($controlPlane, $tenantInput, $this->tenantRoles());
+            // Plane-only flags last so they cannot be clobbered by a partial matrix save.
+            if ($switcherInput !== []) {
+                $this->applyRoleMatrix($controlPlane, $switcherInput, ActingHubService::CONTROL_PLANE_ROLES);
+            }
         } else {
             // Power Admin / FinProms hub tools are per content hub so the
             // dashboard navbar follows that hub while it is selected.
+            if ($switcherInput !== []) {
+                $this->applyRoleMatrix($controlPlane, $switcherInput, ActingHubService::CONTROL_PLANE_ROLES);
+            }
             $this->applyRoleMatrix($tenantHub, $controlPlaneInput, ActingHubService::CONTROL_PLANE_ROLES);
             $this->applyRoleMatrix($tenantHub, $tenantInput, $this->tenantRoles());
             if ($tenantHub->isContentHub() && $tenantHub->hasRemoteDatabaseConfigured()) {
@@ -515,6 +522,7 @@ class CapabilitiesMatrixService
             }
         }
 
+        $this->forgetResolvedCaches();
         app(HubService::class)->forgetCurrentCache();
 
         return $this->matrix($tenantHub->fresh() ?? $hub->fresh());
@@ -633,6 +641,18 @@ class CapabilitiesMatrixService
         }
         $hub->checklist = $checklist;
         $hub->save();
+
+        // In-request static cache still holds the pre-save matrix — drop it.
+        $this->forgetResolvedCaches();
+    }
+
+    /**
+     * Drop request-level role-capability memoization (call after matrix writes).
+     */
+    public function forgetResolvedCaches(): void
+    {
+        self::$resolvedRoleCapabilitiesCache = [];
+        self::$defaultRoleCapabilitiesCache = [];
     }
 
     /**
@@ -864,20 +884,22 @@ class CapabilitiesMatrixService
             }
         }
 
-        // Ensure Central always keeps control-plane switcher defaults when missing
-        // from a partially-seeded role_capabilities blob (e.g. member-caps migrations).
+        // Ensure Central / control-plane always keeps switcher + Central library
+        // defaults when missing from a partially-seeded role_capabilities blob.
         if ($hub->isCentral() || $hub->isControlPlane()) {
             $fresh = $this->defaultRoleCapabilities(Hub::TYPE_CENTRAL);
             foreach (ActingHubService::CONTROL_PLANE_ROLES as $role) {
-                if (! isset($defaults[$role][ActingHubService::CAPABILITY])
-                    || (
-                        ! isset($stored[$role])
+                foreach ([ActingHubService::CAPABILITY, 'dashboard_central_content_library'] as $planeKey) {
+                    $missingFromStored = ! isset($stored[$role])
                         || ! is_array($stored[$role])
-                        || ! array_key_exists(ActingHubService::CAPABILITY, $stored[$role])
-                    )
-                ) {
-                    $defaults[$role][ActingHubService::CAPABILITY] =
-                        (bool) ($fresh[$role][ActingHubService::CAPABILITY] ?? ($role === User::ROLE_POWER_ADMIN));
+                        || ! array_key_exists($planeKey, $stored[$role]);
+                    if ($missingFromStored || ! isset($defaults[$role][$planeKey])) {
+                        $fallback = $planeKey === ActingHubService::CAPABILITY
+                            ? ($role === User::ROLE_POWER_ADMIN)
+                            : true;
+                        $defaults[$role][$planeKey] =
+                            (bool) ($fresh[$role][$planeKey] ?? $fallback);
+                    }
                 }
             }
         }
@@ -977,6 +999,11 @@ class CapabilitiesMatrixService
         // Platform-only Power Admin capabilities.
         if (str_starts_with($flag, 'pa_')) {
             return $this->powerCapabilities->can($flag);
+        }
+
+        // Central content library is control-plane only (never Shared / WL acting hubs).
+        if ($flag === 'dashboard_central_content_library' && ! $hub->isControlPlane()) {
+            return false;
         }
 
         // White-labelled hub tools are inactive while the hub is shared.

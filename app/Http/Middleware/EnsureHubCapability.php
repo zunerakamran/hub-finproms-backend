@@ -56,6 +56,17 @@ class EnsureHubCapability
             // When controlling a white-labelled hub, hub-scoped caps follow that hub's matrix.
             $hubForCap = $this->actingHubs->capabilityHub($user, $capability);
 
+            // Central library must be evaluated on a fresh control-plane hub row
+            // (matrix saves can leave request caches / stale models behind).
+            if ($capability === 'dashboard_central_content_library') {
+                if (! $this->hubs->current()->isControlPlane()) {
+                    continue;
+                }
+                $this->matrix->forgetResolvedCaches();
+                $this->hubs->forgetCurrentCache();
+                $hubForCap = $this->hubs->current();
+            }
+
             if ($this->controlPlaneRemoteWebsiteComplianceAllows($user, $hubForCap, $capability)) {
                 return $next($request);
             }
@@ -67,9 +78,13 @@ class EnsureHubCapability
 
         $failedHub = $this->actingHubs->capabilityHub($user, $capabilities[0]);
         $effectiveRole = $this->actingAdvisors->effectiveCapabilityRole($user);
+        $message = 'This capability is disabled for your role on this hub.';
+        if ($capabilities[0] === 'dashboard_central_content_library' && ! $this->hubs->current()->isControlPlane()) {
+            $message = 'Central content library is only available on the Central Hub Controller.';
+        }
 
         return response()->json([
-            'message' => 'This capability is disabled for your role on this hub.',
+            'message' => $message,
             'capability' => $capabilities[0],
             'capabilities' => $capabilities,
             'role' => $user->role,

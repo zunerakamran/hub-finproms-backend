@@ -281,12 +281,10 @@ class ActingHubService
         // Always expose the control flag from the control-plane deploy hub.
         $effective[self::CAPABILITY] = $this->matrix->userCan($current, $user, self::CAPABILITY);
 
-        // Central content library is Central-only — never inherit the acting Shared/WL matrix.
-        $effective['dashboard_central_content_library'] = $this->matrix->userCan(
-            $current,
-            $user,
-            'dashboard_central_content_library'
-        );
+        // Central content library only while home on Central (not while switcher is on Shared/WL).
+        $actingRemotely = $this->isActingRemotely($user);
+        $effective['dashboard_central_content_library'] = (! $actingRemotely)
+            && $this->matrix->userCan($current, $user, 'dashboard_central_content_library');
 
         if ($user->isPowerAdmin()) {
             foreach (app(PowerAdminCapabilitiesService::class)->resolved() as $key => $enabled) {
