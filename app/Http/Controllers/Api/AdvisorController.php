@@ -9,6 +9,7 @@ use App\Services\ActingHubService;
 use App\Services\AdvisorBillingService;
 use App\Services\AdvisorImportService;
 use App\Services\CapabilitiesMatrixService;
+use App\Services\ModuleRecurringBillingService;
 use App\Services\WhiteLabelDatabaseService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -21,6 +22,7 @@ class AdvisorController extends Controller
     public function __construct(
         private readonly AdvisorImportService $importService,
         private readonly AdvisorBillingService $billingService,
+        private readonly ModuleRecurringBillingService $recurringBilling,
         private readonly ActingHubService $actingHubs,
         private readonly CapabilitiesMatrixService $matrix,
         private readonly WhiteLabelDatabaseService $remoteDb
@@ -86,18 +88,18 @@ class AdvisorController extends Controller
 
         $model = User::query()->find($advisor);
         if (! $model) {
-            return response()->json(['message' => 'Advisor not found.'], 404);
+            return response()->json(['message' => 'User not found.'], 404);
         }
 
-        if (! $model->isAdvisor()) {
+        if (ActingHubService::isControlPlaneRole((string) $model->role)) {
             return response()->json([
-                'message' => 'Only imported advisors can be discontinued.',
+                'message' => 'Control-plane admin accounts cannot be discontinued here.',
             ], 422);
         }
 
         if ($model->isDiscontinued()) {
             return response()->json([
-                'message' => 'This advisor is already discontinued.',
+                'message' => 'This user is already discontinued.',
                 'advisor' => $model,
             ]);
         }
@@ -129,7 +131,9 @@ class AdvisorController extends Controller
         }
 
         $useRemote = $this->shouldUseRemote($request, $hub);
-        $billingOn = $this->billingService->billingEnabled($hub);
+        // Recurring module billing replaces legacy advisor-tier import payment gate.
+        $recurringOn = $this->recurringBilling->billingEnabled($hub);
+        $billingOn = ! $recurringOn && $this->billingService->billingEnabled($hub);
 
         try {
             if ($billingOn) {
@@ -233,7 +237,7 @@ class AdvisorController extends Controller
                 ]);
             }
 
-            // Billing off — create users immediately.
+            // Billing off OR recurring module billing on — create users immediately.
             if ($useRemote) {
                 $result = $this->remoteDb->run($hub, function (string $connection) use ($file, $hub) {
                     return $this->importService->import($file, $hub, $connection);
@@ -243,6 +247,37 @@ class AdvisorController extends Controller
             }
         } catch (InvalidArgumentException|\RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $moduleInvoices = [];
+        if ($recurringOn) {
+            $importedUsers = $this->collectImportedUsersFromResult($result, $useRemote ? $hub : null);
+            try {
+                if ($useRemote) {
+                    $moduleInvoices = $this->remoteDb->run($hub, function (string $connection) use ($hub, $importedUsers, $request) {
+                        // Prefer connection-local models when IDs were returned from remote.
+                        $users = \App\Models\User::on($connection)
+                            ->whereIn('id', collect($importedUsers)->pluck('id')->filter()->all())
+                            ->get()
+                            ->all();
+
+                        return $this->recurringBilling->invoiceImportBatch(
+                            $hub,
+                            $users,
+                            $request->user(),
+                            $connection
+                        );
+                    });
+                } else {
+                    $moduleInvoices = $this->recurringBilling->invoiceImportBatch(
+                        $hub,
+                        $importedUsers,
+                        $request->user()
+                    );
+                }
+            } catch (\Throwable $e) {
+                report($e);
+            }
         }
 
         return response()->json([
@@ -255,13 +290,59 @@ class AdvisorController extends Controller
             ...$result,
             'awaiting_payment' => false,
             'billing' => null,
+            'module_recurring_invoices' => collect($moduleInvoices)->map(fn ($inv) => [
+                'id' => $inv->id,
+                'invoice_number' => $inv->invoice_number,
+                'amount' => (float) $inv->amount,
+                'status' => $inv->status,
+                'due_on' => $inv->due_on,
+                'description' => $inv->description,
+                'types' => $inv->types,
+            ])->values(),
             'quote' => [
-                'billing_enabled' => false,
+                'billing_enabled' => $recurringOn,
                 'payment_required' => false,
+                'recurring_module_billing' => $recurringOn,
                 'payment_methods' => [],
+                'message' => $recurringOn
+                    ? 'Recurring module invoices (if any) are due today and will be charged on the hub renew day.'
+                    : null,
             ],
             'target_hub' => $this->hubPayload($hub),
         ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $result
+     * @return list<\App\Models\User>
+     */
+    private function collectImportedUsersFromResult(array $result, ?Hub $remoteHub = null): array
+    {
+        $emails = collect($result['created'] ?? [])
+            ->merge($result['reactivated'] ?? [])
+            ->pluck('email')
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($emails === []) {
+            return [];
+        }
+
+        // Local commit returns user models occasionally; fall back to email lookup.
+        $fromRows = collect($result['created'] ?? [])
+            ->merge($result['reactivated'] ?? [])
+            ->map(fn ($row) => $row['user'] ?? null)
+            ->filter(fn ($u) => $u instanceof User)
+            ->values()
+            ->all();
+
+        if ($fromRows !== []) {
+            return $fromRows;
+        }
+
+        return User::query()->whereIn('email', $emails)->get()->all();
     }
 
     public function template(Request $request): StreamedResponse

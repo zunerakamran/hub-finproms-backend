@@ -68,6 +68,7 @@ class WhiteLabelHubSyncService
                     'email_templates' => json_encode($hub->email_templates),
                     'subscriber_credits' => $hub->subscriber_credits,
                     'advisor_billing_renew_day' => $hub->advisor_billing_renew_day,
+                    'billing_grace_day' => $hub->billing_grace_day,
                     'updated_at' => $now,
                 ];
 

@@ -17,12 +17,16 @@ class Invoice extends Model
 
     public const TYPE_MODULE_BILLING = 'module_billing';
 
+    public const TYPE_MODULE_RECURRING = 'module_recurring';
+
     /** Billing cadence shown as "Types" in the UI. */
     public const TYPES_ONE_TIME = 'one_time';
 
     public const TYPES_PER_USER_BUYING = 'per_user_buying';
 
     public const TYPES_ONGOING = 'ongoing';
+
+    public const TYPES_RECURRING = 'recurring';
 
     protected $fillable = [
         'invoice_number',
@@ -34,6 +38,7 @@ class Invoice extends Model
         'bundle_purchase_id',
         'hub_advisor_billing_id',
         'hub_module_billing_id',
+        'hub_module_recurring_billing_id',
         'description',
         'amount',
         'currency',
@@ -43,6 +48,7 @@ class Invoice extends Model
         'billing_email',
         'line_items',
         'issued_at',
+        'due_on',
     ];
 
     /**
@@ -53,6 +59,7 @@ class Invoice extends Model
         return match ($type) {
             self::TYPE_SUBSCRIPTION => self::TYPES_ONGOING,
             self::TYPE_ADVISOR_BILLING => self::TYPES_PER_USER_BUYING,
+            self::TYPE_MODULE_RECURRING => self::TYPES_RECURRING,
             self::TYPE_POST_PURCHASE,
             self::TYPE_BUNDLE_PURCHASE,
             self::TYPE_MODULE_BILLING => self::TYPES_ONE_TIME,
@@ -67,6 +74,7 @@ class Invoice extends Model
             'credits' => 'integer',
             'line_items' => 'array',
             'issued_at' => 'datetime',
+            'due_on' => 'date',
         ];
     }
 
@@ -98,5 +106,10 @@ class Invoice extends Model
     public function moduleBilling(): BelongsTo
     {
         return $this->belongsTo(HubModuleBilling::class, 'hub_module_billing_id');
+    }
+
+    public function moduleRecurringBilling(): BelongsTo
+    {
+        return $this->belongsTo(HubModuleRecurringBilling::class, 'hub_module_recurring_billing_id');
     }
 }

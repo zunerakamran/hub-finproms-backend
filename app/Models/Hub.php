@@ -774,6 +774,13 @@ class Hub extends Model
             'default_shared' => false,
             'default_white_label' => true,
         ],
+        'charge_recurring_per_module' => [
+            'label' => 'Charge recurring amount per module',
+            'description' => 'When on, imported users generate recurring module invoices (slot rates from total active users with that module; charge the import batch only). Renew day charges unpaid invoices; grace day suspends users / disables modules if still unpaid. Default on for white-labelled hubs; off for shared.',
+            'group' => self::GROUP_BEHAVIOUR,
+            'default_shared' => false,
+            'default_white_label' => true,
+        ],
 
         // --- Modules (hub Modules page) ---
         'module_central_hub' => [
@@ -997,29 +1004,29 @@ class Hub extends Model
             'default_white_label' => true,
         ],
         'advisor_discontinue' => [
-            'label' => 'Discontinue advisors',
-            'description' => 'End an imported advisor\'s access permanently (until re-imported). Separate from Excel import.',
+            'label' => 'Discontinue users',
+            'description' => 'Permanently end a user’s access on this hub (any role, until re-imported). Discontinued users are excluded from recurring seat counts. Separate from Excel import.',
             'group' => self::GROUP_DASHBOARD_ADVISORS,
             'default_shared' => false,
             'default_white_label' => true,
         ],
         'dashboard_view_advisor_invoices' => [
             'label' => 'View advisor billing invoices',
-            'description' => 'See invoices for white-labelled hub advisor subscriber billing (rate × advisors).',
+            'description' => 'See invoices for white-labelled hub billing (legacy advisor billing and module recurring invoices).',
             'group' => self::GROUP_DASHBOARD_ADVISORS,
             'default_shared' => false,
             'default_white_label' => true,
         ],
         'dashboard_manage_advisor_pricing' => [
-            'label' => 'Set advisor billing rates / quotas',
-            'description' => 'Configure pricing tiers (rate per advisor) used for white-labelled hub billing (rate × advisors).',
+            'label' => 'Set advisor billing rates / quotas (retired)',
+            'description' => 'Retired — module recurring slot tables replace advisor pricing tiers. Kept inactive; use Modules → Module prices instead.',
             'group' => self::GROUP_DASHBOARD_ADVISORS,
             'default_shared' => false,
-            'default_white_label' => true,
+            'default_white_label' => false,
         ],
         'dashboard_manage_advisor_renewal' => [
-            'label' => 'Set advisor billing auto-renew date',
-            'description' => 'Choose the monthly auto-renew day for white-labelled hub advisor billing (Power Admin / FinProms admin).',
+            'label' => 'Set billing renew + grace dates',
+            'description' => 'Choose the monthly renew day (charge card for all due unpaid invoices) and grace day (after which unpaid recurring seats suspend users and unpaid one-time invoices disable modules).',
             'group' => self::GROUP_DASHBOARD_ADVISORS,
             'default_shared' => false,
             'default_white_label' => true,
@@ -1104,17 +1111,17 @@ class Hub extends Model
             'default_white_label' => true,
         ],
 
-        // --- Modules pricing (blurred while charge_amount_per_module is off) ---
+        // --- Modules pricing (blurred while one-time AND recurring charge flags are off) ---
         'dashboard_manage_module_pricing' => [
-            'label' => 'Set module one-time prices',
-            'description' => 'Configure the one-time charge amount for each product module. Used when “Charge amount per module (one time)” is on.',
+            'label' => 'Set module prices (one-time + recurring)',
+            'description' => 'Configure one-time and recurring catalogue amounts / slot tables for each product module.',
             'group' => self::GROUP_MODULE_PRICING,
             'default_shared' => false,
             'default_white_label' => true,
         ],
         'dashboard_view_module_invoices' => [
             'label' => 'View module invoices',
-            'description' => 'See one-time invoices generated when modules are enabled on this hub.',
+            'description' => 'See one-time and recurring invoices generated for modules on this hub.',
             'group' => self::GROUP_MODULE_PRICING,
             'default_shared' => false,
             'default_white_label' => true,
@@ -1423,6 +1430,7 @@ class Hub extends Model
         'compliance_status_display_names',
         'email_templates',
         'advisor_billing_renew_day',
+        'billing_grace_day',
         'subscriber_credits',
         'advisor_stripe_subscription_id',
         'stripe_key',
@@ -1447,6 +1455,7 @@ class Hub extends Model
             'compliance_status_display_names' => 'array',
             'email_templates' => 'array',
             'advisor_billing_renew_day' => 'integer',
+            'billing_grace_day' => 'integer',
             'subscriber_credits' => 'integer',
             'db_port' => 'integer',
             'stripe_secret' => \App\Casts\SafeEncrypted::class,
@@ -1460,6 +1469,18 @@ class Hub extends Model
         $day = (int) ($this->advisor_billing_renew_day ?: 1);
 
         return max(1, min(28, $day));
+    }
+
+    /**
+     * Day of month after which unpaid due invoices trigger penalties.
+     * Always >= renew day, capped at 28.
+     */
+    public function billingGraceDay(): int
+    {
+        $renew = $this->advisorBillingRenewDay();
+        $grace = (int) ($this->billing_grace_day ?: min(28, $renew + 3));
+
+        return max($renew, min(28, $grace));
     }
 
     /**
@@ -1702,6 +1723,7 @@ class Hub extends Model
             $defaults['dashboard_control_white_label_hubs'] = false;
             $defaults['receive_content_from_shared'] = true;
             $defaults['charge_amount_per_module'] = false;
+            $defaults['charge_recurring_per_module'] = false;
             $defaults['module_central_hub'] = false;
             $defaults['manual_posts'] = true;
             $defaults['ai_posts'] = false;
@@ -1737,6 +1759,7 @@ class Hub extends Model
             $defaults['module_website_compliance'] = false;
             $defaults['module_general_compliance'] = false;
             $defaults['charge_amount_per_module'] = false;
+            $defaults['charge_recurring_per_module'] = false;
             $defaults['one_off_purchase'] = false;
             $defaults['public_subscribe'] = false;
             $defaults['private_invite_only'] = false;

@@ -9,6 +9,8 @@ use App\Models\WebsiteCompliance\Section;
 use App\Models\WebsiteCompliance\TemplateRequest;
 use App\Services\ActivityLogService;
 use App\Services\ActingAdvisorService;
+use App\Services\ActingHubService;
+use App\Services\ModuleBillingService;
 use App\Services\WebsiteCompliance\AdvisorSectionService;
 use App\Services\WebsiteCompliance\CpanelSyncService;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
@@ -23,7 +25,9 @@ class TemplateRequestController extends Controller
     public function __construct(
         private readonly WebsiteComplianceGate $gate,
         private readonly ActivityLogService $activityLogs,
-        private readonly ActingAdvisorService $actingAdvisors
+        private readonly ActingAdvisorService $actingAdvisors,
+        private readonly ActingHubService $actingHubs,
+        private readonly ModuleBillingService $moduleBilling
     ) {}
 
     private function resolveTemplateName(?string $requested): ?string
@@ -237,6 +241,15 @@ class TemplateRequestController extends Controller
             'request' => $request,
         ]);
 
+        // One-time £/website invoice (idempotent per template request) when charging is on.
+        $moduleInvoice = null;
+        try {
+            $hub = $this->actingHubs->actingHub($user);
+            $moduleInvoice = $this->moduleBilling->invoiceWebsiteDeploy($hub, $templateRequest, $user);
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
         $message = $configSynced
             ? 'Template deployed and remote cPanel config written successfully!'
             : 'Template marked deployed, but remote cPanel config could not be verified. Check Laravel logs and that api.php is reachable.';
@@ -254,6 +267,15 @@ class TemplateRequestController extends Controller
             'advisor_id' => $targetAdvisorId,
             'hub_sections_created' => $hubSectionsCreated,
             'hub_sections_count' => $hubSectionsCount,
+            'module_invoice' => $moduleInvoice ? [
+                'id' => $moduleInvoice->id,
+                'invoice_number' => $moduleInvoice->invoice_number,
+                'type' => $moduleInvoice->type,
+                'types' => $moduleInvoice->types,
+                'amount' => $moduleInvoice->amount,
+                'status' => $moduleInvoice->status,
+                'description' => $moduleInvoice->description,
+            ] : null,
             'template_request' => $templateRequest->load($this->requestRelations()),
         ]);
     }

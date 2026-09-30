@@ -38,6 +38,7 @@ class AdvisorBillingController extends Controller
 
         return response()->json([
             'renew_day' => $hub->advisorBillingRenewDay(),
+            'grace_day' => $hub->billingGraceDay(),
             'next_renewal_at' => $this->billing->nextRenewalAt($hub)->toIso8601String(),
             'has_stripe_subscription' => filled($hub->advisor_stripe_subscription_id),
             'target_hub' => [
@@ -54,9 +55,19 @@ class AdvisorBillingController extends Controller
 
         $validated = $request->validate([
             'renew_day' => ['required', 'integer', 'min:1', 'max:28'],
+            'grace_day' => ['sometimes', 'integer', 'min:1', 'max:28'],
         ]);
 
-        $hub->advisor_billing_renew_day = (int) $validated['renew_day'];
+        $renewDay = (int) $validated['renew_day'];
+        $graceDay = (int) ($validated['grace_day'] ?? min(28, $renewDay + 3));
+        if ($graceDay < $renewDay) {
+            return response()->json([
+                'message' => 'Grace day must be on or after the renew day.',
+            ], 422);
+        }
+
+        $hub->advisor_billing_renew_day = $renewDay;
+        $hub->billing_grace_day = $graceDay;
         $hub->save();
 
         if ($hub->isWhiteLabel() && $hub->hasRemoteDatabaseConfigured()) {
@@ -68,8 +79,9 @@ class AdvisorBillingController extends Controller
         }
 
         return response()->json([
-            'message' => 'Auto-renew day updated.',
+            'message' => 'Billing renew and grace days updated.',
             'renew_day' => $hub->advisorBillingRenewDay(),
+            'grace_day' => $hub->billingGraceDay(),
             'next_renewal_at' => $this->billing->nextRenewalAt($hub->fresh())->toIso8601String(),
             'target_hub' => [
                 'id' => $hub->id,

@@ -12,39 +12,69 @@ class ModulePricingService
 
     public const BILLING_UNIT_PER_WEBSITE = 'per_website';
 
+    public const RECURRING_UNITS = [
+        ModuleRecurringBillingService::UNIT_NONE,
+        ModuleRecurringBillingService::UNIT_PER_NETWORK,
+        ModuleRecurringBillingService::UNIT_PER_ADVISER,
+        ModuleRecurringBillingService::UNIT_PER_USER,
+        ModuleRecurringBillingService::UNIT_PER_WEBSITE,
+        ModuleRecurringBillingService::UNIT_PER_FIRM,
+    ];
+
     /**
-     * Default catalogue prices (amount + billing unit).
+     * Default catalogue prices (amount + billing unit + recurring).
      *
-     * @var array<string, array{amount: float, billing_unit: string}>
+     * @var array<string, array{amount: float, billing_unit: string, recurring_amount: float, recurring_billing_unit: string, recurring_tier_slot: ?int}>
      */
     public const DEFAULT_CATALOGUE = [
         'module_shared_hub' => [
             'amount' => 14500.00,
             'billing_unit' => self::BILLING_UNIT_ONE_TIME,
+            'recurring_amount' => 4500.00,
+            'recurring_billing_unit' => ModuleRecurringBillingService::UNIT_PER_NETWORK,
+            'recurring_tier_slot' => null,
         ],
         'module_white_label_hub' => [
             'amount' => 14500.00,
             'billing_unit' => self::BILLING_UNIT_ONE_TIME,
+            'recurring_amount' => 4500.00,
+            'recurring_billing_unit' => ModuleRecurringBillingService::UNIT_PER_NETWORK,
+            'recurring_tier_slot' => null,
         ],
         'module_social_media_template_library' => [
             'amount' => 0.00,
             'billing_unit' => self::BILLING_UNIT_ONE_TIME,
+            'recurring_amount' => 0.00,
+            'recurring_billing_unit' => ModuleRecurringBillingService::UNIT_PER_ADVISER,
+            'recurring_tier_slot' => 1,
         ],
         'module_social_media_compliance' => [
             'amount' => 5000.00,
             'billing_unit' => self::BILLING_UNIT_ONE_TIME,
+            'recurring_amount' => 0.00,
+            'recurring_billing_unit' => ModuleRecurringBillingService::UNIT_PER_USER,
+            'recurring_tier_slot' => 2,
         ],
         'module_website_template_library' => [
             'amount' => 300.00,
             'billing_unit' => self::BILLING_UNIT_PER_WEBSITE,
+            'recurring_amount' => 125.00,
+            'recurring_billing_unit' => ModuleRecurringBillingService::UNIT_PER_WEBSITE,
+            'recurring_tier_slot' => null,
         ],
         'module_website_compliance' => [
             'amount' => 10000.00,
             'billing_unit' => self::BILLING_UNIT_ONE_TIME,
+            'recurring_amount' => 1500.00,
+            'recurring_billing_unit' => ModuleRecurringBillingService::UNIT_PER_FIRM,
+            'recurring_tier_slot' => null,
         ],
         'module_general_compliance' => [
             'amount' => 3500.00,
             'billing_unit' => self::BILLING_UNIT_ONE_TIME,
+            'recurring_amount' => 0.00,
+            'recurring_billing_unit' => ModuleRecurringBillingService::UNIT_PER_USER,
+            'recurring_tier_slot' => 3,
         ],
     ];
 
@@ -77,6 +107,9 @@ class ModulePricingService
                 'module_key' => $key,
                 'amount' => $meta['amount'],
                 'billing_unit' => $meta['billing_unit'],
+                'recurring_amount' => $meta['recurring_amount'] ?? 0,
+                'recurring_billing_unit' => $meta['recurring_billing_unit'] ?? ModuleRecurringBillingService::UNIT_NONE,
+                'recurring_tier_slot' => $meta['recurring_tier_slot'] ?? null,
                 'currency' => 'gbp',
                 'is_active' => true,
                 'sort_order' => $sort++,
@@ -96,11 +129,17 @@ class ModulePricingService
             $meta = self::DEFAULT_CATALOGUE[$key] ?? [
                 'amount' => 0.0,
                 'billing_unit' => self::BILLING_UNIT_ONE_TIME,
+                'recurring_amount' => 0.0,
+                'recurring_billing_unit' => ModuleRecurringBillingService::UNIT_NONE,
+                'recurring_tier_slot' => null,
             ];
             ModulePricing::query()->create([
                 'module_key' => $key,
                 'amount' => $meta['amount'],
                 'billing_unit' => $meta['billing_unit'],
+                'recurring_amount' => $meta['recurring_amount'] ?? 0,
+                'recurring_billing_unit' => $meta['recurring_billing_unit'] ?? ModuleRecurringBillingService::UNIT_NONE,
+                'recurring_tier_slot' => $meta['recurring_tier_slot'] ?? null,
                 'currency' => 'gbp',
                 'is_active' => true,
                 'sort_order' => ++$sort,
@@ -173,7 +212,15 @@ class ModulePricingService
     }
 
     /**
-     * @param  array{amount?: mixed, billing_unit?: mixed, is_active?: mixed, sort_order?: mixed}  $data
+     * @param  array{
+     *   amount?: mixed,
+     *   billing_unit?: mixed,
+     *   recurring_amount?: mixed,
+     *   recurring_billing_unit?: mixed,
+     *   recurring_tier_slot?: mixed,
+     *   is_active?: mixed,
+     *   sort_order?: mixed
+     * }  $data
      */
     public function updatePricing(ModulePricing $pricing, array $data): ModulePricing
     {
@@ -187,6 +234,20 @@ class ModulePricingService
             }
             $pricing->billing_unit = $unit;
         }
+        if (array_key_exists('recurring_amount', $data)) {
+            $pricing->recurring_amount = round((float) $data['recurring_amount'], 2);
+        }
+        if (array_key_exists('recurring_billing_unit', $data)) {
+            $unit = (string) $data['recurring_billing_unit'];
+            if (! in_array($unit, self::RECURRING_UNITS, true)) {
+                throw new InvalidArgumentException('Invalid recurring_billing_unit.');
+            }
+            $pricing->recurring_billing_unit = $unit;
+        }
+        if (array_key_exists('recurring_tier_slot', $data)) {
+            $slot = $data['recurring_tier_slot'];
+            $pricing->recurring_tier_slot = $slot === null || $slot === '' ? null : max(1, min(3, (int) $slot));
+        }
         if (array_key_exists('is_active', $data)) {
             $pricing->is_active = (bool) $data['is_active'];
         }
@@ -199,6 +260,55 @@ class ModulePricingService
     }
 
     /**
+     * @return list<array<string, mixed>>
+     */
+    public function listRecurringTiers(): array
+    {
+        return \App\Models\ModuleRecurringTier::query()
+            ->orderBy('slot')
+            ->orderBy('sort_order')
+            ->orderBy('min_users')
+            ->get()
+            ->map(fn ($row) => [
+                'id' => $row->id,
+                'slot' => (int) $row->slot,
+                'min_users' => (int) $row->min_users,
+                'max_users' => $row->max_users !== null ? (int) $row->max_users : null,
+                'rate_per_user' => (float) $row->rate_per_user,
+                'network_margin_per_user' => (float) $row->network_margin_per_user,
+                'currency' => $row->currency,
+                'is_active' => (bool) $row->is_active,
+                'sort_order' => (int) $row->sort_order,
+            ])
+            ->all();
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    public function updateRecurringTier(\App\Models\ModuleRecurringTier $tier, array $data): \App\Models\ModuleRecurringTier
+    {
+        foreach (['min_users', 'max_users', 'sort_order', 'slot'] as $intKey) {
+            if (array_key_exists($intKey, $data)) {
+                $tier->{$intKey} = $data[$intKey] === null || $data[$intKey] === ''
+                    ? null
+                    : (int) $data[$intKey];
+            }
+        }
+        foreach (['rate_per_user', 'network_margin_per_user'] as $decKey) {
+            if (array_key_exists($decKey, $data)) {
+                $tier->{$decKey} = round((float) $data[$decKey], 2);
+            }
+        }
+        if (array_key_exists('is_active', $data)) {
+            $tier->is_active = (bool) $data['is_active'];
+        }
+        $tier->save();
+
+        return $tier->fresh();
+    }
+
+    /**
      * @return array{
      *   id: int,
      *   module_key: string,
@@ -206,6 +316,9 @@ class ModulePricingService
      *   amount: float,
      *   billing_unit: string,
      *   billing_unit_label: string,
+     *   recurring_amount: float,
+     *   recurring_billing_unit: string,
+     *   recurring_tier_slot: ?int,
      *   currency: string,
      *   is_active: bool,
      *   sort_order: int
@@ -222,6 +335,9 @@ class ModulePricingService
             'amount' => (float) $row->amount,
             'billing_unit' => $unit,
             'billing_unit_label' => self::billingUnitLabel($unit),
+            'recurring_amount' => (float) ($row->recurring_amount ?? 0),
+            'recurring_billing_unit' => (string) ($row->recurring_billing_unit ?: ModuleRecurringBillingService::UNIT_NONE),
+            'recurring_tier_slot' => $row->recurring_tier_slot !== null ? (int) $row->recurring_tier_slot : null,
             'currency' => $row->currency,
             'is_active' => (bool) $row->is_active,
             'sort_order' => (int) $row->sort_order,

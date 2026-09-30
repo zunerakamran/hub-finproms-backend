@@ -4,8 +4,11 @@ namespace App\Services;
 
 use App\Models\Hub;
 use App\Models\HubModuleBilling;
+use App\Models\HubModuleRecurringBilling;
 use App\Models\Invoice;
 use App\Models\User;
+use App\Models\WebsiteCompliance\TemplateRequest;
+use App\Support\WebsiteCompliance\WcDatabaseContext;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -14,9 +17,12 @@ use RuntimeException;
 
 class ModuleBillingService
 {
+    public const WEBSITE_MODULE_KEY = 'module_website_template_library';
+
     public function __construct(
         private readonly ModulePricingService $pricing,
-        private readonly InvoiceService $invoices
+        private readonly InvoiceService $invoices,
+        private readonly WhiteLabelDatabaseService $remoteDb
     ) {}
 
     public function billingEnabled(Hub $hub): bool
@@ -25,12 +31,132 @@ class ModuleBillingService
     }
 
     /**
-     * Hub packaging module (Shared / White Label) — invoice is created as paid.
-     * All other product modules start unpaid until payment is recorded later.
+     * Deployed showcase / advisor websites on this hub (wc_template_requests).
+     * Uses the hub's own DB when remote wiring is configured.
      */
-    public static function isHubEnableModule(string $moduleKey): bool
+    public function countDeployedWebsites(Hub $hub): int
     {
-        return in_array($moduleKey, Hub::LOCKED_MODULE_KEYS, true);
+        return (int) $this->onHubDatabase($hub, function () {
+            return TemplateRequest::query()->where('status', 'deployed')->count();
+        });
+    }
+
+    /**
+     * Firms on this hub (for per_firm recurring). Uses remote DB when configured.
+     */
+    public function countFirms(Hub $hub): int
+    {
+        return (int) $this->onHubDatabase($hub, function (?string $connection) {
+            if ($connection) {
+                return (int) DB::connection($connection)->table('firms')->count();
+            }
+
+            return (int) \App\Models\Firm::query()->count();
+        });
+    }
+
+    /**
+     * Run a callback against the hub's WC/user database (local or remote).
+     *
+     * @template T
+     *
+     * @param  callable(?string): T  $callback  connection name or null for default
+     * @return T
+     */
+    public function onHubDatabase(Hub $hub, callable $callback): mixed
+    {
+        if ($hub->isContentHub() && $hub->hasRemoteDatabaseConfigured()) {
+            try {
+                return $this->remoteDb->run($hub, function (string $connection) use ($callback) {
+                    return WcDatabaseContext::using($connection, fn () => $callback($connection));
+                });
+            } catch (\Throwable $e) {
+                report($e);
+
+                return $callback(null);
+            }
+        }
+
+        return $callback(null);
+    }
+
+    /**
+     * One-time £/website invoice when a WC template request is deployed.
+     * Idempotent per hub + template_request id.
+     */
+    public function invoiceWebsiteDeploy(Hub $hub, TemplateRequest $templateRequest, User $actor): ?Invoice
+    {
+        if (! $this->billingEnabled($hub)) {
+            return null;
+        }
+
+        if (! $hub->moduleEffectivelyEnabled(self::WEBSITE_MODULE_KEY)) {
+            return null;
+        }
+
+        if ((string) $templateRequest->status !== 'deployed') {
+            return null;
+        }
+
+        $requestId = (int) $templateRequest->id;
+        $existing = HubModuleBilling::query()
+            ->where('hub_id', $hub->id)
+            ->where('module_key', self::WEBSITE_MODULE_KEY)
+            ->where('status', '!=', HubModuleBilling::STATUS_CANCELED)
+            ->get()
+            ->first(function (HubModuleBilling $row) use ($requestId) {
+                return (int) ($row->meta['wc_template_request_id'] ?? 0) === $requestId;
+            });
+
+        if ($existing) {
+            return $existing->invoice ?: $this->invoices->createForModuleBilling($existing);
+        }
+
+        $quote = $this->pricing->quote(self::WEBSITE_MODULE_KEY);
+        if ($quote['amount'] <= 0) {
+            return null;
+        }
+
+        if (($quote['billing_unit'] ?? '') !== ModulePricingService::BILLING_UNIT_PER_WEBSITE) {
+            // Misconfigured catalogue — still allow amount as one website charge.
+        }
+
+        $payer = $this->resolvePayer($actor);
+        $domain = (string) ($templateRequest->domain_name ?: $templateRequest->cpanel_domain ?: 'website #'.$requestId);
+
+        return DB::transaction(function () use ($hub, $quote, $payer, $requestId, $domain, $templateRequest) {
+            $billing = HubModuleBilling::query()->create([
+                'hub_id' => $hub->id,
+                'module_key' => self::WEBSITE_MODULE_KEY,
+                'billed_user_id' => $payer->id,
+                'amount' => $quote['amount'],
+                'currency' => $quote['currency'],
+                'status' => HubModuleBilling::STATUS_UNPAID,
+                'payment_status' => HubModuleBilling::STATUS_UNPAID,
+                'meta' => [
+                    'module_label' => Hub::CHECKLIST_DEFINITIONS[self::WEBSITE_MODULE_KEY]['label'] ?? self::WEBSITE_MODULE_KEY,
+                    'billing_cadence' => Invoice::TYPES_ONE_TIME,
+                    'billing_unit' => ModulePricingService::BILLING_UNIT_PER_WEBSITE,
+                    'wc_template_request_id' => $requestId,
+                    'domain_name' => $domain,
+                    'template_name' => $templateRequest->template_name,
+                    'auto_paid_on_hub_enable' => false,
+                ],
+            ]);
+
+            $invoice = $this->invoices->createForModuleBilling($billing);
+            // Clarify description for website deploys.
+            $invoice->forceFill([
+                'description' => sprintf(
+                    'Module (one time) — Website Template Library — %s (%s)',
+                    $domain,
+                    $hub->name
+                ),
+                'due_on' => now()->toDateString(),
+            ])->save();
+
+            return $invoice->fresh();
+        });
     }
 
     /**
@@ -114,7 +240,11 @@ class ModuleBillingService
             ->where('hub_id', $hub->id)
             ->where('module_key', $moduleKey)
             ->where('status', '!=', HubModuleBilling::STATUS_CANCELED)
-            ->first();
+            ->get()
+            ->first(function (HubModuleBilling $row) {
+                // Website deploy invoices are keyed separately; ignore them here.
+                return empty($row->meta['wc_template_request_id']);
+            });
 
         if ($existing) {
             // Already billed — only create a missing invoice row, never re-report as new.
@@ -140,10 +270,9 @@ class ModuleBillingService
         }
 
         $payer = $this->resolvePayer($actor);
-        $paid = self::isHubEnableModule($moduleKey);
-        $status = $paid ? HubModuleBilling::STATUS_PAID : HubModuleBilling::STATUS_UNPAID;
+        $status = HubModuleBilling::STATUS_UNPAID;
 
-        return DB::transaction(function () use ($hub, $moduleKey, $quote, $payer, $status, $paid) {
+        return DB::transaction(function () use ($hub, $moduleKey, $quote, $payer, $status) {
             $billing = HubModuleBilling::query()->create([
                 'hub_id' => $hub->id,
                 'module_key' => $moduleKey,
@@ -156,7 +285,7 @@ class ModuleBillingService
                     'module_label' => Hub::CHECKLIST_DEFINITIONS[$moduleKey]['label'] ?? $moduleKey,
                     'billing_cadence' => Invoice::TYPES_ONE_TIME,
                     'billing_unit' => $quote['billing_unit'] ?? ModulePricingService::BILLING_UNIT_ONE_TIME,
-                    'auto_paid_on_hub_enable' => $paid,
+                    'auto_paid_on_hub_enable' => false,
                 ],
             ]);
 
@@ -179,8 +308,12 @@ class ModuleBillingService
         array $data,
         ?UploadedFile $attachment = null
     ): Invoice {
-        if ($invoice->type !== Invoice::TYPE_MODULE_BILLING) {
+        if (! in_array($invoice->type, [Invoice::TYPE_MODULE_BILLING, Invoice::TYPE_MODULE_RECURRING], true)) {
             throw new InvalidArgumentException('Only module invoices can be marked paid with this action.');
+        }
+
+        if ($invoice->type === Invoice::TYPE_MODULE_RECURRING) {
+            return $this->markRecurringInvoicePaid($invoice, $actor, $data, $attachment);
         }
 
         $invoice->loadMissing('moduleBilling');
@@ -235,6 +368,60 @@ class ModuleBillingService
             return $invoice->fresh()->load([
                 'moduleBilling.hub',
                 'moduleBilling.paidBy',
+                'user',
+            ]);
+        });
+    }
+
+    /**
+     * @param  array{
+     *   payment_method?: string|null,
+     *   payment_reference?: string|null,
+     *   payment_notes?: string|null
+     * }  $data
+     */
+    private function markRecurringInvoicePaid(
+        Invoice $invoice,
+        User $actor,
+        array $data,
+        ?UploadedFile $attachment = null
+    ): Invoice {
+        $invoice->loadMissing('moduleRecurringBilling');
+        $billing = $invoice->moduleRecurringBilling;
+        if (! $billing) {
+            throw new RuntimeException('Recurring module billing record is missing for this invoice.');
+        }
+
+        if ($billing->status === HubModuleRecurringBilling::STATUS_CANCELED) {
+            throw new InvalidArgumentException('Canceled recurring billings cannot be marked paid.');
+        }
+
+        if ($invoice->status === 'paid' && $billing->status === HubModuleRecurringBilling::STATUS_PAID) {
+            return $invoice->fresh()->load([
+                'moduleRecurringBilling.hub',
+                'moduleRecurringBilling.paidBy',
+                'user',
+            ]);
+        }
+
+        return DB::transaction(function () use ($invoice, $billing, $actor, $data) {
+            $billing->forceFill([
+                'status' => HubModuleRecurringBilling::STATUS_PAID,
+                'payment_status' => 'paid',
+                'paid_at' => now(),
+                'paid_by_user_id' => $actor->id,
+                'payment_method' => $data['payment_method'] ?? 'manual',
+                'payment_reference' => $data['payment_reference'] ?? null,
+                'payment_notes' => $data['payment_notes'] ?? null,
+            ])->save();
+
+            $invoice->forceFill([
+                'status' => 'paid',
+            ])->save();
+
+            return $invoice->fresh()->load([
+                'moduleRecurringBilling.hub',
+                'moduleRecurringBilling.paidBy',
                 'user',
             ]);
         });

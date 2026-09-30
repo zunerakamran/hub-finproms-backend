@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\BundlePurchase;
 use App\Models\HubAdvisorBilling;
 use App\Models\HubModuleBilling;
+use App\Models\HubModuleRecurringBilling;
 use App\Models\Invoice;
 use App\Models\PostPurchase;
 use App\Models\User;
@@ -115,6 +116,11 @@ class InvoiceService
             ?? \App\Models\Hub::CHECKLIST_DEFINITIONS[$moduleKey]['label']
             ?? $moduleKey
         );
+        $breakdown = $billing->billingBreakdownForApi();
+        $domain = (string) ($billing->meta['domain_name'] ?? '');
+        $description = $domain !== ''
+            ? "Module (one time) — {$moduleLabel} — {$domain} ({$hubName})"
+            : "Module (one time) — {$moduleLabel} ({$hubName})";
 
         return $this->createInvoice([
             'user_id' => $user->id,
@@ -124,20 +130,74 @@ class InvoiceService
             'post_purchase_id' => null,
             'hub_advisor_billing_id' => null,
             'hub_module_billing_id' => $billing->id,
-            'description' => "Module (one time) — {$moduleLabel} ({$hubName})",
+            'description' => $description,
             'amount' => $amount,
             'credits' => 0,
             'billing_name' => $user->name,
             'billing_email' => $user->email,
             'status' => $billing->status === HubModuleBilling::STATUS_PAID ? 'paid' : 'unpaid',
+            'due_on' => now()->toDateString(),
             'line_items' => [[
                 'label' => "{$moduleLabel} — one-time module charge",
                 'quantity' => 1,
                 'unit_amount' => $amount,
                 'total' => $amount,
-                'note' => $billing->status === HubModuleBilling::STATUS_PAID
-                    ? 'One-time hub enablement (paid)'
-                    : 'One-time module enablement (unpaid — awaiting payment)',
+                'note' => implode(' · ', $breakdown['lines']),
+                'breakdown' => $breakdown,
+            ]],
+        ]);
+    }
+
+    public function createForModuleRecurringBilling(HubModuleRecurringBilling $billing): Invoice
+    {
+        $existing = Invoice::query()
+            ->where('hub_module_recurring_billing_id', $billing->id)
+            ->first();
+
+        if ($existing) {
+            return $existing->loadMissing(['moduleRecurringBilling', 'user']);
+        }
+
+        $billing->loadMissing(['billedUser', 'hub']);
+        $user = $billing->billedUser ?? User::findOrFail($billing->billed_user_id);
+        $amount = (float) $billing->amount;
+        $hubName = $billing->hub?->name ?? 'Hub';
+        $moduleKey = (string) $billing->module_key;
+        $moduleLabel = (string) (
+            $billing->meta['module_label']
+            ?? $billing->meta['quote']['module_label']
+            ?? \App\Models\Hub::CHECKLIST_DEFINITIONS[$moduleKey]['label']
+            ?? $moduleKey
+        );
+        $qty = max(1, (int) $billing->user_count);
+        $rate = $billing->rate_per_user !== null ? (float) $billing->rate_per_user : $amount;
+        $kind = (string) $billing->billing_kind;
+        $breakdown = $billing->billingBreakdownForApi();
+        $description = "Module (recurring) — {$moduleLabel} — {$breakdown['summary']} ({$hubName})";
+
+        return $this->createInvoice([
+            'user_id' => $user->id,
+            'type' => Invoice::TYPE_MODULE_RECURRING,
+            'types' => Invoice::TYPES_RECURRING,
+            'user_subscription_id' => null,
+            'post_purchase_id' => null,
+            'hub_advisor_billing_id' => null,
+            'hub_module_billing_id' => null,
+            'hub_module_recurring_billing_id' => $billing->id,
+            'description' => $description,
+            'amount' => $amount,
+            'credits' => 0,
+            'billing_name' => $user->name,
+            'billing_email' => $user->email,
+            'status' => $billing->status === HubModuleRecurringBilling::STATUS_PAID ? 'paid' : 'unpaid',
+            'due_on' => $billing->due_on?->toDateString() ?? now()->toDateString(),
+            'line_items' => [[
+                'label' => "{$moduleLabel} — recurring ({$kind})",
+                'quantity' => $qty,
+                'unit_amount' => $rate,
+                'total' => $amount,
+                'note' => implode(' · ', $breakdown['lines']),
+                'breakdown' => $breakdown,
             ]],
         ]);
     }
@@ -246,6 +306,7 @@ class InvoiceService
                         'bundlePurchase.bundle',
                         'advisorBilling',
                         'moduleBilling',
+                        'moduleRecurringBilling',
                         'user',
                     ]);
                 } catch (\Illuminate\Database\UniqueConstraintViolationException $e) {
@@ -267,6 +328,7 @@ class InvoiceService
                 'bundlePurchase.bundle',
                 'advisorBilling',
                 'moduleBilling',
+                'moduleRecurringBilling',
             ])->find($invoiceId);
 
             if ($fresh) {

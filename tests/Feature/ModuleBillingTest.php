@@ -51,12 +51,16 @@ class ModuleBillingTest extends TestCase
         $this->assertSame(14500.0, (float) $invoices[0]['amount']);
         $this->assertSame(Invoice::TYPE_MODULE_BILLING, $invoices[0]['type']);
         $this->assertSame(Invoice::TYPES_ONE_TIME, $invoices[0]['types']);
-        $this->assertSame('paid', $invoices[0]['status'] ?? Invoice::query()->find($invoices[0]['id'])->status);
+        $this->assertSame('unpaid', $invoices[0]['status'] ?? Invoice::query()->find($invoices[0]['id'])->status);
 
         $this->assertDatabaseHas('invoices', [
             'type' => Invoice::TYPE_MODULE_BILLING,
             'types' => Invoice::TYPES_ONE_TIME,
-            'status' => 'paid',
+            'status' => 'unpaid',
+        ]);
+        $this->assertDatabaseHas('hub_module_billings', [
+            'module_key' => 'module_white_label_hub',
+            'status' => 'unpaid',
         ]);
     }
 
@@ -261,7 +265,7 @@ class ModuleBillingTest extends TestCase
         $payload = $matrix->matrix($hub->fresh());
         $pricingRow = collect($payload['rows'])->firstWhere('key', 'dashboard_manage_module_pricing');
         $this->assertTrue($pricingRow['inactive']);
-        $this->assertSame('charge_amount_per_module_off', $pricingRow['inactive_reason']);
+        $this->assertSame('module_pricing_charge_off', $pricingRow['inactive_reason']);
         $this->assertFalse(
             $matrix->roleCan($hub->fresh(), User::ROLE_POWER_ADMIN, 'dashboard_manage_module_pricing')
         );
@@ -414,5 +418,102 @@ class ModuleBillingTest extends TestCase
             'payment_notes' => 'Should be forbidden.',
         ]);
         $denied->assertForbidden();
+    }
+
+    public function test_deployed_website_creates_one_time_invoice_and_recurring_uses_count(): void
+    {
+        $hub = Hub::query()->create([
+            'name' => 'WL Hub',
+            'slug' => 'wl-websites',
+            'type' => Hub::TYPE_WHITE_LABEL,
+            'is_active' => true,
+            'advisor_billing_renew_day' => (int) now()->day,
+            'checklist' => array_merge(Hub::defaultChecklist(Hub::TYPE_WHITE_LABEL), [
+                'charge_amount_per_module' => true,
+                'charge_recurring_per_module' => true,
+                'module_website_template_library' => true,
+            ]),
+        ]);
+
+        $admin = User::factory()->powerAdmin()->create();
+        app(ModulePricingService::class)->seedDefaultsIfEmpty();
+
+        $billing = app(\App\Services\ModuleBillingService::class);
+        $recurring = app(\App\Services\ModuleRecurringBillingService::class);
+
+        $this->assertSame(0, $billing->countDeployedWebsites($hub));
+
+        // No websites yet → no flat WTL recurring invoice.
+        $none = $recurring->invoiceFlatRecurringForMonth($hub, $admin, now());
+        $this->assertDatabaseMissing('hub_module_recurring_billings', [
+            'hub_id' => $hub->id,
+            'module_key' => 'module_website_template_library',
+        ]);
+        unset($none);
+
+        $first = \App\Models\WebsiteCompliance\TemplateRequest::query()->create([
+            'template_name' => 'classic',
+            'request_type' => 'advisor_website',
+            'domain_name' => 'one.example.test',
+            'status' => 'deployed',
+            'cpanel_domain' => 'one.example.test',
+        ]);
+        $second = \App\Models\WebsiteCompliance\TemplateRequest::query()->create([
+            'template_name' => 'classic',
+            'request_type' => 'advisor_website',
+            'domain_name' => 'two.example.test',
+            'status' => 'deployed',
+            'cpanel_domain' => 'two.example.test',
+        ]);
+        // Pending should not count.
+        \App\Models\WebsiteCompliance\TemplateRequest::query()->create([
+            'template_name' => 'classic',
+            'request_type' => 'advisor_website',
+            'domain_name' => 'pending.example.test',
+            'status' => 'pending',
+        ]);
+
+        $this->assertSame(2, $billing->countDeployedWebsites($hub));
+
+        $invoice1 = $billing->invoiceWebsiteDeploy($hub, $first, $admin);
+        $invoice2 = $billing->invoiceWebsiteDeploy($hub, $second, $admin);
+        $this->assertNotNull($invoice1);
+        $this->assertNotNull($invoice2);
+        $this->assertSame(300.0, (float) $invoice1->amount);
+        $this->assertSame(300.0, (float) $invoice2->amount);
+        $this->assertSame('unpaid', $invoice1->status);
+        $this->assertStringContainsString('one.example.test', $invoice1->description);
+
+        // Idempotent per template request.
+        $again = $billing->invoiceWebsiteDeploy($hub, $first, $admin);
+        $this->assertSame($invoice1->id, $again->id);
+        $this->assertSame(2, \App\Models\HubModuleBilling::query()
+            ->where('hub_id', $hub->id)
+            ->where('module_key', 'module_website_template_library')
+            ->count());
+
+        $flat = $recurring->invoiceFlatRecurringForMonth($hub, $admin, now());
+        $this->assertNotEmpty($flat);
+        $this->assertDatabaseHas('hub_module_recurring_billings', [
+            'hub_id' => $hub->id,
+            'module_key' => 'module_website_template_library',
+            'user_count' => 2,
+            'amount' => 250.00,
+            'status' => 'unpaid',
+        ]);
+
+        // Idempotent for the calendar month.
+        $beforeCount = \App\Models\HubModuleRecurringBilling::query()
+            ->where('hub_id', $hub->id)
+            ->where('module_key', 'module_website_template_library')
+            ->count();
+        $recurring->invoiceFlatRecurringForMonth($hub, $admin, now());
+        $this->assertSame(
+            $beforeCount,
+            \App\Models\HubModuleRecurringBilling::query()
+                ->where('hub_id', $hub->id)
+                ->where('module_key', 'module_website_template_library')
+                ->count()
+        );
     }
 }

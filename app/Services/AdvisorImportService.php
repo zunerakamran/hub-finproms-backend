@@ -515,33 +515,33 @@ class AdvisorImportService
      * Blocks login/access immediately. Does not delete the user.
      * Re-importing the same email can restore them.
      */
-    public function discontinue(User $advisor): User
+    public function discontinue(User $user): User
     {
-        if (! $advisor->isAdvisor()) {
-            throw new RuntimeException('Only imported advisors can be discontinued.');
+        if (ActingHubService::isControlPlaneRole((string) $user->role)) {
+            throw new RuntimeException('Control-plane admin accounts cannot be discontinued here.');
         }
 
-        if ($advisor->isDiscontinued()) {
-            return $advisor;
+        if ($user->isDiscontinued()) {
+            return $user;
         }
 
-        $advisor = DB::connection($advisor->getConnectionName())->transaction(function () use ($advisor) {
-            $connection = $advisor->getConnectionName();
-            $advisor->is_discontinued = true;
-            $advisor->discontinued_at = now();
-            $advisor->has_unlimited_credits = false;
-            $advisor->save();
+        $user = DB::connection($user->getConnectionName())->transaction(function () use ($user) {
+            $connection = $user->getConnectionName();
+            $user->is_discontinued = true;
+            $user->discontinued_at = now();
+            $user->has_unlimited_credits = false;
+            $user->save();
 
-            if (method_exists($advisor, 'tokens')) {
+            if (method_exists($user, 'tokens')) {
                 try {
-                    $advisor->tokens()->delete();
+                    $user->tokens()->delete();
                 } catch (\Throwable) {
                     // Remote hubs may not have Sanctum tokens table wired the same way.
                 }
             }
 
             UserSubscription::on($connection)
-                ->where('user_id', $advisor->id)
+                ->where('user_id', $user->id)
                 ->where('payment_method', 'advisor_import')
                 ->whereIn('status', ['active', 'suspended'])
                 ->update([
@@ -549,12 +549,12 @@ class AdvisorImportService
                     'ends_at' => now(),
                 ]);
 
-            return $advisor->fresh();
+            return $user->fresh();
         });
 
-        app(FunctionalMailService::class)->advisorDiscontinued($advisor);
+        app(FunctionalMailService::class)->advisorDiscontinued($user);
 
-        return $advisor;
+        return $user;
     }
 
     /**

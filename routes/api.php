@@ -427,6 +427,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:dashboard_manage_module_pricing')->group(function () {
             Route::get('/module-pricing', [PowerAdminModulePricingController::class, 'index']);
             Route::put('/module-pricing/{pricing}', [PowerAdminModulePricingController::class, 'update']);
+            Route::put('/module-recurring-tiers/{tier}', [PowerAdminModulePricingController::class, 'updateTier']);
         });
 
         Route::middleware('hub_can:dashboard_view_module_invoices')->group(function () {
@@ -666,6 +667,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:dashboard_manage_module_pricing')->group(function () {
             Route::get('/module-pricing', [PowerAdminModulePricingController::class, 'index']);
             Route::put('/module-pricing/{pricing}', [PowerAdminModulePricingController::class, 'update']);
+            Route::put('/module-recurring-tiers/{tier}', [PowerAdminModulePricingController::class, 'updateTier']);
         });
 
         Route::middleware('hub_can:dashboard_view_module_invoices')->group(function () {

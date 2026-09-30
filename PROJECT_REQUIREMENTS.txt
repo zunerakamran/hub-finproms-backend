@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-09-30
+Last updated: 2026-09-30 (module recurring billing + grace + discontinue any user)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -364,21 +364,21 @@ Notes:
   - Auto-renew is NOT restarted automatically; client admin pays again after
     import / billing flow if needed.
 
-4.3 Pricing Tiers for White-labelled (Managed from Central Hub)
-- Pricing depends on number of subscribers (advisors), e.g.:
-  - 0–99 subscribers → £25 / advisor / month
-  - 100–249 subscribers → £22
-  - 250–499 subscribers → £20
-  - 500+ subscribers → £15
-  - (Defaults copied from WordPress FP Subscriptions plugin; Power Admin can edit)
-- Import billing (WP-style): tier RATE is taken from TOTAL active advisors;
-  the invoice charges RATE × THIS IMPORT BATCH only (already-paid advisors
-  are not recharged). Example: 99 imported → £25×99; later +249 (total 348)
-  → £20×249 only.
-- Monthly auto-renew: ONE invoice for all active advisors =
-  rate(total) × total (single Stripe subscription per hub).
-- Central Hub / Power Admin manages these pricing rules (not Shared Hub as
-  the control plane).
+4.3 Module recurring pricing for White-labelled (replaces advisor rate tiers)
+- Advisor pricing tiers are RETIRED. Recurring charges use module catalogue +
+  slot tables (editable under Modules → Module prices).
+- Functionality: `charge_recurring_per_module` (default ON white-label / OFF shared).
+- Slot tables (#1 SMTL, #2 SMC, #3 GC) by active user headcount bands
+  (0–100 / 101–250 / 251–500 / 501+). Rate + network margin per band.
+- Import Option B: rate from TOTAL active users with that module (not suspended,
+  not discontinued); invoice charges RATE × THIS IMPORT BATCH only; due today.
+- Same batch renews monthly on the import anniversary day (active users only).
+- Renew day (`/my-dashboard/advisor-renewal`): charge hub payment card for ALL
+  due unpaid invoices (one-time + recurring). Grace day (≥ renew day): after
+  grace, unpaid recurring seat invoices suspend those users; unpaid one-time
+  module invoices disable those modules.
+- Discontinue (`advisor_discontinue`) applies to ANY hub user (not only advisors);
+  discontinued users are excluded from future recurring seat counts.
 
 4.4 Remote control of content hubs (from Central Hub Controller)
 - Capability: `dashboard_control_white_label_hubs` — “Control hubs remotely”
@@ -485,6 +485,9 @@ Notes:
 - Each content hub (each Shared + each White-label) has its own configuration.
 - Edited ONLY from Hub Functionalities / hub checklist screens on Central Hub
   — not from the Capabilities matrix (no duplication).
+- After Functionalities / Modules / Capabilities are saved for a hub, the
+  frontend must refresh hub context (with a dashboard loader) so the navbar
+  updates to match the new checklist and effective capabilities.
 
 5.1A Modules checklist (Power Admin → Modules, same hub checklist screen)
 - Per-hub module toggles (functionality group `modules`):
@@ -504,31 +507,31 @@ Notes:
 
 5.1B Module catalogue pricing (Modules pricing)
 - Official default catalogue (editable via capability / database):
+  One-time:
   1) Shared Hub / White Label Hub — £14,500 (one time)
-  2) Social Media Template Library — £0 (one time)
+  2) Social Media Template Library — £0 (one time / included)
   3) Social Media Pre Approval Workflow — £5,000 (one time)
   4) Website Template Library — £300 per website
   5) Website Content Pre Approval Workflow — £10,000 (one time)
   6) Generic Content Pre Approval Workflow — £3,500 (one time)
-- Stored in `module_pricing` (amount + billing_unit: one_time | per_website).
-- Capabilities group “Modules pricing” (blurred while charge_amount_per_module off):
-  - `dashboard_manage_module_pricing` — Set module one-time / per-website prices
-  - `dashboard_view_module_invoices` — Who can see module enablement invoices
-  - `dashboard_mark_module_invoices_paid` — Manually mark an unpaid module invoice
-    as paid (required: payment method + notes; optional: reference + attachment).
-    Settlement details (who marked paid, method, notes, attachment URL) remain on
-    the invoice for later review by anyone with view access.
-- APIs: GET/PUT module-pricing; GET module-invoices; GET module-invoices/{id};
-  POST module-invoices/{id}/mark-paid (multipart; capability-gated)
-- Invoice type `module_billing`, cadence `types = one_time`
-- Payment status rules:
-  - Hub enable invoice (Shared Hub / White Label Hub module) — created as **paid**
-  - All other product-module invoices — created as **unpaid** until payment is
-    recorded via mark-as-paid (or Stripe collection TBD; do not auto-pay)
-- Frontend: Module prices + Module invoices under dashboard “Modules” section
-  (gated by caps). Types shown as badges; Charged by = FinProms (Stripe merchant TBD).
-  Unpaid invoice detail shows Mark as paid form when capability is on; paid
-  invoices show Payment details panel.
+  Recurring (functionality `charge_recurring_per_module`):
+  1) Shared / White Label Hub — £4,500 per network / month
+  2) Social Media Template Library — slot #1 per adviser / month
+  3) Social Media Pre Approval — slot #2 per user / month
+  4) Website Template Library — £125 per website / month
+  5) Website Content Pre Approval — £1,500 per firm / month
+  6) Generic Content Pre Approval — slot #3 per user / month
+- Stored in `module_pricing` (+ recurring_* columns) and `module_recurring_tiers`.
+- Capabilities group “Modules pricing” (blurred while BOTH charge flags off):
+  - `dashboard_manage_module_pricing` — Set one-time + recurring catalogue / slots
+  - `dashboard_view_module_invoices` — Who can see module invoices
+  - `dashboard_mark_module_invoices_paid` — Manually mark unpaid module invoices paid
+- APIs: GET/PUT module-pricing; PUT module-recurring-tiers/{id}; module-invoices…
+- Invoice types: `module_billing` (one_time), `module_recurring` (recurring)
+- Scheduler: `billing:process-module-cycles` daily — anniversary invoices, renew-day
+  card collection, grace penalties
+- Frontend: Module prices shows one-time + recurring + slots; advisor-pricing page
+  removed from nav (tiers retired); Billing renew + grace page under Advisors
 
 5.2 User capabilities matrix (REQUIRED — Power Admin → Capabilities)
 - Power Admin manages what users can do from their dashboards / member UI,
@@ -891,8 +894,16 @@ STEP 1 — Shared hub core (content hub)
 [x] Capabilities group Modules pricing — set prices + view module invoices +
     mark module invoices as paid
 [x] One-time module invoices on enable (skip £0 and per-website until websites billed)
-[x] Hub-enable module invoice (Shared / White Label) created as paid; other module
-    invoices created as unpaid until payment is recorded
+[x] Website Template Library — £300 one-time per deployed wc_template_request;
+    £125/month × count of status=deployed template requests (hub DB / remote WL)
+[x] All module invoices (incl. Shared / White Label hub packaging) created as unpaid
+    until payment is recorded
+[x] Functionality: charge_recurring_per_module + slot tables + Option B import invoices
+[x] Billing renew day + grace day; charge all due unpaid invoices; post-grace
+    suspend users / disable modules
+[x] Discontinue any hub user (not only advisors); active-only seat counts
+[x] Advisor pricing tiers retired from nav (replaced by module recurring slots)
+[x] Flat recurring per_firm counts firms on hub DB; anniversary/grace use remote hub users
 [x] Manual mark module invoice paid (method + notes required; optional reference /
     attachment) with persistent payment details on invoice view
 [x] Frontend: Module prices + Module invoices pages
@@ -910,6 +921,8 @@ STEP 1 — Shared hub core (content hub)
 [x] Content hubs list-only for posts/types/categories/tags (view_*); manage_*
     create/edit removed from Shared / White-label (Central library owns create)
 [x] Shared/WL Manual posts ↔ AI posts functionality opposites for receive/distribute
+[x] After Functionalities / Modules / Capabilities save: refresh hub context with
+    dashboard loader so navbar updates for the selected hub
 [ ] AI post/reel generation by FinProms admin (later)
 [ ] In-app post editing for buyers (later)
 [x] Social Media Compliance check flow (module + APIs)

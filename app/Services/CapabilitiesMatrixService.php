@@ -216,7 +216,8 @@ class CapabilitiesMatrixService
         $wcModuleOn = $hub->hasWebsiteComplianceModule();
         $wtlModuleOn = $hub->hasWebsiteTemplateLibraryModule();
         $smtlModuleOn = $hub->hasSocialMediaTemplateLibraryModule();
-        $modulePricingOn = $hub->can('charge_amount_per_module');
+        $modulePricingOn = $hub->can('charge_amount_per_module')
+            || $hub->can('charge_recurring_per_module');
         // Central has no product modules — do not grey-out hub-ops tools that are
         // used for remote control / registry (modules page, firms, switcher, etc.).
         $isCentralHub = $hub->isCentral();
@@ -293,7 +294,7 @@ class CapabilitiesMatrixService
                 } elseif ($requiresWcModule && ! $wcModuleOn) {
                     $inactiveReason = 'module_website_compliance_off';
                 } elseif ($requiresModulePricing && ! $modulePricingOn) {
-                    $inactiveReason = 'charge_amount_per_module_off';
+                    $inactiveReason = 'module_pricing_charge_off';
                 } elseif ($requiresSmtlModule && ! $smtlModuleOn) {
                     $inactiveReason = 'module_social_media_template_library_off';
                 } elseif ($requiresPrivate) {
@@ -341,7 +342,7 @@ class CapabilitiesMatrixService
             } elseif ($requiresWcModule) {
                 $requiresModule = 'module_website_compliance';
             } elseif ($requiresModulePricing) {
-                $requiresModule = 'charge_amount_per_module';
+                $requiresModule = 'charge_amount_per_module|charge_recurring_per_module';
             }
 
             $rows[] = [
@@ -399,7 +400,9 @@ class CapabilitiesMatrixService
                 'module_website_template_library' => $wtlModuleOn,
                 'module_website_compliance' => $wcModuleOn,
                 'module_general_compliance' => $gcModuleOn,
-                'charge_amount_per_module' => $modulePricingOn,
+                'charge_amount_per_module' => $hub->can('charge_amount_per_module'),
+                'charge_recurring_per_module' => $hub->can('charge_recurring_per_module'),
+                'module_pricing_enabled' => $modulePricingOn,
             ],
             'control_plane_roles' => ActingHubService::CONTROL_PLANE_ROLES,
             'control_plane_hub' => [
@@ -1096,8 +1099,11 @@ class CapabilitiesMatrixService
             return false;
         }
 
-        // Modules pricing caps are inactive while the functionality is off.
-        if (Hub::isModulePricingCapability($flag) && ! $hub->can('charge_amount_per_module')) {
+        // Modules pricing caps are inactive while both charge functionalities are off.
+        if (Hub::isModulePricingCapability($flag)
+            && ! $hub->can('charge_amount_per_module')
+            && ! $hub->can('charge_recurring_per_module')
+        ) {
             return false;
         }
 

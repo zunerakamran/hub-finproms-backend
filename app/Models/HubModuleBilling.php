@@ -105,4 +105,42 @@ class HubModuleBilling extends Model
             'auto_paid_on_hub_enable' => (bool) ($this->meta['auto_paid_on_hub_enable'] ?? false),
         ];
     }
+
+    /**
+     * @return array{kind: string, unit: string, summary: string, lines: list<string>, amount: float}
+     */
+    public function billingBreakdownForApi(): array
+    {
+        $amount = (float) $this->amount;
+        $unit = (string) ($this->meta['billing_unit'] ?? 'one_time');
+        $requestId = (int) ($this->meta['wc_template_request_id'] ?? 0);
+        $domain = (string) ($this->meta['domain_name'] ?? '');
+        $lines = [];
+
+        if ($requestId > 0 || $unit === 'per_website') {
+            $lines[] = 'One-time charge for a deployed website (Website Template Library).';
+            if ($domain !== '') {
+                $lines[] = 'Domain: '.$domain;
+            }
+            if ($requestId > 0) {
+                $lines[] = 'Template request #'.$requestId;
+            }
+            $lines[] = sprintf('Amount: £%s per website', number_format($amount, 2));
+            $summary = $domain !== ''
+                ? sprintf('Website %s — £%s', $domain, number_format($amount, 2))
+                : sprintf('1 website — £%s', number_format($amount, 2));
+        } else {
+            $lines[] = 'One-time module enablement charge.';
+            $lines[] = sprintf('Amount: £%s', number_format($amount, 2));
+            $summary = sprintf('One-time £%s', number_format($amount, 2));
+        }
+
+        return [
+            'kind' => 'one_time',
+            'unit' => $unit,
+            'summary' => $summary,
+            'lines' => $lines,
+            'amount' => $amount,
+        ];
+    }
 }

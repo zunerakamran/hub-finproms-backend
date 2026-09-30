@@ -38,11 +38,16 @@ class ModuleBillingController extends Controller
         }
 
         $invoices = Invoice::query()
-            ->where('type', Invoice::TYPE_MODULE_BILLING)
-            ->whereHas('moduleBilling', fn ($q) => $q->where('hub_id', $hub->id))
+            ->whereIn('type', [Invoice::TYPE_MODULE_BILLING, Invoice::TYPE_MODULE_RECURRING])
+            ->where(function ($q) use ($hub) {
+                $q->whereHas('moduleBilling', fn ($b) => $b->where('hub_id', $hub->id))
+                    ->orWhereHas('moduleRecurringBilling', fn ($b) => $b->where('hub_id', $hub->id));
+            })
             ->with([
                 'moduleBilling.hub:id,name,slug',
                 'moduleBilling.paidBy:id,name,email',
+                'moduleRecurringBilling.hub:id,name,slug',
+                'moduleRecurringBilling.paidBy:id,name,email',
                 'user:id,name,email',
             ])
             ->latest('issued_at')
@@ -55,7 +60,12 @@ class ModuleBillingController extends Controller
         $payload = $invoices->toArray();
         $payload['data'] = collect($invoices->items())->map(function (Invoice $invoice) {
             $row = $invoice->toArray();
-            $row['payment'] = $invoice->moduleBilling?->paymentDetailsForApi();
+            $row['payment'] = $invoice->type === Invoice::TYPE_MODULE_RECURRING
+                ? $invoice->moduleRecurringBilling?->paymentDetailsForApi()
+                : $invoice->moduleBilling?->paymentDetailsForApi();
+            $row['billing_breakdown'] = $invoice->type === Invoice::TYPE_MODULE_RECURRING
+                ? $invoice->moduleRecurringBilling?->billingBreakdownForApi()
+                : $invoice->moduleBilling?->billingBreakdownForApi();
 
             return $row;
         })->all();
@@ -75,6 +85,7 @@ class ModuleBillingController extends Controller
                 'name' => $hub->name,
                 'slug' => $hub->slug,
                 'charge_amount_per_module' => $hub->can('charge_amount_per_module'),
+                'charge_recurring_per_module' => $hub->can('charge_recurring_per_module'),
             ],
         ]);
     }
@@ -87,6 +98,8 @@ class ModuleBillingController extends Controller
         $invoice->load([
             'moduleBilling.hub:id,name,slug',
             'moduleBilling.paidBy:id,name,email',
+            'moduleRecurringBilling.hub:id,name,slug',
+            'moduleRecurringBilling.paidBy:id,name,email',
             'user:id,name,email',
         ]);
 
@@ -95,9 +108,18 @@ class ModuleBillingController extends Controller
             ? $this->matrix->roleCan($hub, (string) $actor->role, self::MARK_PAID_CAPABILITY)
             : false;
 
+        $payment = $invoice->type === Invoice::TYPE_MODULE_RECURRING
+            ? $invoice->moduleRecurringBilling?->paymentDetailsForApi()
+            : $invoice->moduleBilling?->paymentDetailsForApi();
+
+        $billingBreakdown = $invoice->type === Invoice::TYPE_MODULE_RECURRING
+            ? $invoice->moduleRecurringBilling?->billingBreakdownForApi()
+            : $invoice->moduleBilling?->billingBreakdownForApi();
+
         return response()->json([
             'invoice' => $invoice,
-            'payment' => $invoice->moduleBilling?->paymentDetailsForApi(),
+            'payment' => $payment,
+            'billing_breakdown' => $billingBreakdown,
             'can_mark_paid' => $canMarkPaid && $invoice->status !== 'paid',
             'target_hub' => [
                 'id' => $hub->id,
@@ -132,21 +154,34 @@ class ModuleBillingController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
+        $payment = $updated->type === Invoice::TYPE_MODULE_RECURRING
+            ? $updated->moduleRecurringBilling?->paymentDetailsForApi()
+            : $updated->moduleBilling?->paymentDetailsForApi();
+
+        $billingBreakdown = $updated->type === Invoice::TYPE_MODULE_RECURRING
+            ? $updated->moduleRecurringBilling?->billingBreakdownForApi()
+            : $updated->moduleBilling?->billingBreakdownForApi();
+
         return response()->json([
             'message' => 'Module invoice marked as paid.',
             'invoice' => $updated,
-            'payment' => $updated->moduleBilling?->paymentDetailsForApi(),
+            'payment' => $payment,
+            'billing_breakdown' => $billingBreakdown,
         ]);
     }
 
     private function assertInvoiceBelongsToHub(Invoice $invoice, Hub $hub): void
     {
-        if ($invoice->type !== Invoice::TYPE_MODULE_BILLING) {
+        if (! in_array($invoice->type, [Invoice::TYPE_MODULE_BILLING, Invoice::TYPE_MODULE_RECURRING], true)) {
             abort(response()->json(['message' => 'Not a module invoice.'], 404));
         }
 
-        $invoice->loadMissing('moduleBilling');
-        if ((int) ($invoice->moduleBilling?->hub_id ?? 0) !== (int) $hub->id) {
+        $invoice->loadMissing(['moduleBilling', 'moduleRecurringBilling']);
+        $hubId = $invoice->type === Invoice::TYPE_MODULE_RECURRING
+            ? (int) ($invoice->moduleRecurringBilling?->hub_id ?? 0)
+            : (int) ($invoice->moduleBilling?->hub_id ?? 0);
+
+        if ($hubId !== (int) $hub->id) {
             abort(response()->json(['message' => 'Invoice does not belong to this hub.'], 404));
         }
     }

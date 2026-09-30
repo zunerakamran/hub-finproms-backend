@@ -14,3 +14,8 @@ Artisan::command('inspire', function () {
 Schedule::command('wc:publish-scheduled')
     ->everyMinute()
     ->withoutOverlapping();
+
+// Daily hub billing: anniversary recurring invoices, renew-day card collection, grace penalties.
+Schedule::command('billing:process-module-cycles')
+    ->dailyAt('01:15')
+    ->withoutOverlapping();
