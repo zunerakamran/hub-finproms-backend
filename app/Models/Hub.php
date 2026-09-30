@@ -993,8 +993,8 @@ class Hub extends Model
             'default_white_label' => true,
         ],
         'dashboard_manage_role_display_names' => [
-            'label' => 'Set role display names',
-            'description' => 'Customize how role names appear in this hub’s UI (shared or white-labelled). Who may edit labels is controlled by this capability.',
+            'label' => 'Manage roles',
+            'description' => 'Add roles to this hub’s Capabilities matrix and customize how role names appear in the UI. Who may manage roles is controlled by this capability.',
             'group' => self::GROUP_DASHBOARD_HUB,
             'default_shared' => true,
             'default_white_label' => true,

@@ -491,15 +491,14 @@ Notes:
 - Matrix COLUMNS = roles currently present on that hub (users with that role
   exist on the hub’s user store / remote DB) UNION roles Power Admin has
   explicitly added for THAT hub. Do NOT always show every system role.
-- “Add role to this hub” on the Capabilities screen (per selected hub):
-  - Enable a dormant system role on the current hub’s matrix, OR
-  - Create a new custom role (key + display name) for the current hub.
+- “Manage roles” page (`/my-dashboard/role-display-names`, capability
+  `dashboard_manage_role_display_names` labeled Manage roles):
+  - Add a dormant system role or create a custom role for the CURRENT hub
+  - Rename role display titles for that hub
+  - Same capability gates both add and rename
   - Does NOT automatically add the role to other hubs — switch hub and add again
-    if needed.
-  - Custom role definitions are shared platform-wide; enabling a column is per hub.
-  - Rename display titles still uses User role title (section below).
-- Role display names remain overridable per hub (existing User role title page).
-- Examples of what the matrix should control:
+  - Custom role definitions are shared platform-wide; enabling a column is per hub
+- Capability checkboxes remain on the Capabilities matrix (section 5.2 body).
 
   Member-facing (end users / advisors / staff columns):
   - Browse catalog / posts / reels — available for ALL roles in the matrix
@@ -823,7 +822,7 @@ STEP 1 — Shared hub core (content hub)
 [x] Central Hub §5.2 matrix enforced like Shared / White-label (nav + APIs;
     no hard-coded “platform tools only” ignore of checked cells)
 [x] Capabilities matrix columns = roles present on hub ∪ roles added for that hub
-[x] Add role to this hub (catalog or custom) from Power Admin Capabilities
+[x] Manage roles page — add role to this hub + rename display names (same capability)
 [x] Modules checklist — Social Media / Website / General Compliance toggles per hub
 [x] Functionality: charge_amount_per_module — Charge amount per module (one time)
     (default ON white-label / OFF shared)

@@ -345,6 +345,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:dashboard_manage_role_display_names')->group(function () {
             Route::get('/role-display-names', [RoleDisplayNameController::class, 'index']);
             Route::put('/role-display-names', [RoleDisplayNameController::class, 'update']);
+            Route::post('/role-display-names/roles', [RoleDisplayNameController::class, 'addRole']);
         });
 
         Route::middleware('hub_can:dashboard_manage_email_templates')->group(function () {
