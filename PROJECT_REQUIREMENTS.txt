@@ -567,8 +567,10 @@ Notes:
   - View posts/reels — list what exists on this hub (including distributed
     Central content); enableable for ALL roles; defaults ON for hub-admin roles.
     Not gated by Social Media Template Library (list-only admin tool).
-  - Manage posts/reels — create/edit forms; DISABLED on Shared / White-label
+    Also allows deleting posts on that hub. Edit remains Central-only.
+  - Manage posts/reels — create forms; DISABLED on Shared / White-label
     (Central content library owns create). Remains inactive on Central too.
+    Central can still edit existing local posts via View posts.
   - Manage post bundles (group posts/reels; description + total credits) — same roles
   - View types / categories / tags — list-only on content hubs; defaults ON;
     not gated by Social Media Template Library

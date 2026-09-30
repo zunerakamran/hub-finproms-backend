@@ -917,7 +917,7 @@ class Hub extends Model
         ],
         'dashboard_view_posts' => [
             'label' => 'View posts / reels',
-            'description' => 'List posts/reels that exist on this hub (including content distributed from Central). No create/edit.',
+            'description' => 'List posts/reels that exist on this hub (including content distributed from Central). Allows delete. Edit is Central-only; create uses the Central content library.',
             'group' => self::GROUP_DASHBOARD_CONTENT,
             'default_shared' => true,
             'default_white_label' => true,

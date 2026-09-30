@@ -11,11 +11,13 @@ use App\Models\Setting;
 use App\Models\Tag;
 use App\Models\User;
 use App\Services\ActingAdvisorService;
+use App\Services\HubService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class PostController extends Controller
 {
@@ -250,48 +252,13 @@ class PostController extends Controller
 
     public function update(Request $request, int $post): JsonResponse
     {
-        if ($hub = $this->actingWhiteLabelHub($request)) {
-            if ($request->has('tags') && is_string($request->input('tags'))) {
-                $decoded = json_decode($request->input('tags'), true);
-                $request->merge([
-                    'tags' => (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) ? $decoded : [],
-                ]);
-            }
-            if ($request->has('categories') && is_string($request->input('categories'))) {
-                $decoded = json_decode($request->input('categories'), true);
-                $request->merge([
-                    'categories' => (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) ? $decoded : [],
-                ]);
-            }
-            if ($request->has('is_active') && ! is_bool($request->input('is_active'))) {
-                $request->merge([
-                    'is_active' => filter_var($request->input('is_active'), FILTER_VALIDATE_BOOLEAN),
-                ]);
-            }
-            if ($request->has('canva_link') && trim((string) $request->input('canva_link')) === '') {
-                $request->merge(['canva_link' => null]);
-            }
+        // Create stays Central-library-owned; local edit is Central Hub only.
+        if ($this->actingWhiteLabelHub($request)) {
+            throw new HttpException(403, 'Editing posts is only available on the Central Hub.');
+        }
 
-            $validated = $request->validate([
-                'title' => ['sometimes', 'string', 'max:255'],
-                'description' => ['nullable', 'string'],
-                'type' => ['sometimes', 'string', 'max:100'],
-                'categories' => ['sometimes', 'array', 'min:1'],
-                'categories.*' => ['string', 'max:100'],
-                'category' => ['sometimes', 'string', 'max:100'],
-                'tags' => ['nullable', 'array'],
-                'tags.*' => ['string', 'max:100'],
-                'credits_cost' => ['sometimes', 'integer', 'min:1'],
-                'canva_link' => ['nullable', 'url', 'max:2048'],
-                'is_active' => ['sometimes', 'boolean'],
-                'attachment' => ['nullable', 'file', 'max:102400'],
-            ]);
-
-            if (array_key_exists('categories', $validated) || array_key_exists('category', $validated)) {
-                $validated['categories'] = $this->resolveCategoriesInput($validated);
-            }
-
-            return $this->updatePostOnActingHub($request, $hub, $post, $validated);
+        if (app(HubService::class)->current()->isContentHub()) {
+            throw new HttpException(403, 'Editing posts is only available on the Central Hub.');
         }
 
         $model = Post::query()->findOrFail($post);

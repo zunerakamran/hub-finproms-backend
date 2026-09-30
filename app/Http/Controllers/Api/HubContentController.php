@@ -260,68 +260,13 @@ class HubContentController extends Controller
 
     public function updatePost(Request $request, int $post): JsonResponse
     {
-        $hub = $this->resolveActingWhiteLabel($request);
-        $this->assertActingContentCapability($request, $hub, 'dashboard_manage_posts');
-
-        if ($request->has('tags') && is_string($request->input('tags'))) {
-            $decoded = json_decode($request->input('tags'), true);
-            $request->merge([
-                'tags' => (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) ? $decoded : [],
-            ]);
-        }
-        if ($request->has('categories') && is_string($request->input('categories'))) {
-            $decoded = json_decode($request->input('categories'), true);
-            $request->merge([
-                'categories' => (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) ? $decoded : [],
-            ]);
-        }
-        if ($request->has('is_active') && ! is_bool($request->input('is_active'))) {
-            $request->merge([
-                'is_active' => filter_var($request->input('is_active'), FILTER_VALIDATE_BOOLEAN),
-            ]);
-        }
-        if ($request->has('canva_link') && trim((string) $request->input('canva_link')) === '') {
-            $request->merge(['canva_link' => null]);
-        }
-
-        $validated = $request->validate([
-            'title' => ['sometimes', 'string', 'max:255'],
-            'description' => ['nullable', 'string'],
-            'type' => ['sometimes', 'string', 'max:100'],
-            'categories' => ['sometimes', 'array', 'min:1'],
-            'categories.*' => ['string', 'max:100'],
-            'category' => ['sometimes', 'string', 'max:100'],
-            'tags' => ['nullable', 'array'],
-            'tags.*' => ['string', 'max:100'],
-            'credits_cost' => ['sometimes', 'integer', 'min:1'],
-            'canva_link' => ['nullable', 'url', 'max:2048'],
-            'is_active' => ['sometimes', 'boolean'],
-            'attachment' => ['nullable', 'file', 'max:102400'],
-        ]);
-
-        if (! isset($validated['categories']) && isset($validated['category'])) {
-            $validated['categories'] = [$validated['category']];
-        }
-
-        try {
-            $updated = $this->content->updatePost($hub, $post, $validated, $request->file('attachment'));
-        } catch (InvalidArgumentException $e) {
-            $code = str_contains(strtolower($e->getMessage()), 'not found') ? 404 : 422;
-
-            return response()->json(['message' => $e->getMessage()], $code);
-        }
-
-        return response()->json([
-            'message' => 'Post updated on '.$hub->name.'.',
-            'post' => $updated,
-            'target_hub' => ['id' => $hub->id, 'name' => $hub->name, 'slug' => $hub->slug],
-        ]);
+        throw new HttpException(403, 'Editing posts is only available on the Central Hub.');
     }
 
     public function destroyPost(Request $request, int $post): JsonResponse
     {
         $hub = $this->resolveActingWhiteLabel($request);
-        $this->assertActingContentCapability($request, $hub, 'dashboard_manage_posts');
+        $this->assertActingContentCapability($request, $hub, 'dashboard_view_posts');
 
         try {
             $this->content->deletePost($hub, $post);

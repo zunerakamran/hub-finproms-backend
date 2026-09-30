@@ -267,6 +267,9 @@ Route::middleware('auth:sanctum')->group(function () {
     $clientAdminRoutes = function () {
         Route::middleware('hub_can:dashboard_manage_posts')->group(function () {
             Route::post('/posts', [PostController::class, 'store']);
+        });
+        // Edit on Central; delete on any hub with View (or Manage) posts.
+        Route::middleware('hub_can:dashboard_view_posts,dashboard_manage_posts')->group(function () {
             Route::post('/posts/{post}', [PostController::class, 'update']);
             Route::put('/posts/{post}', [PostController::class, 'update']);
             Route::delete('/posts/{post}', [PostController::class, 'destroy']);
@@ -683,6 +686,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::middleware('hub_can:dashboard_manage_posts')->group(function () {
             Route::post('/posts', [PostController::class, 'store']);
+        });
+        // Edit on Central; delete on any hub with View (or Manage) posts.
+        Route::middleware('hub_can:dashboard_view_posts,dashboard_manage_posts')->group(function () {
             Route::post('/posts/{post}', [PostController::class, 'update']);
             Route::put('/posts/{post}', [PostController::class, 'update']);
             Route::delete('/posts/{post}', [PostController::class, 'destroy']);
