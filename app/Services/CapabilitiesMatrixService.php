@@ -32,6 +32,34 @@ class CapabilitiesMatrixService
     ) {}
 
     /**
+     * Catalog + custom role keys (lazy to avoid ctor cycles with HubRolesService).
+     *
+     * @return list<string>
+     */
+    public function allMatrixRoles(): array
+    {
+        try {
+            return app(HubRolesService::class)->allKnownRoles();
+        } catch (\Throwable) {
+            return self::MATRIX_ROLES;
+        }
+    }
+
+    /**
+     * Role columns for the matrix UI on this hub (present users ∪ added-to-all).
+     *
+     * @return list<string>
+     */
+    public function visibleRoles(Hub $hub): array
+    {
+        try {
+            return app(HubRolesService::class)->visibleMatrixRoles($hub);
+        } catch (\Throwable) {
+            return self::MATRIX_ROLES;
+        }
+    }
+
+    /**
      * Which roles a capability row applies to.
      *
      * @return list<string>
@@ -64,7 +92,7 @@ class CapabilitiesMatrixService
 
             // Hub-admin dashboard / admin-email tools apply to every role column so
             // Power Admin can grant them to staff and remaining roles.
-            return self::MATRIX_ROLES;
+            return $this->allMatrixRoles();
         }
 
         if ($group === Hub::GROUP_MEMBER
@@ -77,7 +105,7 @@ class CapabilitiesMatrixService
         ) {
             // User-facing / compliance caps apply to every role column so Power Admin
             // can enable them for staff and users alike (no hard role lock-in).
-            return self::MATRIX_ROLES;
+            return $this->allMatrixRoles();
         }
 
         // Behaviour / Modules / Functionalities are hub-level, not per-role.
@@ -120,13 +148,10 @@ class CapabilitiesMatrixService
         $privateMode = $hub->isPrivateInviteOnly();
         $publicMode = $hub->isPublicSubscribe();
 
-        $roles = [];
-        foreach (self::MATRIX_ROLES as $role) {
-            $roles[] = [
-                'key' => $role,
-                'label' => $hub->roleLabel($role),
-            ];
-        }
+        $visibleRoles = $this->visibleRoles($hub);
+        $hubRoles = app(HubRolesService::class);
+        $rolesMeta = $hubRoles->matrixRolesPayload($hub);
+        $roles = $rolesMeta['roles'];
 
         // Functionalities live on the Hub checklist screen — not repeated here.
         $behaviour = [];
@@ -137,7 +162,7 @@ class CapabilitiesMatrixService
         // Power Admin platform rows
         foreach (PowerAdminCapabilitiesService::DEFINITIONS as $key => $meta) {
             $cells = [];
-            foreach (self::MATRIX_ROLES as $role) {
+            foreach ($visibleRoles as $role) {
                 $applicable = $role === User::ROLE_POWER_ADMIN;
                 $cells[$role] = [
                     'applicable' => $applicable,
@@ -241,7 +266,7 @@ class CapabilitiesMatrixService
 
             $applicableRoles = $this->rolesForCapability($key);
             $cells = [];
-            foreach (self::MATRIX_ROLES as $role) {
+            foreach ($visibleRoles as $role) {
                 $applicable = in_array($role, $applicableRoles, true);
                 $enabled = false;
                 if ($applicable) {
@@ -351,6 +376,9 @@ class CapabilitiesMatrixService
             'module_pricing_capability_keys' => Hub::MODULE_PRICING_CAPABILITY_KEYS,
             'module_keys' => Hub::MODULE_KEYS,
             'roles' => $roles,
+            'available_to_add' => $rolesMeta['available_to_add'],
+            'custom_roles' => $rolesMeta['custom_roles'],
+            'added_to_all_hubs' => $rolesMeta['added_to_all_hubs'],
             'behaviour' => $behaviour,
             'rows' => $rows,
         ];
@@ -456,7 +484,7 @@ class CapabilitiesMatrixService
     private function tenantRoles(): array
     {
         return array_values(array_filter(
-            self::MATRIX_ROLES,
+            $this->allMatrixRoles(),
             fn (string $role) => ! ActingHubService::isControlPlaneRole($role)
         ));
     }
@@ -543,7 +571,7 @@ class CapabilitiesMatrixService
 
         $hub->role_capabilities = $roleCaps;
 
-        $orRoles = $stripControlPlane ? $this->tenantRoles() : self::MATRIX_ROLES;
+        $orRoles = $stripControlPlane ? $this->tenantRoles() : $this->allMatrixRoles();
         $checklist = $hub->resolvedChecklist();
         foreach (Hub::CHECKLIST_DEFINITIONS as $key => $meta) {
             if (! Hub::isCapabilityKey($key)) {
@@ -575,7 +603,7 @@ class CapabilitiesMatrixService
         $checklistDefaults = Hub::defaultChecklist($hubType);
         $matrix = [];
 
-        foreach (self::MATRIX_ROLES as $role) {
+        foreach ($this->allMatrixRoles() as $role) {
             $matrix[$role] = [];
         }
 
@@ -601,7 +629,7 @@ class CapabilitiesMatrixService
         }
 
         // Catalog browse is on for every role by default (staff + users) on content hubs.
-        foreach (self::MATRIX_ROLES as $role) {
+        foreach ($this->allMatrixRoles() as $role) {
             if (isset($matrix[$role])) {
                 $matrix[$role]['member_browse_catalog'] = true;
                 $matrix[$role]['member_view_site_pages'] = true;
@@ -610,7 +638,7 @@ class CapabilitiesMatrixService
 
         // Central Hub Controller has no member website — keep site-page access off for every role.
         if ($hubType === Hub::TYPE_CENTRAL) {
-            foreach (self::MATRIX_ROLES as $role) {
+            foreach ($this->allMatrixRoles() as $role) {
                 if (! isset($matrix[$role])) {
                     continue;
                 }
@@ -671,7 +699,7 @@ class CapabilitiesMatrixService
         }
 
         // Social Media Compliance caps default OFF for every role until Power Admin enables them.
-        foreach (self::MATRIX_ROLES as $role) {
+        foreach ($this->allMatrixRoles() as $role) {
             foreach (Hub::SOCIAL_MEDIA_COMPLIANCE_CAPABILITY_KEYS as $key) {
                 if (isset($matrix[$role])) {
                     $matrix[$role][$key] = false;
@@ -680,7 +708,7 @@ class CapabilitiesMatrixService
         }
 
         // General Compliance caps default OFF for every role until Power Admin enables them.
-        foreach (self::MATRIX_ROLES as $role) {
+        foreach ($this->allMatrixRoles() as $role) {
             foreach (Hub::GENERAL_COMPLIANCE_CAPABILITY_KEYS as $key) {
                 if (isset($matrix[$role])) {
                     $matrix[$role][$key] = false;

@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Models\Hub;
-use App\Models\User;
 use InvalidArgumentException;
 
 class RoleDisplayNameService
@@ -32,15 +31,16 @@ class RoleDisplayNameService
     public function editableRoles(Hub $hub): array
     {
         $labels = $this->labels($hub);
+        $hubRoles = app(HubRolesService::class);
         $roles = [];
-        foreach (CapabilitiesMatrixService::MATRIX_ROLES as $role) {
+        foreach ($hubRoles->visibleMatrixRoles($hub) as $role) {
             if ($hub->isWhiteLabel() && ActingHubService::isControlPlaneRole($role)) {
                 continue;
             }
             $roles[] = [
                 'key' => $role,
-                'label' => $labels[$role] ?? $role,
-                'default_label' => User::ROLE_LABELS[$role] ?? $role,
+                'label' => $labels[$role] ?? $hubRoles->defaultLabel($role),
+                'default_label' => $hubRoles->defaultLabel($role),
             ];
         }
 
@@ -56,11 +56,14 @@ class RoleDisplayNameService
      */
     public function update(Hub $hub, array $names): array
     {
+        $hubRoles = app(HubRolesService::class);
+        $editableKeys = array_map(
+            fn (array $row) => $row['key'],
+            $this->editableRoles($hub)
+        );
+
         $cleaned = [];
-        foreach (CapabilitiesMatrixService::MATRIX_ROLES as $role) {
-            if ($hub->isWhiteLabel() && ActingHubService::isControlPlaneRole($role)) {
-                continue;
-            }
+        foreach ($editableKeys as $role) {
             if (! array_key_exists($role, $names)) {
                 continue;
             }
@@ -71,7 +74,7 @@ class RoleDisplayNameService
             if (mb_strlen($value) > 100) {
                 throw new InvalidArgumentException("Display name for \"{$role}\" must be at most 100 characters.");
             }
-            $default = User::ROLE_LABELS[$role] ?? $role;
+            $default = $hubRoles->defaultLabel($role);
             if ($value === $default) {
                 continue;
             }
@@ -80,7 +83,7 @@ class RoleDisplayNameService
 
         // Roles omitted from the request keep existing overrides.
         $existing = is_array($hub->role_display_names) ? $hub->role_display_names : [];
-        foreach (CapabilitiesMatrixService::MATRIX_ROLES as $role) {
+        foreach ($hubRoles->allKnownRoles() as $role) {
             if ($hub->isWhiteLabel() && ActingHubService::isControlPlaneRole($role)) {
                 unset($existing[$role]);
                 continue;

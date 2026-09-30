@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Hub;
 use App\Services\ActingHubService;
 use App\Services\CapabilitiesMatrixService;
+use App\Services\HubRolesService;
 use App\Services\PowerAdminCapabilitiesService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -16,7 +17,8 @@ class PowerAdminCapabilityController extends Controller
     public function __construct(
         private readonly PowerAdminCapabilitiesService $capabilities,
         private readonly CapabilitiesMatrixService $matrix,
-        private readonly ActingHubService $actingHubs
+        private readonly ActingHubService $actingHubs,
+        private readonly HubRolesService $hubRoles
     ) {}
 
     /**
@@ -113,6 +115,46 @@ class PowerAdminCapabilityController extends Controller
         return response()->json([
             'message' => 'Capabilities matrix saved.',
             'matrix' => $result,
+            'resolved' => $this->capabilities->resolved(),
+        ]);
+    }
+
+    /**
+     * Add a catalog or custom role to every hub’s Capabilities matrix.
+     */
+    public function addRole(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'key' => ['sometimes', 'nullable', 'string', 'max:41'],
+            'label' => ['sometimes', 'nullable', 'string', 'max:100'],
+            'hub_id' => ['sometimes', 'nullable', 'integer', 'exists:hubs,id'],
+        ]);
+
+        try {
+            $added = $this->hubRoles->addRoleToAllHubs(
+                $validated['key'] ?? null,
+                $validated['label'] ?? null
+            );
+        } catch (InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $hubId = (int) ($validated['hub_id'] ?? 0);
+        if (! $hubId && $request->user()) {
+            $hubId = (int) $this->actingHubs->actingHub($request->user())->id;
+        }
+        $hub = $hubId
+            ? Hub::query()->findOrFail($hubId)
+            : (Hub::query()->where('type', Hub::TYPE_CENTRAL)->first()
+                ?? Hub::query()->orderBy('id')->firstOrFail());
+
+        return response()->json([
+            'message' => 'Role added to all hubs.',
+            'role' => $added['role'],
+            'available_to_add' => $added['available_to_add'],
+            'custom_roles' => $added['custom_roles'],
+            'added_to_all_hubs' => $added['added_to_all_hubs'],
+            'matrix' => $this->matrix->matrix($hub),
             'resolved' => $this->capabilities->resolved(),
         ]);
     }

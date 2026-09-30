@@ -569,6 +569,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('pa_can:pa_manage_power_capabilities')->group(function () {
             Route::put('/capabilities', [PowerAdminCapabilityController::class, 'update']);
             Route::put('/capabilities/matrix', [PowerAdminCapabilityController::class, 'updateMatrix']);
+            Route::post('/capabilities/roles', [PowerAdminCapabilityController::class, 'addRole']);
         });
 
         Route::middleware('pa_can:pa_manage_payment_methods')->group(function () {

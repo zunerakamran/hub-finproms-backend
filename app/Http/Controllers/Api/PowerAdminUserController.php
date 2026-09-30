@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\ActingHubService;
 use App\Services\AdminNewUserRegistrationMailService;
 use App\Services\FunctionalMailService;
+use App\Services\HubRolesService;
 use App\Services\WhiteLabelFirmService;
 use App\Services\WhiteLabelUserService;
 use Illuminate\Http\JsonResponse;
@@ -56,7 +57,8 @@ class PowerAdminUserController extends Controller
         private readonly FunctionalMailService $functionalMail,
         private readonly ActingHubService $actingHubs,
         private readonly WhiteLabelUserService $whiteLabelUsers,
-        private readonly WhiteLabelFirmService $whiteLabelFirms
+        private readonly WhiteLabelFirmService $whiteLabelFirms,
+        private readonly HubRolesService $hubRoles
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -503,11 +505,7 @@ class PowerAdminUserController extends Controller
      */
     private function assignableRoles(?Hub $hub = null): array
     {
-        if ($hub && $hub->isWhiteLabel()) {
-            return self::WHITE_LABEL_ASSIGNABLE_ROLES;
-        }
-
-        return self::ASSIGNABLE_ROLES;
+        return $this->hubRoles->assignableRoles($hub);
     }
 
     /**

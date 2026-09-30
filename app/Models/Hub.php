@@ -2119,7 +2119,20 @@ class Hub extends Model
     {
         $overrides = is_array($this->role_display_names) ? $this->role_display_names : [];
         $labels = [];
-        foreach (User::ROLE_LABELS as $key => $default) {
+
+        $keys = User::ROLE_LABELS;
+        try {
+            $hubRoles = app(\App\Services\HubRolesService::class);
+            foreach ($hubRoles->allKnownRoles() as $key) {
+                if (! isset($keys[$key])) {
+                    $keys[$key] = $hubRoles->defaultLabel($key);
+                }
+            }
+        } catch (\Throwable) {
+            // Fall back to built-in labels only.
+        }
+
+        foreach ($keys as $key => $default) {
             $custom = isset($overrides[$key]) ? trim((string) $overrides[$key]) : '';
             $labels[$key] = $custom !== '' ? $custom : $default;
         }
@@ -2130,8 +2143,15 @@ class Hub extends Model
     public function roleLabel(string $role): string
     {
         $labels = $this->resolvedRoleLabels();
+        if (isset($labels[$role])) {
+            return $labels[$role];
+        }
 
-        return $labels[$role] ?? (User::ROLE_LABELS[$role] ?? $role);
+        try {
+            return app(\App\Services\HubRolesService::class)->defaultLabel($role);
+        } catch (\Throwable) {
+            return User::ROLE_LABELS[$role] ?? $role;
+        }
     }
 
     /**

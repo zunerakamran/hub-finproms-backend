@@ -484,7 +484,17 @@ Notes:
   for BOTH Shared hubs and White-labelled hubs — by ROLE (matrix).
 - Distinct from Functionalities (5.1). Do NOT repeat Functionalities here.
 - This is a role × capability matrix per hub, managed only from the
-  CENTRAL HUB CONTROLLER Power Admin dashboard. Examples of what it should control:
+  CENTRAL HUB CONTROLLER Power Admin dashboard.
+- Matrix COLUMNS = roles currently present on that hub (users with that role
+  exist on the hub’s user store / remote DB) UNION roles Power Admin has
+  explicitly added for all hubs. Do NOT always show every system role.
+- “Add role to all hubs” on the Capabilities screen:
+  - Enable a dormant system role on every hub’s matrix, OR
+  - Create a new custom role (key + display name) seeded onto all hubs.
+  - Custom roles are assignable and matrix-gated like catalog roles; rename
+    display titles still uses User role title (section below).
+- Role display names remain overridable per hub (existing User role title page).
+- Examples of what the matrix should control:
 
   Member-facing (end users / advisors / staff columns):
   - Browse catalog / posts / reels — available for ALL roles in the matrix
@@ -807,6 +817,8 @@ STEP 1 — Shared hub core (content hub)
     tools appear only when enabled in Capabilities / Power Admin checklist
 [x] Central Hub §5.2 matrix enforced like Shared / White-label (nav + APIs;
     no hard-coded “platform tools only” ignore of checked cells)
+[x] Capabilities matrix columns = roles present on hub ∪ roles added to all hubs
+[x] Add role to all hubs (catalog or custom) from Power Admin Capabilities
 [x] Modules checklist — Social Media / Website / General Compliance toggles per hub
 [x] Functionality: charge_amount_per_module — Charge amount per module (one time)
     (default ON white-label / OFF shared)
