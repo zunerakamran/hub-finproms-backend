@@ -130,14 +130,16 @@ class ActingHubService
 
     /**
      * Capability checks for hub-level flags follow the acting content hub.
-     * Only the control-plane switcher capability stays on Central.
+     * Control-plane-only tools (hub switcher, Central content library) stay on Central.
      */
     public function capabilityHub(User $user, string $capability): Hub
     {
         $current = $this->hubs->current();
 
-        // Hub switcher itself is always a control-plane capability.
-        if ($capability === self::CAPABILITY) {
+        // Hub switcher + Central content library always live on the control plane.
+        if ($capability === self::CAPABILITY
+            || $capability === 'dashboard_central_content_library'
+        ) {
             return $current;
         }
 
@@ -278,6 +280,13 @@ class ActingHubService
 
         // Always expose the control flag from the control-plane deploy hub.
         $effective[self::CAPABILITY] = $this->matrix->userCan($current, $user, self::CAPABILITY);
+
+        // Central content library is Central-only — never inherit the acting Shared/WL matrix.
+        $effective['dashboard_central_content_library'] = $this->matrix->userCan(
+            $current,
+            $user,
+            'dashboard_central_content_library'
+        );
 
         if ($user->isPowerAdmin()) {
             foreach (app(PowerAdminCapabilitiesService::class)->resolved() as $key => $enabled) {

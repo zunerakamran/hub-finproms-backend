@@ -105,6 +105,14 @@ class CapabilitiesMatrixService
                 ];
             }
 
+            // Central content library — Central Hub Controller roles only.
+            if ($key === 'dashboard_central_content_library') {
+                return [
+                    User::ROLE_POWER_ADMIN,
+                    User::ROLE_FINPROMS_ADMIN,
+                ];
+            }
+
             // Hub-admin dashboard / admin-email tools apply to every role column so
             // Power Admin can grant them to staff and remaining roles.
             return $this->allMatrixRoles();
@@ -456,21 +464,34 @@ class CapabilitiesMatrixService
             array_flip(ActingHubService::CONTROL_PLANE_ROLES)
         );
 
-        // Hub switcher capability always lives on the Central / control-plane hub.
+        // Hub switcher + Central content library always live on the Central / control-plane hub.
         $switcherInput = [];
         foreach (ActingHubService::CONTROL_PLANE_ROLES as $role) {
             if (! isset($controlPlaneInput[$role]) || ! is_array($controlPlaneInput[$role])) {
                 continue;
             }
-            if (! array_key_exists(ActingHubService::CAPABILITY, $controlPlaneInput[$role])) {
+            $planeOnly = [];
+            foreach ([ActingHubService::CAPABILITY, 'dashboard_central_content_library'] as $planeKey) {
+                if (array_key_exists($planeKey, $controlPlaneInput[$role])) {
+                    $planeOnly[$planeKey] = $controlPlaneInput[$role][$planeKey];
+                    unset($controlPlaneInput[$role][$planeKey]);
+                }
+            }
+            if ($planeOnly !== []) {
+                $switcherInput[$role] = $planeOnly;
+            }
+            if (($controlPlaneInput[$role] ?? null) === []) {
+                unset($controlPlaneInput[$role]);
+            }
+        }
+        // Never persist Central-library cells onto Shared / WL matrices.
+        foreach ($tenantInput as $role => $caps) {
+            if (! is_array($caps)) {
                 continue;
             }
-            $switcherInput[$role] = [
-                ActingHubService::CAPABILITY => $controlPlaneInput[$role][ActingHubService::CAPABILITY],
-            ];
-            unset($controlPlaneInput[$role][ActingHubService::CAPABILITY]);
-            if ($controlPlaneInput[$role] === []) {
-                unset($controlPlaneInput[$role]);
+            unset($tenantInput[$role]['dashboard_central_content_library']);
+            if ($tenantInput[$role] === []) {
+                unset($tenantInput[$role]);
             }
         }
         if ($switcherInput !== []) {
