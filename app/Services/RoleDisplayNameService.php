@@ -26,7 +26,7 @@ class RoleDisplayNameService
     }
 
     /**
-     * @return list<array{key: string, label: string, default_label: string, user_count: int, can_delete: bool, is_custom: bool}>
+     * @return list<array{key: string, label: string, default_label: string, user_count: int, can_delete: bool, is_custom: bool, is_must: bool}>
      */
     public function editableRoles(Hub $hub): array
     {
@@ -35,9 +35,6 @@ class RoleDisplayNameService
         $counts = $hubRoles->userCountsByRole($hub);
         $roles = [];
         foreach ($hubRoles->visibleMatrixRoles($hub) as $role) {
-            if ($hub->isWhiteLabel() && ActingHubService::isControlPlaneRole($role)) {
-                continue;
-            }
             $userCount = (int) ($counts[$role] ?? 0);
             $roles[] = [
                 'key' => $role,
@@ -46,6 +43,7 @@ class RoleDisplayNameService
                 'user_count' => $userCount,
                 'can_delete' => $hubRoles->canRemoveRoleFromHub($hub, $role, $userCount),
                 'is_custom' => ! in_array($role, HubRolesService::CATALOG_ROLES, true),
+                'is_must' => $hubRoles->isMustRole($role),
             ];
         }
 
@@ -89,10 +87,6 @@ class RoleDisplayNameService
         // Roles omitted from the request keep existing overrides.
         $existing = is_array($hub->role_display_names) ? $hub->role_display_names : [];
         foreach ($hubRoles->allKnownRoles() as $role) {
-            if ($hub->isWhiteLabel() && ActingHubService::isControlPlaneRole($role)) {
-                unset($existing[$role]);
-                continue;
-            }
             if (array_key_exists($role, $names)) {
                 if (isset($cleaned[$role])) {
                     $existing[$role] = $cleaned[$role];

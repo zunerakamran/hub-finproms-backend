@@ -160,6 +160,85 @@ class RoleDisplayNameTest extends TestCase
         $this->assertNull($after->firstWhere('key', User::ROLE_MANAGER));
     }
 
+    public function test_must_roles_are_always_present_and_never_deletable(): void
+    {
+        $hub = $this->createSharedHub();
+        $admin = User::factory()->powerAdmin()->create();
+        Sanctum::actingAs($admin);
+
+        $index = $this->getJson('/api/client-admin/role-display-names');
+        $index->assertOk();
+        $roles = collect($index->json('roles'));
+
+        foreach ([User::ROLE_POWER_ADMIN, User::ROLE_FINPROMS_ADMIN] as $mustKey) {
+            $role = $roles->firstWhere('key', $mustKey);
+            $this->assertNotNull($role, "Expected must role {$mustKey} on shared hub");
+            $this->assertTrue($role['is_must']);
+            $this->assertFalse($role['can_delete']);
+            $this->assertNull(
+                collect($index->json('available_to_add'))->firstWhere('key', $mustKey),
+                "Must role {$mustKey} must not appear in available_to_add"
+            );
+
+            $this->deleteJson('/api/client-admin/role-display-names/roles/'.$mustKey)
+                ->assertStatus(422);
+        }
+
+        $this->putJson('/api/client-admin/role-display-names', [
+            'roles' => [
+                User::ROLE_POWER_ADMIN => 'Platform Ops',
+                User::ROLE_FINPROMS_ADMIN => 'Hub Operator',
+            ],
+        ])->assertOk()
+            ->assertJsonPath('role_labels.power_admin', 'Platform Ops')
+            ->assertJsonPath('role_labels.finproms_admin', 'Hub Operator');
+
+        $hub->refresh();
+        $this->assertSame('Platform Ops', $hub->role_display_names[User::ROLE_POWER_ADMIN] ?? null);
+        $this->assertSame('Hub Operator', $hub->role_display_names[User::ROLE_FINPROMS_ADMIN] ?? null);
+    }
+
+    public function test_must_roles_appear_on_white_label_hubs_and_cannot_be_deleted(): void
+    {
+        [$admin, $hub] = $this->actingPowerAdminOnWiredHub();
+
+        $index = $this->getJson('/api/client-admin/role-display-names');
+        $index->assertOk()
+            ->assertJsonPath('hub.slug', 'myhub');
+        $roles = collect($index->json('roles'));
+
+        foreach ([User::ROLE_POWER_ADMIN, User::ROLE_FINPROMS_ADMIN] as $mustKey) {
+            $role = $roles->firstWhere('key', $mustKey);
+            $this->assertNotNull($role, "Expected must role {$mustKey} on white-label hub");
+            $this->assertTrue($role['is_must']);
+            $this->assertFalse($role['can_delete']);
+
+            $this->deleteJson('/api/client-admin/role-display-names/roles/'.$mustKey)
+                ->assertStatus(422);
+        }
+
+        $this->putJson('/api/client-admin/role-display-names', [
+            'roles' => [
+                User::ROLE_POWER_ADMIN => 'WL Power',
+                User::ROLE_FINPROMS_ADMIN => 'WL FinProms',
+            ],
+        ])->assertOk()
+            ->assertJsonPath('role_labels.power_admin', 'WL Power')
+            ->assertJsonPath('role_labels.finproms_admin', 'WL FinProms');
+
+        $visible = app(\App\Services\HubRolesService::class)->visibleMatrixRoles($hub->fresh());
+        $this->assertContains(User::ROLE_POWER_ADMIN, $visible);
+        $this->assertContains(User::ROLE_FINPROMS_ADMIN, $visible);
+
+        $matrixRoles = collect(
+            $this->getJson('/api/power-admin/capabilities/matrix?hub_id='.$hub->id)
+                ->assertOk()
+                ->json('matrix.roles')
+        )->pluck('key')->all();
+        $this->assertContains(User::ROLE_POWER_ADMIN, $matrixRoles);
+        $this->assertContains(User::ROLE_FINPROMS_ADMIN, $matrixRoles);
+    }
+
     private function createSharedHub(array $extra = []): Hub
     {
         return Hub::query()->create(array_merge([

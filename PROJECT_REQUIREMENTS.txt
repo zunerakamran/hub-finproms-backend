@@ -538,13 +538,15 @@ Notes:
   CENTRAL HUB CONTROLLER Power Admin dashboard.
 - Matrix COLUMNS = roles currently present on that hub (users with that role
   exist on the hub’s user store / remote DB) UNION roles Power Admin has
-  explicitly added for THAT hub. Do NOT always show every system role.
+  explicitly added for THAT hub UNION must roles (power_admin, finproms_admin)
+  which are always present on every hub. Do NOT always show every other system role.
 - “Manage roles” page (`/my-dashboard/role-display-names`, capability
   `dashboard_manage_role_display_names` labeled Manage roles):
   - List roles on the CURRENT hub with total users per role
   - Add a dormant system role or create a custom role for the CURRENT hub
   - Delete a role from this hub’s matrix when it has 0 users (blocked while users
-    still hold the role; Power Admin cannot be removed from Central)
+    still hold the role; power_admin and finproms_admin are must roles and can
+    never be deleted on any hub — display names may still be renamed)
   - Rename role display titles for that hub
   - Same capability gates add, delete, and rename
   - Does NOT automatically add/remove the role on other hubs — switch hub and act again
@@ -880,7 +882,7 @@ STEP 1 — Shared hub core (content hub)
 [x] Central Hub §5.2 matrix enforced like Shared / White-label (nav + APIs;
     no hard-coded “platform tools only” ignore of checked cells)
 [x] Capabilities matrix columns = roles present on hub ∪ roles added for that hub
-[x] Manage roles page — list roles + user counts, add/delete role on this hub, rename display names (same capability)
+[x] Manage roles page — list roles + user counts, add/delete role on this hub, rename display names (same capability); power_admin + finproms_admin are must roles on every hub (never deletable, names editable)
 [x] Modules checklist — Social Media / Website / General Compliance toggles per hub
 [x] Functionality: charge_amount_per_module — Charge amount per module (one time)
     (default ON white-label / OFF shared)

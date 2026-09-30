@@ -156,7 +156,7 @@ class RoleDisplayNameController extends Controller
 
     /**
      * @param  list<array<string, mixed>>  $roles
-     * @return list<array{key: string, label: string, default_label: string, user_count: int, can_delete: bool, is_custom: bool}>
+     * @return list<array{key: string, label: string, default_label: string, user_count: int, can_delete: bool, is_custom: bool, is_must: bool}>
      */
     private function editableRolesFromMeta(array $roles): array
     {
@@ -172,6 +172,7 @@ class RoleDisplayNameController extends Controller
                 'user_count' => (int) ($role['user_count'] ?? 0),
                 'can_delete' => (bool) ($role['can_delete'] ?? false),
                 'is_custom' => (bool) ($role['is_custom'] ?? false),
+                'is_must' => (bool) ($role['is_must'] ?? false),
             ];
         }
 

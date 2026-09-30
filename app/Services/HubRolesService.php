@@ -16,7 +16,7 @@ use Throwable;
  *
  * Visibility = roles that currently have users on that hub
  *            ∪ roles Power Admin explicitly added for that hub
- *            ∪ (Power Admin on Central, so platform pa_* cells stay editable).
+ *            ∪ must roles (power_admin, finproms_admin) on every hub.
  *
  * Custom role definitions (key + default label) are stored platform-wide so
  * rename / assign work; enabling a role on the matrix is always per hub.
@@ -30,6 +30,17 @@ class HubRolesService
     public const SETTING_ADDED_BY_HUB = 'hub_roles_added_by_hub';
 
     public const SETTING_CUSTOM_ROLES = 'hub_roles_custom';
+
+    /**
+     * Always present on every hub’s matrix. Cannot be deleted; display names
+     * remain editable. Keys stay stable for capability / auth checks.
+     *
+     * @var list<string>
+     */
+    public const MUST_ROLES = [
+        User::ROLE_POWER_ADMIN,
+        User::ROLE_FINPROMS_ADMIN,
+    ];
 
     /**
      * Built-in role keys (catalog). New custom roles are additions, not replacements.
@@ -282,6 +293,11 @@ class HubRolesService
         return self::$userCountsCache[$hubId] = $counts;
     }
 
+    public function isMustRole(string $role): bool
+    {
+        return in_array($this->normalizeRoleKey($role), self::MUST_ROLES, true);
+    }
+
     /**
      * Role columns shown in the Capabilities matrix for this hub.
      *
@@ -296,21 +312,9 @@ class HubRolesService
 
         $visible = array_values(array_unique(array_merge(
             $this->rolesPresentOnHub($hub),
-            $this->rolesAddedForHub($hub)
+            $this->rolesAddedForHub($hub),
+            self::MUST_ROLES
         )));
-
-        // Central always keeps the Power Admin column (platform pa_* checklist).
-        if ($hub->isControlPlane() && ! in_array(User::ROLE_POWER_ADMIN, $visible, true)) {
-            $visible[] = User::ROLE_POWER_ADMIN;
-        }
-
-        // White-labelled hubs never show control-plane-only role columns.
-        if ($hub->isWhiteLabel()) {
-            $visible = array_values(array_filter(
-                $visible,
-                fn (string $role) => ! ActingHubService::isControlPlaneRole($role)
-            ));
-        }
 
         return self::$visibleMatrixRolesCache[$hubId] = $this->orderRoles($visible);
     }
@@ -325,6 +329,9 @@ class HubRolesService
         $visible = $this->visibleMatrixRoles($hub);
         $out = [];
         foreach (self::CATALOG_ROLES as $role) {
+            if ($this->isMustRole($role)) {
+                continue;
+            }
             if ($hub->isWhiteLabel() && ActingHubService::isControlPlaneRole($role)) {
                 continue;
             }
@@ -376,14 +383,14 @@ class HubRolesService
                 'label' => $hub->roleLabel($role),
                 'default_label' => $this->defaultLabel($role),
                 'is_custom' => ! in_array($role, self::CATALOG_ROLES, true),
+                'is_must' => $this->isMustRole($role),
                 'present_on_hub' => $userCount > 0,
-                'added_to_hub' => in_array($role, $added, true),
+                'added_to_hub' => in_array($role, $added, true) || $this->isMustRole($role),
                 // Legacy alias for older frontends.
-                'added_to_all_hubs' => in_array($role, $added, true),
+                'added_to_all_hubs' => in_array($role, $added, true) || $this->isMustRole($role),
                 'user_count' => $userCount,
-                // Role is already visible here — only block when users remain or Central PA.
-                'can_delete' => $userCount === 0
-                    && ! ($hub->isControlPlane() && $role === User::ROLE_POWER_ADMIN),
+                // Must roles are never deletable; others only while users remain.
+                'can_delete' => $userCount === 0 && ! $this->isMustRole($role),
             ];
         }
 
@@ -403,6 +410,30 @@ class HubRolesService
      */
     public function addRoleToHub(Hub $hub, ?string $key = null, ?string $label = null): array
     {
+        $normalizedPreview = $key !== null && $key !== ''
+            ? $this->normalizeRoleKey($key)
+            : '';
+        // Must roles are always on every hub; treat add as a no-op success.
+        if ($normalizedPreview !== '' && $this->isMustRole($normalizedPreview)) {
+            $this->seedRoleCapabilitiesOnHub($hub, $normalizedPreview);
+            unset(self::$visibleMatrixRolesCache[(int) $hub->id]);
+            $hub = $hub->fresh() ?? $hub;
+
+            return [
+                'role' => [
+                    'key' => $normalizedPreview,
+                    'label' => $this->defaultLabel($normalizedPreview),
+                    'default_label' => $this->defaultLabel($normalizedPreview),
+                    'is_custom' => false,
+                    'is_must' => true,
+                    'added_to_hub' => true,
+                ],
+                'added_to_hub' => $this->rolesAddedForHub($hub),
+                'available_to_add' => $this->rolesAvailableToAdd($hub),
+                'custom_roles' => $this->customRoles(),
+            ];
+        }
+
         if ($hub->isWhiteLabel() && $key !== null && $key !== '') {
             $normalized = $this->normalizeRoleKey($key);
             if (ActingHubService::isControlPlaneRole($normalized)) {
@@ -421,6 +452,26 @@ class HubRolesService
             if ($key === '') {
                 throw new InvalidArgumentException('Could not derive a role key from that display name.');
             }
+        }
+
+        if ($this->isMustRole($key)) {
+            $this->seedRoleCapabilitiesOnHub($hub, $key);
+            unset(self::$visibleMatrixRolesCache[(int) $hub->id]);
+            $hub = $hub->fresh() ?? $hub;
+
+            return [
+                'role' => [
+                    'key' => $key,
+                    'label' => $label !== '' ? $label : $this->defaultLabel($key),
+                    'default_label' => $this->defaultLabel($key),
+                    'is_custom' => false,
+                    'is_must' => true,
+                    'added_to_hub' => true,
+                ],
+                'added_to_hub' => $this->rolesAddedForHub($hub),
+                'available_to_add' => $this->rolesAvailableToAdd($hub),
+                'custom_roles' => $this->customRoles(),
+            ];
         }
 
         if (! preg_match('/^[a-z][a-z0-9_]{1,40}$/', $key)) {
@@ -512,7 +563,7 @@ class HubRolesService
             return false;
         }
 
-        if ($hub->isControlPlane() && $role === User::ROLE_POWER_ADMIN) {
+        if ($this->isMustRole($role)) {
             return false;
         }
 
@@ -531,7 +582,7 @@ class HubRolesService
 
     /**
      * Remove a role column from this hub’s Capabilities matrix (Manage roles).
-     * Refuses when users still hold the role, or when the role is required on Central.
+     * Refuses when users still hold the role, or when the role is a must role.
      *
      * @return array<string, mixed>
      */
@@ -547,8 +598,11 @@ class HubRolesService
             throw new InvalidArgumentException("Role \"{$key}\" is not on this hub.");
         }
 
-        if ($hub->isControlPlane() && $key === User::ROLE_POWER_ADMIN) {
-            throw new InvalidArgumentException('Power Admin cannot be removed from the Central hub.');
+        if ($this->isMustRole($key)) {
+            $label = $hub->roleLabel($key);
+            throw new InvalidArgumentException(
+                "\"{$label}\" is a required role and cannot be removed from any hub."
+            );
         }
 
         $userCount = (int) ($this->userCountsByRole($hub)[$key] ?? 0);
@@ -665,7 +719,7 @@ class HubRolesService
             return;
         }
 
-        if ($hub->isWhiteLabel() && ActingHubService::isControlPlaneRole($role)) {
+        if ($hub->isWhiteLabel() && ActingHubService::isControlPlaneRole($role) && ! $this->isMustRole($role)) {
             return;
         }
 
