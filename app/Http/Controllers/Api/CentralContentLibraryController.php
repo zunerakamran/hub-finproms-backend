@@ -14,7 +14,8 @@ use InvalidArgumentException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
- * Central Hub content library: create (manual / Excel), archive, distribute.
+ * Central Hub content library: create (manual / Excel), distribute live posts,
+ * optionally archive (retire from distribute; keeps the library row).
  * AI generation is intentionally a stub (“under development”).
  */
 class CentralContentLibraryController extends Controller
@@ -146,7 +147,7 @@ class CentralContentLibraryController extends Controller
         }
 
         return response()->json([
-            'message' => 'Post archived. You can now distribute it to hubs.',
+            'message' => 'Post archived. It stays in the Central library but can no longer be distributed.',
             'post' => $model->fresh()->load(['creator:id,name', 'archiver:id,name']),
         ]);
     }

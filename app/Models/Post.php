@@ -86,6 +86,10 @@ class Post extends Model
         return ! $this->isAiSource();
     }
 
+    /**
+     * Retire a Central-library post from distribution. Does not delete the row
+     * and does not hide it from the library list — only blocks distribute.
+     */
     public function archive(string $remarks, ?User $actor = null): void
     {
         $remarks = trim($remarks);
@@ -97,7 +101,6 @@ class Post extends Model
             'archived_at' => now(),
             'archive_remarks' => $remarks,
             'archived_by' => $actor?->id,
-            'is_active' => false,
         ])->save();
     }
 

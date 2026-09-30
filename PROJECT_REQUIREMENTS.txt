@@ -403,9 +403,11 @@ Notes:
   - Create manual posts one-by-one or bulk Excel (template download like
     advisor import). Posts remain in the Central DB.
   - AI posts tab is under development (empty stub).
-  - Archive posts with required remarks, then distribute to Shared /
-    White-labelled hubs. Copies are inserted into the target hub DB.
-  - Distribution checks: archived posts only; AI posts only to hubs with
+  - Distribute non-archived (ready) library posts to Shared / White-labelled
+    hubs. Copies are inserted into the target hub DB. Archive is optional:
+    it retires a post from the distribute pool with required remarks but does
+    not delete or hide it from the Central library list.
+  - Distribution checks: non-archived posts only; AI posts only to hubs with
     `ai_posts`; manual posts only to hubs with `manual_posts`.
   - Types / categories / tags with Central library:
     - Central keeps its own taxonomy tables (`content_types`, `categories`,
@@ -891,7 +893,8 @@ STEP 1 — Shared hub core (content hub)
 [x] Power Admin user management UI (pa_manage_users_roles — create/update/delete/roles)
 [x] Control white labelled hubs via dashboard hub switcher (dashboard_control_white_label_hubs)
 [x] Acting-hub content create/list on white-label DB (posts, types, categories, tags, bundles)
-[x] Central content library (manual create + Excel bulk, archive + distribute; AI stub)
+[x] Central content library (manual create + Excel bulk, distribute live posts;
+    archive retires from distribute; AI stub)
 [x] Central library taxonomy: Central-owned types/categories/tags; distribute
     upserts names into target hub DB with the post copy
 [x] Content hubs list-only for posts/types/categories/tags (view_*); manage_*

@@ -213,7 +213,9 @@ class ContentPushService
         }
 
         if ($entityType === 'post' && $model instanceof Post) {
-            if ($model->archived_at === null) {
+            // Distribute live library posts only. Archived = retired from the
+            // distribute pool (still kept in the Central library list).
+            if ($model->archived_at !== null) {
                 return $this->recordResult(
                     $sourceHub,
                     $targetHub,
@@ -223,7 +225,7 @@ class ContentPushService
                     $base,
                     false,
                     null,
-                    'Archive the post with remarks before distributing it.'
+                    'This post is archived and cannot be distributed. Use a non-archived library post.'
                 );
             }
 
