@@ -592,4 +592,145 @@ class ContentPushService
 
         return rtrim((string) config('app.url'), '/').'/'.ltrim($relative, '/');
     }
+
+    /**
+     * Latest successful distribution per target hub for each Central post.
+     *
+     * @param  list<int>  $postIds
+     * @return array<int, list<array{hub_id: int, hub_name: string, hub_type: string, remote_post_id: int|null, distributed_at: string|null}>>
+     */
+    public function successfulDistributionsForPosts(array $postIds): array
+    {
+        $postIds = array_values(array_unique(array_map('intval', $postIds)));
+        if ($postIds === []) {
+            return [];
+        }
+
+        $rows = ContentPush::query()
+            ->with(['targetHub:id,name,type'])
+            ->whereIn('post_id', $postIds)
+            ->where('entity_type', 'post')
+            ->where('status', 'success')
+            ->whereNotNull('remote_post_id')
+            ->orderByDesc('id')
+            ->get();
+
+        $out = [];
+        foreach ($rows as $row) {
+            $postId = (int) $row->post_id;
+            $hubId = (int) $row->target_hub_id;
+            if (! isset($out[$postId])) {
+                $out[$postId] = [];
+            }
+            // Keep the latest success per hub only.
+            foreach ($out[$postId] as $existing) {
+                if ((int) $existing['hub_id'] === $hubId) {
+                    continue 2;
+                }
+            }
+            $out[$postId][] = [
+                'hub_id' => $hubId,
+                'hub_name' => (string) ($row->targetHub?->name ?: 'Hub #'.$hubId),
+                'hub_type' => (string) ($row->targetHub?->type ?: ''),
+                'remote_post_id' => $row->remote_post_id !== null ? (int) $row->remote_post_id : null,
+                'distributed_at' => optional($row->created_at)?->toIso8601String(),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Push the current Central post fields onto every hub it was successfully
+     * distributed to (matched by content_pushes.remote_post_id).
+     *
+     * @return array{synced: int, failed: int, results: list<array<string, mixed>>}
+     */
+    public function syncPostToDistributedHubs(Post $post): array
+    {
+        $distributions = $this->successfulDistributionsForPosts([(int) $post->id])[(int) $post->id] ?? [];
+        if ($distributions === []) {
+            return ['synced' => 0, 'failed' => 0, 'results' => []];
+        }
+
+        $results = [];
+        $synced = 0;
+        $failed = 0;
+
+        foreach ($distributions as $dist) {
+            $hubId = (int) $dist['hub_id'];
+            $remotePostId = (int) ($dist['remote_post_id'] ?? 0);
+            $hub = Hub::query()->find($hubId);
+            $base = [
+                'hub_id' => $hubId,
+                'hub_name' => $dist['hub_name'],
+                'remote_post_id' => $remotePostId ?: null,
+            ];
+
+            if (! $hub || ! $hub->isContentHub() || ! $hub->hasRemoteDatabaseConfigured() || $remotePostId < 1) {
+                $failed++;
+                $results[] = array_merge($base, [
+                    'status' => 'failed',
+                    'message' => 'Missing hub credentials or remote post id.',
+                ]);
+                continue;
+            }
+
+            try {
+                $connection = $this->remoteDb->connect($hub);
+                $exists = DB::connection($connection)->table('posts')->where('id', $remotePostId)->exists();
+                if (! $exists) {
+                    $failed++;
+                    $results[] = array_merge($base, [
+                        'status' => 'failed',
+                        'message' => 'Remote post no longer exists on '.$hub->name.'.',
+                    ]);
+                    continue;
+                }
+
+                $this->ensureTaxonomyForPost($connection, $post);
+                $this->ensurePostCategoriesColumn($connection);
+
+                $updates = [
+                    'title' => $post->title,
+                    'description' => $post->description,
+                    'type' => $post->type,
+                    'categories' => json_encode(array_values($post->categories ?? [])),
+                    'tags' => json_encode(array_values($post->tags ?? [])),
+                    'credits_cost' => $post->credits_cost,
+                    'attachment_path' => $this->remoteAttachmentPath($post),
+                    'attachment_name' => $post->attachment_name,
+                    'attachment_mime' => $post->attachment_mime,
+                    'is_active' => (bool) $post->is_active,
+                    'updated_at' => now(),
+                ];
+
+                if (Schema::connection($connection)->hasColumn('posts', 'canva_link')) {
+                    $updates['canva_link'] = $post->canva_link;
+                }
+
+                DB::connection($connection)->table('posts')->where('id', $remotePostId)->update($updates);
+
+                $synced++;
+                $results[] = array_merge($base, [
+                    'status' => 'success',
+                    'message' => 'Updated on '.$hub->name.'.',
+                ]);
+            } catch (Throwable $e) {
+                $failed++;
+                $results[] = array_merge($base, [
+                    'status' => 'failed',
+                    'message' => $e->getMessage(),
+                ]);
+            } finally {
+                $this->remoteDb->disconnect($hub);
+            }
+        }
+
+        return [
+            'synced' => $synced,
+            'failed' => $failed,
+            'results' => $results,
+        ];
+    }
 }

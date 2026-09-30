@@ -11,6 +11,7 @@ use App\Models\Setting;
 use App\Models\Tag;
 use App\Models\User;
 use App\Services\ActingAdvisorService;
+use App\Services\ContentPushService;
 use App\Services\HubService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -111,6 +112,88 @@ class PostController extends Controller
             'new_banner_days' => Setting::newBannerDays(),
             'visible_metrics' => $metricVisibility,
         ]));
+    }
+
+    /**
+     * Dashboard catalog list (View posts). Includes archived on Central and
+     * distribution targets for Central library posts.
+     */
+    public function adminIndex(Request $request): JsonResponse
+    {
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            $listed = $this->whiteLabelContent()->listPosts(
+                $hub,
+                min(100, max(1, (int) $request->integer('per_page', 50)))
+            );
+
+            return response()->json([
+                'data' => $listed['data'],
+                'target_hub' => $this->targetHubPayload($hub),
+                'acting_on_white_label' => true,
+            ]);
+        }
+
+        $hub = app(HubService::class)->current();
+        $perPage = min(100, max(1, (int) $request->integer('per_page', 50)));
+
+        $query = Post::query()
+            ->with(['creator:id,name', 'archiver:id,name'])
+            ->latest('updated_at');
+
+        $status = $request->string('status')->toString();
+        if ($status === 'archived') {
+            $query->whereNotNull('archived_at');
+        } elseif ($status === 'active' || $status === 'ready') {
+            $query->whereNull('archived_at');
+        }
+
+        if ($request->filled('source')) {
+            $query->where('creation_source', $request->string('source')->toString());
+        }
+
+        if ($request->filled('type')) {
+            $type = $request->string('type')->toString();
+            $query->where('type', $type);
+        }
+
+        if ($request->filled('search')) {
+            $search = $request->string('search')->toString();
+            $query->where(function ($builder) use ($search) {
+                $builder->where('title', 'like', "%{$search}%")
+                    ->orWhere('description', 'like', "%{$search}%");
+            });
+        }
+
+        if ($request->boolean('distributed_only') && $hub->isControlPlane()) {
+            $distributedIds = \App\Models\ContentPush::query()
+                ->where('entity_type', 'post')
+                ->where('status', 'success')
+                ->whereNotNull('post_id')
+                ->distinct()
+                ->pluck('post_id');
+            $query->whereIn('id', $distributedIds);
+        }
+
+        $posts = $query->paginate($perPage);
+
+        $distributions = [];
+        if ($hub->isControlPlane()) {
+            $distributions = app(ContentPushService::class)
+                ->successfulDistributionsForPosts(
+                    $posts->getCollection()->pluck('id')->map(fn ($id) => (int) $id)->all()
+                );
+        }
+
+        $posts->getCollection()->transform(function (Post $post) use ($distributions, $hub) {
+            $post->setAttribute(
+                'distributed_hubs',
+                $hub->isControlPlane() ? ($distributions[(int) $post->id] ?? []) : []
+            );
+
+            return $post;
+        });
+
+        return response()->json($posts);
     }
 
     /**
@@ -290,9 +373,24 @@ class PostController extends Controller
 
         $model->save();
 
+        $sync = ['synced' => 0, 'failed' => 0, 'results' => []];
+        if (app(HubService::class)->current()->isControlPlane()) {
+            $sync = app(ContentPushService::class)->syncPostToDistributedHubs($model->fresh());
+        }
+
+        $message = 'Post updated successfully.';
+        if ($sync['synced'] > 0 || $sync['failed'] > 0) {
+            $message .= sprintf(
+                ' Synced to %d hub(s)%s.',
+                $sync['synced'],
+                $sync['failed'] > 0 ? ', '.$sync['failed'].' failed' : ''
+            );
+        }
+
         return response()->json([
-            'message' => 'Post updated successfully.',
+            'message' => $message,
             'post' => $model->fresh()->load('creator:id,name'),
+            'distribution_sync' => $sync,
         ]);
     }
 

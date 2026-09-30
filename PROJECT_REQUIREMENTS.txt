@@ -408,6 +408,11 @@ Notes:
     it retires a post from the distribute pool with required remarks but does
     not delete or hide it from the Central library list. Unarchive clears
     remarks and restores the post to the distribute pool.
+  - Central posts list lives on `/my-dashboard/posts` (ready + archived, with
+    search/filters and “published on” hubs). Editing a Central post also
+    updates the copies on hubs it was successfully distributed to.
+  - Central library page is create / AI / distribute only (no separate Library
+    tab).
   - Distribution checks: non-archived posts only; AI posts only to hubs with
     `ai_posts`; manual posts only to hubs with `manual_posts`.
   - Types / categories / tags with Central library:
