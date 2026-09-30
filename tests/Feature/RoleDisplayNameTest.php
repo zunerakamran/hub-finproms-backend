@@ -128,6 +128,38 @@ class RoleDisplayNameTest extends TestCase
             ->assertJsonFragment(['key' => 'approver', 'label' => 'Compliance Officer']);
     }
 
+    public function test_manage_roles_lists_user_counts_and_can_delete_empty_role(): void
+    {
+        $hub = $this->createSharedHub();
+        $admin = User::factory()->powerAdmin()->create();
+        User::factory()->create(['role' => User::ROLE_ADVISOR]);
+        Sanctum::actingAs($admin);
+
+        app(\App\Services\HubRolesService::class)->addRoleToHub($hub, User::ROLE_MANAGER);
+
+        $index = $this->getJson('/api/client-admin/role-display-names');
+        $index->assertOk();
+        $roles = collect($index->json('roles'));
+        $advisor = $roles->firstWhere('key', User::ROLE_ADVISOR);
+        $manager = $roles->firstWhere('key', User::ROLE_MANAGER);
+        $this->assertNotNull($advisor);
+        $this->assertSame(1, $advisor['user_count']);
+        $this->assertFalse($advisor['can_delete']);
+        $this->assertNotNull($manager);
+        $this->assertSame(0, $manager['user_count']);
+        $this->assertTrue($manager['can_delete']);
+
+        $this->deleteJson('/api/client-admin/role-display-names/roles/'.User::ROLE_ADVISOR)
+            ->assertStatus(422);
+
+        $this->deleteJson('/api/client-admin/role-display-names/roles/'.User::ROLE_MANAGER)
+            ->assertOk()
+            ->assertJsonPath('removed', User::ROLE_MANAGER);
+
+        $after = collect($this->getJson('/api/client-admin/role-display-names')->json('roles'));
+        $this->assertNull($after->firstWhere('key', User::ROLE_MANAGER));
+    }
+
     private function createSharedHub(array $extra = []): Hub
     {
         return Hub::query()->create(array_merge([

@@ -262,6 +262,12 @@ class ActingHubService
         $current = $this->hubs->current();
         $acting = $this->actingHub($user);
 
+        // Warm request caches once — userCan previously rebuilt the full matrix per flag.
+        $this->matrix->resolvedRoleCapabilities($acting);
+        if ((int) $current->id !== (int) $acting->id) {
+            $this->matrix->resolvedRoleCapabilities($current);
+        }
+
         $flags = array_keys($acting->resolvedChecklist());
         $effective = [];
 

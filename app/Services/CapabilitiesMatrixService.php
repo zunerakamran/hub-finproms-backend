@@ -27,6 +27,15 @@ class CapabilitiesMatrixService
         User::ROLE_USER,
     ];
 
+    /** @var list<string>|null */
+    private static ?array $allMatrixRolesCache = null;
+
+    /** @var array<string, array<string, array<string, bool>>> */
+    private static array $defaultRoleCapabilitiesCache = [];
+
+    /** @var array<string, array<string, array<string, bool>>> */
+    private static array $resolvedRoleCapabilitiesCache = [];
+
     public function __construct(
         private readonly PowerAdminCapabilitiesService $powerCapabilities
     ) {}
@@ -38,11 +47,17 @@ class CapabilitiesMatrixService
      */
     public function allMatrixRoles(): array
     {
-        try {
-            return app(HubRolesService::class)->allKnownRoles();
-        } catch (\Throwable) {
-            return self::MATRIX_ROLES;
+        if (self::$allMatrixRolesCache !== null) {
+            return self::$allMatrixRolesCache;
         }
+
+        try {
+            self::$allMatrixRolesCache = app(HubRolesService::class)->allKnownRoles();
+        } catch (\Throwable) {
+            self::$allMatrixRolesCache = self::MATRIX_ROLES;
+        }
+
+        return self::$allMatrixRolesCache;
     }
 
     /**
@@ -148,10 +163,15 @@ class CapabilitiesMatrixService
         $privateMode = $hub->isPrivateInviteOnly();
         $publicMode = $hub->isPublicSubscribe();
 
-        $visibleRoles = $this->visibleRoles($hub);
-        $hubRoles = app(HubRolesService::class);
-        $rolesMeta = $hubRoles->matrixRolesPayload($hub);
+        $rolesMeta = app(HubRolesService::class)->matrixRolesPayload($hub);
         $roles = $rolesMeta['roles'];
+        $visibleRoles = array_map(
+            static fn (array $role): string => (string) $role['key'],
+            $roles
+        );
+        if ($visibleRoles === []) {
+            $visibleRoles = $this->visibleRoles($hub);
+        }
 
         // Functionalities live on the Hub checklist screen — not repeated here.
         $behaviour = [];
@@ -601,6 +621,10 @@ class CapabilitiesMatrixService
      */
     public function defaultRoleCapabilities(string $hubType): array
     {
+        if (isset(self::$defaultRoleCapabilitiesCache[$hubType])) {
+            return self::$defaultRoleCapabilitiesCache[$hubType];
+        }
+
         $checklistDefaults = Hub::defaultChecklist($hubType);
         $matrix = [];
 
@@ -655,6 +679,7 @@ class CapabilitiesMatrixService
         // Content management tools enabled for Power Admin by default.
         foreach ([
             'dashboard_manage_posts',
+            'dashboard_central_content_library',
             'dashboard_manage_bundles',
             'dashboard_manage_types',
             'dashboard_manage_categories',
@@ -669,6 +694,25 @@ class CapabilitiesMatrixService
         ] as $key) {
             if (isset($matrix[User::ROLE_POWER_ADMIN])) {
                 $matrix[User::ROLE_POWER_ADMIN][$key] = true;
+            }
+        }
+
+        // Central content library is Central-only; keep off on Shared / WL matrices.
+        if ($hubType !== Hub::TYPE_CENTRAL) {
+            foreach ($this->allMatrixRoles() as $role) {
+                if (isset($matrix[$role])) {
+                    $matrix[$role]['dashboard_central_content_library'] = false;
+                }
+            }
+        } else {
+            // On Central, classic “manage posts” stays off — library capability owns create/distribute.
+            foreach ($this->allMatrixRoles() as $role) {
+                if (isset($matrix[$role])) {
+                    $matrix[$role]['dashboard_manage_posts'] = false;
+                    if ($role === User::ROLE_POWER_ADMIN || $role === User::ROLE_FINPROMS_ADMIN) {
+                        $matrix[$role]['dashboard_central_content_library'] = true;
+                    }
+                }
             }
         }
 
@@ -732,7 +776,7 @@ class CapabilitiesMatrixService
             }
         }
 
-        return $matrix;
+        return self::$defaultRoleCapabilitiesCache[$hubType] = $matrix;
     }
 
     /**
@@ -773,13 +817,22 @@ class CapabilitiesMatrixService
      */
     public function resolvedRoleCapabilities(Hub $hub): array
     {
-        $defaults = $this->defaultRoleCapabilities($hub->type);
+        $cacheKey = $this->resolvedRoleCapabilitiesCacheKey($hub);
+        if (isset(self::$resolvedRoleCapabilitiesCache[$cacheKey])) {
+            return self::$resolvedRoleCapabilitiesCache[$cacheKey];
+        }
+
+        // Copy before mutating so cached defaults stay pristine.
+        $defaults = [];
+        foreach ($this->defaultRoleCapabilities($hub->type) as $role => $caps) {
+            $defaults[$role] = array_merge($caps);
+        }
         $stored = is_array($hub->role_capabilities) ? $hub->role_capabilities : [];
 
         // Empty role_capabilities: use typed defaults (do NOT overwrite from the
         // hub checklist OR-flags — that wiped Power Admin defaults on Central).
         if ($stored === []) {
-            return $defaults;
+            return self::$resolvedRoleCapabilitiesCache[$cacheKey] = $defaults;
         }
 
         foreach ($defaults as $role => $caps) {
@@ -808,7 +861,15 @@ class CapabilitiesMatrixService
             }
         }
 
-        return $defaults;
+        return self::$resolvedRoleCapabilitiesCache[$cacheKey] = $defaults;
+    }
+
+    private function resolvedRoleCapabilitiesCacheKey(Hub $hub): string
+    {
+        $stored = $hub->role_capabilities;
+        $sig = is_array($stored) ? md5((string) json_encode($stored)) : 'empty';
+
+        return (string) $hub->id.'|'.(string) $hub->type.'|'.$sig;
     }
 
     /**

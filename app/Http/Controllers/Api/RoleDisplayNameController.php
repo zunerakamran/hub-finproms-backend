@@ -31,7 +31,7 @@ class RoleDisplayNameController extends Controller
                 'slug' => $hub->slug,
                 'type' => $hub->type,
             ],
-            'roles' => $this->roleDisplayNames->editableRoles($hub),
+            'roles' => $this->editableRolesFromMeta($rolesMeta['roles']),
             'role_labels' => $this->roleDisplayNames->labels($hub),
             'available_to_add' => $rolesMeta['available_to_add'],
             'custom_roles' => $rolesMeta['custom_roles'],
@@ -105,7 +105,9 @@ class RoleDisplayNameController extends Controller
                 'type' => $hub->type,
             ],
             'role' => $added['role'],
-            'roles' => $this->roleDisplayNames->editableRoles($hub),
+            'roles' => $this->editableRolesFromMeta(
+                $this->hubRoles->matrixRolesPayload($hub)['roles']
+            ),
             'role_labels' => $this->roleDisplayNames->labels($hub),
             'available_to_add' => $added['available_to_add'],
             'custom_roles' => $added['custom_roles'],
@@ -113,8 +115,66 @@ class RoleDisplayNameController extends Controller
         ]);
     }
 
+    /**
+     * Remove a role from the acting hub’s Capabilities matrix (Manage roles).
+     */
+    public function removeRole(Request $request, string $role): JsonResponse
+    {
+        $hub = $this->targetHub($request);
+
+        try {
+            $removed = $this->hubRoles->removeRoleFromHub($hub, $role);
+        } catch (InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $hub = $hub->fresh() ?? $hub;
+
+        return response()->json([
+            'message' => 'Role removed from '.$hub->name.'.',
+            'hub' => [
+                'id' => $hub->id,
+                'name' => $hub->name,
+                'slug' => $hub->slug,
+                'type' => $hub->type,
+            ],
+            'removed' => $removed['removed'],
+            'roles' => $this->editableRolesFromMeta(
+                $this->hubRoles->matrixRolesPayload($hub)['roles']
+            ),
+            'role_labels' => $this->roleDisplayNames->labels($hub),
+            'available_to_add' => $removed['available_to_add'],
+            'custom_roles' => $removed['custom_roles'],
+            'added_to_hub' => $removed['added_to_hub'],
+        ]);
+    }
+
     private function targetHub(Request $request): Hub
     {
         return $this->actingHubs->targetHub($request->user());
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $roles
+     * @return list<array{key: string, label: string, default_label: string, user_count: int, can_delete: bool, is_custom: bool}>
+     */
+    private function editableRolesFromMeta(array $roles): array
+    {
+        $out = [];
+        foreach ($roles as $role) {
+            if (! is_array($role) || ! isset($role['key'])) {
+                continue;
+            }
+            $out[] = [
+                'key' => (string) $role['key'],
+                'label' => (string) ($role['label'] ?? $role['default_label'] ?? $role['key']),
+                'default_label' => (string) ($role['default_label'] ?? $role['key']),
+                'user_count' => (int) ($role['user_count'] ?? 0),
+                'can_delete' => (bool) ($role['can_delete'] ?? false),
+                'is_custom' => (bool) ($role['is_custom'] ?? false),
+            ];
+        }
+
+        return $out;
     }
 }

@@ -109,21 +109,27 @@ class ContentPushService
     public function eligibleTargetHubs(): array
     {
         return Hub::query()
-            ->where('type', Hub::TYPE_WHITE_LABEL)
+            ->whereIn('type', [Hub::TYPE_SHARED, Hub::TYPE_WHITE_LABEL])
             ->where('is_active', true)
+            ->orderByRaw('CASE WHEN type = ? THEN 0 ELSE 1 END', [Hub::TYPE_SHARED])
             ->orderBy('name')
             ->get()
             ->map(function (Hub $hub) {
                 $canReceive = $hub->can('receive_content_from_shared');
                 $dbReady = $hub->hasRemoteDatabaseConfigured();
+                $manual = $hub->can('manual_posts');
+                $ai = $hub->can('ai_posts');
 
                 return [
                     'id' => $hub->id,
                     'name' => $hub->name,
                     'slug' => $hub->slug,
+                    'type' => $hub->type,
                     'can_receive' => $canReceive,
                     'db_ready' => $dbReady,
-                    'eligible' => $canReceive && $dbReady,
+                    'manual_posts' => $manual,
+                    'ai_posts' => $ai,
+                    'eligible' => $canReceive && $dbReady && ($manual || $ai),
                     'frontend_url' => $hub->frontend_url,
                 ];
             })
@@ -199,11 +205,55 @@ class ContentPushService
         ];
 
         if (! $targetHub->can('receive_content_from_shared')) {
-            return $this->recordResult($sourceHub, $targetHub, $entityType, $model, $actor, $base, false, null, 'Hub does not allow receiving content from the shared hub.');
+            return $this->recordResult($sourceHub, $targetHub, $entityType, $model, $actor, $base, false, null, 'Hub does not allow receiving content from Central.');
         }
 
         if (! $targetHub->hasRemoteDatabaseConfigured()) {
             return $this->recordResult($sourceHub, $targetHub, $entityType, $model, $actor, $base, false, null, 'Remote database credentials are not configured.');
+        }
+
+        if ($entityType === 'post' && $model instanceof Post) {
+            if ($model->archived_at === null) {
+                return $this->recordResult(
+                    $sourceHub,
+                    $targetHub,
+                    $entityType,
+                    $model,
+                    $actor,
+                    $base,
+                    false,
+                    null,
+                    'Archive the post with remarks before distributing it.'
+                );
+            }
+
+            if ($model->isAiSource()) {
+                if (! $targetHub->can('ai_posts')) {
+                    return $this->recordResult(
+                        $sourceHub,
+                        $targetHub,
+                        $entityType,
+                        $model,
+                        $actor,
+                        $base,
+                        false,
+                        null,
+                        'Target hub only accepts manual posts (AI posts functionality is off).'
+                    );
+                }
+            } elseif (! $targetHub->can('manual_posts')) {
+                return $this->recordResult(
+                    $sourceHub,
+                    $targetHub,
+                    $entityType,
+                    $model,
+                    $actor,
+                    $base,
+                    false,
+                    null,
+                    'Target hub only accepts AI posts (Manual posts functionality is off).'
+                );
+            }
         }
 
         try {
@@ -311,13 +361,27 @@ class ContentPushService
             'attachment_path' => $attachmentPath,
             'attachment_name' => $post->attachment_name,
             'attachment_mime' => $post->attachment_mime,
-            'is_active' => (bool) $post->is_active,
+            'is_active' => true,
             'views_count' => 0,
             'reach_count' => 0,
             'buy_count' => 0,
             'created_at' => $now,
             'updated_at' => $now,
         ];
+
+        if (Schema::connection($connection)->hasColumn('posts', 'creation_source')) {
+            $insert['creation_source'] = $post->creation_source ?: Post::SOURCE_MANUAL;
+        }
+        // Distributed copies are live on the target hub (not archived).
+        if (Schema::connection($connection)->hasColumn('posts', 'archived_at')) {
+            $insert['archived_at'] = null;
+            if (Schema::connection($connection)->hasColumn('posts', 'archive_remarks')) {
+                $insert['archive_remarks'] = null;
+            }
+            if (Schema::connection($connection)->hasColumn('posts', 'archived_by')) {
+                $insert['archived_by'] = null;
+            }
+        }
 
         if (Schema::connection($connection)->hasColumn('posts', 'canva_link')) {
             $insert['canva_link'] = $post->canva_link;

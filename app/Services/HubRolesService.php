@@ -38,6 +38,12 @@ class HubRolesService
      */
     public const CATALOG_ROLES = CapabilitiesMatrixService::MATRIX_ROLES;
 
+    /** @var array<int, array<string, int>> */
+    private static array $userCountsCache = [];
+
+    /** @var array<int, list<string>> */
+    private static array $visibleMatrixRolesCache = [];
+
     public function __construct(
         private readonly HubService $hubs,
         private readonly WhiteLabelDatabaseService $remoteDb
@@ -215,46 +221,65 @@ class HubRolesService
      */
     public function rolesPresentOnHub(Hub $hub): array
     {
+        return array_keys(array_filter(
+            $this->userCountsByRole($hub),
+            fn (int $count) => $count > 0
+        ));
+    }
+
+    /**
+     * How many users currently hold each known role on this hub.
+     *
+     * @return array<string, int>
+     */
+    public function userCountsByRole(Hub $hub): array
+    {
+        $hubId = (int) $hub->id;
+        if (isset(self::$userCountsCache[$hubId])) {
+            return self::$userCountsCache[$hubId];
+        }
+
         $known = $this->allKnownRoles();
-        $found = [];
+        $counts = array_fill_keys($known, 0);
 
         try {
+            $rows = collect();
             $current = $this->hubs->current();
             if ((int) $hub->id === (int) $current->id || $hub->isControlPlane()) {
-                $found = User::query()
+                $rows = User::query()
                     ->whereNotNull('role')
                     ->where('role', '!=', '')
-                    ->distinct()
-                    ->pluck('role')
-                    ->all();
+                    ->select('role', DB::raw('COUNT(*) as user_count'))
+                    ->groupBy('role')
+                    ->get();
             } elseif ($hub->isContentHub() && $hub->hasRemoteDatabaseConfigured()) {
                 $connection = $this->remoteDb->connect($hub);
                 if (Schema::connection($connection)->hasTable('users')) {
-                    $found = DB::connection($connection)
+                    $rows = DB::connection($connection)
                         ->table('users')
                         ->whereNotNull('role')
                         ->where('role', '!=', '')
-                        ->distinct()
-                        ->pluck('role')
-                        ->all();
+                        ->select('role', DB::raw('COUNT(*) as user_count'))
+                        ->groupBy('role')
+                        ->get();
                 }
             }
+
+            foreach ($rows as $row) {
+                $role = $this->normalizeRoleKey((string) ($row->role ?? ''));
+                if ($role === 'admin') {
+                    $role = User::ROLE_CLIENT_ADMIN;
+                }
+                if ($role === '' || ! in_array($role, $known, true)) {
+                    continue;
+                }
+                $counts[$role] = ($counts[$role] ?? 0) + (int) ($row->user_count ?? 0);
+            }
         } catch (Throwable) {
-            $found = [];
+            // Leave zeros on failure so Manage roles still loads.
         }
 
-        $out = [];
-        foreach ($found as $role) {
-            $role = $this->normalizeRoleKey((string) $role);
-            if ($role === 'admin') {
-                $role = User::ROLE_CLIENT_ADMIN;
-            }
-            if ($role !== '' && in_array($role, $known, true) && ! in_array($role, $out, true)) {
-                $out[] = $role;
-            }
-        }
-
-        return $out;
+        return self::$userCountsCache[$hubId] = $counts;
     }
 
     /**
@@ -264,6 +289,11 @@ class HubRolesService
      */
     public function visibleMatrixRoles(Hub $hub): array
     {
+        $hubId = (int) $hub->id;
+        if (isset(self::$visibleMatrixRolesCache[$hubId])) {
+            return self::$visibleMatrixRolesCache[$hubId];
+        }
+
         $visible = array_values(array_unique(array_merge(
             $this->rolesPresentOnHub($hub),
             $this->rolesAddedForHub($hub)
@@ -282,7 +312,7 @@ class HubRolesService
             ));
         }
 
-        return $this->orderRoles($visible);
+        return self::$visibleMatrixRolesCache[$hubId] = $this->orderRoles($visible);
     }
 
     /**
@@ -335,20 +365,25 @@ class HubRolesService
     public function matrixRolesPayload(Hub $hub): array
     {
         $visible = $this->visibleMatrixRoles($hub);
-        $present = $this->rolesPresentOnHub($hub);
+        $counts = $this->userCountsByRole($hub);
         $added = $this->rolesAddedForHub($hub);
 
         $roles = [];
         foreach ($visible as $role) {
+            $userCount = (int) ($counts[$role] ?? 0);
             $roles[] = [
                 'key' => $role,
                 'label' => $hub->roleLabel($role),
                 'default_label' => $this->defaultLabel($role),
                 'is_custom' => ! in_array($role, self::CATALOG_ROLES, true),
-                'present_on_hub' => in_array($role, $present, true),
+                'present_on_hub' => $userCount > 0,
                 'added_to_hub' => in_array($role, $added, true),
                 // Legacy alias for older frontends.
                 'added_to_all_hubs' => in_array($role, $added, true),
+                'user_count' => $userCount,
+                // Role is already visible here — only block when users remain or Central PA.
+                'can_delete' => $userCount === 0
+                    && ! ($hub->isControlPlane() && $role === User::ROLE_POWER_ADMIN),
             ];
         }
 
@@ -437,6 +472,8 @@ class HubRolesService
 
         $this->seedRoleCapabilitiesOnHub($hub, $key);
 
+        unset(self::$visibleMatrixRolesCache[(int) $hub->id]);
+
         $hub = $hub->fresh() ?? $hub;
 
         return [
@@ -463,6 +500,145 @@ class HubRolesService
         $hub = $this->hubs->current();
 
         return $this->addRoleToHub($hub, $key, $label);
+    }
+
+    /**
+     * Whether a role may be removed from this hub’s matrix (Manage roles).
+     */
+    public function canRemoveRoleFromHub(Hub $hub, string $role, ?int $userCount = null): bool
+    {
+        $role = $this->normalizeRoleKey($role);
+        if ($role === '') {
+            return false;
+        }
+
+        if ($hub->isControlPlane() && $role === User::ROLE_POWER_ADMIN) {
+            return false;
+        }
+
+        if ($userCount === null) {
+            $userCount = (int) ($this->userCountsByRole($hub)[$role] ?? 0);
+        }
+
+        if ($userCount > 0) {
+            return false;
+        }
+
+        $visible = $this->visibleMatrixRoles($hub);
+
+        return in_array($role, $visible, true);
+    }
+
+    /**
+     * Remove a role column from this hub’s Capabilities matrix (Manage roles).
+     * Refuses when users still hold the role, or when the role is required on Central.
+     *
+     * @return array<string, mixed>
+     */
+    public function removeRoleFromHub(Hub $hub, string $key): array
+    {
+        $key = $this->normalizeRoleKey($key);
+        if ($key === '') {
+            throw new InvalidArgumentException('Role key is required.');
+        }
+
+        $visible = $this->visibleMatrixRoles($hub);
+        if (! in_array($key, $visible, true)) {
+            throw new InvalidArgumentException("Role \"{$key}\" is not on this hub.");
+        }
+
+        if ($hub->isControlPlane() && $key === User::ROLE_POWER_ADMIN) {
+            throw new InvalidArgumentException('Power Admin cannot be removed from the Central hub.');
+        }
+
+        $userCount = (int) ($this->userCountsByRole($hub)[$key] ?? 0);
+        if ($userCount > 0) {
+            $label = $hub->roleLabel($key);
+            throw new InvalidArgumentException(
+                "Cannot delete \"{$label}\" while {$userCount} user".($userCount === 1 ? '' : 's').' still have that role. Reassign them first.'
+            );
+        }
+
+        // Drop from this hub’s explicit add-list.
+        $storedForHub = $this->addedRolesByHubMap()[(string) $hub->id] ?? [];
+        if (! is_array($storedForHub)) {
+            $storedForHub = [];
+        }
+        $storedForHub = array_values(array_filter(
+            array_map(fn ($role) => $this->normalizeRoleKey((string) $role), $storedForHub),
+            fn (string $role) => $role !== '' && $role !== $key
+        ));
+        $this->saveAddedRolesForHub($hub, $storedForHub);
+
+        // Legacy “added to all hubs” — migrate other hubs to per-hub lists, then drop this role globally.
+        $legacy = $this->legacyRolesAddedToAllHubs();
+        if (in_array($key, $legacy, true)) {
+            $this->migrateLegacyAddedRoleOffHub($hub, $key, $legacy);
+        }
+
+        $caps = is_array($hub->role_capabilities) ? $hub->role_capabilities : [];
+        unset($caps[$key]);
+        $hub->role_capabilities = $caps === [] ? null : $caps;
+
+        $names = is_array($hub->role_display_names) ? $hub->role_display_names : [];
+        unset($names[$key]);
+        $hub->role_display_names = $names === [] ? null : $names;
+
+        $hub->save();
+        $this->hubs->forgetCurrentCache();
+        unset(
+            self::$visibleMatrixRolesCache[(int) $hub->id],
+            self::$userCountsCache[(int) $hub->id]
+        );
+
+        if ($hub->isContentHub() && $hub->hasRemoteDatabaseConfigured()) {
+            app(WhiteLabelHubSyncService::class)->pushSettings($hub->fresh() ?? $hub);
+        }
+
+        $hub = $hub->fresh() ?? $hub;
+
+        return [
+            'removed' => $key,
+            'available_to_add' => $this->rolesAvailableToAdd($hub),
+            'custom_roles' => $this->customRoles(),
+            'added_to_hub' => $this->rolesAddedForHub($hub),
+        ];
+    }
+
+    /**
+     * When a role was enabled via the legacy global list, keep it on every other hub
+     * via the per-hub map, then remove it from the legacy list.
+     *
+     * @param  list<string>  $legacy
+     */
+    private function migrateLegacyAddedRoleOffHub(Hub $hub, string $key, array $legacy): void
+    {
+        $map = $this->addedRolesByHubMap();
+        foreach (Hub::query()->orderBy('id')->get(['id']) as $other) {
+            if ((int) $other->id === (int) $hub->id) {
+                continue;
+            }
+            $hubKey = (string) $other->id;
+            $list = $map[$hubKey] ?? [];
+            if (! is_array($list)) {
+                $list = [];
+            }
+            $normalized = array_values(array_unique(array_filter(array_map(
+                fn ($role) => $this->normalizeRoleKey((string) $role),
+                $list
+            ))));
+            if (! in_array($key, $normalized, true)) {
+                $normalized[] = $key;
+            }
+            $map[$hubKey] = $normalized;
+        }
+        Setting::setValue(self::SETTING_ADDED_BY_HUB, json_encode($map));
+
+        $remaining = array_values(array_filter(
+            $legacy,
+            fn (string $role) => $role !== $key
+        ));
+        Setting::setValue(self::SETTING_ADDED_ROLES, json_encode($remaining));
     }
 
     /**

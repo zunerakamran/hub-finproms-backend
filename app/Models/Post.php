@@ -13,6 +13,12 @@ class Post extends Model
 {
     use UsesWcDatabaseContext;
 
+    public const SOURCE_MANUAL = 'manual';
+
+    public const SOURCE_AI = 'ai';
+
+    public const SOURCE_IMPORT = 'import';
+
     /** @var array<string, string>|null */
     protected static ?array $typeSlugMap = null;
 
@@ -29,6 +35,10 @@ class Post extends Model
         'attachment_mime',
         'canva_link',
         'is_active',
+        'creation_source',
+        'archived_at',
+        'archive_remarks',
+        'archived_by',
         'views_count',
         'reach_count',
         'buy_count',
@@ -44,6 +54,7 @@ class Post extends Model
         'is_reel',
         'is_new',
         'category',
+        'is_archived',
     ];
 
     protected function casts(): array
@@ -56,7 +67,43 @@ class Post extends Model
             'views_count' => 'integer',
             'reach_count' => 'integer',
             'buy_count' => 'integer',
+            'archived_at' => 'datetime',
         ];
+    }
+
+    public function getIsArchivedAttribute(): bool
+    {
+        return $this->archived_at !== null;
+    }
+
+    public function isAiSource(): bool
+    {
+        return ($this->creation_source ?? self::SOURCE_MANUAL) === self::SOURCE_AI;
+    }
+
+    public function isManualSource(): bool
+    {
+        return ! $this->isAiSource();
+    }
+
+    public function archive(string $remarks, ?User $actor = null): void
+    {
+        $remarks = trim($remarks);
+        if ($remarks === '') {
+            throw new \InvalidArgumentException('Archive remarks are required.');
+        }
+
+        $this->forceFill([
+            'archived_at' => now(),
+            'archive_remarks' => $remarks,
+            'archived_by' => $actor?->id,
+            'is_active' => false,
+        ])->save();
+    }
+
+    public function archiver(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'archived_by');
     }
 
     /**

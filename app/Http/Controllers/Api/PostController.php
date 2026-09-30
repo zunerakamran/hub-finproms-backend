@@ -44,6 +44,7 @@ class PostController extends Controller
         $query = Post::query()
             ->with('creator:id,name')
             ->where('is_active', true)
+            ->whereNull('archived_at')
             ->latest('updated_at');
 
         if ($request->filled('category')) {
@@ -238,6 +239,7 @@ class PostController extends Controller
             'attachment_mime' => $attachment['mime'] ?? null,
             'canva_link' => $this->normalizeCanvaLink($validated['canva_link'] ?? null),
             'is_active' => $validated['is_active'] ?? true,
+            'creation_source' => Post::SOURCE_MANUAL,
         ]);
 
         return response()->json([

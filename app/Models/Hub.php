@@ -545,6 +545,8 @@ class Hub extends Model
     public const SOCIAL_MEDIA_TEMPLATE_LIBRARY_FUNCTIONALITY_KEYS = [
         'one_off_purchase',
         'receive_content_from_shared',
+        'manual_posts',
+        'ai_posts',
     ];
 
     /**
@@ -662,6 +664,8 @@ class Hub extends Model
         'private_invite_only' => 'public_subscribe',
         'paid_credits' => 'unlimited_credits',
         'unlimited_credits' => 'paid_credits',
+        'manual_posts' => 'ai_posts',
+        'ai_posts' => 'manual_posts',
     ];
 
     /**
@@ -739,6 +743,20 @@ class Hub extends Model
             'group' => self::GROUP_BEHAVIOUR,
             'default_shared' => true,
             'default_white_label' => true,
+        ],
+        'manual_posts' => [
+            'label' => 'Manual posts',
+            'description' => 'This hub accepts manually created posts from Central (and local manual catalog management). Mutually exclusive with AI posts — checking one unchecks the other.',
+            'group' => self::GROUP_BEHAVIOUR,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'ai_posts' => [
+            'label' => 'AI posts',
+            'description' => 'This hub accepts AI-generated posts from Central (AI generation itself is under development). Mutually exclusive with Manual posts — checking one unchecks the other.',
+            'group' => self::GROUP_BEHAVIOUR,
+            'default_shared' => false,
+            'default_white_label' => false,
         ],
         'advisor_subscriber_billing' => [
             'label' => 'Advisor subscriber billing (rate × advisors)',
@@ -890,10 +908,17 @@ class Hub extends Model
         // --- 3. Content catalog ---
         'dashboard_manage_posts' => [
             'label' => 'Manage posts / reels',
-            'description' => 'Hub admin can create and edit posts/reels.',
+            'description' => 'Hub admin can create and edit posts/reels on this Shared or White-labelled hub.',
             'group' => self::GROUP_DASHBOARD_CONTENT,
             'default_shared' => true,
             'default_white_label' => true,
+        ],
+        'dashboard_central_content_library' => [
+            'label' => 'Central content library',
+            'description' => 'Central Hub only: create posts in the Central library (one-by-one or Excel bulk), archive with remarks, and distribute archived posts to Shared / White-labelled hubs. AI generation tab is under development. Posts stay in the Central database until pushed.',
+            'group' => self::GROUP_DASHBOARD_CONTENT,
+            'default_shared' => false,
+            'default_white_label' => false,
         ],
         'dashboard_manage_bundles' => [
             'label' => 'Manage post bundles',
@@ -994,7 +1019,7 @@ class Hub extends Model
         ],
         'dashboard_manage_role_display_names' => [
             'label' => 'Manage roles',
-            'description' => 'Add roles to this hub’s Capabilities matrix and customize how role names appear in the UI. Who may manage roles is controlled by this capability.',
+            'description' => 'List roles (with user counts), add or remove roles on this hub’s Capabilities matrix, and customize how role names appear in the UI. Who may manage roles is controlled by this capability.',
             'group' => self::GROUP_DASHBOARD_HUB,
             'default_shared' => true,
             'default_white_label' => true,
@@ -1321,6 +1346,9 @@ class Hub extends Model
         'dashboard_manage_tags',
     ];
 
+    /** @var array<string, bool>|null */
+    private ?array $resolvedChecklistCache = null;
+
     protected $fillable = [
         'name',
         'slug',
@@ -1602,6 +1630,11 @@ class Hub extends Model
      */
     public static function defaultChecklist(string $type = self::TYPE_WHITE_LABEL): array
     {
+        static $cache = [];
+        if (isset($cache[$type])) {
+            return $cache[$type];
+        }
+
         // Central and Shared use the "default_shared" product defaults as a base;
         // Central then strips content packaging and turns remote-control ON.
         $key = in_array($type, [self::TYPE_SHARED, self::TYPE_CENTRAL], true)
@@ -1623,6 +1656,9 @@ class Hub extends Model
             $defaults['receive_content_from_shared'] = true;
             $defaults['charge_amount_per_module'] = false;
             $defaults['module_central_hub'] = false;
+            $defaults['manual_posts'] = true;
+            $defaults['ai_posts'] = false;
+            $defaults['dashboard_central_content_library'] = false;
         }
 
         if ($type === self::TYPE_CENTRAL) {
@@ -1641,6 +1677,10 @@ class Hub extends Model
             $defaults['receive_content_from_shared'] = false;
             $defaults['advisor_subscriber_billing'] = false;
             $defaults['dashboard_control_white_label_hubs'] = true;
+            $defaults['manual_posts'] = false;
+            $defaults['ai_posts'] = false;
+            $defaults['dashboard_manage_posts'] = false;
+            $defaults['dashboard_central_content_library'] = true;
             // Central is not a member catalog — keep member website / purchase flags off.
             $defaults['member_view_site_pages'] = false;
             $defaults['member_browse_catalog'] = false;
@@ -1649,7 +1689,16 @@ class Hub extends Model
             $defaults['member_download_content'] = false;
         }
 
-        return $defaults;
+        return $cache[$type] = $defaults;
+    }
+
+    public function setAttribute($key, $value)
+    {
+        if (in_array($key, ['checklist', 'type'], true)) {
+            $this->resolvedChecklistCache = null;
+        }
+
+        return parent::setAttribute($key, $value);
     }
 
     /**
@@ -1657,6 +1706,10 @@ class Hub extends Model
      */
     public function resolvedChecklist(): array
     {
+        if ($this->resolvedChecklistCache !== null) {
+            return $this->resolvedChecklistCache;
+        }
+
         $defaults = self::defaultChecklist($this->type);
         $stored = is_array($this->checklist) ? $this->checklist : [];
 
@@ -1667,7 +1720,7 @@ class Hub extends Model
             }
         }
 
-        return $this->applyModuleDependencies($resolved);
+        return $this->resolvedChecklistCache = $this->applyModuleDependencies($resolved);
     }
 
     public function can(string $flag): bool

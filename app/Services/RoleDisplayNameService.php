@@ -26,21 +26,26 @@ class RoleDisplayNameService
     }
 
     /**
-     * @return list<array{key: string, label: string, default_label: string}>
+     * @return list<array{key: string, label: string, default_label: string, user_count: int, can_delete: bool, is_custom: bool}>
      */
     public function editableRoles(Hub $hub): array
     {
         $labels = $this->labels($hub);
         $hubRoles = app(HubRolesService::class);
+        $counts = $hubRoles->userCountsByRole($hub);
         $roles = [];
         foreach ($hubRoles->visibleMatrixRoles($hub) as $role) {
             if ($hub->isWhiteLabel() && ActingHubService::isControlPlaneRole($role)) {
                 continue;
             }
+            $userCount = (int) ($counts[$role] ?? 0);
             $roles[] = [
                 'key' => $role,
                 'label' => $labels[$role] ?? $hubRoles->defaultLabel($role),
                 'default_label' => $hubRoles->defaultLabel($role),
+                'user_count' => $userCount,
+                'can_delete' => $hubRoles->canRemoveRoleFromHub($hub, $role, $userCount),
+                'is_custom' => ! in_array($role, HubRolesService::CATALOG_ROLES, true),
             ];
         }
 

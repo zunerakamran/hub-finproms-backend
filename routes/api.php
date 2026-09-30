@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\AdvisorPaymentCardController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BundleController;
 use App\Http\Controllers\Api\CategoryController;
+use App\Http\Controllers\Api\CentralContentLibraryController;
 use App\Http\Controllers\Api\FirmController;
 use App\Http\Controllers\Api\SocialMediaComplianceController;
 use App\Http\Controllers\Api\GeneralComplianceController;
@@ -294,6 +295,17 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/content-push/hubs/{hub}/test-connection', [ContentPushController::class, 'testConnection']);
         });
 
+        Route::middleware('hub_can:dashboard_central_content_library')->group(function () {
+            Route::get('/central-library/posts/template', [CentralContentLibraryController::class, 'template']);
+            Route::post('/central-library/posts/import', [CentralContentLibraryController::class, 'import']);
+            Route::get('/central-library/posts', [CentralContentLibraryController::class, 'index']);
+            Route::post('/central-library/posts', [CentralContentLibraryController::class, 'store']);
+            Route::post('/central-library/posts/{post}/archive', [CentralContentLibraryController::class, 'archive']);
+            Route::get('/central-library/ai', [CentralContentLibraryController::class, 'aiStub']);
+            Route::get('/central-library/targets', [CentralContentLibraryController::class, 'targets']);
+            Route::post('/central-library/distribute', [CentralContentLibraryController::class, 'push']);
+        });
+
         Route::middleware('hub_can:dashboard_manage_bundles')->group(function () {
             Route::get('/bundles', [BundleController::class, 'index']);
             Route::get('/bundles/{bundle}', [BundleController::class, 'show']);
@@ -346,6 +358,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/role-display-names', [RoleDisplayNameController::class, 'index']);
             Route::put('/role-display-names', [RoleDisplayNameController::class, 'update']);
             Route::post('/role-display-names/roles', [RoleDisplayNameController::class, 'addRole']);
+            Route::delete('/role-display-names/roles/{role}', [RoleDisplayNameController::class, 'removeRole']);
         });
 
         Route::middleware('hub_can:dashboard_manage_email_templates')->group(function () {
@@ -695,6 +708,17 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/content-push/recent', [ContentPushController::class, 'recent']);
             Route::post('/content-push', [ContentPushController::class, 'push']);
             Route::post('/content-push/hubs/{hub}/test-connection', [ContentPushController::class, 'testConnection']);
+        });
+
+        Route::middleware('hub_can:dashboard_central_content_library')->group(function () {
+            Route::get('/central-library/posts/template', [CentralContentLibraryController::class, 'template']);
+            Route::post('/central-library/posts/import', [CentralContentLibraryController::class, 'import']);
+            Route::get('/central-library/posts', [CentralContentLibraryController::class, 'index']);
+            Route::post('/central-library/posts', [CentralContentLibraryController::class, 'store']);
+            Route::post('/central-library/posts/{post}/archive', [CentralContentLibraryController::class, 'archive']);
+            Route::get('/central-library/ai', [CentralContentLibraryController::class, 'aiStub']);
+            Route::get('/central-library/targets', [CentralContentLibraryController::class, 'targets']);
+            Route::post('/central-library/distribute', [CentralContentLibraryController::class, 'push']);
         });
 
         Route::middleware('hub_can:dashboard_manage_bundles')->group(function () {
