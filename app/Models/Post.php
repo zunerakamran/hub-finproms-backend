@@ -90,17 +90,24 @@ class Post extends Model
      * Retire a Central-library post from distribution. Does not delete the row
      * and does not hide it from the library list — only blocks distribute.
      */
-    public function archive(string $remarks, ?User $actor = null): void
+    public function archive(?User $actor = null): void
     {
-        $remarks = trim($remarks);
-        if ($remarks === '') {
-            throw new \InvalidArgumentException('Archive remarks are required.');
-        }
-
         $this->forceFill([
             'archived_at' => now(),
-            'archive_remarks' => $remarks,
+            'archive_remarks' => null,
             'archived_by' => $actor?->id,
+        ])->save();
+    }
+
+    /**
+     * Restore a Central-library post so it can be distributed again.
+     */
+    public function unarchive(): void
+    {
+        $this->forceFill([
+            'archived_at' => null,
+            'archive_remarks' => null,
+            'archived_by' => null,
         ])->save();
     }
 

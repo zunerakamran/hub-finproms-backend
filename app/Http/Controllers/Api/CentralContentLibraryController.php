@@ -15,7 +15,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Central Hub content library: create (manual / Excel), distribute live posts,
- * optionally archive (retire from distribute; keeps the library row).
+ * archive / unarchive (retire or restore from distribute; keeps the library row).
  * AI generation is intentionally a stub (“under development”).
  */
 class CentralContentLibraryController extends Controller
@@ -131,24 +131,33 @@ class CentralContentLibraryController extends Controller
     {
         $this->assertCentralLibrary();
 
-        $validated = $request->validate([
-            'remarks' => ['required', 'string', 'max:2000'],
-        ]);
-
         $model = Post::query()->findOrFail($post);
         if ($model->archived_at !== null) {
             return response()->json(['message' => 'Post is already archived.'], 422);
         }
 
-        try {
-            $model->archive($validated['remarks'], $request->user());
-        } catch (InvalidArgumentException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
-        }
+        $model->archive($request->user());
 
         return response()->json([
             'message' => 'Post archived. It stays in the Central library but can no longer be distributed.',
             'post' => $model->fresh()->load(['creator:id,name', 'archiver:id,name']),
+        ]);
+    }
+
+    public function unarchive(Request $request, int $post): JsonResponse
+    {
+        $this->assertCentralLibrary();
+
+        $model = Post::query()->findOrFail($post);
+        if ($model->archived_at === null) {
+            return response()->json(['message' => 'Post is not archived.'], 422);
+        }
+
+        $model->unarchive();
+
+        return response()->json([
+            'message' => 'Post unarchived. It can be distributed again.',
+            'post' => $model->fresh()->load(['creator:id,name']),
         ]);
     }
 

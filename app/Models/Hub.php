@@ -924,7 +924,7 @@ class Hub extends Model
         ],
         'dashboard_central_content_library' => [
             'label' => 'Central content library',
-            'description' => 'Central Hub only: create posts in the Central library (one-by-one or Excel bulk) and distribute non-archived posts to Shared / White-labelled hubs. Archive retires a post from distribution (keeps it listed). AI generation tab is under development.',
+            'description' => 'Central Hub only: create posts in the Central library (one-by-one or Excel bulk) and distribute non-archived posts to Shared / White-labelled hubs. Archive / unarchive retires or restores a post from distribution (keeps it listed). AI generation tab is under development.',
             'group' => self::GROUP_DASHBOARD_CONTENT,
             'default_shared' => false,
             'default_white_label' => false,

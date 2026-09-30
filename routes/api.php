@@ -311,6 +311,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/central-library/posts', [CentralContentLibraryController::class, 'index']);
             Route::post('/central-library/posts', [CentralContentLibraryController::class, 'store']);
             Route::post('/central-library/posts/{post}/archive', [CentralContentLibraryController::class, 'archive']);
+            Route::post('/central-library/posts/{post}/unarchive', [CentralContentLibraryController::class, 'unarchive']);
             Route::get('/central-library/ai', [CentralContentLibraryController::class, 'aiStub']);
             Route::get('/central-library/targets', [CentralContentLibraryController::class, 'targets']);
             Route::post('/central-library/distribute', [CentralContentLibraryController::class, 'push']);
@@ -726,6 +727,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/central-library/posts', [CentralContentLibraryController::class, 'index']);
             Route::post('/central-library/posts', [CentralContentLibraryController::class, 'store']);
             Route::post('/central-library/posts/{post}/archive', [CentralContentLibraryController::class, 'archive']);
+            Route::post('/central-library/posts/{post}/unarchive', [CentralContentLibraryController::class, 'unarchive']);
             Route::get('/central-library/ai', [CentralContentLibraryController::class, 'aiStub']);
             Route::get('/central-library/targets', [CentralContentLibraryController::class, 'targets']);
             Route::post('/central-library/distribute', [CentralContentLibraryController::class, 'push']);
