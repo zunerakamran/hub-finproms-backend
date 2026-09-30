@@ -1,4 +1,4 @@
-﻿Hub FinProms — Deployment Notes
+Hub FinProms — Deployment Notes
 ================================
 Last updated: 2026-09-29
 
@@ -196,17 +196,23 @@ Step E â€” Wire on CENTRAL Power Admin (hub detail â†’ deploy wiring):
   API URL:       https://myhub.fin-proms.com
   DB driver:     mysql
   DB host:       localhost
+               (ONLY if Central + this hub share the SAME MySQL server.
+                If Central is on another server, use a reachable hostname/IP and
+                allow Central's IP under cPanel -> Remote MySQL.)
   DB port:       3306
-  DB database:   <same as myhub .env DB_DATABASE>
-  DB username:   <same as myhub .env DB_USERNAME>
-  DB password:   <same as myhub .env DB_PASSWORD>
+  DB database:   <same as myhub .env DB_DATABASE>  (full cPanel name)
+  DB username:   <same as myhub .env DB_USERNAME>  (full cPanel name)
+  DB password:   <same as myhub .env DB_PASSWORD>  (re-enter after APP_KEY change)
   Deploy notes:  Option B: frontend + API on myhub.fin-proms.com, Laravel in /api
 
   Target status: Deploy wiring ready
+  After save, Central tests the DB. Fix host/user/pass if "not reachable".
+  Wire Shared the same way (use sharedhub's own .env DB_* values).
 
 Smoke tests:
   https://myhub.fin-proms.com/api/hub
   https://myhub.fin-proms.com/
+  On Central: switch to hub -> Content/Firms must load (not 500).
 
 
 ================================================================================

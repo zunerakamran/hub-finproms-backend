@@ -193,8 +193,10 @@ class CapabilitiesMatrixService
             $requiresModulePricing = Hub::isModulePricingCapability($key);
 
             // Central: product-module sections (SMC/GC/WC/WTL) stay inactive while
-            // those modules are off. Member / general caps (incl. View website pages)
-            // are editable — Power Admin may opt into a public site shell on Central.
+            // those modules are off. SMTL-gated member + dashboard caps stay
+            // editable — Central has no SMTL product module, but Power Admin may
+            // still enable a public site shell and content tools via the matrix
+            // (enforced in roleCan the same way Shared/WL honour checked cells).
             $inactive = false;
             if ($isCentralHub) {
                 if ($requiresSmcModule
@@ -205,8 +207,6 @@ class CapabilitiesMatrixService
                 ) {
                     $inactive = true;
                 }
-                // SMTL-gated *dashboard* tools stay usable for remote-control config;
-                // SMTL-gated *member* caps are editable too (site shell / catalog nav).
             } else {
                 $inactive = ($requiresPrivate && $publicMode)
                     || ($requiresPublic && $privateMode)
@@ -879,13 +879,12 @@ class CapabilitiesMatrixService
         }
 
         // Social Media Template Library caps are inactive while the module is off.
-        // Exception: on Central, member_* caps (View website pages, browse, plans, …)
-        // follow the matrix so enabling “View website pages” actually unlocks the
-        // public site shell even though Central has no content product modules.
+        // Exception: Central has no SMTL product module (control plane), but the
+        // Capabilities matrix still lets Power Admin enable these cells — member
+        // site shell (browse/plans/…) and dashboard content tools (posts/types/…).
+        // Honor checked cells the same way Shared / White-label do when SMTL is on.
         if (Hub::isSocialMediaTemplateLibraryCapability($flag) && ! $hub->hasSocialMediaTemplateLibraryModule()) {
-            $isCentralMemberCap = $hub->isCentral()
-                && (str_starts_with($flag, 'member_') || str_starts_with($flag, 'general_'));
-            if (! $isCentralMemberCap) {
+            if (! $hub->isCentral()) {
                 return false;
             }
         }
