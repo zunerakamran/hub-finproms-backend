@@ -561,10 +561,14 @@ class Hub extends Model
         'member_in_app_edit',
         'general_show_purchases',
         'dashboard_manage_posts',
+        'dashboard_view_posts',
         'dashboard_manage_bundles',
         'dashboard_manage_types',
+        'dashboard_view_types',
         'dashboard_manage_categories',
+        'dashboard_view_categories',
         'dashboard_manage_tags',
+        'dashboard_view_tags',
         'dashboard_ai_content',
     ];
 
@@ -908,7 +912,14 @@ class Hub extends Model
         // --- 3. Content catalog ---
         'dashboard_manage_posts' => [
             'label' => 'Manage posts / reels',
-            'description' => 'Hub admin can create and edit posts/reels on this Shared or White-labelled hub.',
+            'description' => 'Create and edit posts/reels. Disabled on Shared / White-labelled hubs — create only via Central content library, then distribute. Lists use “View posts / reels”.',
+            'group' => self::GROUP_DASHBOARD_CONTENT,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'dashboard_view_posts' => [
+            'label' => 'View posts / reels',
+            'description' => 'List posts/reels that exist on this hub (including content distributed from Central). No create/edit.',
             'group' => self::GROUP_DASHBOARD_CONTENT,
             'default_shared' => true,
             'default_white_label' => true,
@@ -929,21 +940,42 @@ class Hub extends Model
         ],
         'dashboard_manage_types' => [
             'label' => 'Manage types',
-            'description' => 'Hub admin can manage content types.',
+            'description' => 'Create and edit content types. On Shared / White-labelled hubs this is off — types arrive with distributed Central posts; use “View types” for the list. On Central, manage taxonomy for the Central library.',
+            'group' => self::GROUP_DASHBOARD_CONTENT,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'dashboard_view_types' => [
+            'label' => 'View types',
+            'description' => 'List content types that exist on this hub. No create/edit.',
             'group' => self::GROUP_DASHBOARD_CONTENT,
             'default_shared' => true,
             'default_white_label' => true,
         ],
         'dashboard_manage_categories' => [
             'label' => 'Manage categories',
-            'description' => 'Hub admin can manage categories.',
+            'description' => 'Create and edit categories. Off on Shared / White-labelled hubs — categories arrive with distributed Central posts; use “View categories” for the list. On Central, manage taxonomy for the Central library.',
+            'group' => self::GROUP_DASHBOARD_CONTENT,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'dashboard_view_categories' => [
+            'label' => 'View categories',
+            'description' => 'List categories that exist on this hub. No create/edit.',
             'group' => self::GROUP_DASHBOARD_CONTENT,
             'default_shared' => true,
             'default_white_label' => true,
         ],
         'dashboard_manage_tags' => [
             'label' => 'Manage tags',
-            'description' => 'Hub admin can manage tags.',
+            'description' => 'Create and edit tags. Off on Shared / White-labelled hubs — tags arrive with distributed Central posts; use “View tags” for the list. On Central, manage taxonomy for the Central library.',
+            'group' => self::GROUP_DASHBOARD_CONTENT,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'dashboard_view_tags' => [
+            'label' => 'View tags',
+            'description' => 'List tags that exist on this hub. No create/edit.',
             'group' => self::GROUP_DASHBOARD_CONTENT,
             'default_shared' => true,
             'default_white_label' => true,
@@ -1340,7 +1372,24 @@ class Hub extends Model
      */
     public const ACTING_HUB_CONTENT_CAPABILITIES = [
         'dashboard_manage_posts',
+        'dashboard_view_posts',
         'dashboard_manage_bundles',
+        'dashboard_manage_types',
+        'dashboard_view_types',
+        'dashboard_manage_categories',
+        'dashboard_view_categories',
+        'dashboard_manage_tags',
+        'dashboard_view_tags',
+    ];
+
+    /**
+     * Local create/edit content tools — Central library owns create for posts;
+     * taxonomy manage stays Central-only. Content hubs use view_* for lists.
+     *
+     * @var list<string>
+     */
+    public const CONTENT_HUB_DISABLED_MANAGE_CAPABILITIES = [
+        'dashboard_manage_posts',
         'dashboard_manage_types',
         'dashboard_manage_categories',
         'dashboard_manage_tags',
@@ -1659,6 +1708,25 @@ class Hub extends Model
             $defaults['manual_posts'] = true;
             $defaults['ai_posts'] = false;
             $defaults['dashboard_central_content_library'] = false;
+            $defaults['dashboard_manage_posts'] = false;
+            $defaults['dashboard_manage_types'] = false;
+            $defaults['dashboard_manage_categories'] = false;
+            $defaults['dashboard_manage_tags'] = false;
+            $defaults['dashboard_view_posts'] = true;
+            $defaults['dashboard_view_types'] = true;
+            $defaults['dashboard_view_categories'] = true;
+            $defaults['dashboard_view_tags'] = true;
+        }
+
+        if ($type === self::TYPE_WHITE_LABEL) {
+            $defaults['dashboard_manage_posts'] = false;
+            $defaults['dashboard_manage_types'] = false;
+            $defaults['dashboard_manage_categories'] = false;
+            $defaults['dashboard_manage_tags'] = false;
+            $defaults['dashboard_view_posts'] = true;
+            $defaults['dashboard_view_types'] = true;
+            $defaults['dashboard_view_categories'] = true;
+            $defaults['dashboard_view_tags'] = true;
         }
 
         if ($type === self::TYPE_CENTRAL) {
@@ -1681,6 +1749,13 @@ class Hub extends Model
             $defaults['ai_posts'] = false;
             $defaults['dashboard_manage_posts'] = false;
             $defaults['dashboard_central_content_library'] = true;
+            $defaults['dashboard_manage_types'] = true;
+            $defaults['dashboard_manage_categories'] = true;
+            $defaults['dashboard_manage_tags'] = true;
+            $defaults['dashboard_view_posts'] = true;
+            $defaults['dashboard_view_types'] = true;
+            $defaults['dashboard_view_categories'] = true;
+            $defaults['dashboard_view_tags'] = true;
             // Central is not a member catalog — keep member website / purchase flags off.
             $defaults['member_view_site_pages'] = false;
             $defaults['member_browse_catalog'] = false;

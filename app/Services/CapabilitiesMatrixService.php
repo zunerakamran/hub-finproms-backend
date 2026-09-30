@@ -271,9 +271,20 @@ class CapabilitiesMatrixService
                     || ($requiresModulePricing && ! $modulePricingOn);
             }
 
+            // Create/edit posts & taxonomy live on Central only (library + Central taxonomy).
+            if ((! $isCentralHub && in_array($key, Hub::CONTENT_HUB_DISABLED_MANAGE_CAPABILITIES, true))
+                || ($isCentralHub && $key === 'dashboard_manage_posts')
+            ) {
+                $inactive = true;
+            }
+
             $inactiveReason = null;
             if ($inactive) {
-                if ($requiresSmcModule && ! $smcModuleOn) {
+                if ((! $isCentralHub && in_array($key, Hub::CONTENT_HUB_DISABLED_MANAGE_CAPABILITIES, true))
+                    || ($isCentralHub && $key === 'dashboard_manage_posts')
+                ) {
+                    $inactiveReason = 'central_library_only';
+                } elseif ($requiresSmcModule && ! $smcModuleOn) {
                     $inactiveReason = 'module_social_media_compliance_off';
                 } elseif ($requiresGcModule && ! $gcModuleOn) {
                     $inactiveReason = 'module_general_compliance_off';
@@ -589,6 +600,12 @@ class CapabilitiesMatrixService
                     continue;
                 }
                 $roleCaps[$role][$key] = filter_var($value, FILTER_VALIDATE_BOOLEAN);
+                // Content hubs never keep local create/edit for posts & taxonomy.
+                if ($hub->isContentHub()
+                    && in_array($key, Hub::CONTENT_HUB_DISABLED_MANAGE_CAPABILITIES, true)
+                ) {
+                    $roleCaps[$role][$key] = false;
+                }
             }
         }
 
@@ -720,12 +737,16 @@ class CapabilitiesMatrixService
         // Content management tools enabled for Power Admin by default.
         foreach ([
             'dashboard_manage_posts',
+            'dashboard_view_posts',
             'dashboard_central_content_library',
             'dashboard_manage_bundles',
             'dashboard_manage_types',
+            'dashboard_view_types',
             'dashboard_manage_categories',
+            'dashboard_view_categories',
             'dashboard_manage_firms',
             'dashboard_manage_tags',
+            'dashboard_view_tags',
             'dashboard_manage_subscriber_credits',
             'dashboard_manage_modules',
             'dashboard_manage_module_pricing',
@@ -739,10 +760,19 @@ class CapabilitiesMatrixService
         }
 
         // Central content library is Central-only; keep off on Shared / WL matrices.
+        // Local create/edit for posts & taxonomy is also off on Shared / WL —
+        // those hubs only view lists; Central library owns create + distribute.
         if ($hubType !== Hub::TYPE_CENTRAL) {
             foreach ($this->allMatrixRoles() as $role) {
                 if (isset($matrix[$role])) {
                     $matrix[$role]['dashboard_central_content_library'] = false;
+                    foreach (Hub::CONTENT_HUB_DISABLED_MANAGE_CAPABILITIES as $manageKey) {
+                        $matrix[$role][$manageKey] = false;
+                    }
+                    $matrix[$role]['dashboard_view_posts'] = true;
+                    $matrix[$role]['dashboard_view_types'] = true;
+                    $matrix[$role]['dashboard_view_categories'] = true;
+                    $matrix[$role]['dashboard_view_tags'] = true;
                 }
             }
         } else {
@@ -750,8 +780,15 @@ class CapabilitiesMatrixService
             foreach ($this->allMatrixRoles() as $role) {
                 if (isset($matrix[$role])) {
                     $matrix[$role]['dashboard_manage_posts'] = false;
+                    $matrix[$role]['dashboard_view_posts'] = true;
+                    $matrix[$role]['dashboard_view_types'] = true;
+                    $matrix[$role]['dashboard_view_categories'] = true;
+                    $matrix[$role]['dashboard_view_tags'] = true;
                     if ($role === User::ROLE_POWER_ADMIN || $role === User::ROLE_FINPROMS_ADMIN) {
                         $matrix[$role]['dashboard_central_content_library'] = true;
+                        $matrix[$role]['dashboard_manage_types'] = true;
+                        $matrix[$role]['dashboard_manage_categories'] = true;
+                        $matrix[$role]['dashboard_manage_tags'] = true;
                     }
                 }
             }
@@ -1009,6 +1046,12 @@ class CapabilitiesMatrixService
 
         // Central content library is control-plane only (never Shared / WL acting hubs).
         if ($flag === 'dashboard_central_content_library' && ! $hub->isControlPlane()) {
+            return false;
+        }
+
+        // Local create/edit for posts & taxonomy is Central-only (library + Central taxonomy).
+        // Shared / White-label hubs keep view_* for inspecting distributed / local data.
+        if (in_array($flag, Hub::CONTENT_HUB_DISABLED_MANAGE_CAPABILITIES, true) && $hub->isContentHub()) {
             return false;
         }
 

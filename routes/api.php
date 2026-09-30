@@ -93,17 +93,20 @@ Route::match(['GET', 'HEAD'], '/website-compliance/embed-site/{templateRequestId
 // Central keeps member_browse_catalog off, but Power Admin still needs types /
 // categories / tags when creating Central library posts (Bearer token required
 // for the dashboard_* alternatives — guests only satisfy member_* via checklist).
-Route::middleware('hub_can:member_browse_catalog,dashboard_central_content_library,dashboard_manage_types,dashboard_manage_categories,dashboard_manage_tags')->group(function () {
+Route::middleware('hub_can:member_browse_catalog,dashboard_central_content_library,dashboard_manage_types,dashboard_manage_categories,dashboard_manage_tags,dashboard_view_types,dashboard_view_categories,dashboard_view_tags')->group(function () {
     Route::get('/categories', [CategoryController::class, 'index']);
     Route::get('/types', [ContentTypeController::class, 'index']);
     Route::get('/tags', [TagController::class, 'index']);
 });
 
-Route::middleware('hub_can:member_browse_catalog')->group(function () {
+Route::middleware('hub_can:member_browse_catalog,dashboard_view_posts,dashboard_manage_posts')->group(function () {
     Route::get('/posts/categories', [PostController::class, 'categories']);
     Route::get('/posts', [PostController::class, 'index']);
-    Route::post('/posts/reach', [PostController::class, 'recordReach']);
     Route::get('/posts/{post}', [PostController::class, 'show']);
+});
+
+Route::middleware('hub_can:member_browse_catalog')->group(function () {
+    Route::post('/posts/reach', [PostController::class, 'recordReach']);
     Route::get('/bundles', [BundleController::class, 'index']);
     Route::get('/bundles/{bundle}', [BundleController::class, 'show']);
 });

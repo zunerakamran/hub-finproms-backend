@@ -388,10 +388,10 @@ Notes:
   switcher at the top of the Central Hub dashboard.
 - Selecting Central Hub context → platform tools only (registry, checklists, etc.).
 - Selecting a Shared or White-label hub → dashboard menus/tools follow THAT
-  hub’s Capabilities matrix for the user’s role (e.g. Manage posts). Creating
-  posts / types / categories / tags / bundles while that hub is selected
-  writes only to THAT hub’s own database — not Central’s DB and not another
-  hub’s catalog.
+  hub’s Capabilities matrix for the user’s role (e.g. View posts). Creating
+  posts / types / categories / tags is Central-only (Central content library);
+  while a content hub is selected those pages are list-only. Bundles and other
+  hub tools still write to THAT hub’s own database when enabled.
 - APIs: `GET/PUT /client-admin/acting-hub` (and power-admin / admin aliases).
   Authenticated `GET /hub` includes `hub_switcher` + acting effective caps when
   on Central Hub with remote-control capability.
@@ -561,11 +561,14 @@ Notes:
     open /my-dashboard (role=user lands here after login when enabled)
 
   Hub-admin dashboard (FinProms admin on Shared; client_admin on White-label):
-  - Manage posts/reels — enableable for ALL roles in the matrix
-    (Power Admin, FinProms admin, client admin, manager, approver, advisor, user);
-    remaining roles (approver / advisor / user) default OFF until Power Admin enables them
+  - View posts/reels — list what exists on this hub (including distributed
+    Central content); enableable for ALL roles; defaults ON for hub-admin roles
+  - Manage posts/reels — create/edit forms; DISABLED on Shared / White-label
+    (Central content library owns create). Remains inactive on Central too.
   - Manage post bundles (group posts/reels; description + total credits) — same roles
-  - Manage types / categories / tags — same roles
+  - View types / categories / tags — list-only on content hubs; defaults ON
+  - Manage types / categories / tags — Central only (library taxonomy); DISABLED
+    on Shared / White-labelled hubs
   - Manage subscription plans — same roles
   - Manage settings (NEW banner, logo upload, color scheme, application name) — same roles
   - Confirm bank transfers — same roles
@@ -889,6 +892,8 @@ STEP 1 — Shared hub core (content hub)
 [x] Central content library (manual create + Excel bulk, archive + distribute; AI stub)
 [x] Central library taxonomy: Central-owned types/categories/tags; distribute
     upserts names into target hub DB with the post copy
+[x] Content hubs list-only for posts/types/categories/tags (view_*); manage_*
+    create/edit removed from Shared / White-label (Central library owns create)
 [x] Shared/WL Manual posts ↔ AI posts functionality opposites for receive/distribute
 [ ] AI post/reel generation by FinProms admin (later)
 [ ] In-app post editing for buyers (later)
