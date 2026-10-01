@@ -99,6 +99,7 @@ class User extends Authenticatable
         'is_suspended',
         'is_discontinued',
         'discontinued_at',
+        'email_verified_at',
         'stripe_customer_id',
         'stripe_payment_method_id',
         'acting_hub_id',
@@ -272,6 +273,18 @@ class User extends Authenticatable
     public function actingAdvisor(): BelongsTo
     {
         return $this->belongsTo(self::class, 'acting_advisor_id');
+    }
+
+    public function hasVerifiedEmail(): bool
+    {
+        return $this->email_verified_at !== null;
+    }
+
+    public function markEmailAsVerified(): bool
+    {
+        return $this->forceFill([
+            'email_verified_at' => $this->freshTimestamp(),
+        ])->save();
     }
 
     /**

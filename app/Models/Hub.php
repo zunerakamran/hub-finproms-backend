@@ -781,6 +781,13 @@ class Hub extends Model
             'default_shared' => false,
             'default_white_label' => true,
         ],
+        'require_login_otp' => [
+            'label' => 'Two-factor authentication (login OTP)',
+            'description' => 'When on, every user on this hub must enter a one-time passcode emailed to them after a successful password check, on every sign-in. Available for Shared, White-label, and Central hubs.',
+            'group' => self::GROUP_BEHAVIOUR,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
 
         // --- Modules (hub Modules page) ---
         'module_central_hub' => [
@@ -2345,6 +2352,7 @@ class Hub extends Model
             'auth' => [
                 'registration_enabled' => $registrationEnabled,
                 'invite_only' => (bool) ($checklist['private_invite_only'] ?? false),
+                'login_otp_required' => (bool) ($checklist['require_login_otp'] ?? false),
             ],
         ];
     }

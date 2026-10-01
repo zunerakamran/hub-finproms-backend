@@ -497,6 +497,50 @@ class FunctionalMailService
         );
     }
 
+    public function sendEmailVerificationLink(User $user, string $token): void
+    {
+        $hub = $this->hubs->current();
+        $branding = $this->mail->branding($hub);
+        $url = $branding['frontend_url'].'/verify-email?token='.urlencode($token).'&email='.urlencode((string) $user->email);
+        $copy = $this->emailTemplates->resolve($hub, 'email_verification', EmailTemplateCatalog::AUDIENCE_USER, [
+            'user_name' => $user->name ?: 'there',
+            'user_email' => (string) $user->email,
+            'site_name' => $branding['site_name'],
+        ]);
+
+        $this->mail->sendToUser(
+            $user,
+            subject: $copy['subject'],
+            eyebrow: $copy['eyebrow'],
+            heading: $copy['heading'],
+            intro: $copy['intro'],
+            cta: ['label' => $copy['cta_label'] ?: 'Verify email', 'url' => $url],
+            closing: $copy['closing'],
+            hub: $hub,
+        );
+    }
+
+    public function sendLoginOtp(User $user, string $code): void
+    {
+        $hub = $this->hubs->current();
+        $branding = $this->mail->branding($hub);
+        $copy = $this->emailTemplates->resolve($hub, 'login_otp', EmailTemplateCatalog::AUDIENCE_USER, [
+            'user_name' => $user->name ?: 'there',
+            'site_name' => $branding['site_name'],
+            'otp_code' => $code,
+        ]);
+
+        $this->mail->sendToUser(
+            $user,
+            subject: $copy['subject'],
+            eyebrow: $copy['eyebrow'],
+            heading: $copy['heading'],
+            intro: $copy['intro'],
+            closing: $copy['closing'],
+            hub: $hub,
+        );
+    }
+
     private function subscriptionPaymentMethod(?UserSubscription $subscription): string
     {
         $method = strtolower((string) ($subscription?->payment_method ?? ''));

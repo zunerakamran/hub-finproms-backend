@@ -512,6 +512,58 @@ class EmailTemplateCatalog
                 ],
             ],
 
+            'email_verification' => [
+                'label' => 'Email verification',
+                'description' => 'Sent when a member self-registers on a Shared hub so they can confirm their email before signing in.',
+                'group' => 'Accounts',
+                'requires_any' => ['public_subscribe'],
+                'requires_module' => null,
+                'requires_private' => false,
+                'requires_public' => true,
+                'audiences' => [self::AUDIENCE_USER],
+                'variables' => [
+                    ['key' => 'user_name', 'label' => 'User name'],
+                    ['key' => 'user_email', 'label' => 'User email'],
+                    ['key' => 'site_name', 'label' => 'Hub / site name'],
+                ],
+                'defaults' => [
+                    self::AUDIENCE_USER => [
+                        'subject' => '[{{site_name}}] Verify your email',
+                        'eyebrow' => 'Confirm your email',
+                        'heading' => 'Verify your email address',
+                        'intro' => "Hi {{user_name}},\n\nThanks for signing up to {{site_name}}. Please confirm your email address to activate your account and sign in.",
+                        'closing' => 'If you did not create an account, you can ignore this email. This link expires in 60 minutes.',
+                        'cta_label' => 'Verify email',
+                    ],
+                ],
+            ],
+
+            'login_otp' => [
+                'label' => 'Login OTP (two-factor)',
+                'description' => 'Sent when two-factor authentication is enabled on the hub and a user signs in with a correct password.',
+                'group' => 'Accounts',
+                'requires_any' => ['require_login_otp'],
+                'requires_module' => null,
+                'requires_private' => false,
+                'requires_public' => false,
+                'audiences' => [self::AUDIENCE_USER],
+                'variables' => [
+                    ['key' => 'user_name', 'label' => 'User name'],
+                    ['key' => 'site_name', 'label' => 'Hub / site name'],
+                    ['key' => 'otp_code', 'label' => 'One-time passcode'],
+                ],
+                'defaults' => [
+                    self::AUDIENCE_USER => [
+                        'subject' => '[{{site_name}}] Your sign-in code',
+                        'eyebrow' => 'Two-factor authentication',
+                        'heading' => 'Your one-time sign-in code',
+                        'intro' => "Hi {{user_name}},\n\nUse this code to finish signing in to {{site_name}}:\n\n{{otp_code}}\n\nIt expires in 10 minutes. If you did not try to sign in, ignore this email and consider changing your password.",
+                        'closing' => 'Never share this code with anyone.',
+                        'cta_label' => null,
+                    ],
+                ],
+            ],
+
             'smc_request_submitted' => [
                 'label' => 'Social media compliance — request submitted',
                 'description' => 'Admin notification when a social media compliance request is submitted.',

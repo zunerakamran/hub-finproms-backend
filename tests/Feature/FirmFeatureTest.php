@@ -145,8 +145,10 @@ class FirmFeatureTest extends TestCase
             'password_confirmation' => 'password12',
         ]);
 
-        $response->assertCreated();
+        $response->assertCreated()
+            ->assertJsonPath('email_verification_required', true);
         $this->assertNull(User::query()->where('email', 'public.user@example.com')->value('firm_id'));
+        $this->assertNull(User::query()->where('email', 'public.user@example.com')->value('email_verified_at'));
     }
 
     public function test_advisor_import_assigns_firm_from_sheet(): void

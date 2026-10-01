@@ -379,6 +379,7 @@ class AdvisorImportService
                         'is_discontinued' => false,
                         'firm_id' => $firmId,
                         'modules' => $modules,
+                        'email_verified_at' => now(),
                     ]);
 
                     if ($isAdvisor) {

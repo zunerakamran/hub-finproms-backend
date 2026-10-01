@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-09-30 (module recurring billing + grace + discontinue any user)
+Last updated: 2026-10-01 (login OTP two-factor + Shared Hub email verification)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -117,6 +117,36 @@ Deploy rule:
   - Shown when the item is still within the "new" window.
   - Duration (e.g. number of days) is taken from the DATABASE (configurable
     setting), not hard-coded.
+
+2.2a Shared Hub self-registration email verification
+- When public self-registration is enabled (`public_subscribe` / not invite-only),
+  new members must verify their email before they can sign in.
+- Register creates the account with `email_verified_at` null, does NOT issue a
+  Sanctum token, and sends a hub-branded verification link
+  (`{frontend}/verify-email?token=…&email=…`). Link expires in 60 minutes.
+- Verify endpoint marks the email verified, sends the welcome email, and returns
+  an auth token so the member is signed in.
+- Unverified members are blocked at login with `email_verification_required` and
+  may request a resend (throttled).
+- Admin-created and Excel-imported users are marked verified immediately.
+- Existing accounts are backfilled as verified by migration so they are not locked out.
+- Email template catalog event: `email_verification` (editable like other templates).
+- APIs: POST /api/auth/verify-email, POST /api/auth/resend-verification.
+- Frontend: Register shows “check your email”; VerifyEmail page; Login offers resend.
+
+2.2b Two-factor authentication (login OTP) — all hub types
+- Hub Functionalities checklist flag: `require_login_otp`
+  (“Two-factor authentication (login OTP)”). Default OFF for Shared,
+  White-label, and Central. Power Admin enables it per hub on Functionalities.
+- When ON for a hub, EVERY user on that hub (all roles) must complete an email
+  OTP step after a successful password check, on every sign-in.
+- Login returns `otp_required` + `otp_challenge` (no Sanctum token yet).
+  A 6-digit code is emailed (hub From address / MAIL_FROM fallback).
+  Code expires in 10 minutes; max 5 failed attempts; resend throttled 60s.
+- APIs: POST /api/auth/verify-login-otp, POST /api/auth/resend-login-otp.
+- Public GET /hub exposes `auth.login_otp_required`.
+- Email template catalog event: `login_otp`.
+- Frontend Login shows a second step for the code when the hub requires OTP.
 
 2.3 Content metrics
 - Each post/reel tracks:
@@ -691,8 +721,9 @@ Notes:
 --------------------------------------------------------------------------------
 - Every meaningful user activity is recorded in an activity_logs audit trail
   (per hub), including:
-  - Auth: register, login, logout, failed login, blocked login (suspended /
-    discontinued / invite-only)
+  - Auth: register, email verified, login OTP sent/verified, login, logout,
+    failed login, blocked login (suspended / discontinued / invite-only /
+    email unverified)
   - Successful mutating API actions (POST / PUT / PATCH / DELETE): content,
     plans, settings, advisor import/discontinue, billing, capabilities, hubs,
     purchases, subscriptions, etc.
@@ -833,6 +864,10 @@ STEP 1 — Shared hub core (content hub)
 [x] Acting-hub content create/list on white-label DB (posts, types, categories, tags, bundles)
 [x] Public GET /hub returns current hub branding + checklist
 [x] Checklist gates: public register, self-serve subscribe, one-off purchase, unlimited credits
+[x] Shared Hub self-registration requires email verification before login
+    (verify-email + resend; welcome mail after verify; admin/import users auto-verified)
+[x] Hub Functionalities: require_login_otp — email OTP on every login when enabled
+    (all hub types; verify-login-otp + resend-login-otp; Login UI second step)
 [x] Checklist opposite pairs auto-uncheck (public/private, paid/unlimited)
 [x] Frontend: power_admin hubs + checklist UI
 [x] White-labelled private advisor import (Excel/CSV)

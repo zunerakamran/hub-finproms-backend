@@ -89,6 +89,7 @@ class WhiteLabelUserService
                 'has_unlimited_credits' => $payload['has_unlimited_credits'] ?? false,
                 'is_suspended' => $payload['is_suspended'] ?? false,
                 'firm_id' => $this->resolveFirmId($connection, $payload['firm_id'] ?? null),
+                'email_verified_at' => now(),
             ]);
 
             return $this->serialize($user->fresh(), $hub);

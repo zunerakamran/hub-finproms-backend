@@ -95,16 +95,8 @@
                             </td>
                         </tr>
                         <tr>
-                            <td style="padding:16px 18px; border-bottom:1px solid #e5e7eb; font-family:Arial, Helvetica, sans-serif; background-color:#f9fafb;">
-                                <div style="font-size:14px; font-weight:600; color:#111827; margin-bottom:4px;">2. Verify your email</div>
-                                <div style="font-size:13px; color:#6b7280; line-height:1.5;">
-                                    Verify your email to unlock full access.
-                                </div>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td style="padding:16px 18px; font-family:Arial, Helvetica, sans-serif; background-color:#ffffff;">
-                                <div style="font-size:14px; font-weight:600; color:#111827; margin-bottom:8px;">3. Explore resources and subscriptions</div>
+                            <td style="padding:16px 18px; font-family:Arial, Helvetica, sans-serif; background-color:#f9fafb;">
+                                <div style="font-size:14px; font-weight:600; color:#111827; margin-bottom:8px;">2. Explore resources and subscriptions</div>
                                 <div style="font-size:13px; color:#6b7280; line-height:1.5; margin-bottom:10px;">
                                     Explore resources and subscriptions on the website to get started.
                                 </div>

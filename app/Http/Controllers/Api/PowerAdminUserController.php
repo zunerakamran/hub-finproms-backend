@@ -166,6 +166,7 @@ class PowerAdminUserController extends Controller
             'has_unlimited_credits' => $validated['has_unlimited_credits'] ?? false,
             'is_suspended' => $validated['is_suspended'] ?? false,
             'firm_id' => $validated['firm_id'] ?? null,
+            'email_verified_at' => now(),
         ]);
 
         $this->adminNewUserMail->send($user);
