@@ -4,8 +4,12 @@ namespace App\Services\WebsiteCompliance;
 
 use App\Models\User;
 use App\Models\WebsiteCompliance\ChangeRequest;
+use App\Models\WebsiteCompliance\ChangeRequestAttachment;
 use App\Models\WebsiteCompliance\ChangeRequestVersion;
 use App\Models\WebsiteCompliance\Section;
+use App\Support\ComplianceSupportingFiles;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use App\Services\ActingAdvisorService;
 use App\Services\ActivityLogService;
 use App\Services\FirmComplianceVisibilityService;
@@ -83,9 +87,16 @@ class ChangeRequestWorkflowService
         }
     }
 
-    public function createVersionOne(ChangeRequest $changeRequest, string $proposedContent, string $status = ChangeRequest::STATUS_PENDING): ChangeRequestVersion
-    {
-        return ChangeRequestVersion::create([
+    /**
+     * @param  list<UploadedFile>  $supportingFiles
+     */
+    public function createVersionOne(
+        ChangeRequest $changeRequest,
+        string $proposedContent,
+        string $status = ChangeRequest::STATUS_PENDING,
+        array $supportingFiles = []
+    ): ChangeRequestVersion {
+        $version = ChangeRequestVersion::create([
             'request_id' => $changeRequest->id,
             'version_number' => 1,
             'proposed_content' => $proposedContent,
@@ -94,6 +105,13 @@ class ChangeRequestWorkflowService
             'submitted_by' => $changeRequest->editor_id,
             'submitted_at' => now(),
         ]);
+
+        if ($supportingFiles !== []) {
+            ComplianceSupportingFiles::assertWithinLimits($supportingFiles);
+            $this->storeSupportingFilesForVersion($version, $supportingFiles);
+        }
+
+        return $version;
     }
 
     public function syncCurrentVersionStatus(
@@ -120,8 +138,16 @@ class ChangeRequestWorkflowService
         $version->update($payload);
     }
 
-    public function approveWithFeedback(ChangeRequest $changeRequest, User $user, string $feedback, ?Request $request = null): ChangeRequest
-    {
+    /**
+     * @param  list<UploadedFile>  $supportingFiles
+     */
+    public function approveWithFeedback(
+        ChangeRequest $changeRequest,
+        User $user,
+        string $feedback,
+        array $supportingFiles = [],
+        ?Request $request = null
+    ): ChangeRequest {
         $this->assertReviewable($changeRequest, $user);
 
         $proposed = $changeRequest->resolvedProposedContent();
@@ -143,6 +169,11 @@ class ChangeRequestWorkflowService
             $feedback
         );
 
+        $version = $changeRequest->fresh(['currentVersionRow.supportingFiles'])->currentVersionRow;
+        if ($version) {
+            $this->appendSupportingFilesToVersion($version, $supportingFiles);
+        }
+
         $this->activityLogs->log([
             'action' => 'wc.change_request.approve_with_feedback',
             'description' => 'Change request approved with feedback',
@@ -152,7 +183,7 @@ class ChangeRequestWorkflowService
             'properties' => ['feedback' => $feedback],
         ]);
 
-        return $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow']);
+        return $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow.supportingFiles']);
     }
 
     /**
@@ -242,7 +273,7 @@ class ChangeRequestWorkflowService
             'scheduled_at' => null,
         ]);
 
-        ChangeRequestVersion::create([
+        $newVersionRow = ChangeRequestVersion::create([
             'request_id' => $changeRequest->id,
             'version_number' => $nextVersion,
             'proposed_content' => $proposedContent,
@@ -253,6 +284,17 @@ class ChangeRequestWorkflowService
             'reviewed_by' => $user->name ?: (string) $user->id,
             'reviewed_at' => now(),
         ]);
+
+        $newUploads = ComplianceSupportingFiles::normalize($data['supporting_files'] ?? []);
+        ComplianceSupportingFiles::assertWithinLimits($newUploads);
+        $this->copySupportingFilesFromVersion($current, $newVersionRow);
+        if ($newUploads !== []) {
+            $newVersionRow->loadMissing('supportingFiles');
+            $nextOrder = $newVersionRow->supportingFiles->isEmpty()
+                ? 0
+                : ((int) $newVersionRow->supportingFiles->max('sort_order')) + 1;
+            $this->storeSupportingFilesForVersion($newVersionRow, $newUploads, $nextOrder);
+        }
 
         if ($status === ChangeRequest::STATUS_APPROVED) {
             ChangeRequestPublishService::publish(
@@ -275,14 +317,20 @@ class ChangeRequestWorkflowService
             ],
         ]);
 
-        return $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow', 'versions']);
+        return $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow.supportingFiles', 'versions.supportingFiles']);
     }
 
     /**
      * @param  list<array{section_id:int, proposed_content:string, current_content?:string|null}>  $sectionEdits
+     * @param  list<UploadedFile>  $supportingFiles
      */
-    public function resubmit(ChangeRequest $changeRequest, User $user, array $sectionEdits, ?Request $request = null): ChangeRequest
-    {
+    public function resubmit(
+        ChangeRequest $changeRequest,
+        User $user,
+        array $sectionEdits,
+        array $supportingFiles = [],
+        ?Request $request = null
+    ): ChangeRequest {
         if (! $this->isOriginalEditorOrRemoteOperator($changeRequest, $user)) {
             throw new HttpException(403, 'Only the original editor can resubmit this request.');
         }
@@ -292,6 +340,12 @@ class ChangeRequestWorkflowService
         }
 
         $this->assertEditsWithinPriorVersion($changeRequest, $sectionEdits);
+
+        $current = $changeRequest->currentVersionRow
+            ?? $changeRequest->versions()->orderByDesc('version_number')->first();
+        $normalizedSupporting = ComplianceSupportingFiles::normalize($supportingFiles);
+        ComplianceSupportingFiles::assertWithinLimits($normalizedSupporting);
+        $hasNewSupporting = $normalizedSupporting !== [];
 
         $edits = $this->prepareAndLockEdits($sectionEdits, $user);
         $proposedContent = json_encode($edits);
@@ -309,7 +363,7 @@ class ChangeRequestWorkflowService
             'scheduled_at' => null,
         ]);
 
-        ChangeRequestVersion::create([
+        $newVersionRow = ChangeRequestVersion::create([
             'request_id' => $changeRequest->id,
             'version_number' => $nextVersion,
             'proposed_content' => $proposedContent,
@@ -319,6 +373,16 @@ class ChangeRequestWorkflowService
             'submitted_at' => now(),
         ]);
 
+        if ($current) {
+            if ($hasNewSupporting) {
+                $this->storeSupportingFilesForVersion($newVersionRow, $normalizedSupporting);
+            } else {
+                $this->copySupportingFilesFromVersion($current, $newVersionRow);
+            }
+        } elseif ($hasNewSupporting) {
+            $this->storeSupportingFilesForVersion($newVersionRow, $normalizedSupporting);
+        }
+
         $this->activityLogs->log([
             'action' => 'wc.change_request.resubmit',
             'description' => 'Resubmitted change request as version '.$nextVersion,
@@ -327,15 +391,21 @@ class ChangeRequestWorkflowService
             'request' => $request,
         ]);
 
-        return $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow', 'versions']);
+        return $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow.supportingFiles', 'versions.supportingFiles']);
     }
 
     /**
      * @param  list<array{section_id:int, proposed_content:string, current_content?:string|null}>|null  $sectionEdits
+     * @param  list<UploadedFile>  $supportingFiles
      * @return array{success: bool, cpanel_synced: bool, sections: array, change_request: ChangeRequest}
      */
-    public function confirmFeedback(ChangeRequest $changeRequest, User $user, ?array $sectionEdits = null, ?Request $request = null): array
-    {
+    public function confirmFeedback(
+        ChangeRequest $changeRequest,
+        User $user,
+        ?array $sectionEdits = null,
+        array $supportingFiles = [],
+        ?Request $request = null
+    ): array {
         if (! $this->isOriginalEditorOrRemoteOperator($changeRequest, $user)) {
             throw new HttpException(403, 'Only the original editor can confirm feedback.');
         }
@@ -345,6 +415,11 @@ class ChangeRequestWorkflowService
         }
 
         $nextVersion = ((int) ($changeRequest->current_version ?: 1)) + 1;
+        $current = $changeRequest->currentVersionRow
+            ?? $changeRequest->versions()->orderByDesc('version_number')->first();
+        $normalizedSupporting = ComplianceSupportingFiles::normalize($supportingFiles);
+        ComplianceSupportingFiles::assertWithinLimits($normalizedSupporting);
+        $hasNewSupporting = $normalizedSupporting !== [];
 
         if ($sectionEdits !== null) {
             if ($sectionEdits === []) {
@@ -366,7 +441,7 @@ class ChangeRequestWorkflowService
                 'feedback' => null,
             ]);
 
-            ChangeRequestVersion::create([
+            $newVersionRow = ChangeRequestVersion::create([
                 'request_id' => $changeRequest->id,
                 'version_number' => $nextVersion,
                 'proposed_content' => $proposedContent,
@@ -375,6 +450,16 @@ class ChangeRequestWorkflowService
                 'submitted_by' => $this->gate->tenantUserIdOrNull($user),
                 'submitted_at' => now(),
             ]);
+
+            if ($current) {
+                if ($hasNewSupporting) {
+                    $this->storeSupportingFilesForVersion($newVersionRow, $normalizedSupporting);
+                } else {
+                    $this->copySupportingFilesFromVersion($current, $newVersionRow);
+                }
+            } elseif ($hasNewSupporting) {
+                $this->storeSupportingFilesForVersion($newVersionRow, $normalizedSupporting);
+            }
         } else {
             // Confirm without content changes still creates a new version (match SMC/GC).
             $proposedContent = $changeRequest->resolvedProposedContent();
@@ -385,7 +470,7 @@ class ChangeRequestWorkflowService
                 'feedback' => null,
             ]);
 
-            ChangeRequestVersion::create([
+            $newVersionRow = ChangeRequestVersion::create([
                 'request_id' => $changeRequest->id,
                 'version_number' => $nextVersion,
                 'proposed_content' => $proposedContent,
@@ -394,6 +479,16 @@ class ChangeRequestWorkflowService
                 'submitted_by' => $this->gate->tenantUserIdOrNull($user),
                 'submitted_at' => now(),
             ]);
+
+            if ($current) {
+                if ($hasNewSupporting) {
+                    $this->storeSupportingFilesForVersion($newVersionRow, $normalizedSupporting);
+                } else {
+                    $this->copySupportingFilesFromVersion($current, $newVersionRow);
+                }
+            } elseif ($hasNewSupporting) {
+                $this->storeSupportingFilesForVersion($newVersionRow, $normalizedSupporting);
+            }
 
             // Re-lock briefly so publish unlock path stays consistent.
             $decoded = json_decode((string) $proposedContent, true);
@@ -427,8 +522,68 @@ class ChangeRequestWorkflowService
 
         return [
             ...$result,
-            'change_request' => $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow', 'versions']),
+            'change_request' => $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow.supportingFiles', 'versions.supportingFiles']),
         ];
+    }
+
+    /**
+     * @param  list<UploadedFile>  $files
+     */
+    public function appendSupportingFilesToVersion(ChangeRequestVersion $version, array $files): void
+    {
+        $normalized = ComplianceSupportingFiles::normalize($files);
+        ComplianceSupportingFiles::assertWithinLimits($normalized);
+        if ($normalized === []) {
+            return;
+        }
+
+        $version->loadMissing('supportingFiles');
+        $nextOrder = $version->supportingFiles->isEmpty()
+            ? 0
+            : ((int) $version->supportingFiles->max('sort_order')) + 1;
+        $this->storeSupportingFilesForVersion($version, $normalized, $nextOrder);
+    }
+
+    /**
+     * @param  list<UploadedFile>  $files
+     */
+    private function storeSupportingFilesForVersion(
+        ChangeRequestVersion $version,
+        array $files,
+        ?int $startOrder = null
+    ): void {
+        $baseOrder = $startOrder ?? 0;
+
+        foreach (array_values($files) as $index => $file) {
+            $path = $file->store('website-compliance-files', 'public');
+            ChangeRequestAttachment::query()->create([
+                'version_id' => $version->id,
+                'original_name' => $file->getClientOriginalName(),
+                'file_path' => $path,
+                'file_url' => Storage::disk('public')->url($path),
+                'mime_type' => $file->getClientMimeType() ?: $file->getMimeType(),
+                'size_bytes' => (int) $file->getSize(),
+                'sort_order' => $baseOrder + $index,
+            ]);
+        }
+    }
+
+    private function copySupportingFilesFromVersion(
+        ChangeRequestVersion $from,
+        ChangeRequestVersion $to
+    ): void {
+        $from->loadMissing('supportingFiles');
+        foreach ($from->supportingFiles as $index => $attachment) {
+            ChangeRequestAttachment::query()->create([
+                'version_id' => $to->id,
+                'original_name' => $attachment->original_name,
+                'file_path' => $attachment->file_path,
+                'file_url' => $attachment->file_url,
+                'mime_type' => $attachment->mime_type,
+                'size_bytes' => $attachment->size_bytes,
+                'sort_order' => $attachment->sort_order ?? $index,
+            ]);
+        }
     }
 
     public function assertReviewable(ChangeRequest $changeRequest, User $user): void

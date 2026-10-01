@@ -155,6 +155,9 @@ class GeneralComplianceRequest extends Model
             'attachments' => $version
                 ? $version->attachments->map(fn (GeneralComplianceRequestAttachment $a) => $a->toApiArray())->values()->all()
                 : [],
+            'supporting_files' => $version
+                ? $version->attachments->map(fn (GeneralComplianceRequestAttachment $a) => $a->toApiArray())->values()->all()
+                : [],
             'status' => $version?->status ?? self::STATUS_PENDING,
             'feedback' => $version?->feedback,
             'reviewed_by' => $version?->reviewed_by,

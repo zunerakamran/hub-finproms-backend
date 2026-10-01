@@ -13,6 +13,7 @@ use App\Services\CapabilitiesMatrixService;
 use App\Services\FirmComplianceVisibilityService;
 use App\Services\SocialMediaComplianceService;
 use App\Services\HubService;
+use App\Support\ComplianceSupportingFiles;
 use App\Support\DateFormat;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -109,7 +110,7 @@ class SocialMediaComplianceController extends Controller
         $subject = $this->actingAdvisors->subjectOrNull($user);
         $query = SocialMediaComplianceRequest::query()
             ->with([
-                'currentVersionRow',
+                'currentVersionRow.supportingFiles',
                 'assignee:id,name,email',
                 'post:id,title,type',
                 'user:id,name,email,firm_id',
@@ -149,8 +150,8 @@ class SocialMediaComplianceController extends Controller
 
         return response()->json([
             'data' => $socialMediaComplianceRequest->fresh([
-                'currentVersionRow',
-                'versions',
+                'currentVersionRow.supportingFiles',
+                'versions.supportingFiles',
                 'assignee:id,name,email',
                 'post',
                 'user:id,name,email,firm_id',
@@ -166,7 +167,7 @@ class SocialMediaComplianceController extends Controller
         $user = $request->user();
         $hub = $this->smcHub($user);
 
-        $validated = $request->validate([
+        $validated = $request->validate(array_merge([
             'description' => ['required', 'string', 'max:10000'],
             'attachment' => [
                 'required',
@@ -174,11 +175,12 @@ class SocialMediaComplianceController extends Controller
                 'max:102400',
                 'mimes:jpg,jpeg,png,gif,webp,mp4,mov,webm',
             ],
-        ]);
+        ], ComplianceSupportingFiles::optionalUploadRules()));
 
         $compliance = $this->compliance->submit($hub, $user, [
             'description' => $validated['description'],
             'attachment' => $request->file('attachment'),
+            'supporting_files' => ComplianceSupportingFiles::fromRequest($request),
         ], $request);
 
         return response()->json([
@@ -193,7 +195,7 @@ class SocialMediaComplianceController extends Controller
         $user = $request->user();
         $hub = $this->smcHub($user);
 
-        $validated = $request->validate([
+        $validated = $request->validate(array_merge([
             'description' => ['required', 'string', 'max:10000'],
             'attachment' => [
                 'nullable',
@@ -201,11 +203,12 @@ class SocialMediaComplianceController extends Controller
                 'max:102400',
                 'mimes:jpg,jpeg,png,gif,webp,mp4,mov,webm',
             ],
-        ]);
+        ], ComplianceSupportingFiles::optionalUploadRules()));
 
         $compliance = $this->compliance->resubmit($hub, $user, $socialMediaComplianceRequest, [
             'description' => $validated['description'],
             'attachment' => $request->file('attachment'),
+            'supporting_files' => ComplianceSupportingFiles::fromRequest($request),
         ], $request);
 
         return response()->json([
@@ -220,20 +223,23 @@ class SocialMediaComplianceController extends Controller
         $user = $request->user();
         $hub = $this->smcHub($user);
 
-        $request->validate([
+        $request->validate(array_merge([
             'attachment' => [
                 'nullable',
                 'file',
                 'max:102400',
                 'mimes:jpg,jpeg,png,gif,webp,mp4,mov,webm',
             ],
-        ]);
+        ], ComplianceSupportingFiles::optionalUploadRules()));
 
         $compliance = $this->compliance->confirmApprovedWithFeedback(
             $hub,
             $user,
             $socialMediaComplianceRequest,
-            ['attachment' => $request->file('attachment')],
+            [
+                'attachment' => $request->file('attachment'),
+                'supporting_files' => ComplianceSupportingFiles::fromRequest($request),
+            ],
             $request
         );
 
@@ -271,10 +277,12 @@ class SocialMediaComplianceController extends Controller
         $user = $request->user();
         $hub = $this->smcHub($user);
 
-        $validated = $request->validate([
+        $validated = $request->validate(array_merge([
             'status' => ['required', 'string', 'in:'.implode(',', SocialMediaComplianceRequest::STATUSES)],
             'feedback' => ['nullable', 'string', 'max:10000'],
-        ]);
+        ], ComplianceSupportingFiles::optionalUploadRules()));
+
+        $validated['supporting_files'] = ComplianceSupportingFiles::fromRequest($request);
 
         $compliance = $this->compliance->review($hub, $user, $socialMediaComplianceRequest, $validated, $request);
 
@@ -290,10 +298,12 @@ class SocialMediaComplianceController extends Controller
         $user = $request->user();
         $hub = $this->smcHub($user);
 
-        $validated = $request->validate([
+        $validated = $request->validate(array_merge([
             'status' => ['required', 'string', 'in:'.implode(',', SocialMediaComplianceRequest::STATUSES)],
             'comment' => ['nullable', 'string', 'max:10000'],
-        ]);
+        ], ComplianceSupportingFiles::optionalUploadRules()));
+
+        $validated['supporting_files'] = ComplianceSupportingFiles::fromRequest($request);
 
         $compliance = $this->compliance->changeStatus(
             $hub,

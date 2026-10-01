@@ -16,6 +16,7 @@ use App\Services\WebsiteCompliance\ChangeRequestPublishService;
 use App\Services\WebsiteCompliance\ChangeRequestWorkflowService;
 use App\Services\WebsiteCompliance\CpanelSyncService;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
+use App\Support\ComplianceSupportingFiles;
 use App\Support\WebsiteCompliance\WcDatabaseContext;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -41,15 +42,20 @@ class ChangeRequestController extends Controller
         $onBehalfById = $this->actingAdvisors->onBehalfById($user, $subject);
         $editorId = $this->gate->tenantUserIdOrNull($subject) ?? (int) $subject->id;
 
-        if ($request->has('section_edits') && is_array($request->section_edits)) {
-            $request->validate([
+        $sectionEdits = $this->normalizedSectionEditsInput($request);
+
+        if (is_array($sectionEdits)) {
+            $request->merge(['section_edits' => $sectionEdits]);
+            $request->validate(array_merge([
                 'section_edits' => 'required|array|min:1',
                 'section_edits.*.section_id' => ['required', Rule::exists(Section::class, 'id')],
                 'section_edits.*.proposed_content' => 'required|string',
                 'section_edits.*.current_content' => 'nullable|string',
-            ]);
+            ], ComplianceSupportingFiles::optionalUploadRules()));
 
-            $edits = $this->workflow->prepareAndLockEdits($request->section_edits, $subject, $user);
+            $supportingFiles = ComplianceSupportingFiles::fromRequest($request);
+
+            $edits = $this->workflow->prepareAndLockEdits($sectionEdits, $subject, $user);
             $proposedContent = json_encode($edits);
             $primarySectionId = count($edits) === 1 ? $edits[0]['section_id'] : null;
 
@@ -62,7 +68,7 @@ class ChangeRequestController extends Controller
                 'current_version' => 1,
             ]);
 
-            $this->workflow->createVersionOne($changeRequest, $proposedContent);
+            $this->workflow->createVersionOne($changeRequest, $proposedContent, ChangeRequest::STATUS_PENDING, $supportingFiles);
 
             $this->activityLogs->log([
                 'action' => 'wc.change_request.submit',
@@ -73,14 +79,16 @@ class ChangeRequestController extends Controller
                 'request' => $request,
             ]);
 
-            return response()->json($changeRequest->fresh(['editor', 'onBehalfBy', 'section', 'currentVersionRow'])->toApiArray(), 201);
+            return response()->json($changeRequest->fresh(['editor', 'onBehalfBy', 'section', 'currentVersionRow.supportingFiles'])->toApiArray(), 201);
         }
 
-        $request->validate([
+        $request->validate(array_merge([
             'section_id' => ['required', Rule::exists(Section::class, 'id')],
             'proposed_content' => 'required|string',
             'current_content' => 'nullable|string',
-        ]);
+        ], ComplianceSupportingFiles::optionalUploadRules()));
+
+        $supportingFiles = ComplianceSupportingFiles::fromRequest($request);
 
         $edits = $this->workflow->prepareAndLockEdits([
             [
@@ -100,7 +108,7 @@ class ChangeRequestController extends Controller
             'current_version' => 1,
         ]);
 
-        $this->workflow->createVersionOne($changeRequest, $proposedContent);
+        $this->workflow->createVersionOne($changeRequest, $proposedContent, ChangeRequest::STATUS_PENDING, $supportingFiles);
 
         $this->activityLogs->log([
             'action' => 'wc.change_request.submit',
@@ -111,7 +119,7 @@ class ChangeRequestController extends Controller
             'request' => $request,
         ]);
 
-        return response()->json($changeRequest->fresh(['editor', 'onBehalfBy', 'section', 'currentVersionRow'])->toApiArray(), 201);
+        return response()->json($changeRequest->fresh(['editor', 'onBehalfBy', 'section', 'currentVersionRow.supportingFiles'])->toApiArray(), 201);
     }
 
     public function index(Request $request): JsonResponse
@@ -125,7 +133,7 @@ class ChangeRequestController extends Controller
             'editor.firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
             'onBehalfBy:id,name,email',
             'approver',
-            'currentVersionRow',
+            'currentVersionRow.supportingFiles',
         ];
         // Pickup/assign write tenantUserIdOrNull; match the same id for scoping.
         $actorId = $this->gate->tenantUserIdOrNull($user) ?? (int) $user->id;
@@ -182,8 +190,8 @@ class ChangeRequestController extends Controller
             'editor.firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
             'onBehalfBy:id,name,email',
             'approver',
-            'currentVersionRow',
-            'versions',
+            'currentVersionRow.supportingFiles',
+            'versions.supportingFiles',
         ])->findOrFail($id);
 
         $actorId = $this->gate->tenantUserIdOrNull($user) ?? (int) $user->id;
@@ -235,7 +243,7 @@ class ChangeRequestController extends Controller
         $user = $request->user();
         $this->gate->assertCan($user, 'wc_change_request_status');
 
-        $validated = $request->validate([
+        $validated = $request->validate(array_merge([
             'status' => [
                 'required',
                 'string',
@@ -247,7 +255,9 @@ class ChangeRequestController extends Controller
                 ]),
             ],
             'comment' => ['nullable', 'string', 'max:10000'],
-        ]);
+        ], ComplianceSupportingFiles::optionalUploadRules()));
+
+        $validated['supporting_files'] = ComplianceSupportingFiles::fromRequest($request);
 
         $changeRequest = ChangeRequest::with(['editor:id,firm_id', 'currentVersionRow', 'section'])
             ->findOrFail($id);
@@ -367,6 +377,9 @@ class ChangeRequestController extends Controller
         $this->gate->assertCanAny($user, ['wc_review_change_requests', 'wc_change_request_status']);
         $this->workflow->assertReviewable($changeRequest, $user);
 
+        $request->validate(ComplianceSupportingFiles::optionalUploadRules());
+        $supportingFiles = ComplianceSupportingFiles::fromRequest($request);
+
         if ($request->filled('scheduled_at')) {
             try {
                 $scheduledAt = Carbon::parse((string) $request->input('scheduled_at'))->utc();
@@ -400,6 +413,11 @@ class ChangeRequestController extends Controller
                 ChangeRequest::STATUS_SCHEDULED,
                 $user
             );
+
+            $scheduledVersion = $changeRequest->fresh(['currentVersionRow.supportingFiles'])->currentVersionRow;
+            if ($scheduledVersion) {
+                $this->workflow->appendSupportingFilesToVersion($scheduledVersion, $supportingFiles);
+            }
 
             $hubId = null;
             if (WcDatabaseContext::active()) {
@@ -438,6 +456,11 @@ class ChangeRequestController extends Controller
             ]);
         }
 
+        $approveVersion = $changeRequest->fresh(['currentVersionRow.supportingFiles'])->currentVersionRow;
+        if ($approveVersion) {
+            $this->workflow->appendSupportingFilesToVersion($approveVersion, $supportingFiles);
+        }
+
         $result = ChangeRequestPublishService::publish($changeRequest, $user->id);
 
         return response()->json([
@@ -452,13 +475,17 @@ class ChangeRequestController extends Controller
 
     public function reject(Request $request, int $id): JsonResponse
     {
-        $request->validate(['rejection_reason' => 'required|string']);
+        $request->validate(array_merge([
+            'rejection_reason' => 'required|string',
+        ], ComplianceSupportingFiles::optionalUploadRules()));
 
         $changeRequest = ChangeRequest::with(['section', 'currentVersionRow'])->findOrFail($id);
         $user = $request->user();
 
         $this->gate->assertCanAny($user, ['wc_review_change_requests', 'wc_change_request_status']);
         $this->workflow->assertReviewable($changeRequest, $user);
+
+        $supportingFiles = ComplianceSupportingFiles::fromRequest($request);
 
         $proposed = $changeRequest->resolvedProposedContent();
         $this->workflow->unlockSectionsFromProposedContent($proposed, $changeRequest->section);
@@ -477,6 +504,11 @@ class ChangeRequestController extends Controller
             $request->rejection_reason
         );
 
+        $rejectVersion = $changeRequest->fresh(['currentVersionRow.supportingFiles'])->currentVersionRow;
+        if ($rejectVersion) {
+            $this->workflow->appendSupportingFilesToVersion($rejectVersion, $supportingFiles);
+        }
+
         $this->activityLogs->log([
             'action' => 'wc.change_request.reject',
             'description' => 'Change request rejected: '.$request->rejection_reason,
@@ -493,13 +525,21 @@ class ChangeRequestController extends Controller
 
     public function approveWithFeedback(Request $request, int $id): JsonResponse
     {
-        $request->validate(['feedback' => 'required|string|max:10000']);
+        $request->validate(array_merge([
+            'feedback' => 'required|string|max:10000',
+        ], ComplianceSupportingFiles::optionalUploadRules()));
 
         $user = $request->user();
         $this->gate->assertCanAny($user, ['wc_review_change_requests', 'wc_change_request_status']);
 
         $changeRequest = ChangeRequest::with(['section', 'currentVersionRow'])->findOrFail($id);
-        $updated = $this->workflow->approveWithFeedback($changeRequest, $user, $request->feedback, $request);
+        $updated = $this->workflow->approveWithFeedback(
+            $changeRequest,
+            $user,
+            $request->feedback,
+            ComplianceSupportingFiles::fromRequest($request),
+            $request
+        );
 
         return response()->json([
             'message' => 'Request approved with feedback. Sections unlocked for the editor to address notes.',
@@ -513,15 +553,30 @@ class ChangeRequestController extends Controller
         $user = $request->user();
         $this->gate->assertCan($user, 'wc_submit_change_requests');
 
-        $request->validate([
+        $sectionEdits = $this->normalizedSectionEditsInput($request);
+        if (! is_array($sectionEdits)) {
+            return response()->json([
+                'message' => 'section_edits must be a valid array.',
+                'errors' => ['section_edits' => ['section_edits must be a valid array.']],
+            ], 422);
+        }
+
+        $request->merge(['section_edits' => $sectionEdits]);
+        $request->validate(array_merge([
             'section_edits' => 'required|array|min:1',
             'section_edits.*.section_id' => ['required', Rule::exists(Section::class, 'id')],
             'section_edits.*.proposed_content' => 'required|string',
             'section_edits.*.current_content' => 'nullable|string',
-        ]);
+        ], ComplianceSupportingFiles::optionalUploadRules()));
 
         $changeRequest = ChangeRequest::findOrFail($id);
-        $updated = $this->workflow->resubmit($changeRequest, $user, $request->section_edits, $request);
+        $updated = $this->workflow->resubmit(
+            $changeRequest,
+            $user,
+            $sectionEdits,
+            ComplianceSupportingFiles::fromRequest($request),
+            $request
+        );
 
         return response()->json([
             'message' => 'Change request resubmitted for review.',
@@ -534,16 +589,33 @@ class ChangeRequestController extends Controller
         $user = $request->user();
         $this->gate->assertCan($user, 'wc_submit_change_requests');
 
-        $request->validate([
+        $sectionEdits = $this->normalizedSectionEditsInput($request);
+        if ($request->has('section_edits') && ! is_array($sectionEdits)) {
+            return response()->json([
+                'message' => 'section_edits must be a valid array.',
+                'errors' => ['section_edits' => ['section_edits must be a valid array.']],
+            ], 422);
+        }
+
+        if (is_array($sectionEdits)) {
+            $request->merge(['section_edits' => $sectionEdits]);
+        }
+
+        $request->validate(array_merge([
             'section_edits' => 'nullable|array|min:1',
             'section_edits.*.section_id' => ['required_with:section_edits', Rule::exists(Section::class, 'id')],
             'section_edits.*.proposed_content' => 'required_with:section_edits|string',
             'section_edits.*.current_content' => 'nullable|string',
-        ]);
+        ], ComplianceSupportingFiles::optionalUploadRules()));
 
         $changeRequest = ChangeRequest::with(['section', 'currentVersionRow'])->findOrFail($id);
-        $sectionEdits = $request->has('section_edits') ? $request->section_edits : null;
-        $result = $this->workflow->confirmFeedback($changeRequest, $user, $sectionEdits, $request);
+        $result = $this->workflow->confirmFeedback(
+            $changeRequest,
+            $user,
+            is_array($sectionEdits) ? $sectionEdits : null,
+            ComplianceSupportingFiles::fromRequest($request),
+            $request
+        );
 
         return response()->json([
             'message' => $result['cpanel_synced']
@@ -669,6 +741,28 @@ class ChangeRequestController extends Controller
             'site_url' => $siteUrl !== '' ? $siteUrl : null,
             'template_name' => $templateRequest->template_name,
         ];
+    }
+
+    /**
+     * @return list<array<string, mixed>>|null
+     */
+    private function normalizedSectionEditsInput(Request $request): ?array
+    {
+        if (! $request->has('section_edits')) {
+            return null;
+        }
+
+        $sectionEdits = $request->input('section_edits');
+        if (is_string($sectionEdits)) {
+            $decoded = json_decode($sectionEdits, true);
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+
+            return null;
+        }
+
+        return is_array($sectionEdits) ? $sectionEdits : null;
     }
 
     private function resolveTemplateRequestForSection(?Section $section): ?TemplateRequest

@@ -4,7 +4,9 @@ namespace App\Services;
 
 use App\Models\Firm;
 use App\Models\SocialMediaComplianceRequest;
+use App\Models\SocialMediaComplianceRequestAttachment;
 use App\Models\SocialMediaComplianceRequestVersion;
+use App\Support\ComplianceSupportingFiles;
 use App\Models\Hub;
 use App\Models\User;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -72,7 +74,8 @@ class SocialMediaComplianceService
      * @param  array{
      *   description?: ?string,
      *   attachment?: ?UploadedFile,
-     *   image?: ?UploadedFile
+     *   image?: ?UploadedFile,
+     *   supporting_files?: list<UploadedFile>
      * }  $data
      */
     public function submit(Hub $hub, User $user, array $data, $request = null): SocialMediaComplianceRequest
@@ -98,7 +101,10 @@ class SocialMediaComplianceService
 
         [$imagePath, $imageUrl] = $this->storeUploadedMedia($attachment);
 
-        $compliance = DB::transaction(function () use ($subject, $user, $onBehalfById, $description, $imagePath, $imageUrl) {
+        $supportingFiles = $this->supportingFilesFromData($data);
+        ComplianceSupportingFiles::assertWithinLimits($supportingFiles);
+
+        $compliance = DB::transaction(function () use ($subject, $user, $onBehalfById, $description, $imagePath, $imageUrl, $supportingFiles) {
             $compliance = SocialMediaComplianceRequest::query()->create([
                 'user_id' => $subject->id,
                 'post_id' => null,
@@ -108,7 +114,7 @@ class SocialMediaComplianceService
                 'on_behalf_by_user_id' => $onBehalfById,
             ]);
 
-            SocialMediaComplianceRequestVersion::query()->create([
+            $version = SocialMediaComplianceRequestVersion::query()->create([
                 'request_id' => $compliance->id,
                 'version_number' => 1,
                 'description' => $description,
@@ -121,7 +127,11 @@ class SocialMediaComplianceService
                 'on_behalf_by_user_id' => $onBehalfById,
             ]);
 
-            return $compliance->fresh(['currentVersionRow', 'post', 'user', 'onBehalfBy']);
+            if ($supportingFiles !== []) {
+                $this->storeSupportingFilesForVersion($version, $supportingFiles);
+            }
+
+            return $compliance->fresh(['currentVersionRow.supportingFiles', 'post', 'user', 'onBehalfBy']);
         });
 
         $this->mail->notifyRequestSubmitted($compliance, $subject);
@@ -146,7 +156,7 @@ class SocialMediaComplianceService
     }
 
     /**
-     * @param  array{description: string, attachment?: ?UploadedFile, image?: ?UploadedFile}  $data
+     * @param  array{description: string, attachment?: ?UploadedFile, image?: ?UploadedFile, supporting_files?: list<UploadedFile>}  $data
      */
     public function resubmit(Hub $hub, User $user, SocialMediaComplianceRequest $compliance, array $data, $request = null): SocialMediaComplianceRequest
     {
@@ -174,16 +184,20 @@ class SocialMediaComplianceService
             [$imagePath, $imageUrl] = $this->storeUploadedMedia($upload);
         }
 
+        $supportingFiles = $this->supportingFilesFromData($data);
+        ComplianceSupportingFiles::assertWithinLimits($supportingFiles);
+        $hasNewSupportingFiles = $supportingFiles !== [];
+
         $newVersion = (int) $compliance->current_version + 1;
         $onBehalfById = $this->actingAdvisors->onBehalfById($user, $this->actingAdvisors->requireSubject($user));
 
-        DB::transaction(function () use ($compliance, $user, $description, $imagePath, $imageUrl, $newVersion, $onBehalfById) {
+        DB::transaction(function () use ($compliance, $user, $description, $imagePath, $imageUrl, $newVersion, $onBehalfById, $current, $supportingFiles, $hasNewSupportingFiles) {
             $compliance->update([
                 'current_version' => $newVersion,
                 'on_behalf_by_user_id' => $onBehalfById ?? $compliance->on_behalf_by_user_id,
             ]);
 
-            SocialMediaComplianceRequestVersion::query()->create([
+            $version = SocialMediaComplianceRequestVersion::query()->create([
                 'request_id' => $compliance->id,
                 'version_number' => $newVersion,
                 'description' => $description,
@@ -195,9 +209,15 @@ class SocialMediaComplianceService
                 'feedback' => '',
                 'on_behalf_by_user_id' => $onBehalfById,
             ]);
+
+            if ($hasNewSupportingFiles) {
+                $this->storeSupportingFilesForVersion($version, $supportingFiles);
+            } else {
+                $this->copySupportingFilesFromVersion($current, $version);
+            }
         });
 
-        $compliance = $compliance->fresh(['currentVersionRow', 'assignee', 'post', 'user', 'onBehalfBy']);
+        $compliance = $compliance->fresh(['currentVersionRow.supportingFiles', 'assignee', 'post', 'user', 'onBehalfBy']);
 
         if ($compliance->assignee) {
             $this->mail->notifyResubmitted($compliance, $compliance->assignee, $user);
@@ -224,7 +244,7 @@ class SocialMediaComplianceService
     /**
      * Confirm or re-upload after "Approved with Feedback".
      *
-     * @param  array{image?: ?UploadedFile}  $data
+     * @param  array{attachment?: ?UploadedFile, image?: ?UploadedFile, supporting_files?: list<UploadedFile>}  $data
      */
     public function confirmApprovedWithFeedback(
         Hub $hub,
@@ -256,6 +276,10 @@ class SocialMediaComplianceService
             $feedback = '';
         }
 
+        $supportingFiles = $this->supportingFilesFromData($data);
+        ComplianceSupportingFiles::assertWithinLimits($supportingFiles);
+        $hasNewSupportingFiles = $supportingFiles !== [];
+
         DB::transaction(function () use (
             $compliance,
             $user,
@@ -263,7 +287,9 @@ class SocialMediaComplianceService
             $newVersion,
             $imagePath,
             $imageUrl,
-            $feedback
+            $feedback,
+            $supportingFiles,
+            $hasNewSupportingFiles
         ) {
             $onBehalfById = $this->actingAdvisors->onBehalfById(
                 $user,
@@ -275,7 +301,7 @@ class SocialMediaComplianceService
                 'on_behalf_by_user_id' => $onBehalfById ?? $compliance->on_behalf_by_user_id,
             ]);
 
-            SocialMediaComplianceRequestVersion::query()->create([
+            $version = SocialMediaComplianceRequestVersion::query()->create([
                 'request_id' => $compliance->id,
                 'version_number' => $newVersion,
                 'description' => $current->description,
@@ -289,9 +315,15 @@ class SocialMediaComplianceService
                 'reviewed_at' => $current->reviewed_at,
                 'on_behalf_by_user_id' => $onBehalfById,
             ]);
+
+            if ($hasNewSupportingFiles) {
+                $this->storeSupportingFilesForVersion($version, $supportingFiles);
+            } else {
+                $this->copySupportingFilesFromVersion($current, $version);
+            }
         });
 
-        $compliance = $compliance->fresh(['currentVersionRow', 'post', 'user', 'onBehalfBy']);
+        $compliance = $compliance->fresh(['currentVersionRow.supportingFiles', 'post', 'user', 'onBehalfBy']);
 
         $this->activityLogs->log([
             'action' => 'smc.confirm_feedback',
@@ -409,11 +441,11 @@ class SocialMediaComplianceService
             ]);
         }
 
-        return $compliance->fresh(['currentVersionRow', 'assignee', 'post', 'user']);
+        return $compliance->fresh(['currentVersionRow.supportingFiles', 'assignee', 'post', 'user']);
     }
 
     /**
-     * @param  array{status: string, feedback?: ?string}  $data
+     * @param  array{status: string, feedback?: ?string, supporting_files?: list<UploadedFile>}  $data
      */
     public function review(
         Hub $hub,
@@ -451,6 +483,9 @@ class SocialMediaComplianceService
         }
 
         $feedback = trim((string) ($data['feedback'] ?? ''));
+        $supportingFiles = $this->supportingFilesFromData($data);
+        ComplianceSupportingFiles::assertWithinLimits($supportingFiles);
+
         $version = $compliance->currentVersionRow;
         if (! $version) {
             throw ValidationException::withMessages([
@@ -465,7 +500,15 @@ class SocialMediaComplianceService
             'reviewed_at' => now(),
         ]);
 
-        $compliance = $compliance->fresh(['currentVersionRow', 'user', 'post', 'assignee']);
+        if ($supportingFiles !== []) {
+            $version->loadMissing('supportingFiles');
+            $nextOrder = $version->supportingFiles->isEmpty()
+                ? 0
+                : ((int) $version->supportingFiles->max('sort_order')) + 1;
+            $this->storeSupportingFilesForVersion($version, $supportingFiles, $nextOrder);
+        }
+
+        $compliance = $compliance->fresh(['currentVersionRow.supportingFiles', 'user', 'post', 'assignee']);
 
         if ($compliance->user) {
             $this->mail->notifyStatusUpdated(
@@ -499,7 +542,7 @@ class SocialMediaComplianceService
      * Manager-style status override: creates a new version with the chosen status + comment.
      * Content (description / image) is copied from the current version.
      *
-     * @param  array{status: string, comment?: ?string}  $data
+     * @param  array{status: string, comment?: ?string, supporting_files?: list<UploadedFile>}  $data
      */
     public function changeStatus(
         Hub $hub,
@@ -541,12 +584,14 @@ class SocialMediaComplianceService
         }
 
         $comment = trim((string) ($data['comment'] ?? ''));
+        $supportingFiles = $this->supportingFilesFromData($data);
+        ComplianceSupportingFiles::assertWithinLimits($supportingFiles);
         $newVersion = (int) $compliance->current_version + 1;
 
-        DB::transaction(function () use ($compliance, $actor, $current, $newVersion, $status, $comment) {
+        DB::transaction(function () use ($compliance, $actor, $current, $newVersion, $status, $comment, $supportingFiles) {
             $compliance->update(['current_version' => $newVersion]);
 
-            SocialMediaComplianceRequestVersion::query()->create([
+            $version = SocialMediaComplianceRequestVersion::query()->create([
                 'request_id' => $compliance->id,
                 'version_number' => $newVersion,
                 'description' => $current->description,
@@ -559,9 +604,19 @@ class SocialMediaComplianceService
                 'reviewed_by' => $actor->name,
                 'reviewed_at' => now(),
             ]);
+
+            $this->copySupportingFilesFromVersion($current, $version);
+
+            if ($supportingFiles !== []) {
+                $version->loadMissing('supportingFiles');
+                $nextOrder = $version->supportingFiles->isEmpty()
+                    ? 0
+                    : ((int) $version->supportingFiles->max('sort_order')) + 1;
+                $this->storeSupportingFilesForVersion($version, $supportingFiles, $nextOrder);
+            }
         });
 
-        $compliance = $compliance->fresh(['currentVersionRow', 'user', 'post', 'assignee']);
+        $compliance = $compliance->fresh(['currentVersionRow.supportingFiles', 'user', 'post', 'assignee']);
 
         if ($compliance->user) {
             $this->mail->notifyStatusUpdated(
@@ -607,7 +662,7 @@ class SocialMediaComplianceService
 
         $query = SocialMediaComplianceRequest::query()
             ->with([
-                'currentVersionRow',
+                'currentVersionRow.supportingFiles',
                 'assignee:id,name,email',
                 'post:id,title,type',
                 'user:id,name,email,firm_id',
@@ -657,7 +712,7 @@ class SocialMediaComplianceService
 
         $query = SocialMediaComplianceRequest::query()
             ->with([
-                'currentVersionRow',
+                'currentVersionRow.supportingFiles',
                 'assignee:id,name,email',
                 'user:id,name,email,firm_id',
                 'user.firm:id,name',
@@ -834,6 +889,57 @@ class SocialMediaComplianceService
         $path = $file->store('social-media-compliance', 'public');
 
         return [$path, Storage::disk('public')->url($path)];
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return list<UploadedFile>
+     */
+    private function supportingFilesFromData(array $data): array
+    {
+        return ComplianceSupportingFiles::normalize($data['supporting_files'] ?? []);
+    }
+
+    /**
+     * @param  list<UploadedFile>  $files
+     */
+    private function storeSupportingFilesForVersion(
+        SocialMediaComplianceRequestVersion $version,
+        array $files,
+        ?int $startOrder = null
+    ): void {
+        $baseOrder = $startOrder ?? 0;
+
+        foreach (array_values($files) as $index => $file) {
+            $path = $file->store('social-media-compliance-files', 'public');
+            SocialMediaComplianceRequestAttachment::query()->create([
+                'version_id' => $version->id,
+                'original_name' => $file->getClientOriginalName(),
+                'file_path' => $path,
+                'file_url' => Storage::disk('public')->url($path),
+                'mime_type' => $file->getClientMimeType() ?: $file->getMimeType(),
+                'size_bytes' => (int) $file->getSize(),
+                'sort_order' => $baseOrder + $index,
+            ]);
+        }
+    }
+
+    private function copySupportingFilesFromVersion(
+        SocialMediaComplianceRequestVersion $from,
+        SocialMediaComplianceRequestVersion $to
+    ): void {
+        $from->loadMissing('supportingFiles');
+        foreach ($from->supportingFiles as $index => $attachment) {
+            SocialMediaComplianceRequestAttachment::query()->create([
+                'version_id' => $to->id,
+                'original_name' => $attachment->original_name,
+                'file_path' => $attachment->file_path,
+                'file_url' => $attachment->file_url,
+                'mime_type' => $attachment->mime_type,
+                'size_bytes' => $attachment->size_bytes,
+                'sort_order' => $attachment->sort_order ?? $index,
+            ]);
+        }
     }
 
     /**

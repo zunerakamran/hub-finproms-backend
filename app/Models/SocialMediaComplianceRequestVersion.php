@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Models\WebsiteCompliance\UsesWcDatabaseContext;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Storage;
 
 class SocialMediaComplianceRequestVersion extends Model
@@ -47,6 +48,13 @@ class SocialMediaComplianceRequestVersion extends Model
         return $this->belongsTo(User::class, 'submitted_by');
     }
 
+    public function supportingFiles(): HasMany
+    {
+        return $this->hasMany(SocialMediaComplianceRequestAttachment::class, 'version_id')
+            ->orderBy('sort_order')
+            ->orderBy('id');
+    }
+
     public function resolvedImageUrl(): ?string
     {
         if (filled($this->image_url)) {
@@ -71,6 +79,8 @@ class SocialMediaComplianceRequestVersion extends Model
      */
     public function toApiArray(): array
     {
+        $this->loadMissing('supportingFiles');
+
         return [
             'id' => $this->id,
             'request_id' => $this->request_id,
@@ -78,6 +88,10 @@ class SocialMediaComplianceRequestVersion extends Model
             'description' => $this->description,
             'image_path' => $this->image_path,
             'image_url' => $this->resolvedImageUrl(),
+            'supporting_files' => $this->supportingFiles
+                ->map(fn (SocialMediaComplianceRequestAttachment $a) => $a->toApiArray())
+                ->values()
+                ->all(),
             'submitted_by' => $this->submitted_by,
             'submitted_at' => optional($this->submitted_at)?->toIso8601String(),
             'status' => $this->status,

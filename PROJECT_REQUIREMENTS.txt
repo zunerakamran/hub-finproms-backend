@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-01 (terms & conditions + login OTP + email verification)
+Last updated: 2026-10-01 (compliance optional supporting files)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -310,17 +310,30 @@ Notes:
   reviewers; reviewers set Pending / Approved / Rejected / Approved with
   Feedback; version history supports reject-resubmit and approve-with-feedback
   confirm/reupload. Emails notify admins, assignees, and submitters.
+- Optional **supporting files** (PDF, Office, images, ZIP; max 10 × 10 MB) may
+  be attached on submit, review (approve/reject), and change-status, in addition
+  to the required media attachment. Field: `supporting_files[]`. Copied across
+  versions on resubmit / change-status when no new files are uploaded.
 - All Social Media Compliance mutations and report/chart views are written to
   activity_logs (actions: smc.submit / assign / unassign / review / resubmit /
-  confirm_feedback / reports.* / charts.*).
+  confirm_feedback / change_status / reports.* / charts.*).
 
 3.3b General Compliance
 - Same review flow as Social Media Compliance (submit → assign → review →
   versions / reports), but submissions are free-form: required description
-  textarea + multiple file attachments (PDF, Office, images, ZIP, etc.).
+  textarea + optional multiple supporting files / attachments (PDF, Office,
+  images, ZIP, etc.; max 10 × 10 MB).
+- Supporting files may also be attached when reviewing (approve/reject) and
+  when changing request status (appended to the current/new version).
+- Accepts multipart field names `attachments[]` or `supporting_files[]`.
 - Power Admin enables the **General Compliance** module per hub. Capabilities
   (`gc_*`) are blurred while the module is off.
 - Activity logs use `gc.*` actions.
+
+3.3c Website Compliance supporting files
+- Change requests accept optional supporting files on submit, approve, reject,
+  approve-with-feedback, and change-status (`supporting_files[]`, same limits
+  as other compliance modules). Stored per change-request version.
 
 3.4 Other Features (later)
 - Additional features to be added over time; keep architecture flexible.
@@ -965,6 +978,7 @@ STEP 1 — Shared hub core (content hub)
 [x] Social Media Compliance capability section (blurred while module off)
 [x] Social Media Compliance API — submit / assign / review / versions / reports / charts
 [x] Social Media Compliance activity logging (smc.* actions in activity_logs)
+[x] Optional compliance supporting files (SMC / GC / WC) on submit, review/approve-reject, and change-status
 [x] Approver / manager dedicated front-end UIs (SMC & ops flows)
 [x] Power Admin user management UI (pa_manage_users_roles — create/update/delete/roles)
 [x] Control white labelled hubs via dashboard hub switcher (dashboard_control_white_label_hubs)
@@ -981,8 +995,8 @@ STEP 1 — Shared hub core (content hub)
 [ ] AI post/reel generation by FinProms admin (later)
 [ ] In-app post editing for buyers (later)
 [x] Social Media Compliance check flow (module + APIs)
-[x] General Compliance module + APIs (description + multi-file attachments)
-[x] Website Compliance module + APIs (templates, sections, change requests, cPanel deploy)
+[x] General Compliance module + APIs (description + optional multi-file supporting files)
+[x] Website Compliance module + APIs (templates, sections, change requests, cPanel deploy, supporting files)
 
 ================================================================================
 END OF REQUIREMENTS

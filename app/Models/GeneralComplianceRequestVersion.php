@@ -70,6 +70,10 @@ class GeneralComplianceRequestVersion extends Model
                 ->map(fn (GeneralComplianceRequestAttachment $a) => $a->toApiArray())
                 ->values()
                 ->all(),
+            'supporting_files' => $this->attachments
+                ->map(fn (GeneralComplianceRequestAttachment $a) => $a->toApiArray())
+                ->values()
+                ->all(),
             'submitted_by' => $this->submitted_by,
             'submitted_at' => optional($this->submitted_at)?->toIso8601String(),
             'status' => $this->status,

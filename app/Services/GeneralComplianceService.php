@@ -80,7 +80,8 @@ class GeneralComplianceService
      * @param  array{
      *   description: string,
      *   content_type: string,
-     *   attachments: list<UploadedFile>
+     *   attachments?: list<UploadedFile>,
+     *   supporting_files?: list<UploadedFile>
      * }  $data
      */
     public function submit(Hub $hub, User $user, array $data, $request = null): GeneralComplianceRequest
@@ -99,12 +100,7 @@ class GeneralComplianceService
 
         $contentType = $this->assertValidContentType($data['content_type'] ?? null);
 
-        $files = $this->normalizeUploadedFiles($data['attachments'] ?? []);
-        if ($files === []) {
-            throw ValidationException::withMessages([
-                'attachments' => 'At least one attachment is required.',
-            ]);
-        }
+        $files = $this->complianceUploadsFromData($data);
         $this->assertAttachmentLimits($files);
 
         $compliance = DB::transaction(function () use ($subject, $user, $onBehalfById, $description, $contentType, $files) {
@@ -128,7 +124,9 @@ class GeneralComplianceService
                 'on_behalf_by_user_id' => $onBehalfById,
             ]);
 
-            $this->storeAttachmentsForVersion($version, $files);
+            if ($files !== []) {
+                $this->storeAttachmentsForVersion($version, $files);
+            }
 
             return $compliance->fresh(['currentVersionRow.attachments', 'user', 'onBehalfBy']);
         });
@@ -157,7 +155,7 @@ class GeneralComplianceService
     }
 
     /**
-     * @param  array{description: string, content_type: string, attachments?: list<UploadedFile>}  $data
+     * @param  array{description: string, content_type: string, attachments?: list<UploadedFile>, supporting_files?: list<UploadedFile>}  $data
      */
     public function resubmit(Hub $hub, User $user, GeneralComplianceRequest $compliance, array $data, $request = null): GeneralComplianceRequest
     {
@@ -182,7 +180,7 @@ class GeneralComplianceService
             $data['content_type'] ?? $current->content_type
         );
 
-        $files = $this->normalizeUploadedFiles($data['attachments'] ?? []);
+        $files = $this->complianceUploadsFromData($data);
         $this->assertAttachmentLimits($files);
         $hasNewFiles = $files !== [];
 
@@ -243,7 +241,7 @@ class GeneralComplianceService
     /**
      * Confirm or re-upload after "Approved with Feedback".
      *
-     * @param  array{attachments?: list<UploadedFile>}  $data
+     * @param  array{attachments?: list<UploadedFile>, supporting_files?: list<UploadedFile>}  $data
      */
     public function confirmApprovedWithFeedback(
         Hub $hub,
@@ -262,7 +260,7 @@ class GeneralComplianceService
             ]);
         }
 
-        $files = $this->normalizeUploadedFiles($data['attachments'] ?? []);
+        $files = $this->complianceUploadsFromData($data);
         $this->assertAttachmentLimits($files);
         $hasNewFiles = $files !== [];
 
@@ -431,7 +429,7 @@ class GeneralComplianceService
     }
 
     /**
-     * @param  array{status: string, feedback?: ?string}  $data
+     * @param  array{status: string, feedback?: ?string, attachments?: list<UploadedFile>, supporting_files?: list<UploadedFile>}  $data
      */
     public function review(
         Hub $hub,
@@ -469,6 +467,9 @@ class GeneralComplianceService
         }
 
         $feedback = trim((string) ($data['feedback'] ?? ''));
+        $files = $this->complianceUploadsFromData($data);
+        $this->assertAttachmentLimits($files);
+
         $version = $compliance->currentVersionRow;
         if (! $version) {
             throw ValidationException::withMessages([
@@ -482,6 +483,14 @@ class GeneralComplianceService
             'reviewed_by' => $actor->name,
             'reviewed_at' => now(),
         ]);
+
+        if ($files !== []) {
+            $version->loadMissing('attachments');
+            $nextOrder = $version->attachments->isEmpty()
+                ? 0
+                : ((int) $version->attachments->max('sort_order')) + 1;
+            $this->storeAttachmentsForVersion($version, $files, $nextOrder);
+        }
 
         $compliance = $compliance->fresh(['currentVersionRow.attachments', 'user', 'assignee']);
 
@@ -517,7 +526,7 @@ class GeneralComplianceService
      * Manager-style status override: creates a new version with the chosen status + comment.
      * Description and attachments are copied from the current version.
      *
-     * @param  array{status: string, comment?: ?string}  $data
+     * @param  array{status: string, comment?: ?string, attachments?: list<UploadedFile>, supporting_files?: list<UploadedFile>}  $data
      */
     public function changeStatus(
         Hub $hub,
@@ -559,9 +568,11 @@ class GeneralComplianceService
         }
 
         $comment = trim((string) ($data['comment'] ?? ''));
+        $files = $this->complianceUploadsFromData($data);
+        $this->assertAttachmentLimits($files);
         $newVersion = (int) $compliance->current_version + 1;
 
-        DB::transaction(function () use ($compliance, $actor, $current, $newVersion, $status, $comment) {
+        DB::transaction(function () use ($compliance, $actor, $current, $newVersion, $status, $comment, $files) {
             $compliance->update(['current_version' => $newVersion]);
 
             $version = GeneralComplianceRequestVersion::query()->create([
@@ -578,6 +589,14 @@ class GeneralComplianceService
             ]);
 
             $this->copyAttachmentsFromVersion($current, $version);
+
+            if ($files !== []) {
+                $version->loadMissing('attachments');
+                $nextOrder = $version->attachments->isEmpty()
+                    ? 0
+                    : ((int) $version->attachments->max('sort_order')) + 1;
+                $this->storeAttachmentsForVersion($version, $files, $nextOrder);
+            }
         });
 
         $compliance = $compliance->fresh(['currentVersionRow.attachments', 'user', 'assignee']);
@@ -844,6 +863,20 @@ class GeneralComplianceService
     }
 
     /**
+     * @param  array<string, mixed>  $data
+     * @return list<UploadedFile>
+     */
+    private function complianceUploadsFromData(array $data): array
+    {
+        $supporting = $this->normalizeUploadedFiles($data['supporting_files'] ?? []);
+        if ($supporting !== []) {
+            return $supporting;
+        }
+
+        return $this->normalizeUploadedFiles($data['attachments'] ?? []);
+    }
+
+    /**
      * @param  mixed  $files
      * @return list<UploadedFile>
      */
@@ -901,8 +934,13 @@ class GeneralComplianceService
     /**
      * @param  list<UploadedFile>  $files
      */
-    private function storeAttachmentsForVersion(GeneralComplianceRequestVersion $version, array $files): void
-    {
+    private function storeAttachmentsForVersion(
+        GeneralComplianceRequestVersion $version,
+        array $files,
+        ?int $startOrder = null
+    ): void {
+        $baseOrder = $startOrder ?? 0;
+
         foreach (array_values($files) as $index => $file) {
             $path = $file->store('general-compliance', 'public');
             GeneralComplianceRequestAttachment::query()->create([
@@ -912,7 +950,7 @@ class GeneralComplianceService
                 'file_url' => Storage::disk('public')->url($path),
                 'mime_type' => $file->getClientMimeType() ?: $file->getMimeType(),
                 'size_bytes' => (int) $file->getSize(),
-                'sort_order' => $index,
+                'sort_order' => $baseOrder + $index,
             ]);
         }
     }

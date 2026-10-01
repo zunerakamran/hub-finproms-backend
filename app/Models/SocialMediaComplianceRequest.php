@@ -110,7 +110,7 @@ class SocialMediaComplianceRequest extends Model
         }
 
         $this->loadMissing([
-            'currentVersionRow',
+            'currentVersionRow.supportingFiles',
             'assignee:id,name,email',
             'post:id,title,type,attachment_path,attachment_name,attachment_mime',
             'user:id,name,email,firm_id',
@@ -170,6 +170,9 @@ class SocialMediaComplianceRequest extends Model
             ] : null,
             'description' => $version?->description,
             'image_url' => $version?->resolvedImageUrl(),
+            'supporting_files' => $version
+                ? $version->supportingFiles->map(fn (SocialMediaComplianceRequestAttachment $a) => $a->toApiArray())->values()->all()
+                : [],
             'status' => $version?->status ?? self::STATUS_PENDING,
             'feedback' => $version?->feedback,
             'reviewed_by' => $version?->reviewed_by,
@@ -179,7 +182,7 @@ class SocialMediaComplianceRequest extends Model
         ];
 
         if ($includeVersions) {
-            $this->loadMissing('versions');
+            $this->loadMissing('versions.supportingFiles');
             $payload['versions'] = $this->versions
                 ->sortByDesc('version_number')
                 ->values()

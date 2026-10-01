@@ -13,6 +13,7 @@ use App\Services\CapabilitiesMatrixService;
 use App\Services\FirmComplianceVisibilityService;
 use App\Services\GeneralComplianceService;
 use App\Services\HubService;
+use App\Support\ComplianceSupportingFiles;
 use App\Support\DateFormat;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -164,22 +165,21 @@ class GeneralComplianceController extends Controller
         $user = $request->user();
         $hub = $this->gcHub($user);
 
-        $validated = $request->validate([
+        $validated = $request->validate(array_merge([
             'description' => ['required', 'string', 'max:10000'],
             'content_type' => ['required', 'string', 'max:100'],
-            'attachments' => ['required', 'array', 'min:1', 'max:'.GeneralComplianceService::MAX_ATTACHMENTS],
+            'attachments' => ['nullable', 'array', 'max:'.GeneralComplianceService::MAX_ATTACHMENTS],
             'attachments.*' => [
-                'required',
                 'file',
                 'mimes:'.GeneralComplianceService::ATTACHMENT_MIMES,
                 'max:'.GeneralComplianceService::MAX_ATTACHMENT_KB,
             ],
-        ]);
+        ], ComplianceSupportingFiles::optionalUploadRules()));
 
         $compliance = $this->compliance->submit($hub, $user, [
             'description' => $validated['description'],
             'content_type' => $validated['content_type'],
-            'attachments' => $request->file('attachments', []),
+            'attachments' => ComplianceSupportingFiles::fromRequest($request),
         ], $request);
 
         return response()->json([
@@ -194,7 +194,7 @@ class GeneralComplianceController extends Controller
         $user = $request->user();
         $hub = $this->gcHub($user);
 
-        $validated = $request->validate([
+        $validated = $request->validate(array_merge([
             'description' => ['required', 'string', 'max:10000'],
             'content_type' => ['required', 'string', 'max:100'],
             'attachments' => ['nullable', 'array', 'max:'.GeneralComplianceService::MAX_ATTACHMENTS],
@@ -203,12 +203,12 @@ class GeneralComplianceController extends Controller
                 'mimes:'.GeneralComplianceService::ATTACHMENT_MIMES,
                 'max:'.GeneralComplianceService::MAX_ATTACHMENT_KB,
             ],
-        ]);
+        ], ComplianceSupportingFiles::optionalUploadRules()));
 
         $compliance = $this->compliance->resubmit($hub, $user, $generalComplianceRequest, [
             'description' => $validated['description'],
             'content_type' => $validated['content_type'],
-            'attachments' => $request->file('attachments', []) ?: [],
+            'attachments' => ComplianceSupportingFiles::fromRequest($request),
         ], $request);
 
         return response()->json([
@@ -223,20 +223,20 @@ class GeneralComplianceController extends Controller
         $user = $request->user();
         $hub = $this->gcHub($user);
 
-        $request->validate([
+        $request->validate(array_merge([
             'attachments' => ['nullable', 'array', 'max:'.GeneralComplianceService::MAX_ATTACHMENTS],
             'attachments.*' => [
                 'file',
                 'mimes:'.GeneralComplianceService::ATTACHMENT_MIMES,
                 'max:'.GeneralComplianceService::MAX_ATTACHMENT_KB,
             ],
-        ]);
+        ], ComplianceSupportingFiles::optionalUploadRules()));
 
         $compliance = $this->compliance->confirmApprovedWithFeedback(
             $hub,
             $user,
             $generalComplianceRequest,
-            ['attachments' => $request->file('attachments', []) ?: []],
+            ['attachments' => ComplianceSupportingFiles::fromRequest($request)],
             $request
         );
 
@@ -274,10 +274,18 @@ class GeneralComplianceController extends Controller
         $user = $request->user();
         $hub = $this->gcHub($user);
 
-        $validated = $request->validate([
+        $validated = $request->validate(array_merge([
             'status' => ['required', 'string', 'in:'.implode(',', GeneralComplianceRequest::STATUSES)],
             'feedback' => ['nullable', 'string', 'max:10000'],
-        ]);
+            'attachments' => ['nullable', 'array', 'max:'.GeneralComplianceService::MAX_ATTACHMENTS],
+            'attachments.*' => [
+                'file',
+                'mimes:'.GeneralComplianceService::ATTACHMENT_MIMES,
+                'max:'.GeneralComplianceService::MAX_ATTACHMENT_KB,
+            ],
+        ], ComplianceSupportingFiles::optionalUploadRules()));
+
+        $validated['attachments'] = ComplianceSupportingFiles::fromRequest($request);
 
         $compliance = $this->compliance->review($hub, $user, $generalComplianceRequest, $validated, $request);
 
@@ -293,10 +301,18 @@ class GeneralComplianceController extends Controller
         $user = $request->user();
         $hub = $this->gcHub($user);
 
-        $validated = $request->validate([
+        $validated = $request->validate(array_merge([
             'status' => ['required', 'string', 'in:'.implode(',', GeneralComplianceRequest::STATUSES)],
             'comment' => ['nullable', 'string', 'max:10000'],
-        ]);
+            'attachments' => ['nullable', 'array', 'max:'.GeneralComplianceService::MAX_ATTACHMENTS],
+            'attachments.*' => [
+                'file',
+                'mimes:'.GeneralComplianceService::ATTACHMENT_MIMES,
+                'max:'.GeneralComplianceService::MAX_ATTACHMENT_KB,
+            ],
+        ], ComplianceSupportingFiles::optionalUploadRules()));
+
+        $validated['attachments'] = ComplianceSupportingFiles::fromRequest($request);
 
         $compliance = $this->compliance->changeStatus(
             $hub,

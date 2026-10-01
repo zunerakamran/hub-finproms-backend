@@ -5,6 +5,7 @@ namespace App\Models\WebsiteCompliance;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ChangeRequestVersion extends Model
 {
@@ -43,12 +44,20 @@ class ChangeRequestVersion extends Model
         return $this->belongsTo(User::class, 'submitted_by');
     }
 
+    public function supportingFiles(): HasMany
+    {
+        return $this->hasMany(ChangeRequestAttachment::class, 'version_id')
+            ->orderBy('sort_order')
+            ->orderBy('id');
+    }
+
     /**
      * @return array<string, mixed>
      */
     public function toApiArray(): array
     {
         $decoded = json_decode((string) $this->proposed_content, true);
+        $this->loadMissing('supportingFiles');
 
         return [
             'id' => $this->id,
@@ -56,6 +65,10 @@ class ChangeRequestVersion extends Model
             'version_number' => $this->version_number,
             'proposed_content' => $this->proposed_content,
             'section_edits' => is_array($decoded) ? $decoded : null,
+            'supporting_files' => $this->supportingFiles
+                ->map(fn (ChangeRequestAttachment $a) => $a->toApiArray())
+                ->values()
+                ->all(),
             'status' => $this->status,
             'feedback' => $this->feedback,
             'submitted_by' => $this->submitted_by,
