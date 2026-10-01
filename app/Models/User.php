@@ -106,6 +106,8 @@ class User extends Authenticatable
         'acting_advisor_id',
         'firm_id',
         'modules',
+        'terms_accepted_at',
+        'terms_accepted_version',
     ];
 
     protected $hidden = [
@@ -122,6 +124,8 @@ class User extends Authenticatable
     {
         return [
             'email_verified_at' => 'datetime',
+            'terms_accepted_at' => 'datetime',
+            'terms_accepted_version' => 'integer',
             'password' => 'hashed',
             'credits' => 'integer',
             'is_advisor' => 'boolean',
@@ -284,6 +288,27 @@ class User extends Authenticatable
     {
         return $this->forceFill([
             'email_verified_at' => $this->freshTimestamp(),
+        ])->save();
+    }
+
+    public function hasAcceptedTerms(Hub $hub): bool
+    {
+        if (! $hub->termsPublicPayload()['required']) {
+            return true;
+        }
+
+        if ($this->terms_accepted_at === null || $this->terms_accepted_version === null) {
+            return false;
+        }
+
+        return (int) $this->terms_accepted_version === (int) $hub->termsVersion();
+    }
+
+    public function acceptTerms(Hub $hub): bool
+    {
+        return $this->forceFill([
+            'terms_accepted_at' => $this->freshTimestamp(),
+            'terms_accepted_version' => $hub->termsVersion(),
         ])->save();
     }
 

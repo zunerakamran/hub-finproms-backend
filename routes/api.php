@@ -44,6 +44,7 @@ use App\Http\Controllers\Api\PurchaseController;
 use App\Http\Controllers\Api\SettingController;
 use App\Http\Controllers\Api\RoleDisplayNameController;
 use App\Http\Controllers\Api\EmailTemplateController;
+use App\Http\Controllers\Api\TermsController;
 use App\Http\Controllers\Api\ComplianceStatusDisplayNameController;
 use App\Http\Controllers\Api\StripeWebhookController;
 use App\Http\Controllers\Api\SubscriptionController;
@@ -67,6 +68,7 @@ Route::prefix('auth')->group(function () {
     Route::middleware('auth:sanctum')->group(function () {
         Route::post('/logout', [AuthController::class, 'logout']);
         Route::get('/me', [AuthController::class, 'me']);
+        Route::post('/accept-terms', [AuthController::class, 'acceptTerms']);
     });
 });
 
@@ -385,6 +387,12 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/email-templates/{event}', [EmailTemplateController::class, 'show']);
             Route::put('/email-templates/{event}/{audience}', [EmailTemplateController::class, 'update']);
             Route::post('/email-templates/{event}/{audience}/reset', [EmailTemplateController::class, 'reset']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_terms')->group(function () {
+            Route::get('/terms', [TermsController::class, 'show']);
+            Route::put('/terms', [TermsController::class, 'update']);
+            Route::post('/terms/reset', [TermsController::class, 'reset']);
         });
 
         Route::middleware('hub_can:dashboard_manage_compliance_status_display_names')->group(function () {

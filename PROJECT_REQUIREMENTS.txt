@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-01 (login OTP two-factor + Shared Hub email verification)
+Last updated: 2026-10-01 (terms & conditions + login OTP + email verification)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -147,6 +147,23 @@ Deploy rule:
 - Public GET /hub exposes `auth.login_otp_required`.
 - Email template catalog event: `login_otp`.
 - Frontend Login shows a second step for the code when the hub requires OTP.
+
+2.2c Terms & Conditions (all hub types)
+- Capability matrix key: `dashboard_manage_terms` (“Manage terms & conditions”)
+  in Hub operations. Defaults ON for hub-admin style roles on Shared and
+  White-label (and available on Central). Who may edit content is controlled
+  per role on the Capabilities matrix.
+- Hub stores rich HTML Terms & Conditions (`hubs.terms_and_conditions` JSON:
+  content, version, updated_at). Each hub type seeds relevant default copy
+  (Shared catalogue / White-label private firm / Central control plane) which
+  capable users can edit via a rich-text editor.
+- On first login (and when the version changes after an edit), authenticated
+  users must view and accept the current terms before using the app.
+  Acceptance is stored on the user: `terms_accepted_at`, `terms_accepted_version`.
+- APIs: GET/PUT /api/client-admin/terms, POST /api/client-admin/terms/reset
+  (hub_can:dashboard_manage_terms); POST /api/auth/accept-terms (auth).
+- Public GET /hub includes `auth.terms` { required, version, content }.
+- Frontend: /my-dashboard/terms admin page; TermsGate modal after login.
 
 2.3 Content metrics
 - Each post/reel tracks:
@@ -721,9 +738,9 @@ Notes:
 --------------------------------------------------------------------------------
 - Every meaningful user activity is recorded in an activity_logs audit trail
   (per hub), including:
-  - Auth: register, email verified, login OTP sent/verified, login, logout,
-    failed login, blocked login (suspended / discontinued / invite-only /
-    email unverified)
+  - Auth: register, email verified, login OTP sent/verified, terms accepted,
+    login, logout, failed login, blocked login (suspended / discontinued /
+    invite-only / email unverified)
   - Successful mutating API actions (POST / PUT / PATCH / DELETE): content,
     plans, settings, advisor import/discontinue, billing, capabilities, hubs,
     purchases, subscriptions, etc.
@@ -868,6 +885,9 @@ STEP 1 — Shared hub core (content hub)
     (verify-email + resend; welcome mail after verify; admin/import users auto-verified)
 [x] Hub Functionalities: require_login_otp — email OTP on every login when enabled
     (all hub types; verify-login-otp + resend-login-otp; Login UI second step)
+[x] Capability: dashboard_manage_terms — who can edit Terms & Conditions (all hubs)
+[x] Terms & Conditions rich content + first-login accept gate (saved on user;
+    versioned; type-specific defaults for Shared / White-label / Central)
 [x] Checklist opposite pairs auto-uncheck (public/private, paid/unlimited)
 [x] Frontend: power_admin hubs + checklist UI
 [x] White-labelled private advisor import (Excel/CSV)

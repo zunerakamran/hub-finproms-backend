@@ -112,7 +112,7 @@ class AuthController extends Controller
 
         return response()->json([
             'message' => 'Email verified successfully. You are now signed in.',
-            'user' => $user,
+            'user' => $this->decorateUserForAuthResponse($user),
             'token' => $token,
         ]);
     }
@@ -476,9 +476,18 @@ class AuthController extends Controller
 
         return response()->json([
             'message' => 'Login successful.',
-            'user' => $user,
+            'user' => $this->decorateUserForAuthResponse($user),
             'token' => $token,
         ]);
+    }
+
+    private function decorateUserForAuthResponse(User $user): User
+    {
+        $hub = $this->hubs->current();
+        $user->setAttribute('terms_accepted', $user->hasAcceptedTerms($hub));
+        $user->setAttribute('terms_required_version', $hub->termsVersion());
+
+        return $user;
     }
 
     public function logout(Request $request): JsonResponse
@@ -499,6 +508,38 @@ class AuthController extends Controller
 
         return response()->json([
             'message' => 'Logged out successfully.',
+        ]);
+    }
+
+    public function acceptTerms(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $hub = $this->hubs->current();
+
+        $user->acceptTerms($hub);
+
+        try {
+            $this->activityLogs->log([
+                'action' => 'auth.terms_accepted',
+                'description' => 'Terms & Conditions accepted (v'.$hub->termsVersion().'): '.$user->email,
+                'user' => $user,
+                'request' => $request,
+                'subject' => $user,
+                'status_code' => 200,
+                'properties' => ['terms_version' => $hub->termsVersion()],
+            ]);
+        } catch (\Throwable) {
+            //
+        }
+
+        $user = $user->fresh();
+        $user->setAttribute('terms_accepted', $user->hasAcceptedTerms($hub));
+        $user->setAttribute('terms_required_version', $hub->termsVersion());
+
+        return response()->json([
+            'message' => 'Terms & Conditions accepted.',
+            'user' => $user,
         ]);
     }
 
@@ -525,6 +566,9 @@ class AuthController extends Controller
             $user->setAttribute('billing_subject_id', (int) $subject->id);
             $user->setAttribute('billing_subject_name', $subject->name);
         }
+
+        $user->setAttribute('terms_accepted', $user->hasAcceptedTerms($hub));
+        $user->setAttribute('terms_required_version', $hub->termsVersion());
 
         $payload = [
             'user' => $user,

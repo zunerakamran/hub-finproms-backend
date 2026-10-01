@@ -1061,6 +1061,13 @@ class Hub extends Model
             'default_shared' => true,
             'default_white_label' => true,
         ],
+        'dashboard_manage_terms' => [
+            'label' => 'Manage terms & conditions',
+            'description' => 'Edit the Terms & Conditions content shown to users on first login (and when the text is updated). Available on Shared, White-label, and Central hubs.',
+            'group' => self::GROUP_DASHBOARD_HUB,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
         'dashboard_manage_role_display_names' => [
             'label' => 'Manage roles',
             'description' => 'List roles (with user counts), add or remove roles on this hub’s Capabilities matrix, and customize how role names appear in the UI. Who may manage roles is controlled by this capability.',
@@ -1436,6 +1443,7 @@ class Hub extends Model
         'role_display_names',
         'compliance_status_display_names',
         'email_templates',
+        'terms_and_conditions',
         'advisor_billing_renew_day',
         'billing_grace_day',
         'subscriber_credits',
@@ -1461,6 +1469,7 @@ class Hub extends Model
             'role_display_names' => 'array',
             'compliance_status_display_names' => 'array',
             'email_templates' => 'array',
+            'terms_and_conditions' => 'array',
             'advisor_billing_renew_day' => 'integer',
             'billing_grace_day' => 'integer',
             'subscriber_credits' => 'integer',
@@ -2353,7 +2362,54 @@ class Hub extends Model
                 'registration_enabled' => $registrationEnabled,
                 'invite_only' => (bool) ($checklist['private_invite_only'] ?? false),
                 'login_otp_required' => (bool) ($checklist['require_login_otp'] ?? false),
+                'terms' => $this->termsPublicPayload(),
             ],
+        ];
+    }
+
+    /**
+     * Resolved Terms & Conditions for this hub (stored custom or type default).
+     *
+     * @return array{content: string, version: int, updated_at: ?string, is_custom: bool}
+     */
+    public function resolvedTerms(): array
+    {
+        $stored = is_array($this->terms_and_conditions) ? $this->terms_and_conditions : [];
+        $content = isset($stored['content']) ? trim((string) $stored['content']) : '';
+        $isCustom = $content !== '';
+
+        if (! $isCustom) {
+            $content = \App\Support\TermsAndConditionsDefaults::forType((string) $this->type);
+        }
+
+        $version = max(1, (int) ($stored['version'] ?? 1));
+        $updatedAt = isset($stored['updated_at']) ? (string) $stored['updated_at'] : null;
+
+        return [
+            'content' => $content,
+            'version' => $version,
+            'updated_at' => $updatedAt,
+            'is_custom' => $isCustom,
+        ];
+    }
+
+    public function termsVersion(): int
+    {
+        return $this->resolvedTerms()['version'];
+    }
+
+    /**
+     * @return array{required: bool, version: int, content: string, updated_at: ?string}
+     */
+    public function termsPublicPayload(): array
+    {
+        $terms = $this->resolvedTerms();
+
+        return [
+            'required' => trim($terms['content']) !== '',
+            'version' => $terms['version'],
+            'content' => $terms['content'],
+            'updated_at' => $terms['updated_at'],
         ];
     }
 
