@@ -11,6 +11,7 @@ use App\Services\WebsiteCompliance\AdvisorSectionService;
 use App\Services\WebsiteCompliance\ShowcaseSectionService;
 use App\Services\WebsiteCompliance\TemplatePreviewCaptureService;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
+use App\Support\WebsiteCompliance\BrandColor;
 use App\Support\WebsiteCompliance\HubTemplateCatalog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -119,6 +120,10 @@ class TemplateController extends Controller
             'preview_url' => 'nullable|string|max:500',
             'dummy_content' => 'nullable|string',
             'is_active' => 'nullable|boolean',
+            'color_schemes' => 'nullable|array|max:20',
+            'color_schemes.*.name' => 'nullable|string|max:100',
+            'color_schemes.*.primary' => 'nullable|string|max:50',
+            'color_schemes.*.secondary' => 'nullable|string|max:50',
         ]);
 
         $slug = $request->slug ? Str::slug($request->slug) : Str::slug($request->name);
@@ -163,6 +168,7 @@ class TemplateController extends Controller
             'thumbnail_url' => $thumbnailUrl,
             'preview_url' => $previewUrl,
             'dummy_content' => $request->dummy_content,
+            'color_schemes' => $this->normalizeColorSchemes($request->input('color_schemes')),
             'is_active' => $request->has('is_active') ? (bool) $request->is_active : true,
         ]);
 
@@ -203,6 +209,10 @@ class TemplateController extends Controller
             'dummy_content' => 'nullable|string',
             'is_active' => 'nullable|boolean',
             'regenerate_preview' => 'nullable|boolean',
+            'color_schemes' => 'nullable|array|max:20',
+            'color_schemes.*.name' => 'nullable|string|max:100',
+            'color_schemes.*.primary' => 'nullable|string|max:50',
+            'color_schemes.*.secondary' => 'nullable|string|max:50',
         ]);
 
         $data = $request->only(['name', 'description', 'thumbnail_url', 'preview_url', 'dummy_content']);
@@ -221,6 +231,9 @@ class TemplateController extends Controller
         }
         if ($request->has('is_active')) {
             $data['is_active'] = (bool) $request->is_active;
+        }
+        if ($request->exists('color_schemes')) {
+            $data['color_schemes'] = $this->normalizeColorSchemes($request->input('color_schemes'));
         }
 
         $previewUrl = $data['preview_url'] ?? $template->preview_url;
@@ -287,5 +300,44 @@ class TemplateController extends Controller
     private function defaultPreviewUrl(string $slug): string
     {
         return HubTemplateCatalog::previewUrlFor($slug);
+    }
+
+    /**
+     * @param  mixed  $raw
+     * @return list<array{name: string, primary: string, secondary: string}>
+     */
+    private function normalizeColorSchemes(mixed $raw): array
+    {
+        if (! is_array($raw)) {
+            return [];
+        }
+
+        $schemes = [];
+        foreach ($raw as $index => $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+
+            $primary = BrandColor::toHex(
+                isset($row['primary']) ? (string) $row['primary'] : null,
+                '#0B1B3D'
+            );
+            $secondary = BrandColor::toHex(
+                isset($row['secondary']) ? (string) $row['secondary'] : null,
+                '#C8102E'
+            );
+            $name = trim((string) ($row['name'] ?? ''));
+            if ($name === '') {
+                $name = 'Scheme '.((int) $index + 1);
+            }
+
+            $schemes[] = [
+                'name' => Str::limit($name, 100, ''),
+                'primary' => $primary,
+                'secondary' => $secondary,
+            ];
+        }
+
+        return array_values($schemes);
     }
 }

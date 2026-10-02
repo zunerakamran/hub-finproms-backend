@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-02 (WTL vs Website Content Pre Approval — split flows documented)
+Last updated: 2026-10-02 (Website template colour schemes on register + request forms)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -363,9 +363,16 @@ Notes:
   A) Website Template Library (`module_website_template_library`)
      - Showcase website templates only — no content pre-approval queue here.
      - Power Admin (if `wc_manage_templates`) adds / edits / deletes templates.
+       When registering / editing a template, Power Admin can attach one or more
+       colour schemes (name + primary + secondary) that suit that template;
+       stored on `wc_templates.color_schemes` (JSON).
      - Capable users browse the template catalogue.
      - Capable users request a template by filling the deployment form
        (`wc_request_deployments`) — domain, branding, colours, etc.
+       On the request form they pick one of the template’s colour schemes, or
+       enter an optional custom primary / secondary if none of the offered
+       schemes fit. Chosen colours are saved on the template request as usual
+       (`primary_color` / `secondary_color`).
      - Optional staff path: request on behalf of / assign to an advisor
        (`wc_assign_website_templates`).
      - Power Admin (if `wc_deploy_websites`) manually deploys the pending
@@ -1145,6 +1152,8 @@ STEP 1 — Shared hub core (content hub)
 [x] General Compliance module + APIs (description + optional attachments and
     separate supporting files)
 [x] Website Template Library module + APIs (templates, request form, manual cPanel deploy)
+[x] Website templates: Power Admin colour schemes on register/edit; request form
+    scheme picker + optional custom colours (`wc_templates.color_schemes`)
 [x] Website Content Pre Approval Workflow module + APIs (sections, change requests, supporting files; depends on WTL)
 [x] Frontend: separate nav sections for Website Template Library vs Content Pre Approval
 [x] Firm Head of Firm — capability `dashboard_assign_firm_head`; one head per
