@@ -236,7 +236,10 @@ class ActingHubService
                 continue;
             }
 
-            $eligible = $hub->can('receive_content_from_shared') && $hub->hasRemoteDatabaseConfigured();
+            // Remote control only needs active + remote DB wiring.
+            // "Receive content from Central Hub" gates content push, not the switcher
+            // (otherwise turning that flag off locks you out of fixing Functionalities).
+            $eligible = $hub->hasRemoteDatabaseConfigured();
             $typeLabel = $hub->isShared() ? 'shared' : 'white-label';
             $items[] = [
                 'id' => $hub->id,
@@ -460,19 +463,13 @@ class ActingHubService
         if (! $hub->is_active) {
             throw new InvalidArgumentException('That hub is inactive.');
         }
-        if (! $hub->can('receive_content_from_shared')) {
-            throw new InvalidArgumentException('That hub does not allow content from Central Hub.');
-        }
         $this->remoteDb->assertConfigured($hub);
     }
 
     private function ineligibleReason(Hub $hub): string
     {
-        if (! $hub->can('receive_content_from_shared')) {
-            return 'receive_content_from_shared is off';
-        }
         if (! $hub->hasRemoteDatabaseConfigured()) {
-            return 'remote database not configured';
+            return 'remote database not configured — open Power Admin → Hubs → this hub and save DB host / database / username / password';
         }
 
         return 'not ready';

@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-02 (firm documents functionality gate + hub-wide caps)
+Last updated: 2026-10-02 (hub switcher eligibility = remote DB only; receive_content for push)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -511,9 +511,11 @@ Notes:
 - APIs: `GET/PUT /client-admin/acting-hub` (and power-admin / admin aliases).
   Authenticated `GET /hub` includes `hub_switcher` + acting effective caps when
   on Central Hub with remote-control capability.
-- Target hub must have Functionalities such as `receive_content_from_shared`
-  (may be renamed to receive_content_from_central) and remote DB credentials
-  configured on Central Hub registry.
+- Target hub for the switcher must be active with remote DB credentials
+  configured on the Central Hub registry (deploy wiring). Selecting a hub for
+  remote control does NOT require “Receive content from Central Hub”.
+- “Receive content from Central Hub” (`receive_content_from_shared`) only gates
+  Central content library distribute / content push — not the hub switcher.
 - Central content library (capability `dashboard_central_content_library`,
   Central Hub only):
   - Create manual posts one-by-one or bulk Excel (template download like
