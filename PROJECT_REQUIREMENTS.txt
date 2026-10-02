@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-02 (WTL enable = wc_templates count; re-enable deletes prior invoice)
+Last updated: 2026-10-02 (WTL vs Website Content Pre Approval — split flows documented)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -299,9 +299,9 @@ Notes:
 
 3.3 Social Media Compliance
 - After purchase (and later editing), posts can go through a compliance check.
-- Power Admin (on Central Hub) enables the **Social Media Compliance** module
-  per hub (Modules checklist). Website Compliance is also available as a hub
-  module (templates, section editing, change-request approval, cPanel deploy).
+- Power Admin (on Central Hub) enables the **Social Media Pre Approval Workflow**
+  module per hub (Modules checklist). Website features are separate modules —
+  see 3.3d (Website Template Library + Website Content Pre Approval Workflow).
 - While the module is off, all Social Media Compliance capabilities appear
   blurred / inactive on the Capabilities matrix (same pattern as private/public).
 - Who can submit, assign, review, view queues, or open reports is controlled
@@ -343,7 +343,7 @@ Notes:
   (`gc_*`) are blurred while the module is off.
 - Activity logs use `gc.*` actions.
 
-3.3c Website Compliance supporting files
+3.3c Website Content Pre Approval supporting files
 - Change requests accept optional supporting files on submit (advisor/editor),
   approve / reject / approve-with-feedback / schedule (approver), and
   change-status (manager) via `supporting_files[]` (same limits as other
@@ -351,6 +351,44 @@ Notes:
   attribution (`source`, `uploaded_by_*`, `uploaded_by_role`).
 - **UI:** show supporting files inside each version in version history only —
   never as a separate request-level supporting-files box.
+
+3.3d Website Template Library vs Website Content Pre Approval Workflow
+- Formerly one combined “Website Compliance” product. They are now TWO Modules
+  checklist items. Content Pre Approval depends on Template Library.
+- API namespace remains `/api/website-compliance/*` (shared tables); module and
+  capability gates decide which half is available.
+- Frontend dashboard shows TWO nav sections (not one “Website Compliance”
+  umbrella): Website Template Library and Website Content Pre Approval.
+
+  A) Website Template Library (`module_website_template_library`)
+     - Showcase website templates only — no content pre-approval queue here.
+     - Power Admin (if `wc_manage_templates`) adds / edits / deletes templates.
+     - Capable users browse the template catalogue.
+     - Capable users request a template by filling the deployment form
+       (`wc_request_deployments`) — domain, branding, colours, etc.
+     - Optional staff path: request on behalf of / assign to an advisor
+       (`wc_assign_website_templates`).
+     - Power Admin (if `wc_deploy_websites`) manually deploys the pending
+       request onto the respective cPanel (credentials + domain on deploy).
+       Deploy is never automatic from the request form.
+     - Related caps: `wc_view_all_deployments` (list), `wc_deploy_websites`
+       (deploy / reject).
+     - Capabilities in group “Website Template Library” are blurred while
+       this module is off.
+
+  B) Website Content Pre Approval Workflow (`module_website_compliance`)
+     - Requires Website Template Library enabled (module dependency).
+     - Full compliance flow on a deployed site’s sections.
+     - Advisor / editor (if capable) locks/edits sections and submits change
+       requests (`wc_edit_sections`, `wc_submit_change_requests`).
+     - Approver / manager sees the whole flow: assign → review →
+       approve / reject / approve-with-feedback / schedule → publish
+       (`wc_assign_change_requests`, `wc_review_change_requests`,
+       `wc_change_request_status`, `wc_view_all_change_requests`, …).
+     - Optional bypass: publish live without review (`wc_publish_live_content`).
+     - Supporting files: section 3.3c.
+     - Capabilities in group “Website Content Pre Approval” are blurred while
+       this module is off.
 
 3.4 Firm Head of Firm & Firm Documents
 - Firms already exist on hub databases (`firms` + `users.firm_id`; capability
@@ -643,8 +681,10 @@ Notes:
   - Social Media Template Library — posts / reels catalog
   - Social Media Pre Approval Workflow — activates SMC capability section
     (capabilities blurred while this module is off)
-  - Website Template Library — showcase templates / deployments
-  - Website Content Pre Approval Workflow — activates WC capability section
+  - Website Template Library — templates catalogue, request form, manual
+    cPanel deploy (section 3.3d-A); activates WTL capability section
+  - Website Content Pre Approval Workflow — section edit + change-request
+    approval flow (section 3.3d-B); requires WTL; activates WC capability section
     (capabilities blurred while this module is off)
   - Generic Content Pre Approval Workflow — activates GC capability section
     (capabilities blurred while this module is off)
@@ -1104,7 +1144,9 @@ STEP 1 — Shared hub core (content hub)
 [x] Social Media Compliance check flow (module + APIs)
 [x] General Compliance module + APIs (description + optional attachments and
     separate supporting files)
-[x] Website Compliance module + APIs (templates, sections, change requests, cPanel deploy, supporting files)
+[x] Website Template Library module + APIs (templates, request form, manual cPanel deploy)
+[x] Website Content Pre Approval Workflow module + APIs (sections, change requests, supporting files; depends on WTL)
+[x] Frontend: separate nav sections for Website Template Library vs Content Pre Approval
 [x] Firm Head of Firm — capability `dashboard_assign_firm_head`; one head per
     firm appointed from that firm’s members (section 3.4.1)
 [x] Firm Documents library — head can add attachments (images, Word, PDF, etc.)

@@ -27,7 +27,7 @@ class WebsiteComplianceGate
         if ($wcCapability === null) {
             if (! $hub->hasWebsiteComplianceModule() && ! $hub->hasWebsiteTemplateLibraryModule()) {
                 throw ValidationException::withMessages([
-                    'module' => 'Website Template Library / Content Pre Approval is not enabled for this hub.',
+                    'module' => 'Website Template Library and/or Website Content Pre Approval Workflow is not enabled for this hub.',
                 ]);
             }
 
