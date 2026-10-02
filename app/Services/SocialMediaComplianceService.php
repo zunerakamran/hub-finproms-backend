@@ -215,6 +215,16 @@ class SocialMediaComplianceService
             } else {
                 $this->copySupportingFilesFromVersion($current, $version);
             }
+        });
+
+        $compliance = $compliance->fresh(['currentVersionRow.supportingFiles', 'assignee', 'post', 'user', 'onBehalfBy']);
+
+        if ($compliance->assignee) {
+            $this->mail->notifyResubmitted($compliance, $compliance->assignee, $user);
+        }
+
+        $this->activityLogs->log([
+            'action' => 'smc.resubmit',
             'description' => 'ReSubmitted social media compliance request #'.$compliance->id.' as v'.$newVersion,
             'user' => $user,
             'hub' => $hub,
