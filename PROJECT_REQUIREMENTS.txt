@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-02 (WTL one enable invoice per hub; Shared remote count no silent fallback)
+Last updated: 2026-10-02 (module uncheck→check creates a new enable invoice)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -632,12 +632,14 @@ Notes:
   - Generic Content Pre Approval Workflow — activates GC capability section
     (capabilities blurred while this module is off)
 - Managed via `dashboard_manage_modules` / Modules API on Central Hub.
-- When `charge_amount_per_module` is ON, newly enabling a module creates a
-  one-time invoice (idempotent per hub + module), including £0 catalogue prices
-  (recorded as paid / complimentary). Website Template Library is priced per
-  website: on enable, ONE consolidated invoice is created for all currently
-  deployed websites (unit rate × count). Later individual deploys each add one
-  invoice for that new site only.
+- When `charge_amount_per_module` is ON, newly enabling a module (including
+  uncheck → check again) creates a one-time invoice. Previous unpaid enable
+  invoices for that module are canceled/superseded so only the new enable
+  invoice remains unpaid. £0 catalogue prices still create a paid/complimentary
+  invoice. Website Template Library creates ONE consolidated invoice for all
+  currently deployed websites (unit rate × count). Later individual deploys
+  each add one invoice for that new site only. Invoices-page backfill does not
+  duplicate enable invoices.
 
 5.1B Module catalogue pricing (Modules pricing)
 - Official default catalogue (editable via capability / database):

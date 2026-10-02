@@ -242,7 +242,7 @@ class ModuleBillingTest extends TestCase
             ->where('status', '!=', 'canceled')
             ->count());
 
-        // Idempotent — enabling again does not create another enable invoice.
+        // Saving while already enabled does not create another invoice.
         $again = $this->putJson('/api/power-admin/modules?hub_id='.$hub->id, [
             'hub_id' => $hub->id,
             'modules' => [
@@ -257,7 +257,7 @@ class ModuleBillingTest extends TestCase
             ->where('status', '!=', 'canceled')
             ->count());
 
-        // Uncheck then re-check must not create a second enable invoice.
+        // Uncheck then re-check MUST create a new enable invoice (previous unpaid superseded).
         $this->putJson('/api/power-admin/modules?hub_id='.$hub->id, [
             'hub_id' => $hub->id,
             'modules' => [
@@ -271,17 +271,19 @@ class ModuleBillingTest extends TestCase
             ],
         ]);
         $reenable->assertOk();
-        $this->assertSame([], $reenable->json('module_invoices'));
+        $createdAgain = collect($reenable->json('module_invoices'));
+        $this->assertCount(1, $createdAgain);
+        $this->assertSame(600.0, (float) $createdAgain->first()['amount']);
         $this->assertSame(1, \App\Models\HubModuleBilling::query()
             ->where('hub_id', $hub->id)
             ->where('module_key', 'module_website_template_library')
             ->where('status', 'unpaid')
             ->count());
-        $this->assertSame(600.0, (float) \App\Models\HubModuleBilling::query()
+        $this->assertSame(1, \App\Models\HubModuleBilling::query()
             ->where('hub_id', $hub->id)
             ->where('module_key', 'module_website_template_library')
-            ->where('status', 'unpaid')
-            ->value('amount'));
+            ->where('status', 'canceled')
+            ->count());
 
         // No deployed sites → enabling creates no WTL invoices.
         $hub2 = Hub::query()->create([

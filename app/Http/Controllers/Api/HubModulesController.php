@@ -108,8 +108,6 @@ class HubModulesController extends Controller
                 $fresh = $hub->fresh();
                 if (! $this->moduleBilling->billingEnabled($fresh)) {
                     $moduleInvoiceWarning = 'Website Template Library was enabled, but “Charge amount per module (one time)” is off on this hub — turn it on under Functionalities to generate invoices.';
-                } elseif ($this->moduleBilling->existingWtlEnableBilling($fresh)) {
-                    // Already billed on a previous enable — expected on re-check.
                 } else {
                     try {
                         if ($this->moduleBilling->countDeployedWebsites($fresh) === 0) {
