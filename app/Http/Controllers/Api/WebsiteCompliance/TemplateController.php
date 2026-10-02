@@ -124,6 +124,10 @@ class TemplateController extends Controller
             'color_schemes.*.name' => 'nullable|string|max:100',
             'color_schemes.*.primary' => 'nullable|string|max:50',
             'color_schemes.*.secondary' => 'nullable|string|max:50',
+            'available_pages' => 'nullable|array|max:40',
+            'available_pages.*.name' => 'nullable|string|max:150',
+            'available_pages.*.slug' => 'nullable|string|max:150',
+            'available_pages.*.description' => 'nullable|string|max:1000',
         ]);
 
         $slug = $request->slug ? Str::slug($request->slug) : Str::slug($request->name);
@@ -169,6 +173,7 @@ class TemplateController extends Controller
             'preview_url' => $previewUrl,
             'dummy_content' => $request->dummy_content,
             'color_schemes' => $this->normalizeColorSchemes($request->input('color_schemes')),
+            'available_pages' => $this->normalizeAvailablePages($request->input('available_pages')),
             'is_active' => $request->has('is_active') ? (bool) $request->is_active : true,
         ]);
 
@@ -213,6 +218,10 @@ class TemplateController extends Controller
             'color_schemes.*.name' => 'nullable|string|max:100',
             'color_schemes.*.primary' => 'nullable|string|max:50',
             'color_schemes.*.secondary' => 'nullable|string|max:50',
+            'available_pages' => 'nullable|array|max:40',
+            'available_pages.*.name' => 'nullable|string|max:150',
+            'available_pages.*.slug' => 'nullable|string|max:150',
+            'available_pages.*.description' => 'nullable|string|max:1000',
         ]);
 
         $data = $request->only(['name', 'description', 'thumbnail_url', 'preview_url', 'dummy_content']);
@@ -234,6 +243,9 @@ class TemplateController extends Controller
         }
         if ($request->exists('color_schemes')) {
             $data['color_schemes'] = $this->normalizeColorSchemes($request->input('color_schemes'));
+        }
+        if ($request->exists('available_pages')) {
+            $data['available_pages'] = $this->normalizeAvailablePages($request->input('available_pages'));
         }
 
         $previewUrl = $data['preview_url'] ?? $template->preview_url;
@@ -339,5 +351,48 @@ class TemplateController extends Controller
         }
 
         return array_values($schemes);
+    }
+
+    /**
+     * @param  mixed  $raw
+     * @return list<array{name: string, slug: string, description: string}>
+     */
+    private function normalizeAvailablePages(mixed $raw): array
+    {
+        if (! is_array($raw)) {
+            return [];
+        }
+
+        $pages = [];
+        $seen = [];
+        foreach ($raw as $index => $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+
+            $name = trim((string) ($row['name'] ?? ''));
+            $slug = Str::slug((string) ($row['slug'] ?? $name));
+            if ($name === '' && $slug === '') {
+                continue;
+            }
+            if ($name === '') {
+                $name = 'Page '.((int) $index + 1);
+            }
+            if ($slug === '') {
+                $slug = 'page-'.((int) $index + 1);
+            }
+            if (isset($seen[$slug])) {
+                continue;
+            }
+            $seen[$slug] = true;
+
+            $pages[] = [
+                'name' => Str::limit($name, 150, ''),
+                'slug' => Str::limit($slug, 150, ''),
+                'description' => Str::limit(trim((string) ($row['description'] ?? '')), 1000, ''),
+            ];
+        }
+
+        return array_values($pages);
     }
 }

@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-02 (Website template colour schemes on register + request forms)
+Last updated: 2026-10-02 (Website template request form: services, images, contact, policies, pages + content)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -366,6 +366,9 @@ Notes:
        When registering / editing a template, Power Admin can attach one or more
        colour schemes (name + primary + secondary) that suit that template;
        stored on `wc_templates.color_schemes` (JSON).
+       Power Admin also defines the **available pages** for that template
+       (name + slug + optional description) on `wc_templates.available_pages`
+       (JSON). Requesters later select which of those pages to include.
      - Capable users browse the template catalogue.
      - Capable users request a template by filling the deployment form
        (`wc_request_deployments`) — domain, branding, colours, etc.
@@ -373,6 +376,14 @@ Notes:
        enter an optional custom primary / secondary if none of the offered
        schemes fit. Chosen colours are saved on the template request as usual
        (`primary_color` / `secondary_color`).
+       The request form also collects optional website content extras stored on
+       `wc_template_requests`:
+         • `services` — name + description list
+         • `images` — uploaded image URL + optional label list
+         • `contact_details` — phone, email, address, website
+         • `policies` — name + content list
+         • `selected_pages` — slugs chosen from the template’s `available_pages`
+         • `page_contents` — content text keyed by selected page slug
      - Optional staff path: request on behalf of / assign to an advisor
        (`wc_assign_website_templates`).
      - Power Admin (if `wc_deploy_websites`) manually deploys the pending
@@ -1154,6 +1165,10 @@ STEP 1 — Shared hub core (content hub)
 [x] Website Template Library module + APIs (templates, request form, manual cPanel deploy)
 [x] Website templates: Power Admin colour schemes on register/edit; request form
     scheme picker + optional custom colours (`wc_templates.color_schemes`)
+[x] Website templates: Power Admin available pages on register/edit
+    (`wc_templates.available_pages`); request form collects services, images,
+    contact details, policies, selected pages + page contents
+    (`wc_template_requests` JSON fields)
 [x] Website Content Pre Approval Workflow module + APIs (sections, change requests, supporting files; depends on WTL)
 [x] Frontend: separate nav sections for Website Template Library vs Content Pre Approval
 [x] Firm Head of Firm — capability `dashboard_assign_firm_head`; one head per

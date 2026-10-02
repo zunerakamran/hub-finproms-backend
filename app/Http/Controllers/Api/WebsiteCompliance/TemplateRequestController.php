@@ -18,6 +18,7 @@ use App\Support\WebsiteCompliance\HubTemplateCatalog;
 use App\Support\WebsiteCompliance\BrandColor;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class TemplateRequestController extends Controller
@@ -72,6 +73,23 @@ class TemplateRequestController extends Controller
             'favicon_url' => 'nullable|string|max:1000',
             'primary_color' => 'nullable|string|max:50',
             'secondary_color' => 'nullable|string|max:50',
+            'services' => 'nullable|array|max:40',
+            'services.*.name' => 'nullable|string|max:150',
+            'services.*.description' => 'nullable|string|max:2000',
+            'images' => 'nullable|array|max:40',
+            'images.*.url' => 'nullable|string|max:1000',
+            'images.*.label' => 'nullable|string|max:150',
+            'contact_details' => 'nullable|array',
+            'contact_details.phone' => 'nullable|string|max:80',
+            'contact_details.email' => 'nullable|string|max:255',
+            'contact_details.address' => 'nullable|string|max:500',
+            'contact_details.website' => 'nullable|string|max:255',
+            'policies' => 'nullable|array|max:20',
+            'policies.*.name' => 'nullable|string|max:150',
+            'policies.*.content' => 'nullable|string|max:20000',
+            'selected_pages' => 'nullable|array|max:40',
+            'selected_pages.*' => 'nullable|string|max:150',
+            'page_contents' => 'nullable|array',
             'assigned_advisor_id' => [
                 $mustAssignAdvisor ? 'required' : 'nullable',
                 Rule::exists(User::class, 'id'),
@@ -111,6 +129,12 @@ class TemplateRequestController extends Controller
             'favicon_url' => CpanelSyncService::absoluteAssetUrl($request->favicon_url),
             'primary_color' => BrandColor::toHex($request->primary_color ?? null, '#0B1B3D'),
             'secondary_color' => BrandColor::toHex($request->secondary_color ?? null, '#C8102E'),
+            'services' => $this->normalizeServices($request->input('services')),
+            'images' => $this->normalizeImages($request->input('images')),
+            'contact_details' => $this->normalizeContactDetails($request->input('contact_details')),
+            'policies' => $this->normalizePolicies($request->input('policies')),
+            'selected_pages' => $this->normalizeSelectedPages($request->input('selected_pages')),
+            'page_contents' => $this->normalizePageContents($request->input('page_contents')),
             'status' => 'pending',
         ]);
 
@@ -701,5 +725,185 @@ class TemplateRequestController extends Controller
         }
 
         return $hasColumn;
+    }
+
+    /**
+     * @param  mixed  $raw
+     * @return list<array{name: string, description: string}>
+     */
+    private function normalizeServices(mixed $raw): array
+    {
+        if (! is_array($raw)) {
+            return [];
+        }
+
+        $services = [];
+        foreach ($raw as $index => $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+
+            $name = trim((string) ($row['name'] ?? ''));
+            $description = trim((string) ($row['description'] ?? ''));
+            if ($name === '' && $description === '') {
+                continue;
+            }
+            if ($name === '') {
+                $name = 'Service '.((int) $index + 1);
+            }
+
+            $services[] = [
+                'name' => Str::limit($name, 150, ''),
+                'description' => Str::limit($description, 2000, ''),
+            ];
+        }
+
+        return array_values($services);
+    }
+
+    /**
+     * @param  mixed  $raw
+     * @return list<array{url: string, label: string}>
+     */
+    private function normalizeImages(mixed $raw): array
+    {
+        if (! is_array($raw)) {
+            return [];
+        }
+
+        $images = [];
+        foreach ($raw as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+
+            $url = trim((string) ($row['url'] ?? ''));
+            if ($url === '') {
+                continue;
+            }
+
+            $absolute = CpanelSyncService::absoluteAssetUrl($url) ?: $url;
+            $images[] = [
+                'url' => Str::limit((string) $absolute, 1000, ''),
+                'label' => Str::limit(trim((string) ($row['label'] ?? '')), 150, ''),
+            ];
+        }
+
+        return array_values($images);
+    }
+
+    /**
+     * @param  mixed  $raw
+     * @return array{phone: string, email: string, address: string, website: string}|null
+     */
+    private function normalizeContactDetails(mixed $raw): ?array
+    {
+        if (! is_array($raw)) {
+            return null;
+        }
+
+        $phone = trim((string) ($raw['phone'] ?? ''));
+        $email = trim((string) ($raw['email'] ?? ''));
+        $address = trim((string) ($raw['address'] ?? ''));
+        $website = trim((string) ($raw['website'] ?? ''));
+
+        if ($phone === '' && $email === '' && $address === '' && $website === '') {
+            return null;
+        }
+
+        return [
+            'phone' => Str::limit($phone, 80, ''),
+            'email' => Str::limit($email, 255, ''),
+            'address' => Str::limit($address, 500, ''),
+            'website' => Str::limit($website, 255, ''),
+        ];
+    }
+
+    /**
+     * @param  mixed  $raw
+     * @return list<array{name: string, content: string}>
+     */
+    private function normalizePolicies(mixed $raw): array
+    {
+        if (! is_array($raw)) {
+            return [];
+        }
+
+        $policies = [];
+        foreach ($raw as $index => $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+
+            $name = trim((string) ($row['name'] ?? ''));
+            $content = trim((string) ($row['content'] ?? ''));
+            if ($name === '' && $content === '') {
+                continue;
+            }
+            if ($name === '') {
+                $name = 'Policy '.((int) $index + 1);
+            }
+
+            $policies[] = [
+                'name' => Str::limit($name, 150, ''),
+                'content' => Str::limit($content, 20000, ''),
+            ];
+        }
+
+        return array_values($policies);
+    }
+
+    /**
+     * @param  mixed  $raw
+     * @return list<string>
+     */
+    private function normalizeSelectedPages(mixed $raw): array
+    {
+        if (! is_array($raw)) {
+            return [];
+        }
+
+        $pages = [];
+        $seen = [];
+        foreach ($raw as $item) {
+            $slug = Str::slug(trim((string) $item));
+            if ($slug === '' || isset($seen[$slug])) {
+                continue;
+            }
+            $seen[$slug] = true;
+            $pages[] = Str::limit($slug, 150, '');
+        }
+
+        return array_values($pages);
+    }
+
+    /**
+     * @param  mixed  $raw
+     * @return array<string, string>
+     */
+    private function normalizePageContents(mixed $raw): array
+    {
+        if (! is_array($raw)) {
+            return [];
+        }
+
+        $contents = [];
+        foreach ($raw as $key => $value) {
+            if (is_array($value)) {
+                $slug = Str::slug(trim((string) ($value['slug'] ?? $key)));
+                $content = trim((string) ($value['content'] ?? ''));
+            } else {
+                $slug = Str::slug(trim((string) $key));
+                $content = trim((string) $value);
+            }
+
+            if ($slug === '' || $content === '') {
+                continue;
+            }
+
+            $contents[$slug] = Str::limit($content, 50000, '');
+        }
+
+        return $contents;
     }
 }

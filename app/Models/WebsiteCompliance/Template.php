@@ -19,12 +19,14 @@ class Template extends Model
         'preview_url',
         'dummy_content',
         'color_schemes',
+        'available_pages',
         'is_active',
     ];
 
     protected $casts = [
         'is_active' => 'boolean',
         'color_schemes' => 'array',
+        'available_pages' => 'array',
     ];
 
     public function pages(): HasMany
