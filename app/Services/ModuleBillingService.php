@@ -320,9 +320,12 @@ class ModuleBillingService
     }
 
     /**
-     * Bill currently deployed websites that are not yet covered by a WTL one-time
-     * invoice — as a SINGLE consolidated invoice (unit rate × unbilled count).
-     * Used when WTL is enabled / charge flag turns on with sites already live.
+     * Bill currently deployed websites as a SINGLE consolidated invoice
+     * (unit rate × unbilled count) when WTL is enabled / charge turns on.
+     *
+     * Unpaid legacy per-site WTL billings are canceled first so re-enabling
+     * after the old “one invoice per website” behaviour produces one invoice
+     * instead of appearing to create none.
      *
      * @return list<Invoice>
      */
@@ -332,7 +335,25 @@ class ModuleBillingService
             return [];
         }
 
-        $unbilled = $this->deployedWebsiteRequests($hub)
+        $deployed = $this->deployedWebsiteRequests($hub);
+        if ($deployed->isEmpty()) {
+            return [];
+        }
+
+        // Already have a consolidated enable invoice — only bill sites not covered yet.
+        $existingConsolidated = HubModuleBilling::query()
+            ->where('hub_id', $hub->id)
+            ->where('module_key', self::WEBSITE_MODULE_KEY)
+            ->where('status', '!=', HubModuleBilling::STATUS_CANCELED)
+            ->get()
+            ->first(fn (HubModuleBilling $row) => ! empty($row->meta['consolidated_websites']));
+
+        if (! $existingConsolidated) {
+            // Supersede unpaid one-invoice-per-site rows so enable can emit one total.
+            $this->cancelUnpaidLegacyPerSiteWtlBillings($hub);
+        }
+
+        $unbilled = $deployed
             ->filter(fn (TemplateRequest $request) => $this->billingCoveringWebsiteRequest($hub, (int) $request->id) === null)
             ->values();
 
@@ -410,6 +431,48 @@ class ModuleBillingService
         });
 
         return [$invoice];
+    }
+
+    /**
+     * Cancel unpaid legacy per-website (non-consolidated) WTL billings so a
+     * single enable invoice can replace them without double-counting coverage.
+     */
+    public function cancelUnpaidLegacyPerSiteWtlBillings(Hub $hub): int
+    {
+        $rows = HubModuleBilling::query()
+            ->where('hub_id', $hub->id)
+            ->where('module_key', self::WEBSITE_MODULE_KEY)
+            ->where('status', HubModuleBilling::STATUS_UNPAID)
+            ->with('invoice')
+            ->get()
+            ->filter(function (HubModuleBilling $row) {
+                if (! empty($row->meta['consolidated_websites'])) {
+                    return false;
+                }
+
+                // Per-site rows have a single wc_template_request_id.
+                return (int) ($row->meta['wc_template_request_id'] ?? 0) > 0;
+            });
+
+        $canceled = 0;
+        foreach ($rows as $billing) {
+            $billing->forceFill([
+                'status' => HubModuleBilling::STATUS_CANCELED,
+                'payment_status' => HubModuleBilling::STATUS_CANCELED,
+                'meta' => array_merge($billing->meta ?? [], [
+                    'canceled_reason' => 'Superseded by consolidated Website Template Library invoice on module enable',
+                ]),
+            ])->save();
+
+            if ($billing->invoice && $billing->invoice->status !== 'paid') {
+                $billing->invoice->forceFill([
+                    'status' => 'canceled',
+                ])->save();
+            }
+            $canceled++;
+        }
+
+        return $canceled;
     }
 
     /**
