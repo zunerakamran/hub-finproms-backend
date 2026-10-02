@@ -1001,6 +1001,48 @@ class Hub extends Model
             'default_shared' => true,
             'default_white_label' => true,
         ],
+        'dashboard_assign_firm_head' => [
+            'label' => 'Assign Head of Firm',
+            'description' => 'Appoint, replace, or clear the single Head of Firm for each firm (must be a member of that firm). Distinct from Manage firms.',
+            'group' => self::GROUP_DASHBOARD_FIRMS,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'firm_documents_view' => [
+            'label' => 'View firm documents',
+            'description' => 'View and download firm document attachments. Head of Firm always has this for their firm; members need a head grant or this capability.',
+            'group' => self::GROUP_DASHBOARD_FIRMS,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'firm_documents_add' => [
+            'label' => 'Add firm documents',
+            'description' => 'Upload firm documents (images, Word, PDF, etc.). Head of Firm always has this for their firm.',
+            'group' => self::GROUP_DASHBOARD_FIRMS,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'firm_documents_delete' => [
+            'label' => 'Delete firm documents',
+            'description' => 'Permanently delete firm documents. Head of Firm always has this for their firm.',
+            'group' => self::GROUP_DASHBOARD_FIRMS,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'firm_documents_archive' => [
+            'label' => 'Archive firm documents',
+            'description' => 'Archive / unarchive firm documents. Head of Firm always has this for their firm.',
+            'group' => self::GROUP_DASHBOARD_FIRMS,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'firm_documents_manage_member_rights' => [
+            'label' => 'Manage firm document member rights',
+            'description' => 'Grant or revoke add/view/delete/archive document rights for firm members. Head of Firm always has this for their firm.',
+            'group' => self::GROUP_DASHBOARD_FIRMS,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
 
         // --- 5. Advisors & private billing ---
         'advisor_excel_import' => [

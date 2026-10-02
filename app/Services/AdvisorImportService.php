@@ -533,6 +533,13 @@ class AdvisorImportService
             $user->has_unlimited_credits = false;
             $user->save();
 
+            try {
+                app(FirmDocumentAccessService::class)->clearGrantsForUser($user);
+                app(FirmDocumentAccessService::class)->clearHeadIfUser($user);
+            } catch (\Throwable) {
+                // Tables may not exist yet on older remote hubs.
+            }
+
             if (method_exists($user, 'tokens')) {
                 try {
                     $user->tokens()->delete();

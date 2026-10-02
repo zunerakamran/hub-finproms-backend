@@ -59,7 +59,7 @@ class FirmController extends Controller
             ->pluck('users_count', 'firm_id');
 
         $query = Firm::query()
-            ->with('complianceVisibleToFirm:id,name')
+            ->with(['complianceVisibleToFirm:id,name', 'headUser:id,name,email'])
             ->orderByDesc('created_at')
             ->orderByDesc('id');
 

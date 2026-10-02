@@ -16,6 +16,7 @@ class Firm extends Model
         'compliance_visible_to_own',
         'compliance_visible_to_central',
         'compliance_visible_to_firm_id',
+        'head_user_id',
     ];
 
     protected function casts(): array
@@ -30,6 +31,21 @@ class Firm extends Model
     public function users(): HasMany
     {
         return $this->hasMany(User::class);
+    }
+
+    public function headUser(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'head_user_id');
+    }
+
+    public function documents(): HasMany
+    {
+        return $this->hasMany(FirmDocument::class);
+    }
+
+    public function documentMemberRights(): HasMany
+    {
+        return $this->hasMany(FirmDocumentMemberRight::class);
     }
 
     public function complianceVisibleToFirm(): BelongsTo
@@ -71,6 +87,14 @@ class Firm extends Model
             'name' => $this->name,
             'is_central' => $this->isCentral(),
             'users_count' => $usersCount,
+            'head_user_id' => $this->head_user_id ? (int) $this->head_user_id : null,
+            'head_user' => $this->headUser
+                ? [
+                    'id' => (int) $this->headUser->id,
+                    'name' => (string) $this->headUser->name,
+                    'email' => (string) $this->headUser->email,
+                ]
+                : null,
             'compliance_visibility' => [
                 'visible_to_own' => (bool) $this->compliance_visible_to_own,
                 'visible_to_central' => (bool) $this->compliance_visible_to_central,

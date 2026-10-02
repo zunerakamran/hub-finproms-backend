@@ -294,6 +294,47 @@ class ActingHubService
             }
         }
 
+        return $this->mergeFirmDocumentEffectiveCapabilities($user, $effective);
+    }
+
+    /**
+     * Head of Firm / member grants override matrix cells for firm document caps
+     * so the dashboard nav can show Firm Documents without a role matrix tick.
+     *
+     * @param  array<string, bool>  $effective
+     * @return array<string, bool>
+     */
+    public function mergeFirmDocumentEffectiveCapabilities(User $user, array $effective): array
+    {
+        try {
+            $summary = app(FirmDocumentAccessService::class)->effectiveRightsSummary($user);
+        } catch (\Throwable) {
+            return $effective;
+        }
+
+        if ($summary['can_view']) {
+            $effective['firm_documents_view'] = true;
+        }
+        if ($summary['can_add']) {
+            $effective['firm_documents_add'] = true;
+        }
+        if ($summary['can_delete']) {
+            $effective['firm_documents_delete'] = true;
+        }
+        if ($summary['can_archive']) {
+            $effective['firm_documents_archive'] = true;
+        }
+        if ($summary['can_manage_member_rights']) {
+            $effective['firm_documents_manage_member_rights'] = true;
+        }
+        if ($summary['is_firm_head']) {
+            $effective['firm_documents_view'] = true;
+            $effective['firm_documents_add'] = true;
+            $effective['firm_documents_delete'] = true;
+            $effective['firm_documents_archive'] = true;
+            $effective['firm_documents_manage_member_rights'] = true;
+        }
+
         return $effective;
     }
 

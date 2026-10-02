@@ -748,6 +748,7 @@ class CapabilitiesMatrixService
             'dashboard_manage_categories',
             'dashboard_view_categories',
             'dashboard_manage_firms',
+            'dashboard_assign_firm_head',
             'dashboard_manage_tags',
             'dashboard_view_tags',
             'dashboard_manage_subscriber_credits',

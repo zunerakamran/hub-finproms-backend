@@ -68,7 +68,8 @@ class HubController extends Controller
                         $effective[$key] = $enabled;
                     }
                 }
-                $payload['effective_capabilities'] = $effective;
+                $payload['effective_capabilities'] = $this->actingHubs
+                    ->mergeFirmDocumentEffectiveCapabilities($user, $effective);
             }
             $payload['viewer_role'] = $user->role;
             $payload['effective_role'] = $this->matrix->effectiveRoleFor($user);

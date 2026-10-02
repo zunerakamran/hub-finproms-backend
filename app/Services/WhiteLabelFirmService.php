@@ -140,6 +140,10 @@ class WhiteLabelFirmService
             'name' => (string) $row->name,
             'is_central' => (bool) $row->is_central,
             'users_count' => (int) ($counts[$row->id] ?? 0),
+            'head_user_id' => isset($row->head_user_id) && $row->head_user_id
+                ? (int) $row->head_user_id
+                : null,
+            'head_user' => null,
             'compliance_visibility' => [
                 'visible_to_own' => (bool) ($row->compliance_visible_to_own ?? true),
                 'visible_to_central' => (bool) ($row->compliance_visible_to_central ?? false),
@@ -327,11 +331,29 @@ class WhiteLabelFirmService
             : null;
         $usersCount = (int) DB::connection($connection)->table('users')->where('firm_id', $firmId)->count();
 
+        $headUser = null;
+        if (isset($row->head_user_id) && $row->head_user_id) {
+            $head = DB::connection($connection)->table('users')
+                ->where('id', $row->head_user_id)
+                ->first(['id', 'name', 'email']);
+            if ($head) {
+                $headUser = [
+                    'id' => (int) $head->id,
+                    'name' => (string) $head->name,
+                    'email' => (string) $head->email,
+                ];
+            }
+        }
+
         return [
             'id' => (int) $row->id,
             'name' => (string) $row->name,
             'is_central' => (bool) $row->is_central,
             'users_count' => $usersCount,
+            'head_user_id' => isset($row->head_user_id) && $row->head_user_id
+                ? (int) $row->head_user_id
+                : null,
+            'head_user' => $headUser,
             'compliance_visibility' => [
                 'visible_to_own' => (bool) ($row->compliance_visible_to_own ?? true),
                 'visible_to_central' => (bool) ($row->compliance_visible_to_central ?? false),

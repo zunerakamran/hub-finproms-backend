@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-01 (compliance optional supporting files)
+Last updated: 2026-10-01 (firm head + firm documents implemented)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -335,7 +335,97 @@ Notes:
   approve-with-feedback, and change-status (`supporting_files[]`, same limits
   as other compliance modules). Stored per change-request version.
 
-3.4 Other Features (later)
+3.4 Firm Head of Firm & Firm Documents
+- Firms already exist on hub databases (`firms` + `users.firm_id`; capability
+  `dashboard_manage_firms`). This section adds Head of Firm allocation and a
+  firm-scoped Documents library (attachments) with per-member rights.
+- Applies on Shared and White-labelled hubs (each hub’s own firms / members).
+  Backend and frontend both required.
+
+3.4.1 Who can appoint a Head of Firm
+- Capability (Capabilities matrix): `dashboard_assign_firm_head`
+  (“Assign Head of Firm”).
+- Power Admin enables this per hub / role. Typical defaults ON for
+  finproms_admin / client_admin / manager; OFF for approver / advisor / user
+  until enabled.
+- A user with this capability may appoint (or replace / clear) the Head of Firm
+  for a firm on that hub.
+- Rules:
+  - ONE Head of Firm per firm at a time.
+  - The appointed head MUST already be a member of that firm
+    (`user.firm_id` = that firm).
+  - Replacing the head transfers head rights to the new person; the previous
+    head loses automatic full document rights (any explicit member grants they
+    still hold as a normal member remain until revoked).
+  - Clearing the head leaves the firm without a head until a new one is set;
+    only users with `dashboard_assign_firm_head` can appoint again.
+- Distinct from `dashboard_manage_firms` (create/edit firms + compliance
+  visibility). Assign-head may be granted without full firm CRUD, and vice versa.
+
+3.4.2 Head of Firm rights (documents)
+- The Head of Firm automatically has ALL firm-document rights for THEIR firm:
+  add, view, delete, and archive — no separate grant required.
+- The head may upload documents / attachments for the firm, including images,
+  Word (.doc / .docx), PDF, and other common office / media types (same
+  practical limits pattern as compliance supporting files unless tightened later).
+- Documents are scoped to the firm; members of other firms cannot see or manage
+  them unless a future cross-firm rule is added.
+
+3.4.3 Head grants rights to firm members
+- The Head of Firm may grant (and revoke) document permissions to ANY member of
+  THEIR firm. Permissions are independent and combinable:
+  - Add documents
+  - View documents
+  - Delete documents
+  - Archive documents
+- Firm members only receive the rights the head grants them; they do not inherit
+  head status.
+- Only the current Head of Firm (plus roles with `dashboard_assign_firm_head`
+  if needed for support) manages these member grants — not arbitrary firm users.
+- When a user leaves the firm or is discontinued, their firm-document grants
+  are cleared.
+
+3.4.4 Firm Documents library behaviour
+- Firm Documents live under the dashboard (firm-scoped), gated by the rights
+  above (head = all; members = granted subset).
+- Actions:
+  - Add / upload — create document metadata + store attachment file(s)
+  - View / download — list and open documents the actor may view
+  - Delete — permanently remove (only if delete right)
+  - Archive / unarchive — soft-retire from the active list without deleting
+    (only if archive right); archived items remain viewable to users with view
+    when filtered to archived, unless product UI hides them by default
+- Suggested capability keys (for matrix + API gates where role-level defaults
+  apply; firm-member overrides from head grants still apply inside the firm):
+  - `firm_documents_add`
+  - `firm_documents_view`
+  - `firm_documents_delete`
+  - `firm_documents_archive`
+  - `firm_documents_manage_member_rights` — Head of Firm (and optionally
+    assign-head roles) may set member grants; heads always effectively have this
+    for their own firm
+- Enforcement order: actor must belong to the firm (or be acting with
+  assign-head / hub-admin support tools), then head OR explicit member grant OR
+  matching capability as designed — head always wins full rights for own firm.
+
+3.4.5 Activity logs (required for the whole flow)
+- Every mutation in this flow is written to `activity_logs` (same hub audit
+  trail as section 6A). Suggested action keys:
+  - `firm.head.assign` — Head of Firm appointed
+  - `firm.head.replace` — Head of Firm replaced
+  - `firm.head.clear` — Head of Firm cleared
+  - `firm.documents.member_rights.grant` — member document rights granted/updated
+  - `firm.documents.member_rights.revoke` — member document rights revoked
+  - `firm.documents.add` — document uploaded / created
+  - `firm.documents.view` — optional: record sensitive downloads if product
+    requires audit of views (otherwise omit high-volume view noise)
+  - `firm.documents.delete` — document permanently deleted
+  - `firm.documents.archive` / `firm.documents.unarchive` — archive toggles
+- Log payloads should identify firm id/name, actor, target user (for head /
+  rights changes), document id/name (for document actions), and granted rights
+  flags — never store file binary contents; redact secrets.
+
+3.5 Other Features (later)
 - Additional features to be added over time; keep architecture flexible.
 
 
@@ -656,6 +746,13 @@ Notes:
     report for the hub — same roles
   - Manage active sessions — see currently logged-in users and force-logout
     any user (ends all of their API sessions on this hub) — same roles
+  - Manage firms — create/edit firms, assign users’ firm membership context,
+    and set compliance visibility between firms — same roles
+  - Assign Head of Firm (`dashboard_assign_firm_head`) — appoint / replace /
+    clear the single Head of Firm for each firm (must be a member of that firm)
+  - Firm Documents — add / view / delete / archive firm attachments (images,
+    Word, PDF, etc.); Head of Firm has all rights for their firm and may grant
+    add/view/delete/archive to firm members (section 3.4)
   - AI content generation / control hubs remotely — same roles
     (typically Power Admin on Central Hub; Shared-only where appropriate)
   - Any other admin dashboard screens/actions
@@ -757,6 +854,10 @@ Notes:
   - Successful mutating API actions (POST / PUT / PATCH / DELETE): content,
     plans, settings, advisor import/discontinue, billing, capabilities, hubs,
     purchases, subscriptions, etc.
+  - Firm Head & Firm Documents (section 3.4): appoint/replace/clear head,
+    grant/revoke member document rights, and document add / delete / archive
+    (and view/download if audited) — action keys `firm.head.*` and
+    `firm.documents.*`
 - Sensitive fields (passwords, secrets, card data) are NEVER stored; payloads
   are redacted / truncated.
 - Activity report (aggregates): totals, unique users/actions, counts by action,
@@ -814,7 +915,7 @@ Notes:
 - New Shared and White-label instances are spawned by copying code to another
   cPanel and registering them on Central Hub.
 - Design for future: AI generation (FinProms admin), in-app edit, compliance,
-  more features.
+  firm head + firm documents, more features.
 - Settings that vary (e.g. NEW-banner duration) come from the database.
 
 
@@ -997,6 +1098,13 @@ STEP 1 — Shared hub core (content hub)
 [x] Social Media Compliance check flow (module + APIs)
 [x] General Compliance module + APIs (description + optional multi-file supporting files)
 [x] Website Compliance module + APIs (templates, sections, change requests, cPanel deploy, supporting files)
+[x] Firm Head of Firm — capability `dashboard_assign_firm_head`; one head per
+    firm appointed from that firm’s members (section 3.4.1)
+[x] Firm Documents library — head can add attachments (images, Word, PDF, etc.)
+    and has all add/view/delete/archive rights (section 3.4.2–3.4.4)
+[x] Head grants firm-member document rights (add / view / delete / archive)
+[x] Firm Head & Firm Documents activity logs (`firm.head.*`, `firm.documents.*`)
+[x] Frontend: Assign Head of Firm + Firm Documents UI (rights-gated)
 
 ================================================================================
 END OF REQUIREMENTS
