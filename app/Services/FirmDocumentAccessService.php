@@ -6,7 +6,10 @@ use App\Models\Firm;
 use App\Models\FirmDocumentMemberRight;
 use App\Models\Hub;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+
+// WhiteLabelDatabaseService is resolved via app() in headedFirmIdFor().
 
 /**
  * Resolves firm-document rights for a user against a firm.
@@ -50,12 +53,8 @@ class FirmDocumentAccessService
 
     public function isHeadOfFirm(User $user, Firm $firm): bool
     {
-        if ($firm->head_user_id === null || (int) $firm->head_user_id !== (int) $user->id) {
-            return false;
-        }
-
-        // Stale head row if the user left the firm.
-        return $user->firm_id !== null && (int) $user->firm_id === (int) $firm->id;
+        return $firm->head_user_id !== null
+            && (int) $firm->head_user_id === (int) $user->id;
     }
 
     public function can(User $user, Firm $firm, string $right, ?Hub $hub = null): bool
@@ -116,7 +115,6 @@ class FirmDocumentAccessService
     {
         $hub = $hub ?? $this->hubs->current();
         $enabled = $this->functionalityEnabled($hub);
-        $firmId = $user->firm_id ? (int) $user->firm_id : null;
 
         $hubWide = [
             'can_add' => $enabled && $this->matrix->userCan($hub, $user, 'firm_documents_add'),
@@ -133,31 +131,29 @@ class FirmDocumentAccessService
                 'can_archive' => false,
                 'can_manage_member_rights' => false,
                 'is_firm_head' => false,
-                'firm_id' => $firmId,
+                'firm_id' => $user->firm_id ? (int) $user->firm_id : null,
                 'functionality_enabled' => false,
                 'hub_wide' => $hubWide,
             ];
         }
 
-        $isHead = false;
-        if ($firmId && Schema::hasColumn('firms', 'head_user_id')) {
-            $firm = Firm::query()->find($firmId);
-            if ($firm && $this->isHeadOfFirm($user, $firm)) {
-                $isHead = true;
-
-                return [
-                    'can_add' => true,
-                    'can_view' => true,
-                    'can_delete' => true,
-                    'can_archive' => true,
-                    'can_manage_member_rights' => true,
-                    'is_firm_head' => true,
-                    'firm_id' => $firmId,
-                    'functionality_enabled' => true,
-                    'hub_wide' => $hubWide,
-                ];
-            }
+        // Prefer "I am head of firm X" over relying on users.firm_id alone.
+        $headedFirmId = $this->headedFirmIdFor($user, $hub);
+        if ($headedFirmId) {
+            return [
+                'can_add' => true,
+                'can_view' => true,
+                'can_delete' => true,
+                'can_archive' => true,
+                'can_manage_member_rights' => true,
+                'is_firm_head' => true,
+                'firm_id' => $headedFirmId,
+                'functionality_enabled' => true,
+                'hub_wide' => $hubWide,
+            ];
         }
+
+        $firmId = $user->firm_id ? (int) $user->firm_id : null;
 
         $grant = null;
         if ($firmId && Schema::hasTable('firm_document_member_rights')) {
@@ -173,11 +169,55 @@ class FirmDocumentAccessService
             'can_delete' => (bool) ($grant?->can_delete) || $hubWide['can_delete'],
             'can_archive' => (bool) ($grant?->can_archive) || $hubWide['can_archive'],
             'can_manage_member_rights' => false,
-            'is_firm_head' => $isHead,
+            'is_firm_head' => false,
             'firm_id' => $firmId,
             'functionality_enabled' => true,
             'hub_wide' => $hubWide,
         ];
+    }
+
+    /**
+     * Firm id where this user is Head of Firm (local DB, or remote hub DB by email).
+     */
+    public function headedFirmIdFor(User $user, ?Hub $hub = null): ?int
+    {
+        $hub = $hub ?? $this->hubs->current();
+
+        // Local / same-DB hub (content hub deploy, or Shared with local firms).
+        if (Schema::hasColumn('firms', 'head_user_id')) {
+            $localId = Firm::query()->where('head_user_id', $user->id)->value('id');
+            if ($localId) {
+                return (int) $localId;
+            }
+        }
+
+        // Acting remotely from Central: look up head by matching email on remote users.
+        if ($hub->isContentHub() && $hub->hasRemoteDatabaseConfigured()) {
+            try {
+                return app(WhiteLabelDatabaseService::class)->run($hub, function (string $connection) use ($user) {
+                    if (! DB::connection($connection)->getSchemaBuilder()->hasColumn('firms', 'head_user_id')) {
+                        return null;
+                    }
+
+                    $remoteUserId = DB::connection($connection)->table('users')
+                        ->where('email', $user->email)
+                        ->value('id');
+                    if (! $remoteUserId) {
+                        return null;
+                    }
+
+                    $firmId = DB::connection($connection)->table('firms')
+                        ->where('head_user_id', $remoteUserId)
+                        ->value('id');
+
+                    return $firmId ? (int) $firmId : null;
+                });
+            } catch (\Throwable) {
+                return null;
+            }
+        }
+
+        return null;
     }
 
     public function clearGrantsForUser(User $user): void

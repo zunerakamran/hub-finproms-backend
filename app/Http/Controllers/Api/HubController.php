@@ -59,6 +59,12 @@ class HubController extends Controller
                         ->effectiveRightsSummary($user, $acting);
                 } catch (\Throwable) {
                     $payload['acting_checklist'] = $payload['checklist'] ?? [];
+                    try {
+                        $payload['firm_document_rights'] = app(\App\Services\FirmDocumentAccessService::class)
+                            ->effectiveRightsSummary($user, $this->hubs->current());
+                    } catch (\Throwable) {
+                        // leave unset
+                    }
                 }
             } else {
                 $effective = [];

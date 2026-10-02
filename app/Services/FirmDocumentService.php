@@ -6,6 +6,7 @@ use App\Models\Firm;
 use App\Models\FirmDocument;
 use App\Models\FirmDocumentAttachment;
 use App\Models\FirmDocumentMemberRight;
+use App\Models\Hub;
 use App\Models\User;
 use App\Support\ComplianceSupportingFiles;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -24,13 +25,13 @@ class FirmDocumentService
         private readonly HubService $hubs,
     ) {}
 
-    public function assertCan(User $user, Firm $firm, string $right): void
+    public function assertCan(User $user, Firm $firm, string $right, ?Hub $hub = null): void
     {
-        if (! $this->access->functionalityEnabled()) {
+        if (! $this->access->functionalityEnabled($hub)) {
             throw new HttpException(403, 'Firm documents are disabled for this hub. Enable Functionalities → Firm documents first.');
         }
 
-        if (! $this->access->can($user, $firm, $right)) {
+        if (! $this->access->can($user, $firm, $right, $hub)) {
             throw new HttpException(403, 'You do not have permission to '.$right.' firm documents for this firm.');
         }
     }
@@ -38,9 +39,9 @@ class FirmDocumentService
     /**
      * @return LengthAwarePaginator<int, FirmDocument>
      */
-    public function paginate(User $actor, Firm $firm, string $scope = 'active', int $perPage = 25): LengthAwarePaginator
+    public function paginate(User $actor, Firm $firm, string $scope = 'active', int $perPage = 25, ?Hub $hub = null): LengthAwarePaginator
     {
-        $this->assertCan($actor, $firm, FirmDocumentAccessService::RIGHT_VIEW);
+        $this->assertCan($actor, $firm, FirmDocumentAccessService::RIGHT_VIEW, $hub);
 
         $query = FirmDocument::query()
             ->with(['attachments', 'uploader:id,name,email'])
@@ -69,8 +70,9 @@ class FirmDocumentService
         ?string $description,
         array $files,
         ?Request $request = null,
+        ?Hub $hub = null,
     ): FirmDocument {
-        $this->assertCan($actor, $firm, FirmDocumentAccessService::RIGHT_ADD);
+        $this->assertCan($actor, $firm, FirmDocumentAccessService::RIGHT_ADD, $hub);
 
         if ($files === []) {
             throw ValidationException::withMessages([
@@ -113,10 +115,10 @@ class FirmDocumentService
         return $document;
     }
 
-    public function delete(User $actor, FirmDocument $document, ?Request $request = null): void
+    public function delete(User $actor, FirmDocument $document, ?Request $request = null, ?Hub $hub = null): void
     {
         $firm = $document->firm ?? Firm::query()->findOrFail($document->firm_id);
-        $this->assertCan($actor, $firm, FirmDocumentAccessService::RIGHT_DELETE);
+        $this->assertCan($actor, $firm, FirmDocumentAccessService::RIGHT_DELETE, $hub);
 
         $payload = [
             'firm_id' => $firm->id,
@@ -146,10 +148,10 @@ class FirmDocumentService
         ]);
     }
 
-    public function archive(User $actor, FirmDocument $document, bool $archive = true, ?Request $request = null): FirmDocument
+    public function archive(User $actor, FirmDocument $document, bool $archive = true, ?Request $request = null, ?Hub $hub = null): FirmDocument
     {
         $firm = $document->firm ?? Firm::query()->findOrFail($document->firm_id);
-        $this->assertCan($actor, $firm, FirmDocumentAccessService::RIGHT_ARCHIVE);
+        $this->assertCan($actor, $firm, FirmDocumentAccessService::RIGHT_ARCHIVE, $hub);
 
         if ($archive) {
             if ($document->isArchived()) {
@@ -193,9 +195,9 @@ class FirmDocumentService
     /**
      * @return list<FirmDocumentMemberRight>
      */
-    public function listMemberRights(User $actor, Firm $firm): array
+    public function listMemberRights(User $actor, Firm $firm, ?Hub $hub = null): array
     {
-        $this->assertCan($actor, $firm, FirmDocumentAccessService::RIGHT_MANAGE_MEMBER_RIGHTS);
+        $this->assertCan($actor, $firm, FirmDocumentAccessService::RIGHT_MANAGE_MEMBER_RIGHTS, $hub);
 
         return FirmDocumentMemberRight::query()
             ->with('user:id,name,email')
@@ -214,8 +216,9 @@ class FirmDocumentService
         User $member,
         array $rights,
         ?Request $request = null,
+        ?Hub $hub = null,
     ): FirmDocumentMemberRight {
-        $this->assertCan($actor, $firm, FirmDocumentAccessService::RIGHT_MANAGE_MEMBER_RIGHTS);
+        $this->assertCan($actor, $firm, FirmDocumentAccessService::RIGHT_MANAGE_MEMBER_RIGHTS, $hub);
 
         if ($member->firm_id === null || (int) $member->firm_id !== (int) $firm->id) {
             throw ValidationException::withMessages([
