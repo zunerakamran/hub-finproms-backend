@@ -113,9 +113,7 @@ class ModuleBillingService
         }
 
         $quote = $this->pricing->quote(self::WEBSITE_MODULE_KEY);
-        if ($quote['amount'] <= 0) {
-            return null;
-        }
+        // £0 catalogue prices still produce an invoice row (audit / settle trail).
 
         if (($quote['billing_unit'] ?? '') !== ModulePricingService::BILLING_UNIT_PER_WEBSITE) {
             // Misconfigured catalogue — still allow amount as one website charge.
@@ -123,16 +121,24 @@ class ModuleBillingService
 
         $payer = $this->resolvePayer($actor);
         $domain = (string) ($templateRequest->domain_name ?: $templateRequest->cpanel_domain ?: 'website #'.$requestId);
+        $isComplimentary = (float) $quote['amount'] <= 0;
+        $status = $isComplimentary
+            ? HubModuleBilling::STATUS_PAID
+            : HubModuleBilling::STATUS_UNPAID;
 
-        return DB::transaction(function () use ($hub, $quote, $payer, $requestId, $domain, $templateRequest) {
+        return DB::transaction(function () use ($hub, $quote, $payer, $requestId, $domain, $templateRequest, $status, $isComplimentary, $actor) {
             $billing = HubModuleBilling::query()->create([
                 'hub_id' => $hub->id,
                 'module_key' => self::WEBSITE_MODULE_KEY,
                 'billed_user_id' => $payer->id,
                 'amount' => $quote['amount'],
                 'currency' => $quote['currency'],
-                'status' => HubModuleBilling::STATUS_UNPAID,
-                'payment_status' => HubModuleBilling::STATUS_UNPAID,
+                'status' => $status,
+                'payment_status' => $status,
+                'paid_at' => $isComplimentary ? now() : null,
+                'paid_by_user_id' => $isComplimentary ? $actor->id : null,
+                'payment_method' => $isComplimentary ? 'complimentary' : null,
+                'payment_notes' => $isComplimentary ? '£0 catalogue price — included' : null,
                 'meta' => [
                     'module_label' => Hub::CHECKLIST_DEFINITIONS[self::WEBSITE_MODULE_KEY]['label'] ?? self::WEBSITE_MODULE_KEY,
                     'billing_cadence' => Invoice::TYPES_ONE_TIME,
@@ -140,7 +146,7 @@ class ModuleBillingService
                     'wc_template_request_id' => $requestId,
                     'domain_name' => $domain,
                     'template_name' => $templateRequest->template_name,
-                    'auto_paid_on_hub_enable' => false,
+                    'auto_paid_on_hub_enable' => $isComplimentary,
                 ],
             ]);
 
@@ -177,6 +183,21 @@ class ModuleBillingService
     }
 
     /**
+     * Deployed WC template requests on this hub (local or remote DB).
+     *
+     * @return \Illuminate\Support\Collection<int, TemplateRequest>
+     */
+    public function deployedWebsiteRequests(Hub $hub)
+    {
+        return $this->onHubDatabase($hub, function () {
+            return TemplateRequest::query()
+                ->where('status', 'deployed')
+                ->orderBy('id')
+                ->get();
+        });
+    }
+
+    /**
      * Create one-time invoices for modules that newly became enabled.
      *
      * @param  list<string>  $newlyEnabledKeys
@@ -190,8 +211,7 @@ class ModuleBillingService
 
         $created = [];
         foreach ($newlyEnabledKeys as $moduleKey) {
-            $invoice = $this->invoiceModuleIfNeeded($hub, $moduleKey, $actor);
-            if ($invoice) {
+            foreach ($this->invoiceModuleEnablement($hub, $moduleKey, $actor) as $invoice) {
                 $created[] = $invoice;
             }
         }
@@ -213,8 +233,7 @@ class ModuleBillingService
 
         $created = [];
         foreach ($hub->enabledModuleKeys() as $moduleKey) {
-            $invoice = $this->invoiceModuleIfNeeded($hub, $moduleKey, $actor);
-            if ($invoice) {
+            foreach ($this->invoiceModuleEnablement($hub, $moduleKey, $actor) as $invoice) {
                 $created[] = $invoice;
             }
         }
@@ -222,18 +241,31 @@ class ModuleBillingService
         return $created;
     }
 
-    public function invoiceModuleIfNeeded(Hub $hub, string $moduleKey, User $actor): ?Invoice
+    /**
+     * @return list<Invoice>
+     */
+    public function invoiceModuleEnablement(Hub $hub, string $moduleKey, User $actor): array
     {
         if (! $this->billingEnabled($hub)) {
-            return null;
+            return [];
         }
 
         if (! in_array($moduleKey, Hub::MODULE_KEYS, true)) {
-            return null;
+            return [];
         }
 
         if (! $hub->moduleEffectivelyEnabled($moduleKey)) {
-            return null;
+            return [];
+        }
+
+        $quote = $this->pricing->quote($moduleKey);
+
+        // Per-website modules: invoice each currently deployed site (£/website × count).
+        // Future deploys are billed via invoiceWebsiteDeploy().
+        if (($quote['billing_unit'] ?? ModulePricingService::BILLING_UNIT_ONE_TIME)
+            === ModulePricingService::BILLING_UNIT_PER_WEBSITE
+        ) {
+            return $this->invoiceExistingDeployedWebsites($hub, $actor);
         }
 
         $existing = HubModuleBilling::query()
@@ -249,30 +281,20 @@ class ModuleBillingService
         if ($existing) {
             // Already billed — only create a missing invoice row, never re-report as new.
             if ($existing->invoice) {
-                return null;
+                return [];
             }
 
-            return $this->invoices->createForModuleBilling($existing);
+            return [$this->invoices->createForModuleBilling($existing)];
         }
 
-        $quote = $this->pricing->quote($moduleKey);
-        if ($quote['amount'] <= 0) {
-            // Zero / inactive pricing — skip invoice generation.
-            return null;
-        }
-
-        // Per-website modules are not charged as a flat one-time on enable —
-        // amount is a unit rate (£/website) applied when websites are provisioned.
-        if (($quote['billing_unit'] ?? ModulePricingService::BILLING_UNIT_ONE_TIME)
-            === ModulePricingService::BILLING_UNIT_PER_WEBSITE
-        ) {
-            return null;
-        }
-
+        // Flat one-time — including £0 catalogue prices (still create the invoice).
         $payer = $this->resolvePayer($actor);
-        $status = HubModuleBilling::STATUS_UNPAID;
+        $isComplimentary = (float) $quote['amount'] <= 0;
+        $status = $isComplimentary
+            ? HubModuleBilling::STATUS_PAID
+            : HubModuleBilling::STATUS_UNPAID;
 
-        return DB::transaction(function () use ($hub, $moduleKey, $quote, $payer, $status) {
+        $invoice = DB::transaction(function () use ($hub, $moduleKey, $quote, $payer, $status, $isComplimentary, $actor) {
             $billing = HubModuleBilling::query()->create([
                 'hub_id' => $hub->id,
                 'module_key' => $moduleKey,
@@ -281,16 +303,63 @@ class ModuleBillingService
                 'currency' => $quote['currency'],
                 'status' => $status,
                 'payment_status' => $status,
+                'paid_at' => $isComplimentary ? now() : null,
+                'paid_by_user_id' => $isComplimentary ? $actor->id : null,
+                'payment_method' => $isComplimentary ? 'complimentary' : null,
+                'payment_notes' => $isComplimentary ? '£0 catalogue price — included' : null,
                 'meta' => [
                     'module_label' => Hub::CHECKLIST_DEFINITIONS[$moduleKey]['label'] ?? $moduleKey,
                     'billing_cadence' => Invoice::TYPES_ONE_TIME,
                     'billing_unit' => $quote['billing_unit'] ?? ModulePricingService::BILLING_UNIT_ONE_TIME,
-                    'auto_paid_on_hub_enable' => false,
+                    'auto_paid_on_hub_enable' => $isComplimentary,
                 ],
             ]);
 
             return $this->invoices->createForModuleBilling($billing);
         });
+
+        return [$invoice];
+    }
+
+    /**
+     * Bill every currently deployed website that has no WTL one-time invoice yet.
+     * Used when WTL is enabled / charge flag turns on with sites already live.
+     *
+     * @return list<Invoice>
+     */
+    public function invoiceExistingDeployedWebsites(Hub $hub, User $actor): array
+    {
+        if (! $this->billingEnabled($hub) || ! $hub->moduleEffectivelyEnabled(self::WEBSITE_MODULE_KEY)) {
+            return [];
+        }
+
+        $created = [];
+        foreach ($this->deployedWebsiteRequests($hub) as $templateRequest) {
+            $requestId = (int) $templateRequest->id;
+            $alreadyInvoiced = HubModuleBilling::query()
+                ->where('hub_id', $hub->id)
+                ->where('module_key', self::WEBSITE_MODULE_KEY)
+                ->where('status', '!=', HubModuleBilling::STATUS_CANCELED)
+                ->get()
+                ->contains(function (HubModuleBilling $row) use ($requestId) {
+                    return (int) ($row->meta['wc_template_request_id'] ?? 0) === $requestId
+                        && $row->invoice !== null;
+                });
+
+            $invoice = $this->invoiceWebsiteDeploy($hub, $templateRequest, $actor);
+            if ($invoice && ! $alreadyInvoiced) {
+                $created[] = $invoice;
+            }
+        }
+
+        return $created;
+    }
+
+    public function invoiceModuleIfNeeded(Hub $hub, string $moduleKey, User $actor): ?Invoice
+    {
+        $invoices = $this->invoiceModuleEnablement($hub, $moduleKey, $actor);
+
+        return $invoices[0] ?? null;
     }
 
     /**

@@ -17,7 +17,7 @@ class HubService
 
         $slug = (string) config('hub.current_slug', 'shared');
 
-        return Cache::remember("hub:current:{$slug}", 60, function () use ($slug) {
+        return Cache::remember("hub:current:{$slug}", 5, function () use ($slug) {
             $hub = Hub::query()->where('slug', $slug)->where('is_active', true)->first();
 
             // Inactive / missing row for this slug — create or reactivate.

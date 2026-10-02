@@ -584,6 +584,20 @@ class AuthController extends Controller
             ],
         ];
 
+        try {
+            $firmDocRights = app(\App\Services\FirmDocumentAccessService::class)
+                ->effectiveRightsSummary($user, $hub);
+            $payload['firm_document_rights'] = $firmDocRights;
+            $user->setAttribute('is_firm_head', (bool) ($firmDocRights['is_firm_head'] ?? false));
+            $user->setAttribute(
+                'firm_document_firm_id',
+                isset($firmDocRights['firm_id']) ? (int) $firmDocRights['firm_id'] : null
+            );
+            $payload['user'] = $user;
+        } catch (\Throwable) {
+            //
+        }
+
         if ($user->isPowerAdmin()) {
             $payload['power_admin_capabilities'] = $this->powerCapabilities->resolved();
         }

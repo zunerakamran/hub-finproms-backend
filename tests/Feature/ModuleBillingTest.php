@@ -42,16 +42,21 @@ class ModuleBillingTest extends TestCase
         ]);
 
         $response->assertCreated();
-        $invoices = $response->json('module_invoices');
+        $invoices = collect($response->json('module_invoices'));
         $this->assertNotEmpty($invoices);
 
-        // White Label Hub (£14,500). Social Media Template Library is £0 so skipped.
-        $this->assertCount(1, $invoices);
-        $this->assertStringContainsString('White Label Hub', $invoices[0]['description']);
-        $this->assertSame(14500.0, (float) $invoices[0]['amount']);
-        $this->assertSame(Invoice::TYPE_MODULE_BILLING, $invoices[0]['type']);
-        $this->assertSame(Invoice::TYPES_ONE_TIME, $invoices[0]['types']);
-        $this->assertSame('unpaid', $invoices[0]['status'] ?? Invoice::query()->find($invoices[0]['id'])->status);
+        // White Label Hub (£14,500) + Social Media Template Library (£0 included).
+        $this->assertCount(2, $invoices);
+        $wl = $invoices->first(fn ($row) => str_contains($row['description'], 'White Label Hub'));
+        $smtl = $invoices->first(fn ($row) => str_contains($row['description'], 'Social Media Template Library'));
+        $this->assertNotNull($wl);
+        $this->assertNotNull($smtl);
+        $this->assertSame(14500.0, (float) $wl['amount']);
+        $this->assertSame(0.0, (float) $smtl['amount']);
+        $this->assertSame(Invoice::TYPE_MODULE_BILLING, $wl['type']);
+        $this->assertSame(Invoice::TYPES_ONE_TIME, $wl['types']);
+        $this->assertSame('unpaid', $wl['status'] ?? Invoice::query()->find($wl['id'])->status);
+        $this->assertSame('paid', $smtl['status'] ?? Invoice::query()->find($smtl['id'])->status);
 
         $this->assertDatabaseHas('invoices', [
             'type' => Invoice::TYPE_MODULE_BILLING,
@@ -61,6 +66,11 @@ class ModuleBillingTest extends TestCase
         $this->assertDatabaseHas('hub_module_billings', [
             'module_key' => 'module_white_label_hub',
             'status' => 'unpaid',
+        ]);
+        $this->assertDatabaseHas('hub_module_billings', [
+            'module_key' => 'module_social_media_template_library',
+            'status' => 'paid',
+            'amount' => 0,
         ]);
     }
 
@@ -125,7 +135,51 @@ class ModuleBillingTest extends TestCase
         $this->assertSame([], $again->json('module_invoices'));
     }
 
-    public function test_website_template_library_does_not_invoice_on_enable_because_per_website(): void
+    public function test_zero_pound_module_still_creates_paid_invoice_on_enable(): void
+    {
+        $hub = Hub::query()->create([
+            'name' => 'WL Hub',
+            'slug' => 'wl-smtl-zero',
+            'type' => Hub::TYPE_WHITE_LABEL,
+            'is_active' => true,
+            'checklist' => array_merge(Hub::defaultChecklist(Hub::TYPE_WHITE_LABEL), [
+                'charge_amount_per_module' => true,
+                'module_social_media_template_library' => false,
+            ]),
+        ]);
+
+        $matrix = app(CapabilitiesMatrixService::class);
+        $caps = $matrix->resolvedRoleCapabilities($hub);
+        $caps[User::ROLE_POWER_ADMIN]['dashboard_manage_modules'] = true;
+        $hub->role_capabilities = $caps;
+        $hub->save();
+
+        $admin = User::factory()->powerAdmin()->create();
+        Sanctum::actingAs($admin);
+        app(ModulePricingService::class)->seedDefaultsIfEmpty();
+
+        $response = $this->putJson('/api/power-admin/modules?hub_id='.$hub->id, [
+            'hub_id' => $hub->id,
+            'modules' => [
+                'module_social_media_template_library' => true,
+            ],
+        ]);
+
+        $response->assertOk();
+        $created = collect($response->json('module_invoices'));
+        $this->assertCount(1, $created);
+        $this->assertSame(0.0, (float) $created->first()['amount']);
+        $this->assertSame('paid', $created->first()['status']);
+        $this->assertStringContainsString('Social Media Template Library', $created->first()['description']);
+        $this->assertDatabaseHas('hub_module_billings', [
+            'hub_id' => $hub->id,
+            'module_key' => 'module_social_media_template_library',
+            'status' => 'paid',
+            'amount' => 0,
+        ]);
+    }
+
+    public function test_website_template_library_invoices_existing_deployed_websites_on_enable(): void
     {
         $hub = Hub::query()->create([
             'name' => 'WL Hub',
@@ -148,6 +202,27 @@ class ModuleBillingTest extends TestCase
         Sanctum::actingAs($admin);
         app(ModulePricingService::class)->seedDefaultsIfEmpty();
 
+        \App\Models\WebsiteCompliance\TemplateRequest::query()->create([
+            'template_name' => 'classic',
+            'request_type' => 'advisor_website',
+            'domain_name' => 'one.example.test',
+            'status' => 'deployed',
+            'cpanel_domain' => 'one.example.test',
+        ]);
+        \App\Models\WebsiteCompliance\TemplateRequest::query()->create([
+            'template_name' => 'classic',
+            'request_type' => 'advisor_website',
+            'domain_name' => 'two.example.test',
+            'status' => 'deployed',
+            'cpanel_domain' => 'two.example.test',
+        ]);
+        \App\Models\WebsiteCompliance\TemplateRequest::query()->create([
+            'template_name' => 'classic',
+            'request_type' => 'advisor_website',
+            'domain_name' => 'pending.example.test',
+            'status' => 'pending',
+        ]);
+
         $response = $this->putJson('/api/power-admin/modules?hub_id='.$hub->id, [
             'hub_id' => $hub->id,
             'modules' => [
@@ -156,8 +231,39 @@ class ModuleBillingTest extends TestCase
         ]);
 
         $response->assertOk();
-        $this->assertSame([], $response->json('module_invoices'));
+        $created = collect($response->json('module_invoices'));
+        $this->assertCount(2, $created);
+        $this->assertTrue($created->every(fn ($row) => (float) $row['amount'] === 300.0));
         $this->assertTrue($hub->fresh()->hasWebsiteTemplateLibraryModule());
+        $this->assertSame(2, \App\Models\HubModuleBilling::query()
+            ->where('hub_id', $hub->id)
+            ->where('module_key', 'module_website_template_library')
+            ->count());
+
+        // No deployed sites → enabling creates no WTL invoices.
+        $hub2 = Hub::query()->create([
+            'name' => 'WL Empty',
+            'slug' => 'wl-wtl-empty',
+            'type' => Hub::TYPE_WHITE_LABEL,
+            'is_active' => true,
+            'checklist' => array_merge(Hub::defaultChecklist(Hub::TYPE_WHITE_LABEL), [
+                'charge_amount_per_module' => true,
+                'module_website_template_library' => false,
+            ]),
+        ]);
+        $caps2 = $matrix->resolvedRoleCapabilities($hub2);
+        $caps2[User::ROLE_POWER_ADMIN]['dashboard_manage_modules'] = true;
+        $hub2->role_capabilities = $caps2;
+        $hub2->save();
+
+        $empty = $this->putJson('/api/power-admin/modules?hub_id='.$hub2->id, [
+            'hub_id' => $hub2->id,
+            'modules' => [
+                'module_website_template_library' => true,
+            ],
+        ]);
+        $empty->assertOk();
+        $this->assertSame([], $empty->json('module_invoices'));
     }
 
     public function test_shared_hub_does_not_invoice_modules_by_default(): void

@@ -18,7 +18,7 @@ class WhiteLabelHubSyncService
     ) {}
 
     /**
-     * Push branding, functionalities, capabilities, and credits to the remote hubs row.
+     * Push branding, functionalities, capabilities, and credits to the remote hubs row(s).
      *
      * @throws InvalidArgumentException
      */
@@ -79,13 +79,32 @@ class WhiteLabelHubSyncService
                     ARRAY_FILTER_USE_KEY
                 );
 
-                $query = DB::connection($connection)->table('hubs')->where('slug', $hub->slug);
-                if ($query->exists()) {
-                    $query->update($payload);
-                } else {
+                // Update every content-hub row on that DB (slug match + live deploy row).
+                // Content hub .env HUB_SLUG can differ from the Central registry slug;
+                // updating only by registry slug left the live site on a stale checklist.
+                $targetIds = DB::connection($connection)->table('hubs')
+                    ->where(function ($q) use ($hub) {
+                        $q->where('slug', $hub->slug);
+                        if ($schema->hasColumn('hubs', 'type')) {
+                            $q->orWhereIn('type', [Hub::TYPE_SHARED, Hub::TYPE_WHITE_LABEL]);
+                        }
+                    })
+                    ->pluck('id')
+                    ->map(fn ($id) => (int) $id)
+                    ->unique()
+                    ->values()
+                    ->all();
+
+                if ($targetIds === []) {
                     $payload['slug'] = $hub->slug;
                     $payload['created_at'] = $now;
                     DB::connection($connection)->table('hubs')->insert($payload);
+
+                    return;
+                }
+
+                foreach ($targetIds as $id) {
+                    DB::connection($connection)->table('hubs')->where('id', $id)->update($payload);
                 }
             });
         } catch (InvalidArgumentException $e) {

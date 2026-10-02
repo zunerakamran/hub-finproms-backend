@@ -782,7 +782,7 @@ class Hub extends Model
         ],
         'charge_amount_per_module' => [
             'label' => 'Charge amount per module (one time)',
-            'description' => 'When on, enabling a product module generates a one-time invoice at the configured module price. Default on for white-labelled hubs; off for the shared hub.',
+            'description' => 'When on, enabling a product module generates a one-time invoice at the configured module price (including £0 catalogue prices, recorded as paid). Per-website modules invoice each currently deployed site on enable, then again for each new deploy.',
             'group' => self::GROUP_BEHAVIOUR,
             'default_shared' => false,
             'default_white_label' => true,
@@ -803,7 +803,7 @@ class Hub extends Model
         ],
         'firm_documents' => [
             'label' => 'Firm documents',
-            'description' => 'When on, this hub enables firm document libraries (attachments). Related Capabilities (view / add / delete / archive firm documents across all firms) become available on the matrix. Head of Firm always has full rights for their own firm and can grant rights to that firm’s members. Assign Head of Firm is separate and does not require this flag.',
+            'description' => 'When on, hub-wide Firm document Capabilities (view / add / delete / archive across ALL firms) become available on the matrix. Head of Firm always unlocks Firm documents for their own firm when appointed — that does not require this flag. Assign Head of Firm is separate. When toggled from Central, this flag is synced to the content hub database (deploy wiring required).',
             'group' => self::GROUP_BEHAVIOUR,
             'default_shared' => false,
             'default_white_label' => false,

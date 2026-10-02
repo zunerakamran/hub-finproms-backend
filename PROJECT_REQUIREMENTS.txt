@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-02 (hub switcher eligibility = remote DB only; receive_content for push)
+Last updated: 2026-10-02 (£0 module invoices + WTL bill existing sites on enable)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -344,12 +344,17 @@ Notes:
 
 3.4.0 Functionality gate (hub-wide matrix only)
 - Hub Functionalities checklist flag: `firm_documents` (“Firm documents”).
-  Default OFF. Power Admin enables it per hub on Functionalities.
+  Default OFF. Power Admin enables it per hub on Functionalities (often from
+  Central Hub Controller → Hub Functionalities for that hub).
 - While OFF, firm-document Capabilities (view / add / delete / archive for ALL
   firms) are blurred / inactive on the Capabilities matrix.
 - Head of Firm does NOT need this flag — appointing a Head unlocks Firm
   documents for that user on their firm immediately.
 - Assign Head of Firm (`dashboard_assign_firm_head`) is NOT gated by this flag.
+- Central control: toggling this flag on Central MUST sync to the content hub’s
+  own database (remote DB wiring). The Head logs into the content hub site
+  (Shared / White-label), not Central — that hub’s API must have the same
+  Firm Documents / Head code deployed.
 
 3.4.1 Who can appoint a Head of Firm
 - Capability (Capabilities matrix): `dashboard_assign_firm_head`
@@ -627,15 +632,17 @@ Notes:
   - Generic Content Pre Approval Workflow — activates GC capability section
     (capabilities blurred while this module is off)
 - Managed via `dashboard_manage_modules` / Modules API on Central Hub.
-- When `charge_amount_per_module` is ON, newly enabling a one-time-priced
-  module creates a one-time invoice (idempotent per hub + module). Website
-  Template Library is priced per website and does NOT invoice on enable alone.
+- When `charge_amount_per_module` is ON, newly enabling a module creates a
+  one-time invoice (idempotent per hub + module), including £0 catalogue prices
+  (recorded as paid / complimentary). Website Template Library is priced per
+  website: on enable, one invoice is created for each currently deployed
+  website; later deploys invoice individually.
 
 5.1B Module catalogue pricing (Modules pricing)
 - Official default catalogue (editable via capability / database):
   One-time:
   1) Shared Hub / White Label Hub — £14,500 (one time)
-  2) Social Media Template Library — £0 (one time / included)
+  2) Social Media Template Library — £0 (one time / included; invoice still created, auto-paid)
   3) Social Media Pre Approval Workflow — £5,000 (one time)
   4) Website Template Library — £300 per website
   5) Website Content Pre Approval Workflow — £10,000 (one time)
