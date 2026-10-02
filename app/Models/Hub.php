@@ -644,6 +644,19 @@ class Hub extends Model
     ];
 
     /**
+     * Firm document capabilities — inactive while Functionalities → firm_documents is off.
+     * These are hub-wide (all firms). Head of Firm / member grants are separate and per-firm.
+     *
+     * @var list<string>
+     */
+    public const FIRM_DOCUMENTS_CAPABILITY_KEYS = [
+        'firm_documents_view',
+        'firm_documents_add',
+        'firm_documents_delete',
+        'firm_documents_archive',
+    ];
+
+    /**
      * Member personal-dashboard sections (General options).
      *
      * @var list<string>
@@ -784,6 +797,13 @@ class Hub extends Model
         'require_login_otp' => [
             'label' => 'Two-factor authentication (login OTP)',
             'description' => 'When on, every user on this hub must enter a one-time passcode emailed to them after a successful password check, on every sign-in. Available for Shared, White-label, and Central hubs.',
+            'group' => self::GROUP_BEHAVIOUR,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'firm_documents' => [
+            'label' => 'Firm documents',
+            'description' => 'When on, this hub enables firm document libraries (attachments). Related Capabilities (view / add / delete / archive firm documents across all firms) become available on the matrix. Head of Firm always has full rights for their own firm and can grant rights to that firm’s members. Assign Head of Firm is separate and does not require this flag.',
             'group' => self::GROUP_BEHAVIOUR,
             'default_shared' => false,
             'default_white_label' => false,
@@ -1003,42 +1023,35 @@ class Hub extends Model
         ],
         'dashboard_assign_firm_head' => [
             'label' => 'Assign Head of Firm',
-            'description' => 'Appoint, replace, or clear the single Head of Firm for each firm (must be a member of that firm). Distinct from Manage firms.',
+            'description' => 'Appoint, replace, or clear the single Head of Firm for each firm (must be a member of that firm). Not tied to the Firm documents functionality — used only to designate a head. Typical for Power Admin / FinProms admin.',
             'group' => self::GROUP_DASHBOARD_FIRMS,
             'default_shared' => true,
             'default_white_label' => true,
         ],
         'firm_documents_view' => [
-            'label' => 'View firm documents',
-            'description' => 'View and download firm document attachments. Head of Firm always has this for their firm; members need a head grant or this capability.',
+            'label' => 'View firm documents (all firms)',
+            'description' => 'View and download documents for ANY firm on this hub. Blurred while Functionalities → Firm documents is off. Separate from Head of Firm / member grants (those are per-firm).',
             'group' => self::GROUP_DASHBOARD_FIRMS,
             'default_shared' => false,
             'default_white_label' => false,
         ],
         'firm_documents_add' => [
-            'label' => 'Add firm documents',
-            'description' => 'Upload firm documents (images, Word, PDF, etc.). Head of Firm always has this for their firm.',
+            'label' => 'Add firm documents (all firms)',
+            'description' => 'Upload documents for ANY firm on this hub. Blurred while Functionalities → Firm documents is off. Head of Firm always has add for their own firm without this capability.',
             'group' => self::GROUP_DASHBOARD_FIRMS,
             'default_shared' => false,
             'default_white_label' => false,
         ],
         'firm_documents_delete' => [
-            'label' => 'Delete firm documents',
-            'description' => 'Permanently delete firm documents. Head of Firm always has this for their firm.',
+            'label' => 'Delete firm documents (all firms)',
+            'description' => 'Permanently delete documents for ANY firm on this hub. Blurred while Functionalities → Firm documents is off. Head of Firm always has delete for their own firm without this capability.',
             'group' => self::GROUP_DASHBOARD_FIRMS,
             'default_shared' => false,
             'default_white_label' => false,
         ],
         'firm_documents_archive' => [
-            'label' => 'Archive firm documents',
-            'description' => 'Archive / unarchive firm documents. Head of Firm always has this for their firm.',
-            'group' => self::GROUP_DASHBOARD_FIRMS,
-            'default_shared' => false,
-            'default_white_label' => false,
-        ],
-        'firm_documents_manage_member_rights' => [
-            'label' => 'Manage firm document member rights',
-            'description' => 'Grant or revoke add/view/delete/archive document rights for firm members. Head of Firm always has this for their firm.',
+            'label' => 'Archive firm documents (all firms)',
+            'description' => 'Archive / unarchive documents for ANY firm on this hub. Blurred while Functionalities → Firm documents is off. Head of Firm always has archive for their own firm without this capability.',
             'group' => self::GROUP_DASHBOARD_FIRMS,
             'default_shared' => false,
             'default_white_label' => false,
@@ -1693,6 +1706,16 @@ class Hub extends Model
     {
         return in_array($key, self::MODULE_PRICING_CAPABILITY_KEYS, true)
             || ((self::CHECKLIST_DEFINITIONS[$key]['group'] ?? null) === self::GROUP_MODULE_PRICING);
+    }
+
+    public static function isFirmDocumentsCapability(string $key): bool
+    {
+        return in_array($key, self::FIRM_DOCUMENTS_CAPABILITY_KEYS, true);
+    }
+
+    public function hasFirmDocumentsFunctionality(): bool
+    {
+        return (bool) ($this->resolvedChecklist()['firm_documents'] ?? false);
     }
 
     public static function isSocialMediaTemplateLibraryFunctionality(string $key): bool

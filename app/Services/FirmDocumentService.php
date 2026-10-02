@@ -26,6 +26,10 @@ class FirmDocumentService
 
     public function assertCan(User $user, Firm $firm, string $right): void
     {
+        if (! $this->access->functionalityEnabled()) {
+            throw new HttpException(403, 'Firm documents are disabled for this hub. Enable Functionalities → Firm documents first.');
+        }
+
         if (! $this->access->can($user, $firm, $right)) {
             throw new HttpException(403, 'You do not have permission to '.$right.' firm documents for this firm.');
         }

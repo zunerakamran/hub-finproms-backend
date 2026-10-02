@@ -10,8 +10,12 @@ use Illuminate\Support\Facades\Schema;
 
 /**
  * Resolves firm-document rights for a user against a firm.
- * Head of Firm always has full rights for their firm.
- * Otherwise: member grant row OR role capability from the matrix.
+ *
+ * Order:
+ * 1) Hub Functionalities → Firm documents must be ON (except assign-head is unrelated).
+ * 2) Head of Firm → full rights for THEIR firm only (incl. member-rights grants).
+ * 3) Member grant row → rights for THEIR firm only.
+ * 4) Capabilities matrix firm_documents_* → hub-wide for ALL firms.
  */
 class FirmDocumentAccessService
 {
@@ -30,13 +34,19 @@ class FirmDocumentAccessService
         self::RIGHT_VIEW => 'firm_documents_view',
         self::RIGHT_DELETE => 'firm_documents_delete',
         self::RIGHT_ARCHIVE => 'firm_documents_archive',
-        self::RIGHT_MANAGE_MEMBER_RIGHTS => 'firm_documents_manage_member_rights',
     ];
 
     public function __construct(
         private readonly CapabilitiesMatrixService $matrix,
         private readonly HubService $hubs,
     ) {}
+
+    public function functionalityEnabled(?Hub $hub = null): bool
+    {
+        $hub = $hub ?? $this->hubs->current();
+
+        return $hub->hasFirmDocumentsFunctionality();
+    }
 
     public function isHeadOfFirm(User $user, Firm $firm): bool
     {
@@ -52,54 +62,84 @@ class FirmDocumentAccessService
     {
         $hub = $hub ?? $this->hubs->current();
 
+        if (! $this->functionalityEnabled($hub)) {
+            return false;
+        }
+
+        // Head of Firm: full rights for their own firm (including granting member rights).
         if ($this->isHeadOfFirm($user, $firm)) {
             return true;
         }
 
-        // Assign-head roles may manage member rights for support.
-        if ($right === self::RIGHT_MANAGE_MEMBER_RIGHTS
-            && $this->matrix->userCan($hub, $user, 'dashboard_assign_firm_head')) {
-            return true;
-        }
-
-        $grant = $this->memberGrant($user, $firm);
-        if ($grant) {
-            $granted = match ($right) {
-                self::RIGHT_ADD => (bool) $grant->can_add,
-                self::RIGHT_VIEW => (bool) $grant->can_view,
-                self::RIGHT_DELETE => (bool) $grant->can_delete,
-                self::RIGHT_ARCHIVE => (bool) $grant->can_archive,
-                default => false,
-            };
-            if ($granted) {
-                return true;
+        // Member grants are firm-scoped (own firm only).
+        if ($right !== self::RIGHT_MANAGE_MEMBER_RIGHTS) {
+            $grant = $this->memberGrant($user, $firm);
+            if ($grant) {
+                $granted = match ($right) {
+                    self::RIGHT_ADD => (bool) $grant->can_add,
+                    self::RIGHT_VIEW => (bool) $grant->can_view,
+                    self::RIGHT_DELETE => (bool) $grant->can_delete,
+                    self::RIGHT_ARCHIVE => (bool) $grant->can_archive,
+                    default => false,
+                };
+                if ($granted) {
+                    return true;
+                }
             }
         }
 
+        // Only the Head of Firm manages member rights (not matrix / assign-head).
+        if ($right === self::RIGHT_MANAGE_MEMBER_RIGHTS) {
+            return false;
+        }
+
+        // Matrix caps apply across ALL firms on the hub.
         $cap = self::CAP_MAP[$right] ?? null;
-        if ($cap && $this->matrix->userCan($hub, $user, $cap)) {
-            // Role-level document caps still require firm membership (except manage rights via assign-head above).
-            if ($right === self::RIGHT_MANAGE_MEMBER_RIGHTS) {
-                return true;
-            }
 
-            return $user->firm_id !== null && (int) $user->firm_id === (int) $firm->id;
-        }
-
-        return false;
+        return $cap !== null && $this->matrix->userCan($hub, $user, $cap);
     }
 
     /**
-     * Aggregated rights across the user's own firm (or all firms for assign-head / role caps).
-     *
-     * @return array{can_add: bool, can_view: bool, can_delete: bool, can_archive: bool, can_manage_member_rights: bool, is_firm_head: bool, firm_id: ?int}
+     * @return array{
+     *   can_add: bool,
+     *   can_view: bool,
+     *   can_delete: bool,
+     *   can_archive: bool,
+     *   can_manage_member_rights: bool,
+     *   is_firm_head: bool,
+     *   firm_id: ?int,
+     *   functionality_enabled: bool,
+     *   hub_wide: array{can_add: bool, can_view: bool, can_delete: bool, can_archive: bool}
+     * }
      */
     public function effectiveRightsSummary(User $user, ?Hub $hub = null): array
     {
         $hub = $hub ?? $this->hubs->current();
+        $enabled = $this->functionalityEnabled($hub);
         $firmId = $user->firm_id ? (int) $user->firm_id : null;
-        $isHead = false;
 
+        $hubWide = [
+            'can_add' => $enabled && $this->matrix->userCan($hub, $user, 'firm_documents_add'),
+            'can_view' => $enabled && $this->matrix->userCan($hub, $user, 'firm_documents_view'),
+            'can_delete' => $enabled && $this->matrix->userCan($hub, $user, 'firm_documents_delete'),
+            'can_archive' => $enabled && $this->matrix->userCan($hub, $user, 'firm_documents_archive'),
+        ];
+
+        if (! $enabled) {
+            return [
+                'can_add' => false,
+                'can_view' => false,
+                'can_delete' => false,
+                'can_archive' => false,
+                'can_manage_member_rights' => false,
+                'is_firm_head' => false,
+                'firm_id' => $firmId,
+                'functionality_enabled' => false,
+                'hub_wide' => $hubWide,
+            ];
+        }
+
+        $isHead = false;
         if ($firmId && Schema::hasColumn('firms', 'head_user_id')) {
             $firm = Firm::query()->find($firmId);
             if ($firm && $this->isHeadOfFirm($user, $firm)) {
@@ -113,6 +153,8 @@ class FirmDocumentAccessService
                     'can_manage_member_rights' => true,
                     'is_firm_head' => true,
                     'firm_id' => $firmId,
+                    'functionality_enabled' => true,
+                    'hub_wide' => $hubWide,
                 ];
             }
         }
@@ -125,38 +167,16 @@ class FirmDocumentAccessService
                 ->first();
         }
 
-        $canAdd = (bool) ($grant?->can_add)
-            || $this->matrix->userCan($hub, $user, 'firm_documents_add');
-        $canView = (bool) ($grant?->can_view)
-            || $this->matrix->userCan($hub, $user, 'firm_documents_view');
-        $canDelete = (bool) ($grant?->can_delete)
-            || $this->matrix->userCan($hub, $user, 'firm_documents_delete');
-        $canArchive = (bool) ($grant?->can_archive)
-            || $this->matrix->userCan($hub, $user, 'firm_documents_archive');
-        $canManage = $this->matrix->userCan($hub, $user, 'firm_documents_manage_member_rights')
-            || $this->matrix->userCan($hub, $user, 'dashboard_assign_firm_head');
-
-        // Role caps without firm membership: treat as hub-wide support tools.
-        if (! $firmId) {
-            return [
-                'can_add' => $this->matrix->userCan($hub, $user, 'firm_documents_add'),
-                'can_view' => $this->matrix->userCan($hub, $user, 'firm_documents_view'),
-                'can_delete' => $this->matrix->userCan($hub, $user, 'firm_documents_delete'),
-                'can_archive' => $this->matrix->userCan($hub, $user, 'firm_documents_archive'),
-                'can_manage_member_rights' => $canManage,
-                'is_firm_head' => false,
-                'firm_id' => null,
-            ];
-        }
-
         return [
-            'can_add' => $canAdd,
-            'can_view' => $canView,
-            'can_delete' => $canDelete,
-            'can_archive' => $canArchive,
-            'can_manage_member_rights' => $canManage || $isHead,
+            'can_add' => (bool) ($grant?->can_add) || $hubWide['can_add'],
+            'can_view' => (bool) ($grant?->can_view) || $hubWide['can_view'],
+            'can_delete' => (bool) ($grant?->can_delete) || $hubWide['can_delete'],
+            'can_archive' => (bool) ($grant?->can_archive) || $hubWide['can_archive'],
+            'can_manage_member_rights' => false,
             'is_firm_head' => $isHead,
             'firm_id' => $firmId,
+            'functionality_enabled' => true,
+            'hub_wide' => $hubWide,
         ];
     }
 

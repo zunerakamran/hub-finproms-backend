@@ -312,6 +312,15 @@ class ActingHubService
             return $effective;
         }
 
+        if (! ($summary['functionality_enabled'] ?? false)) {
+            $effective['firm_documents_view'] = false;
+            $effective['firm_documents_add'] = false;
+            $effective['firm_documents_delete'] = false;
+            $effective['firm_documents_archive'] = false;
+
+            return $effective;
+        }
+
         if ($summary['can_view']) {
             $effective['firm_documents_view'] = true;
         }
@@ -323,16 +332,6 @@ class ActingHubService
         }
         if ($summary['can_archive']) {
             $effective['firm_documents_archive'] = true;
-        }
-        if ($summary['can_manage_member_rights']) {
-            $effective['firm_documents_manage_member_rights'] = true;
-        }
-        if ($summary['is_firm_head']) {
-            $effective['firm_documents_view'] = true;
-            $effective['firm_documents_add'] = true;
-            $effective['firm_documents_delete'] = true;
-            $effective['firm_documents_archive'] = true;
-            $effective['firm_documents_manage_member_rights'] = true;
         }
 
         return $effective;

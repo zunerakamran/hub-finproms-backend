@@ -218,6 +218,7 @@ class CapabilitiesMatrixService
         $smtlModuleOn = $hub->hasSocialMediaTemplateLibraryModule();
         $modulePricingOn = $hub->can('charge_amount_per_module')
             || $hub->can('charge_recurring_per_module');
+        $firmDocumentsOn = $hub->hasFirmDocumentsFunctionality();
         // Central has no product modules — do not grey-out hub-ops tools that are
         // used for remote control / registry (modules page, firms, switcher, etc.).
         $isCentralHub = $hub->isCentral();
@@ -245,6 +246,7 @@ class CapabilitiesMatrixService
             $requiresWtlModule = Hub::isWebsiteTemplateLibraryCapability($key);
             $requiresSmtlModule = Hub::isSocialMediaTemplateLibraryCapability($key);
             $requiresModulePricing = Hub::isModulePricingCapability($key);
+            $requiresFirmDocuments = Hub::isFirmDocumentsCapability($key);
 
             // Central: product-module sections (SMC/GC/WC/WTL) stay inactive while
             // those modules are off. SMTL-gated member + dashboard caps stay
@@ -258,6 +260,7 @@ class CapabilitiesMatrixService
                     || $requiresWcModule
                     || $requiresWtlModule
                     || ($requiresModulePricing && ! $modulePricingOn)
+                    || ($requiresFirmDocuments && ! $firmDocumentsOn)
                 ) {
                     $inactive = true;
                 }
@@ -269,7 +272,8 @@ class CapabilitiesMatrixService
                     || ($requiresWcModule && ! $wcModuleOn)
                     || ($requiresWtlModule && ! $wtlModuleOn)
                     || ($requiresSmtlModule && ! $smtlModuleOn)
-                    || ($requiresModulePricing && ! $modulePricingOn);
+                    || ($requiresModulePricing && ! $modulePricingOn)
+                    || ($requiresFirmDocuments && ! $firmDocumentsOn);
             }
 
             // Create/edit posts & taxonomy live on Central only (library + Central taxonomy).
@@ -295,6 +299,8 @@ class CapabilitiesMatrixService
                     $inactiveReason = 'module_website_compliance_off';
                 } elseif ($requiresModulePricing && ! $modulePricingOn) {
                     $inactiveReason = 'module_pricing_charge_off';
+                } elseif ($requiresFirmDocuments && ! $firmDocumentsOn) {
+                    $inactiveReason = 'firm_documents_off';
                 } elseif ($requiresSmtlModule && ! $smtlModuleOn) {
                     $inactiveReason = 'module_social_media_template_library_off';
                 } elseif ($requiresPrivate) {
@@ -403,6 +409,7 @@ class CapabilitiesMatrixService
                 'charge_amount_per_module' => $hub->can('charge_amount_per_module'),
                 'charge_recurring_per_module' => $hub->can('charge_recurring_per_module'),
                 'module_pricing_enabled' => $modulePricingOn,
+                'firm_documents' => $firmDocumentsOn,
             ],
             'control_plane_roles' => ActingHubService::CONTROL_PLANE_ROLES,
             'control_plane_hub' => [
@@ -419,6 +426,7 @@ class CapabilitiesMatrixService
             'website_template_library_capability_keys' => Hub::WEBSITE_TEMPLATE_LIBRARY_CAPABILITY_KEYS,
             'website_compliance_capability_keys' => Hub::WEBSITE_COMPLIANCE_CAPABILITY_KEYS,
             'module_pricing_capability_keys' => Hub::MODULE_PRICING_CAPABILITY_KEYS,
+            'firm_documents_capability_keys' => Hub::FIRM_DOCUMENTS_CAPABILITY_KEYS,
             'module_keys' => Hub::MODULE_KEYS,
             'roles' => $roles,
             'available_to_add' => $rolesMeta['available_to_add'],
@@ -1105,6 +1113,11 @@ class CapabilitiesMatrixService
             && ! $hub->can('charge_amount_per_module')
             && ! $hub->can('charge_recurring_per_module')
         ) {
+            return false;
+        }
+
+        // Firm document caps are inactive while Functionalities → Firm documents is off.
+        if (Hub::isFirmDocumentsCapability($flag) && ! $hub->hasFirmDocumentsFunctionality()) {
             return false;
         }
 

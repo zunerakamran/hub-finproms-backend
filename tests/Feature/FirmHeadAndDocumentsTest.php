@@ -86,6 +86,12 @@ class FirmHeadAndDocumentsTest extends TestCase
     {
         Storage::fake('public');
         $hub = $this->createSharedHub();
+        $checklist = $hub->resolvedChecklist();
+        $checklist['firm_documents'] = true;
+        $hub->checklist = $checklist;
+        $hub->save();
+        app(HubService::class)->forgetCurrentCache();
+
         $this->enableCaps($hub, User::ROLE_POWER_ADMIN, [
             'dashboard_assign_firm_head',
         ]);
@@ -141,10 +147,48 @@ class FirmHeadAndDocumentsTest extends TestCase
             ->assertJsonPath('documents.0.title', 'Policy pack');
     }
 
+    public function test_matrix_view_cap_allows_any_firm_when_functionality_on(): void
+    {
+        Storage::fake('public');
+        $hub = $this->createSharedHub();
+        $checklist = $hub->resolvedChecklist();
+        $checklist['firm_documents'] = true;
+        $hub->checklist = $checklist;
+        $hub->save();
+        $this->enableCaps($hub, User::ROLE_POWER_ADMIN, [
+            'firm_documents_view',
+            'firm_documents_add',
+        ]);
+        app(HubService::class)->forgetCurrentCache();
+
+        $admin = User::factory()->powerAdmin()->create(); // no firm membership
+        $firm = Firm::query()->create(['name' => 'Any Firm']);
+        $head = User::factory()->create(['firm_id' => $firm->id, 'role' => User::ROLE_USER]);
+        $firm->update(['head_user_id' => $head->id]);
+
+        Sanctum::actingAs($head);
+        $file = UploadedFile::fake()->create('a.pdf', 20, 'application/pdf');
+        $this->post('/api/firm-documents', [
+            'firm_id' => $firm->id,
+            'title' => 'Hub wide',
+            'attachments' => [$file],
+        ], ['Accept' => 'application/json'])->assertCreated();
+
+        Sanctum::actingAs($admin);
+        $this->getJson('/api/firm-documents?firm_id='.$firm->id)
+            ->assertOk()
+            ->assertJsonPath('documents.0.title', 'Hub wide');
+    }
+
     public function test_head_can_archive_and_delete_documents(): void
     {
         Storage::fake('public');
-        $this->createSharedHub();
+        $hub = $this->createSharedHub();
+        $checklist = $hub->resolvedChecklist();
+        $checklist['firm_documents'] = true;
+        $hub->checklist = $checklist;
+        $hub->save();
+        app(HubService::class)->forgetCurrentCache();
 
         $firm = Firm::query()->create(['name' => 'Archive Firm']);
         $head = User::factory()->create(['firm_id' => $firm->id, 'role' => User::ROLE_USER]);

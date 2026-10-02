@@ -55,6 +55,7 @@ class FirmDocumentController extends Controller
                 'can_archive' => $this->access->can($user, $firm, FirmDocumentAccessService::RIGHT_ARCHIVE),
                 'can_manage_member_rights' => $this->access->can($user, $firm, FirmDocumentAccessService::RIGHT_MANAGE_MEMBER_RIGHTS),
                 'is_firm_head' => $this->access->isHeadOfFirm($user, $firm),
+                'functionality_enabled' => $this->access->functionalityEnabled(),
             ],
             'documents' => collect($paginator->items())
                 ->map(fn (FirmDocument $doc) => $doc->toApiArray())
