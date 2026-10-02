@@ -53,8 +53,23 @@ class FirmDocumentAccessService
 
     public function isHeadOfFirm(User $user, Firm $firm): bool
     {
-        return $firm->head_user_id !== null
-            && (int) $firm->head_user_id === (int) $user->id;
+        if ($firm->head_user_id === null) {
+            return false;
+        }
+
+        if ((int) $firm->head_user_id === (int) $user->id) {
+            return true;
+        }
+
+        // Same person, different user row (email match) — still Head.
+        if (! filled($user->email)) {
+            return false;
+        }
+
+        $head = User::query()->find($firm->head_user_id);
+
+        return $head !== null
+            && strcasecmp((string) $head->email, (string) $user->email) === 0;
     }
 
     public function can(User $user, Firm $firm, string $right, ?Hub $hub = null): bool
@@ -178,6 +193,7 @@ class FirmDocumentAccessService
 
     /**
      * Firm id where this user is Head of Firm (local DB, or remote hub DB by email).
+     * Role-agnostic: manager, advisor, approver, client_admin, etc.
      */
     public function headedFirmIdFor(User $user, ?Hub $hub = null): ?int
     {
@@ -189,6 +205,20 @@ class FirmDocumentAccessService
             if ($localId) {
                 return (int) $localId;
             }
+
+            // Email fallback if head was stored against another user row with the same email.
+            if (filled($user->email)) {
+                $headIds = User::query()
+                    ->where('email', $user->email)
+                    ->pluck('id')
+                    ->all();
+                if ($headIds !== []) {
+                    $byEmail = Firm::query()->whereIn('head_user_id', $headIds)->value('id');
+                    if ($byEmail) {
+                        return (int) $byEmail;
+                    }
+                }
+            }
         }
 
         // Acting remotely from Central: look up head by matching email on remote users.
@@ -199,15 +229,20 @@ class FirmDocumentAccessService
                         return null;
                     }
 
-                    $remoteUserId = DB::connection($connection)->table('users')
+                    $remoteUserIds = DB::connection($connection)->table('users')
                         ->where('email', $user->email)
-                        ->value('id');
-                    if (! $remoteUserId) {
-                        return null;
+                        ->pluck('id')
+                        ->all();
+                    if ($remoteUserIds === []) {
+                        $firmId = DB::connection($connection)->table('firms')
+                            ->where('head_user_id', $user->id)
+                            ->value('id');
+
+                        return $firmId ? (int) $firmId : null;
                     }
 
                     $firmId = DB::connection($connection)->table('firms')
-                        ->where('head_user_id', $remoteUserId)
+                        ->whereIn('head_user_id', $remoteUserIds)
                         ->value('id');
 
                     return $firmId ? (int) $firmId : null;

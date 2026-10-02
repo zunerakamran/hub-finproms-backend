@@ -212,4 +212,38 @@ class FirmHeadAndDocumentsTest extends TestCase
         $this->assertDatabaseMissing('firm_documents', ['id' => $docId]);
         $this->assertDatabaseHas('activity_logs', ['action' => 'firm.documents.delete']);
     }
+
+    public function test_manager_head_gets_document_rights_without_matrix_tick(): void
+    {
+        $hub = $this->createSharedHub();
+        $checklist = $hub->resolvedChecklist();
+        $checklist['firm_documents'] = true;
+        $hub->checklist = $checklist;
+        $hub->save();
+        app(HubService::class)->forgetCurrentCache();
+
+        $firm = Firm::query()->create(['name' => 'Manager Head Firm']);
+        $head = User::factory()->create([
+            'firm_id' => $firm->id,
+            'role' => User::ROLE_MANAGER,
+            'email' => 'manager@gmail.com',
+        ]);
+        $firm->update(['head_user_id' => $head->id]);
+
+        Sanctum::actingAs($head);
+
+        $this->getJson('/api/firm-documents/my-rights')
+            ->assertOk()
+            ->assertJsonPath('rights.is_firm_head', true)
+            ->assertJsonPath('rights.can_view', true)
+            ->assertJsonPath('rights.can_add', true)
+            ->assertJsonPath('rights.functionality_enabled', true)
+            ->assertJsonPath('rights.firm_id', $firm->id);
+
+        $this->getJson('/api/hub')
+            ->assertOk()
+            ->assertJsonPath('hub.firm_document_rights.is_firm_head', true)
+            ->assertJsonPath('hub.effective_capabilities.firm_documents_view', true)
+            ->assertJsonPath('hub.effective_capabilities.firm_documents_add', true);
+    }
 }

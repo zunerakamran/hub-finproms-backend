@@ -356,10 +356,14 @@ Notes:
 - ONE Head of Firm per firm; must already be a member of that firm.
 
 3.4.2 Head of Firm rights (own firm only)
+- Head of Firm can be ANY role (manager, advisor, approver, client_admin,
+  admin-staff, user, …). Appointment is membership-based, not role-based.
 - When Functionalities → Firm documents is ON, the Head of Firm automatically
   has ALL document rights for THEIR firm: add, view, delete, archive, and
   granting those rights to firm members — no matrix tick required.
 - Documents are scoped to the firm.
+- Frontend unlocks “Firm documents” for Heads via `firm_document_rights` /
+  merged `firm_documents_*` effective capabilities (any role).
 
 3.4.3 Head grants rights to firm members (own firm only)
 - The Head may grant / revoke any combination of add / view / delete / archive
