@@ -317,26 +317,17 @@ class ActingHubService
             return $effective;
         }
 
-        if (! ($summary['functionality_enabled'] ?? false)) {
-            $effective['firm_documents_view'] = false;
-            $effective['firm_documents_add'] = false;
-            $effective['firm_documents_delete'] = false;
-            $effective['firm_documents_archive'] = false;
-
-            return $effective;
-        }
-
-        // Never downgrade a matrix true; only OR in head / grant rights.
-        if ($summary['can_view']) {
+        // Head of Firm / grants unlock Documents in the nav (appointment is enough).
+        if ($summary['can_view'] || ($summary['is_firm_head'] ?? false)) {
             $effective['firm_documents_view'] = true;
         }
-        if ($summary['can_add']) {
+        if ($summary['can_add'] || ($summary['is_firm_head'] ?? false)) {
             $effective['firm_documents_add'] = true;
         }
-        if ($summary['can_delete']) {
+        if ($summary['can_delete'] || ($summary['is_firm_head'] ?? false)) {
             $effective['firm_documents_delete'] = true;
         }
-        if ($summary['can_archive']) {
+        if ($summary['can_archive'] || ($summary['is_firm_head'] ?? false)) {
             $effective['firm_documents_archive'] = true;
         }
 

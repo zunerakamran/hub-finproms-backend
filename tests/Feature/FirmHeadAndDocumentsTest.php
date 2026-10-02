@@ -216,8 +216,9 @@ class FirmHeadAndDocumentsTest extends TestCase
     public function test_manager_head_gets_document_rights_without_matrix_tick(): void
     {
         $hub = $this->createSharedHub();
+        // Functionality OFF — Head appointment alone must still unlock Documents.
         $checklist = $hub->resolvedChecklist();
-        $checklist['firm_documents'] = true;
+        $checklist['firm_documents'] = false;
         $hub->checklist = $checklist;
         $hub->save();
         app(HubService::class)->forgetCurrentCache();
@@ -237,7 +238,6 @@ class FirmHeadAndDocumentsTest extends TestCase
             ->assertJsonPath('rights.is_firm_head', true)
             ->assertJsonPath('rights.can_view', true)
             ->assertJsonPath('rights.can_add', true)
-            ->assertJsonPath('rights.functionality_enabled', true)
             ->assertJsonPath('rights.firm_id', $firm->id);
 
         $this->getJson('/api/hub')

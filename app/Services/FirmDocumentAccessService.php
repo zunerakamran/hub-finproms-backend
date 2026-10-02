@@ -9,16 +9,14 @@ use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
-// WhiteLabelDatabaseService is resolved via app() in headedFirmIdFor().
-
 /**
  * Resolves firm-document rights for a user against a firm.
  *
  * Order:
- * 1) Hub Functionalities → Firm documents must be ON (except assign-head is unrelated).
- * 2) Head of Firm → full rights for THEIR firm only (incl. member-rights grants).
- * 3) Member grant row → rights for THEIR firm only.
- * 4) Capabilities matrix firm_documents_* → hub-wide for ALL firms.
+ * 1) Head of Firm (any role) → full rights for THEIR firm (appointment unlocks Documents).
+ * 2) Member grant row → rights for THEIR firm only.
+ * 3) Capabilities matrix firm_documents_* → hub-wide for ALL firms (requires
+ *    Functionalities → Firm documents ON).
  */
 class FirmDocumentAccessService
 {
@@ -61,7 +59,6 @@ class FirmDocumentAccessService
             return true;
         }
 
-        // Same person, different user row (email match) — still Head.
         if (! filled($user->email)) {
             return false;
         }
@@ -76,11 +73,7 @@ class FirmDocumentAccessService
     {
         $hub = $hub ?? $this->hubs->current();
 
-        if (! $this->functionalityEnabled($hub)) {
-            return false;
-        }
-
-        // Head of Firm: full rights for their own firm (including granting member rights).
+        // Head of Firm (any role): full rights for their own firm — appointment unlocks Documents.
         if ($this->isHeadOfFirm($user, $firm)) {
             return true;
         }
@@ -107,7 +100,11 @@ class FirmDocumentAccessService
             return false;
         }
 
-        // Matrix caps apply across ALL firms on the hub.
+        // Hub-wide matrix caps require Functionalities → Firm documents.
+        if (! $this->functionalityEnabled($hub)) {
+            return false;
+        }
+
         $cap = self::CAP_MAP[$right] ?? null;
 
         return $cap !== null && $this->matrix->userCan($hub, $user, $cap);
@@ -138,21 +135,7 @@ class FirmDocumentAccessService
             'can_archive' => $enabled && $this->matrix->userCan($hub, $user, 'firm_documents_archive'),
         ];
 
-        if (! $enabled) {
-            return [
-                'can_add' => false,
-                'can_view' => false,
-                'can_delete' => false,
-                'can_archive' => false,
-                'can_manage_member_rights' => false,
-                'is_firm_head' => false,
-                'firm_id' => $user->firm_id ? (int) $user->firm_id : null,
-                'functionality_enabled' => false,
-                'hub_wide' => $hubWide,
-            ];
-        }
-
-        // Prefer "I am head of firm X" over relying on users.firm_id alone.
+        // Appointment as Head unlocks Firm documents for that user (any role).
         $headedFirmId = $this->headedFirmIdFor($user, $hub);
         if ($headedFirmId) {
             return [
@@ -163,7 +146,7 @@ class FirmDocumentAccessService
                 'can_manage_member_rights' => true,
                 'is_firm_head' => true,
                 'firm_id' => $headedFirmId,
-                'functionality_enabled' => true,
+                'functionality_enabled' => $enabled,
                 'hub_wide' => $hubWide,
             ];
         }
@@ -178,6 +161,8 @@ class FirmDocumentAccessService
                 ->first();
         }
 
+        $hasGrant = (bool) ($grant?->can_add || $grant?->can_view || $grant?->can_delete || $grant?->can_archive);
+
         return [
             'can_add' => (bool) ($grant?->can_add) || $hubWide['can_add'],
             'can_view' => (bool) ($grant?->can_view) || $hubWide['can_view'],
@@ -186,7 +171,7 @@ class FirmDocumentAccessService
             'can_manage_member_rights' => false,
             'is_firm_head' => false,
             'firm_id' => $firmId,
-            'functionality_enabled' => true,
+            'functionality_enabled' => $enabled || $hasGrant || $hubWide['can_view'] || $hubWide['can_add'],
             'hub_wide' => $hubWide,
         ];
     }
@@ -199,14 +184,12 @@ class FirmDocumentAccessService
     {
         $hub = $hub ?? $this->hubs->current();
 
-        // Local / same-DB hub (content hub deploy, or Shared with local firms).
         if (Schema::hasColumn('firms', 'head_user_id')) {
             $localId = Firm::query()->where('head_user_id', $user->id)->value('id');
             if ($localId) {
                 return (int) $localId;
             }
 
-            // Email fallback if head was stored against another user row with the same email.
             if (filled($user->email)) {
                 $headIds = User::query()
                     ->where('email', $user->email)
@@ -221,7 +204,6 @@ class FirmDocumentAccessService
             }
         }
 
-        // Acting remotely from Central: look up head by matching email on remote users.
         if ($hub->isContentHub() && $hub->hasRemoteDatabaseConfigured()) {
             try {
                 return app(WhiteLabelDatabaseService::class)->run($hub, function (string $connection) use ($user) {

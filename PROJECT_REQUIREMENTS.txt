@@ -342,11 +342,13 @@ Notes:
 - Applies on Shared and White-labelled hubs (each hub’s own firms / members).
   Backend and frontend both required.
 
-3.4.0 Functionality gate (REQUIRED)
+3.4.0 Functionality gate (hub-wide matrix only)
 - Hub Functionalities checklist flag: `firm_documents` (“Firm documents”).
   Default OFF. Power Admin enables it per hub on Functionalities.
-- While OFF, firm-document Capabilities (view / add / delete / archive) are
-  blurred / inactive on the Capabilities matrix, and document APIs deny access.
+- While OFF, firm-document Capabilities (view / add / delete / archive for ALL
+  firms) are blurred / inactive on the Capabilities matrix.
+- Head of Firm does NOT need this flag — appointing a Head unlocks Firm
+  documents for that user on their firm immediately.
 - Assign Head of Firm (`dashboard_assign_firm_head`) is NOT gated by this flag.
 
 3.4.1 Who can appoint a Head of Firm
@@ -354,15 +356,17 @@ Notes:
   (“Assign Head of Firm”) — typically Power Admin / FinProms admin.
 - Not part of the document rights model; only designates the head.
 - ONE Head of Firm per firm; must already be a member of that firm.
+- Head may be ANY role (manager, advisor, approver, client_admin, …).
 
 3.4.2 Head of Firm rights (own firm only)
 - Head of Firm can be ANY role (manager, advisor, approver, client_admin,
   admin-staff, user, …). Appointment is membership-based, not role-based.
-- When Functionalities → Firm documents is ON, the Head of Firm automatically
-  has ALL document rights for THEIR firm: add, view, delete, archive, and
-  granting those rights to firm members — no matrix tick required.
+- As soon as a user is appointed Head of Firm, they unlock “Firm documents”
+  in the dashboard and have ALL document rights for THEIR firm: add, view,
+  delete, archive, and granting those rights to firm members — no matrix tick
+  and no Functionalities flag required.
 - Documents are scoped to the firm.
-- Frontend unlocks “Firm documents” for Heads via `firm_document_rights` /
+- Frontend unlocks “Firm documents” via `firm_document_rights.is_firm_head` /
   merged `firm_documents_*` effective capabilities (any role).
 
 3.4.3 Head grants rights to firm members (own firm only)

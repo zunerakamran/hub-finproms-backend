@@ -27,11 +27,15 @@ class FirmDocumentService
 
     public function assertCan(User $user, Firm $firm, string $right, ?Hub $hub = null): void
     {
-        if (! $this->access->functionalityEnabled($hub)) {
-            throw new HttpException(403, 'Firm documents are disabled for this hub. Enable Functionalities → Firm documents first.');
-        }
-
+        // Head / member grants work from appointment — matrix hub-wide caps still
+        // require Functionalities → Firm documents (enforced inside can()).
         if (! $this->access->can($user, $firm, $right, $hub)) {
+            if (! $this->access->functionalityEnabled($hub)
+                && ! $this->access->isHeadOfFirm($user, $firm)
+            ) {
+                throw new HttpException(403, 'Firm documents are disabled for this hub. Enable Functionalities → Firm documents first.');
+            }
+
             throw new HttpException(403, 'You do not have permission to '.$right.' firm documents for this firm.');
         }
     }

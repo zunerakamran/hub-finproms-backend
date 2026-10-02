@@ -471,10 +471,6 @@ class WhiteLabelFirmDocumentService
 
     public function actorCan(Hub $hub, User $actor, int $firmId, string $right): bool
     {
-        if (! $hub->hasFirmDocumentsFunctionality()) {
-            return false;
-        }
-
         if ($this->actorIsHead($hub, $actor, $firmId)) {
             return true;
         }
@@ -484,20 +480,23 @@ class WhiteLabelFirmDocumentService
         }
 
         // Member grants on remote (match actor by email → remote user id).
-        if ($right !== FirmDocumentAccessService::RIGHT_MANAGE_MEMBER_RIGHTS) {
-            $grant = $this->remoteMemberGrant($hub, $actor, $firmId);
-            if ($grant) {
-                $ok = match ($right) {
-                    FirmDocumentAccessService::RIGHT_ADD => (bool) $grant->can_add,
-                    FirmDocumentAccessService::RIGHT_VIEW => (bool) $grant->can_view,
-                    FirmDocumentAccessService::RIGHT_DELETE => (bool) $grant->can_delete,
-                    FirmDocumentAccessService::RIGHT_ARCHIVE => (bool) $grant->can_archive,
-                    default => false,
-                };
-                if ($ok) {
-                    return true;
-                }
+        $grant = $this->remoteMemberGrant($hub, $actor, $firmId);
+        if ($grant) {
+            $ok = match ($right) {
+                FirmDocumentAccessService::RIGHT_ADD => (bool) $grant->can_add,
+                FirmDocumentAccessService::RIGHT_VIEW => (bool) $grant->can_view,
+                FirmDocumentAccessService::RIGHT_DELETE => (bool) $grant->can_delete,
+                FirmDocumentAccessService::RIGHT_ARCHIVE => (bool) $grant->can_archive,
+                default => false,
+            };
+            if ($ok) {
+                return true;
             }
+        }
+
+        // Hub-wide matrix caps require Functionalities → Firm documents.
+        if (! $hub->hasFirmDocumentsFunctionality()) {
+            return false;
         }
 
         $cap = match ($right) {
@@ -562,11 +561,9 @@ class WhiteLabelFirmDocumentService
 
     private function assertFunctionality(Hub $hub): void
     {
-        if (! $hub->hasFirmDocumentsFunctionality()) {
-            throw new InvalidArgumentException(
-                'Firm documents are disabled for this hub. Enable Functionalities → Firm documents first.'
-            );
-        }
+        // Hub-wide matrix use still needs the functionality; Head/member paths
+        // skip this via assertCanOnRemote → actorCan (Head bypasses the flag).
+        // Keep this no-op so remote CRUD is not blocked for Heads.
     }
 
     private function assertFirmExists(Hub $hub, int $firmId): void
