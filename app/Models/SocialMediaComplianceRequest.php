@@ -110,7 +110,7 @@ class SocialMediaComplianceRequest extends Model
         }
 
         $this->loadMissing([
-            'currentVersionRow.supportingFiles',
+            'currentVersionRow',
             'assignee:id,name,email',
             'post:id,title,type,attachment_path,attachment_name,attachment_mime',
             'user:id,name,email,firm_id',
@@ -170,9 +170,8 @@ class SocialMediaComplianceRequest extends Model
             ] : null,
             'description' => $version?->description,
             'image_url' => $version?->resolvedImageUrl(),
-            'supporting_files' => $version
-                ? $version->supportingFiles->map(fn (SocialMediaComplianceRequestAttachment $a) => $a->toApiArray())->values()->all()
-                : [],
+            // Supporting files live on versions[].supporting_files for version history UI —
+            // do not render a separate request-level supporting-files box.
             'status' => $version?->status ?? self::STATUS_PENDING,
             'feedback' => $version?->feedback,
             'reviewed_by' => $version?->reviewed_by,

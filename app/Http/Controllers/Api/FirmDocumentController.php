@@ -120,7 +120,7 @@ class FirmDocumentController extends Controller
                 'description' => ['nullable', 'string', 'max:5000'],
             ], ComplianceSupportingFiles::optionalUploadRules('attachments')));
 
-            $files = ComplianceSupportingFiles::fromRequest($request);
+            $files = ComplianceSupportingFiles::fromRequest($request, 'attachments');
 
             try {
                 $document = $this->whiteLabelDocuments->create(
@@ -152,7 +152,7 @@ class FirmDocumentController extends Controller
 
         $firm = $this->resolveFirm($user, $validated['firm_id'] ?? null);
         $hub = $this->rightsHub($request, $user);
-        $files = ComplianceSupportingFiles::fromRequest($request);
+        $files = ComplianceSupportingFiles::fromRequest($request, 'attachments');
 
         $document = $this->documents->create(
             $user,

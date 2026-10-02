@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\WebsiteCompliance\UsesWcDatabaseContext;
+use App\Support\ComplianceSupportingFiles;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Storage;
@@ -13,14 +14,22 @@ class GeneralComplianceRequestAttachment extends Model
 
     protected $table = 'general_compliance_request_attachments';
 
+    public const KIND_ATTACHMENT = 'attachment';
+
+    public const KIND_SUPPORTING_FILE = 'supporting_file';
+
     protected $fillable = [
         'version_id',
+        'kind',
         'original_name',
         'file_path',
         'file_url',
         'mime_type',
         'size_bytes',
         'sort_order',
+        'uploaded_by_user_id',
+        'uploaded_by_name',
+        'source',
     ];
 
     protected function casts(): array
@@ -28,6 +37,7 @@ class GeneralComplianceRequestAttachment extends Model
         return [
             'size_bytes' => 'integer',
             'sort_order' => 'integer',
+            'uploaded_by_user_id' => 'integer',
         ];
     }
 
@@ -60,15 +70,27 @@ class GeneralComplianceRequestAttachment extends Model
      */
     public function toApiArray(): array
     {
+        $source = $this->source;
+        $kind = $this->kind ?: self::KIND_ATTACHMENT;
+
         return [
             'id' => $this->id,
             'version_id' => $this->version_id,
+            'kind' => $kind,
             'original_name' => $this->original_name,
             'file_path' => $this->file_path,
             'file_url' => $this->resolvedFileUrl(),
             'mime_type' => $this->mime_type,
             'size_bytes' => $this->size_bytes,
             'sort_order' => $this->sort_order,
+            'uploaded_by_user_id' => $this->uploaded_by_user_id ? (int) $this->uploaded_by_user_id : null,
+            'uploaded_by_name' => $this->uploaded_by_name,
+            'source' => $source,
+            // Role label applies to supporting files in version history.
+            'uploaded_by_role' => $kind === self::KIND_SUPPORTING_FILE
+                ? ComplianceSupportingFiles::roleForSource($source)
+                : null,
+            'created_at' => optional($this->created_at)?->toIso8601String(),
         ];
     }
 }

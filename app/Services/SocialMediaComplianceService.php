@@ -128,7 +128,7 @@ class SocialMediaComplianceService
             ]);
 
             if ($supportingFiles !== []) {
-                $this->storeSupportingFilesForVersion($version, $supportingFiles);
+                $this->storeSupportingFilesForVersion($version, $supportingFiles, $user, 'submit');
             }
 
             return $compliance->fresh(['currentVersionRow.supportingFiles', 'post', 'user', 'onBehalfBy']);
@@ -211,20 +211,10 @@ class SocialMediaComplianceService
             ]);
 
             if ($hasNewSupportingFiles) {
-                $this->storeSupportingFilesForVersion($version, $supportingFiles);
+                $this->storeSupportingFilesForVersion($version, $supportingFiles, $user, 'resubmit');
             } else {
                 $this->copySupportingFilesFromVersion($current, $version);
             }
-        });
-
-        $compliance = $compliance->fresh(['currentVersionRow.supportingFiles', 'assignee', 'post', 'user', 'onBehalfBy']);
-
-        if ($compliance->assignee) {
-            $this->mail->notifyResubmitted($compliance, $compliance->assignee, $user);
-        }
-
-        $this->activityLogs->log([
-            'action' => 'smc.resubmit',
             'description' => 'ReSubmitted social media compliance request #'.$compliance->id.' as v'.$newVersion,
             'user' => $user,
             'hub' => $hub,
@@ -317,7 +307,7 @@ class SocialMediaComplianceService
             ]);
 
             if ($hasNewSupportingFiles) {
-                $this->storeSupportingFilesForVersion($version, $supportingFiles);
+                $this->storeSupportingFilesForVersion($version, $supportingFiles, $user, 'confirm_feedback');
             } else {
                 $this->copySupportingFilesFromVersion($current, $version);
             }
@@ -505,7 +495,7 @@ class SocialMediaComplianceService
             $nextOrder = $version->supportingFiles->isEmpty()
                 ? 0
                 : ((int) $version->supportingFiles->max('sort_order')) + 1;
-            $this->storeSupportingFilesForVersion($version, $supportingFiles, $nextOrder);
+            $this->storeSupportingFilesForVersion($version, $supportingFiles, $actor, 'review', $nextOrder);
         }
 
         $compliance = $compliance->fresh(['currentVersionRow.supportingFiles', 'user', 'post', 'assignee']);
@@ -612,7 +602,7 @@ class SocialMediaComplianceService
                 $nextOrder = $version->supportingFiles->isEmpty()
                     ? 0
                     : ((int) $version->supportingFiles->max('sort_order')) + 1;
-                $this->storeSupportingFilesForVersion($version, $supportingFiles, $nextOrder);
+                $this->storeSupportingFilesForVersion($version, $supportingFiles, $actor, 'change_status', $nextOrder);
             }
         });
 
@@ -906,9 +896,12 @@ class SocialMediaComplianceService
     private function storeSupportingFilesForVersion(
         SocialMediaComplianceRequestVersion $version,
         array $files,
+        ?User $uploader = null,
+        ?string $source = null,
         ?int $startOrder = null
     ): void {
         $baseOrder = $startOrder ?? 0;
+        $attribution = ComplianceSupportingFiles::attributionPayload($uploader, $source);
 
         foreach (array_values($files) as $index => $file) {
             $path = $file->store('social-media-compliance-files', 'public');
@@ -920,6 +913,9 @@ class SocialMediaComplianceService
                 'mime_type' => $file->getClientMimeType() ?: $file->getMimeType(),
                 'size_bytes' => (int) $file->getSize(),
                 'sort_order' => $baseOrder + $index,
+                'uploaded_by_user_id' => $attribution['uploaded_by_user_id'],
+                'uploaded_by_name' => $attribution['uploaded_by_name'],
+                'source' => $attribution['source'],
             ]);
         }
     }
@@ -938,6 +934,9 @@ class SocialMediaComplianceService
                 'mime_type' => $attachment->mime_type,
                 'size_bytes' => $attachment->size_bytes,
                 'sort_order' => $attachment->sort_order ?? $index,
+                'uploaded_by_user_id' => $attachment->uploaded_by_user_id,
+                'uploaded_by_name' => $attachment->uploaded_by_name,
+                'source' => $attachment->source,
             ]);
         }
     }

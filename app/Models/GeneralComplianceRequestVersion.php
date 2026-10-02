@@ -46,9 +46,35 @@ class GeneralComplianceRequestVersion extends Model
         return $this->belongsTo(User::class, 'submitted_by');
     }
 
+    /**
+     * Primary submission files (multipart field: attachments[]).
+     */
     public function attachments(): HasMany
     {
         return $this->hasMany(GeneralComplianceRequestAttachment::class, 'version_id')
+            ->where('kind', GeneralComplianceRequestAttachment::KIND_ATTACHMENT)
+            ->orderBy('sort_order')
+            ->orderBy('id');
+    }
+
+    /**
+     * Supporting / evidence files (multipart field: supporting_files[]).
+     */
+    public function supportingFiles(): HasMany
+    {
+        return $this->hasMany(GeneralComplianceRequestAttachment::class, 'version_id')
+            ->where('kind', GeneralComplianceRequestAttachment::KIND_SUPPORTING_FILE)
+            ->orderBy('sort_order')
+            ->orderBy('id');
+    }
+
+    /**
+     * All files for this version (both kinds), used when copying across versions.
+     */
+    public function allFiles(): HasMany
+    {
+        return $this->hasMany(GeneralComplianceRequestAttachment::class, 'version_id')
+            ->orderBy('kind')
             ->orderBy('sort_order')
             ->orderBy('id');
     }
@@ -58,7 +84,7 @@ class GeneralComplianceRequestVersion extends Model
      */
     public function toApiArray(): array
     {
-        $this->loadMissing('attachments');
+        $this->loadMissing(['attachments', 'supportingFiles']);
 
         return [
             'id' => $this->id,
@@ -70,7 +96,7 @@ class GeneralComplianceRequestVersion extends Model
                 ->map(fn (GeneralComplianceRequestAttachment $a) => $a->toApiArray())
                 ->values()
                 ->all(),
-            'supporting_files' => $this->attachments
+            'supporting_files' => $this->supportingFiles
                 ->map(fn (GeneralComplianceRequestAttachment $a) => $a->toApiArray())
                 ->values()
                 ->all(),

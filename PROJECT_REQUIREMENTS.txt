@@ -311,9 +311,15 @@ Notes:
   Feedback; version history supports reject-resubmit and approve-with-feedback
   confirm/reupload. Emails notify admins, assignees, and submitters.
 - Optional **supporting files** (PDF, Office, images, ZIP; max 10 × 10 MB) may
-  be attached on submit, review (approve/reject), and change-status, in addition
-  to the required media attachment. Field: `supporting_files[]`. Copied across
-  versions on resubmit / change-status when no new files are uploaded.
+  be attached on submit (advisor), review/approve-reject (approver), and
+  change-status (manager), in addition to the required media attachment.
+  Field: `supporting_files[]`. Copied across versions on resubmit /
+  change-status when no new files are uploaded.
+- **UI:** show supporting files inside each entry of **version history**
+  (`versions[].supporting_files`) when any exist — never as a separate
+  request-level supporting-files box. Each file includes `source`,
+  `uploaded_by_name`, and `uploaded_by_role` (`advisor` | `approver` |
+  `manager`) so the UI can label who attached it.
 - All Social Media Compliance mutations and report/chart views are written to
   activity_logs (actions: smc.submit / assign / unassign / review / resubmit /
   confirm_feedback / change_status / reports.* / charts.*).
@@ -321,19 +327,30 @@ Notes:
 3.3b General Compliance
 - Same review flow as Social Media Compliance (submit → assign → review →
   versions / reports), but submissions are free-form: required description
-  textarea + optional multiple supporting files / attachments (PDF, Office,
-  images, ZIP, etc.; max 10 × 10 MB).
-- Supporting files may also be attached when reviewing (approve/reject) and
-  when changing request status (appended to the current/new version).
-- Accepts multipart field names `attachments[]` or `supporting_files[]`.
+  textarea + optional multiple **attachments** (primary content files) and
+  optional **supporting files** (evidence; PDF, Office, images, ZIP, etc.;
+  max 10 × 10 MB each field).
+- Attachments and supporting files are distinct: multipart fields
+  `attachments[]` and `supporting_files[]` are stored and returned separately
+  (`kind` on each file row). Do not alias one into the other.
+- Supporting files may be attached by the advisor on submit/resubmit/confirm,
+  by the approver on review, and by the manager on change-status (appended to
+  the current/new version).
+- **UI:** render supporting files only inside **version history**
+  (`versions[].supporting_files`); primary `attachments` may still show with
+  the request content. Do not show a separate supporting-files panel.
 - Power Admin enables the **General Compliance** module per hub. Capabilities
   (`gc_*`) are blurred while the module is off.
 - Activity logs use `gc.*` actions.
 
 3.3c Website Compliance supporting files
-- Change requests accept optional supporting files on submit, approve, reject,
-  approve-with-feedback, and change-status (`supporting_files[]`, same limits
-  as other compliance modules). Stored per change-request version.
+- Change requests accept optional supporting files on submit (advisor/editor),
+  approve / reject / approve-with-feedback / schedule (approver), and
+  change-status (manager) via `supporting_files[]` (same limits as other
+  compliance modules). Stored per change-request version with uploader
+  attribution (`source`, `uploaded_by_*`, `uploaded_by_role`).
+- **UI:** show supporting files inside each version in version history only —
+  never as a separate request-level supporting-files box.
 
 3.4 Firm Head of Firm & Firm Documents
 - Firms already exist on hub databases (`firms` + `users.firm_id`; capability
@@ -1068,7 +1085,7 @@ STEP 1 — Shared hub core (content hub)
 [x] Social Media Compliance capability section (blurred while module off)
 [x] Social Media Compliance API — submit / assign / review / versions / reports / charts
 [x] Social Media Compliance activity logging (smc.* actions in activity_logs)
-[x] Optional compliance supporting files (SMC / GC / WC) on submit, review/approve-reject, and change-status
+[x] Optional compliance supporting files (SMC / GC / WC) on submit, review/approve-reject, and change-status — shown in version history with uploader role (advisor / approver / manager), not as a separate request-level box
 [x] Approver / manager dedicated front-end UIs (SMC & ops flows)
 [x] Power Admin user management UI (pa_manage_users_roles — create/update/delete/roles)
 [x] Control white labelled hubs via dashboard hub switcher (dashboard_control_white_label_hubs)
@@ -1085,7 +1102,8 @@ STEP 1 — Shared hub core (content hub)
 [ ] AI post/reel generation by FinProms admin (later)
 [ ] In-app post editing for buyers (later)
 [x] Social Media Compliance check flow (module + APIs)
-[x] General Compliance module + APIs (description + optional multi-file supporting files)
+[x] General Compliance module + APIs (description + optional attachments and
+    separate supporting files)
 [x] Website Compliance module + APIs (templates, sections, change requests, cPanel deploy, supporting files)
 [x] Firm Head of Firm — capability `dashboard_assign_firm_head`; one head per
     firm appointed from that firm’s members (section 3.4.1)

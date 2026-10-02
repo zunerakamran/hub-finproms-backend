@@ -68,7 +68,7 @@ class ChangeRequestController extends Controller
                 'current_version' => 1,
             ]);
 
-            $this->workflow->createVersionOne($changeRequest, $proposedContent, ChangeRequest::STATUS_PENDING, $supportingFiles);
+            $this->workflow->createVersionOne($changeRequest, $proposedContent, ChangeRequest::STATUS_PENDING, $supportingFiles, $user, 'submit');
 
             $this->activityLogs->log([
                 'action' => 'wc.change_request.submit',
@@ -79,7 +79,7 @@ class ChangeRequestController extends Controller
                 'request' => $request,
             ]);
 
-            return response()->json($changeRequest->fresh(['editor', 'onBehalfBy', 'section', 'currentVersionRow.supportingFiles'])->toApiArray(), 201);
+            return response()->json($changeRequest->fresh(['editor', 'onBehalfBy', 'section', 'currentVersionRow.supportingFiles', 'versions.supportingFiles'])->toApiArray(includeVersions: true), 201);
         }
 
         $request->validate(array_merge([
@@ -108,7 +108,7 @@ class ChangeRequestController extends Controller
             'current_version' => 1,
         ]);
 
-        $this->workflow->createVersionOne($changeRequest, $proposedContent, ChangeRequest::STATUS_PENDING, $supportingFiles);
+        $this->workflow->createVersionOne($changeRequest, $proposedContent, ChangeRequest::STATUS_PENDING, $supportingFiles, $user, 'submit');
 
         $this->activityLogs->log([
             'action' => 'wc.change_request.submit',
@@ -119,7 +119,7 @@ class ChangeRequestController extends Controller
             'request' => $request,
         ]);
 
-        return response()->json($changeRequest->fresh(['editor', 'onBehalfBy', 'section', 'currentVersionRow.supportingFiles'])->toApiArray(), 201);
+        return response()->json($changeRequest->fresh(['editor', 'onBehalfBy', 'section', 'currentVersionRow.supportingFiles', 'versions.supportingFiles'])->toApiArray(includeVersions: true), 201);
     }
 
     public function index(Request $request): JsonResponse
@@ -416,7 +416,7 @@ class ChangeRequestController extends Controller
 
             $scheduledVersion = $changeRequest->fresh(['currentVersionRow.supportingFiles'])->currentVersionRow;
             if ($scheduledVersion) {
-                $this->workflow->appendSupportingFilesToVersion($scheduledVersion, $supportingFiles);
+                $this->workflow->appendSupportingFilesToVersion($scheduledVersion, $supportingFiles, $user, 'schedule');
             }
 
             $hubId = null;
@@ -452,13 +452,13 @@ class ChangeRequestController extends Controller
                 'message' => 'Change request approved & scheduled for '.$scheduledAt->toIso8601String(),
                 'status' => ChangeRequest::STATUS_SCHEDULED,
                 'scheduled_at' => $scheduledAt->toIso8601String(),
-                'change_request' => $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow'])->toApiArray(),
+                'change_request' => $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow.supportingFiles', 'versions.supportingFiles'])->toApiArray(includeVersions: true),
             ]);
         }
 
         $approveVersion = $changeRequest->fresh(['currentVersionRow.supportingFiles'])->currentVersionRow;
         if ($approveVersion) {
-            $this->workflow->appendSupportingFilesToVersion($approveVersion, $supportingFiles);
+            $this->workflow->appendSupportingFilesToVersion($approveVersion, $supportingFiles, $user, 'approve');
         }
 
         $result = ChangeRequestPublishService::publish($changeRequest, $user->id);
@@ -469,7 +469,7 @@ class ChangeRequestController extends Controller
                 : 'Approved in the hub database, but the live site was not updated. Check Laravel logs and that cpanel_domain points to the live template URL (e.g. '.rtrim((string) config('app.url'), '/').'/template4)',
             'status' => ChangeRequest::STATUS_APPROVED,
             'cpanel_synced' => $result['cpanel_synced'],
-            'change_request' => $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow'])->toApiArray(),
+            'change_request' => $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow.supportingFiles', 'versions.supportingFiles'])->toApiArray(includeVersions: true),
         ]);
     }
 
@@ -506,7 +506,7 @@ class ChangeRequestController extends Controller
 
         $rejectVersion = $changeRequest->fresh(['currentVersionRow.supportingFiles'])->currentVersionRow;
         if ($rejectVersion) {
-            $this->workflow->appendSupportingFilesToVersion($rejectVersion, $supportingFiles);
+            $this->workflow->appendSupportingFilesToVersion($rejectVersion, $supportingFiles, $user, 'reject');
         }
 
         $this->activityLogs->log([
@@ -519,7 +519,7 @@ class ChangeRequestController extends Controller
 
         return response()->json([
             'message' => 'Request rejected and sections unlocked for advisor re-editing.',
-            'change_request' => $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow'])->toApiArray(),
+            'change_request' => $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow.supportingFiles', 'versions.supportingFiles'])->toApiArray(includeVersions: true),
         ]);
     }
 
@@ -544,7 +544,7 @@ class ChangeRequestController extends Controller
         return response()->json([
             'message' => 'Request approved with feedback. Sections unlocked for the editor to address notes.',
             'status' => ChangeRequest::STATUS_APPROVED_WITH_FEEDBACK,
-            'change_request' => $updated->toApiArray(),
+            'change_request' => $updated->fresh(['versions.supportingFiles'])->toApiArray(includeVersions: true),
         ]);
     }
 

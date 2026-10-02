@@ -157,7 +157,7 @@ class ChangeRequest extends Model
         }
 
         $this->loadMissing([
-            'currentVersionRow.supportingFiles',
+            'currentVersionRow',
             'editor:id,name,email,firm_id',
             'editor.firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
             'onBehalfBy:id,name,email',
@@ -191,12 +191,8 @@ class ChangeRequest extends Model
             'section_edits' => is_array($decoded) ? $decoded : null,
             // When revising a previous version, FE should only show these sections.
             'editable_section_ids' => $locksToPriorVersion ? $priorSectionIds : null,
-            'supporting_files' => $this->currentVersionRow
-                ? $this->currentVersionRow->supportingFiles
-                    ->map(fn (ChangeRequestAttachment $a) => $a->toApiArray())
-                    ->values()
-                    ->all()
-                : [],
+            // Supporting files live on versions[].supporting_files for version history UI —
+            // do not render a separate request-level supporting-files box.
             'feedback' => $this->feedback,
             'rejection_reason' => $this->rejection_reason,
             'scheduled_at' => optional($this->scheduled_at)?->toIso8601String(),

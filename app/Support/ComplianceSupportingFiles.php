@@ -71,21 +71,45 @@ final class ComplianceSupportingFiles
     }
 
     /**
-     * Collect supporting files from a request, accepting either
-     * supporting_files or attachments as the multipart field name.
+     * Collect uploaded files from a named multipart field.
+     * Default field is supporting_files (compliance evidence).
+     * Pass "attachments" for primary submission files (e.g. General Compliance / Firm Documents).
      *
      * @return list<UploadedFile>
      */
-    public static function fromRequest(\Illuminate\Http\Request $request): array
+    public static function fromRequest(\Illuminate\Http\Request $request, string $field = 'supporting_files'): array
     {
-        $files = $request->file('supporting_files', null);
-        if ($files === null || $files === []) {
-            $files = $request->file('attachments', []);
-        }
-
-        $normalized = self::normalize($files ?: []);
-        self::assertWithinLimits($normalized);
+        $normalized = self::normalize($request->file($field, []) ?: []);
+        self::assertWithinLimits($normalized, $field);
 
         return $normalized;
+    }
+
+    /**
+     * Who typically uploaded a supporting file for this workflow source.
+     * Used by UI version history (advisor / approver / manager labels).
+     */
+    public static function roleForSource(?string $source): ?string
+    {
+        return match ($source) {
+            'submit', 'resubmit', 'confirm_feedback' => 'advisor',
+            'review', 'approve', 'reject', 'approve_with_feedback', 'schedule' => 'approver',
+            'change_status' => 'manager',
+            default => null,
+        };
+    }
+
+    /**
+     * @return array{uploaded_by_user_id: int|null, uploaded_by_name: string|null, source: string|null}
+     */
+    public static function attributionPayload(
+        ?\App\Models\User $uploader,
+        ?string $source
+    ): array {
+        return [
+            'uploaded_by_user_id' => $uploader?->id ? (int) $uploader->id : null,
+            'uploaded_by_name' => $uploader?->name ?: null,
+            'source' => $source,
+        ];
     }
 }

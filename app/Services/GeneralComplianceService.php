@@ -9,6 +9,7 @@ use App\Models\GeneralComplianceRequestAttachment;
 use App\Models\GeneralComplianceRequestVersion;
 use App\Models\Hub;
 use App\Models\User;
+use App\Support\ComplianceSupportingFiles;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
@@ -100,10 +101,12 @@ class GeneralComplianceService
 
         $contentType = $this->assertValidContentType($data['content_type'] ?? null);
 
-        $files = $this->complianceUploadsFromData($data);
-        $this->assertAttachmentLimits($files);
+        $attachments = $this->attachmentsFromData($data);
+        $supportingFiles = $this->supportingFilesFromData($data);
+        $this->assertAttachmentLimits($attachments, 'attachments');
+        ComplianceSupportingFiles::assertWithinLimits($supportingFiles);
 
-        $compliance = DB::transaction(function () use ($subject, $user, $onBehalfById, $description, $contentType, $files) {
+        $compliance = DB::transaction(function () use ($subject, $user, $onBehalfById, $description, $contentType, $attachments, $supportingFiles) {
             $compliance = GeneralComplianceRequest::query()->create([
                 'user_id' => $subject->id,
                 'name' => $subject->name,
@@ -124,11 +127,31 @@ class GeneralComplianceService
                 'on_behalf_by_user_id' => $onBehalfById,
             ]);
 
-            if ($files !== []) {
-                $this->storeAttachmentsForVersion($version, $files);
+            if ($attachments !== []) {
+                $this->storeFilesForVersion(
+                    $version,
+                    $attachments,
+                    GeneralComplianceRequestAttachment::KIND_ATTACHMENT,
+                    $user,
+                    'submit'
+                );
+            }
+            if ($supportingFiles !== []) {
+                $this->storeFilesForVersion(
+                    $version,
+                    $supportingFiles,
+                    GeneralComplianceRequestAttachment::KIND_SUPPORTING_FILE,
+                    $user,
+                    'submit'
+                );
             }
 
-            return $compliance->fresh(['currentVersionRow.attachments', 'user', 'onBehalfBy']);
+            return $compliance->fresh([
+                'currentVersionRow.attachments',
+                'currentVersionRow.supportingFiles',
+                'user',
+                'onBehalfBy',
+            ]);
         });
 
         $this->mail->notifyRequestSubmitted($compliance, $subject);
@@ -146,7 +169,8 @@ class GeneralComplianceService
                 'version' => 1,
                 'status' => GeneralComplianceRequest::STATUS_PENDING,
                 'content_type' => $contentType,
-                'attachment_count' => count($files),
+                'attachment_count' => count($attachments),
+                'supporting_file_count' => count($supportingFiles),
                 'on_behalf_of_user_id' => $onBehalfById ? $subject->id : null,
             ],
         ]);
@@ -180,14 +204,29 @@ class GeneralComplianceService
             $data['content_type'] ?? $current->content_type
         );
 
-        $files = $this->complianceUploadsFromData($data);
-        $this->assertAttachmentLimits($files);
-        $hasNewFiles = $files !== [];
+        $attachments = $this->attachmentsFromData($data);
+        $supportingFiles = $this->supportingFilesFromData($data);
+        $this->assertAttachmentLimits($attachments, 'attachments');
+        ComplianceSupportingFiles::assertWithinLimits($supportingFiles);
+        $hasNewAttachments = $attachments !== [];
+        $hasNewSupportingFiles = $supportingFiles !== [];
 
         $newVersion = (int) $compliance->current_version + 1;
         $onBehalfById = $this->actingAdvisors->onBehalfById($user, $this->actingAdvisors->requireSubject($user));
 
-        DB::transaction(function () use ($compliance, $user, $description, $contentType, $files, $hasNewFiles, $current, $newVersion, $onBehalfById) {
+        DB::transaction(function () use (
+            $compliance,
+            $user,
+            $description,
+            $contentType,
+            $attachments,
+            $supportingFiles,
+            $hasNewAttachments,
+            $hasNewSupportingFiles,
+            $current,
+            $newVersion,
+            $onBehalfById
+        ) {
             $compliance->update([
                 'current_version' => $newVersion,
                 'on_behalf_by_user_id' => $onBehalfById ?? $compliance->on_behalf_by_user_id,
@@ -205,14 +244,46 @@ class GeneralComplianceService
                 'on_behalf_by_user_id' => $onBehalfById,
             ]);
 
-            if ($hasNewFiles) {
-                $this->storeAttachmentsForVersion($version, $files);
+            if ($hasNewAttachments) {
+                $this->storeFilesForVersion(
+                    $version,
+                    $attachments,
+                    GeneralComplianceRequestAttachment::KIND_ATTACHMENT,
+                    $user,
+                    'resubmit'
+                );
             } else {
-                $this->copyAttachmentsFromVersion($current, $version);
+                $this->copyFilesFromVersion(
+                    $current,
+                    $version,
+                    GeneralComplianceRequestAttachment::KIND_ATTACHMENT
+                );
+            }
+
+            if ($hasNewSupportingFiles) {
+                $this->storeFilesForVersion(
+                    $version,
+                    $supportingFiles,
+                    GeneralComplianceRequestAttachment::KIND_SUPPORTING_FILE,
+                    $user,
+                    'resubmit'
+                );
+            } else {
+                $this->copyFilesFromVersion(
+                    $current,
+                    $version,
+                    GeneralComplianceRequestAttachment::KIND_SUPPORTING_FILE
+                );
             }
         });
 
-        $compliance = $compliance->fresh(['currentVersionRow.attachments', 'assignee', 'user', 'onBehalfBy']);
+        $compliance = $compliance->fresh([
+            'currentVersionRow.attachments',
+            'currentVersionRow.supportingFiles',
+            'assignee',
+            'user',
+            'onBehalfBy',
+        ]);
 
         if ($compliance->assignee) {
             $this->mail->notifyResubmitted($compliance, $compliance->assignee, $user);
@@ -231,7 +302,8 @@ class GeneralComplianceService
                 'status' => GeneralComplianceRequest::STATUS_PENDING,
                 'content_type' => $contentType,
                 'assigned_to' => $compliance->assigned_to,
-                'new_attachments' => $hasNewFiles,
+                'new_attachments' => $hasNewAttachments,
+                'new_supporting_files' => $hasNewSupportingFiles,
             ],
         ]);
 
@@ -260,9 +332,13 @@ class GeneralComplianceService
             ]);
         }
 
-        $files = $this->complianceUploadsFromData($data);
-        $this->assertAttachmentLimits($files);
-        $hasNewFiles = $files !== [];
+        $attachments = $this->attachmentsFromData($data);
+        $supportingFiles = $this->supportingFilesFromData($data);
+        $this->assertAttachmentLimits($attachments, 'attachments');
+        ComplianceSupportingFiles::assertWithinLimits($supportingFiles);
+        $hasNewAttachments = $attachments !== [];
+        $hasNewSupportingFiles = $supportingFiles !== [];
+        $hasNewFiles = $hasNewAttachments || $hasNewSupportingFiles;
 
         $newVersion = (int) $compliance->current_version + 1;
         $feedback = $hasNewFiles ? $current->feedback : '';
@@ -272,8 +348,10 @@ class GeneralComplianceService
             $user,
             $current,
             $newVersion,
-            $files,
-            $hasNewFiles,
+            $attachments,
+            $supportingFiles,
+            $hasNewAttachments,
+            $hasNewSupportingFiles,
             $feedback
         ) {
             $onBehalfById = $this->actingAdvisors->onBehalfById(
@@ -300,14 +378,45 @@ class GeneralComplianceService
                 'on_behalf_by_user_id' => $onBehalfById,
             ]);
 
-            if ($hasNewFiles) {
-                $this->storeAttachmentsForVersion($version, $files);
+            if ($hasNewAttachments) {
+                $this->storeFilesForVersion(
+                    $version,
+                    $attachments,
+                    GeneralComplianceRequestAttachment::KIND_ATTACHMENT,
+                    $user,
+                    'confirm_feedback'
+                );
             } else {
-                $this->copyAttachmentsFromVersion($current, $version);
+                $this->copyFilesFromVersion(
+                    $current,
+                    $version,
+                    GeneralComplianceRequestAttachment::KIND_ATTACHMENT
+                );
+            }
+
+            if ($hasNewSupportingFiles) {
+                $this->storeFilesForVersion(
+                    $version,
+                    $supportingFiles,
+                    GeneralComplianceRequestAttachment::KIND_SUPPORTING_FILE,
+                    $user,
+                    'confirm_feedback'
+                );
+            } else {
+                $this->copyFilesFromVersion(
+                    $current,
+                    $version,
+                    GeneralComplianceRequestAttachment::KIND_SUPPORTING_FILE
+                );
             }
         });
 
-        $compliance = $compliance->fresh(['currentVersionRow.attachments', 'user', 'onBehalfBy']);
+        $compliance = $compliance->fresh([
+            'currentVersionRow.attachments',
+            'currentVersionRow.supportingFiles',
+            'user',
+            'onBehalfBy',
+        ]);
 
         $this->activityLogs->log([
             'action' => 'gc.confirm_feedback',
@@ -319,7 +428,8 @@ class GeneralComplianceService
             'status_code' => 200,
             'properties' => [
                 'version' => $newVersion,
-                'new_attachments' => $hasNewFiles,
+                'new_attachments' => $hasNewAttachments,
+                'new_supporting_files' => $hasNewSupportingFiles,
                 'status' => GeneralComplianceRequest::STATUS_APPROVED,
             ],
         ]);
@@ -425,11 +535,16 @@ class GeneralComplianceService
             ]);
         }
 
-        return $compliance->fresh(['currentVersionRow.attachments', 'assignee', 'user']);
+        return $compliance->fresh([
+            'currentVersionRow.attachments',
+            'currentVersionRow.supportingFiles',
+            'assignee',
+            'user',
+        ]);
     }
 
     /**
-     * @param  array{status: string, feedback?: ?string, attachments?: list<UploadedFile>, supporting_files?: list<UploadedFile>}  $data
+     * @param  array{status: string, feedback?: ?string, supporting_files?: list<UploadedFile>}  $data
      */
     public function review(
         Hub $hub,
@@ -467,8 +582,8 @@ class GeneralComplianceService
         }
 
         $feedback = trim((string) ($data['feedback'] ?? ''));
-        $files = $this->complianceUploadsFromData($data);
-        $this->assertAttachmentLimits($files);
+        $supportingFiles = $this->supportingFilesFromData($data);
+        ComplianceSupportingFiles::assertWithinLimits($supportingFiles);
 
         $version = $compliance->currentVersionRow;
         if (! $version) {
@@ -484,15 +599,27 @@ class GeneralComplianceService
             'reviewed_at' => now(),
         ]);
 
-        if ($files !== []) {
-            $version->loadMissing('attachments');
-            $nextOrder = $version->attachments->isEmpty()
+        if ($supportingFiles !== []) {
+            $version->loadMissing('supportingFiles');
+            $nextOrder = $version->supportingFiles->isEmpty()
                 ? 0
-                : ((int) $version->attachments->max('sort_order')) + 1;
-            $this->storeAttachmentsForVersion($version, $files, $nextOrder);
+                : ((int) $version->supportingFiles->max('sort_order')) + 1;
+            $this->storeFilesForVersion(
+                $version,
+                $supportingFiles,
+                GeneralComplianceRequestAttachment::KIND_SUPPORTING_FILE,
+                $actor,
+                'review',
+                $nextOrder
+            );
         }
 
-        $compliance = $compliance->fresh(['currentVersionRow.attachments', 'user', 'assignee']);
+        $compliance = $compliance->fresh([
+            'currentVersionRow.attachments',
+            'currentVersionRow.supportingFiles',
+            'user',
+            'assignee',
+        ]);
 
         if ($compliance->user) {
             $this->mail->notifyStatusUpdated(
@@ -516,6 +643,7 @@ class GeneralComplianceService
                 'status' => $status,
                 'version' => $compliance->current_version,
                 'has_feedback' => $feedback !== '',
+                'supporting_file_count' => count($supportingFiles),
             ],
         ]);
 
@@ -524,9 +652,9 @@ class GeneralComplianceService
 
     /**
      * Manager-style status override: creates a new version with the chosen status + comment.
-     * Description and attachments are copied from the current version.
+     * Description, attachments, and supporting files are copied from the current version.
      *
-     * @param  array{status: string, comment?: ?string, attachments?: list<UploadedFile>, supporting_files?: list<UploadedFile>}  $data
+     * @param  array{status: string, comment?: ?string, supporting_files?: list<UploadedFile>}  $data
      */
     public function changeStatus(
         Hub $hub,
@@ -568,11 +696,11 @@ class GeneralComplianceService
         }
 
         $comment = trim((string) ($data['comment'] ?? ''));
-        $files = $this->complianceUploadsFromData($data);
-        $this->assertAttachmentLimits($files);
+        $supportingFiles = $this->supportingFilesFromData($data);
+        ComplianceSupportingFiles::assertWithinLimits($supportingFiles);
         $newVersion = (int) $compliance->current_version + 1;
 
-        DB::transaction(function () use ($compliance, $actor, $current, $newVersion, $status, $comment, $files) {
+        DB::transaction(function () use ($compliance, $actor, $current, $newVersion, $status, $comment, $supportingFiles) {
             $compliance->update(['current_version' => $newVersion]);
 
             $version = GeneralComplianceRequestVersion::query()->create([
@@ -588,18 +716,30 @@ class GeneralComplianceService
                 'reviewed_at' => now(),
             ]);
 
-            $this->copyAttachmentsFromVersion($current, $version);
+            $this->copyFilesFromVersion($current, $version);
 
-            if ($files !== []) {
-                $version->loadMissing('attachments');
-                $nextOrder = $version->attachments->isEmpty()
+            if ($supportingFiles !== []) {
+                $version->loadMissing('supportingFiles');
+                $nextOrder = $version->supportingFiles->isEmpty()
                     ? 0
-                    : ((int) $version->attachments->max('sort_order')) + 1;
-                $this->storeAttachmentsForVersion($version, $files, $nextOrder);
+                    : ((int) $version->supportingFiles->max('sort_order')) + 1;
+                $this->storeFilesForVersion(
+                    $version,
+                    $supportingFiles,
+                    GeneralComplianceRequestAttachment::KIND_SUPPORTING_FILE,
+                    $actor,
+                    'change_status',
+                    $nextOrder
+                );
             }
         });
 
-        $compliance = $compliance->fresh(['currentVersionRow.attachments', 'user', 'assignee']);
+        $compliance = $compliance->fresh([
+            'currentVersionRow.attachments',
+            'currentVersionRow.supportingFiles',
+            'user',
+            'assignee',
+        ]);
 
         if ($compliance->user) {
             $this->mail->notifyStatusUpdated(
@@ -623,6 +763,7 @@ class GeneralComplianceService
                 'status' => $status,
                 'version' => $newVersion,
                 'has_comment' => $comment !== '',
+                'supporting_file_count' => count($supportingFiles),
             ],
         ]);
 
@@ -646,6 +787,7 @@ class GeneralComplianceService
         $query = GeneralComplianceRequest::query()
             ->with([
                 'currentVersionRow.attachments',
+                'currentVersionRow.supportingFiles',
                 'assignee:id,name,email',
                 'user:id,name,email,firm_id',
                 'user.firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
@@ -695,6 +837,7 @@ class GeneralComplianceService
         $query = GeneralComplianceRequest::query()
             ->with([
                 'currentVersionRow.attachments',
+                'currentVersionRow.supportingFiles',
                 'assignee:id,name,email',
                 'user:id,name,email,firm_id',
                 'user.firm:id,name',
@@ -730,6 +873,7 @@ class GeneralComplianceService
             }
 
             $attachments = $row->currentVersionRow?->attachments ?? collect();
+            $supportingFiles = $row->currentVersionRow?->supportingFiles ?? collect();
             $attribution = ActingAdvisorService::attributionLabel(
                 $row->name,
                 $row->onBehalfBy?->name
@@ -747,6 +891,8 @@ class GeneralComplianceService
                 'content_type' => $row->currentVersionRow?->content_type,
                 'attachment_count' => $attachments->count(),
                 'attachment_names' => $attachments->pluck('original_name')->implode('; '),
+                'supporting_file_count' => $supportingFiles->count(),
+                'supporting_file_names' => $supportingFiles->pluck('original_name')->implode('; '),
                 'status' => $status,
                 'assigned_to' => $row->assignee?->name,
                 'assigned_to_email' => $row->assignee?->email,
@@ -866,14 +1012,18 @@ class GeneralComplianceService
      * @param  array<string, mixed>  $data
      * @return list<UploadedFile>
      */
-    private function complianceUploadsFromData(array $data): array
+    private function attachmentsFromData(array $data): array
     {
-        $supporting = $this->normalizeUploadedFiles($data['supporting_files'] ?? []);
-        if ($supporting !== []) {
-            return $supporting;
-        }
-
         return $this->normalizeUploadedFiles($data['attachments'] ?? []);
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return list<UploadedFile>
+     */
+    private function supportingFilesFromData(array $data): array
+    {
+        return ComplianceSupportingFiles::normalize($data['supporting_files'] ?? []);
     }
 
     /**
@@ -903,11 +1053,11 @@ class GeneralComplianceService
     /**
      * @param  list<UploadedFile>  $files
      */
-    private function assertAttachmentLimits(array $files): void
+    private function assertAttachmentLimits(array $files, string $field = 'attachments'): void
     {
         if (count($files) > self::MAX_ATTACHMENTS) {
             throw ValidationException::withMessages([
-                'attachments' => 'You may upload at most '.self::MAX_ATTACHMENTS.' files.',
+                $field => 'You may upload at most '.self::MAX_ATTACHMENTS.' files.',
             ]);
         }
     }
@@ -934,41 +1084,67 @@ class GeneralComplianceService
     /**
      * @param  list<UploadedFile>  $files
      */
-    private function storeAttachmentsForVersion(
+    private function storeFilesForVersion(
         GeneralComplianceRequestVersion $version,
         array $files,
+        string $kind,
+        ?User $uploader = null,
+        ?string $source = null,
         ?int $startOrder = null
     ): void {
         $baseOrder = $startOrder ?? 0;
+        $attribution = ComplianceSupportingFiles::attributionPayload($uploader, $source);
 
         foreach (array_values($files) as $index => $file) {
             $path = $file->store('general-compliance', 'public');
             GeneralComplianceRequestAttachment::query()->create([
                 'version_id' => $version->id,
+                'kind' => $kind,
                 'original_name' => $file->getClientOriginalName(),
                 'file_path' => $path,
                 'file_url' => Storage::disk('public')->url($path),
                 'mime_type' => $file->getClientMimeType() ?: $file->getMimeType(),
                 'size_bytes' => (int) $file->getSize(),
                 'sort_order' => $baseOrder + $index,
+                'uploaded_by_user_id' => $attribution['uploaded_by_user_id'],
+                'uploaded_by_name' => $attribution['uploaded_by_name'],
+                'source' => $attribution['source'],
             ]);
         }
     }
 
-    private function copyAttachmentsFromVersion(
+    /**
+     * Copy files from one version to another. When $kind is null, copies both kinds.
+     */
+    private function copyFilesFromVersion(
         GeneralComplianceRequestVersion $from,
-        GeneralComplianceRequestVersion $to
+        GeneralComplianceRequestVersion $to,
+        ?string $kind = null
     ): void {
-        $from->loadMissing('attachments');
-        foreach ($from->attachments as $index => $attachment) {
+        if ($kind === GeneralComplianceRequestAttachment::KIND_ATTACHMENT) {
+            $from->loadMissing('attachments');
+            $files = $from->attachments;
+        } elseif ($kind === GeneralComplianceRequestAttachment::KIND_SUPPORTING_FILE) {
+            $from->loadMissing('supportingFiles');
+            $files = $from->supportingFiles;
+        } else {
+            $from->loadMissing('allFiles');
+            $files = $from->allFiles;
+        }
+
+        foreach ($files as $index => $file) {
             GeneralComplianceRequestAttachment::query()->create([
                 'version_id' => $to->id,
-                'original_name' => $attachment->original_name,
-                'file_path' => $attachment->file_path,
-                'file_url' => $attachment->file_url,
-                'mime_type' => $attachment->mime_type,
-                'size_bytes' => $attachment->size_bytes,
-                'sort_order' => $attachment->sort_order ?? $index,
+                'kind' => $file->kind ?: GeneralComplianceRequestAttachment::KIND_ATTACHMENT,
+                'original_name' => $file->original_name,
+                'file_path' => $file->file_path,
+                'file_url' => $file->file_url,
+                'mime_type' => $file->mime_type,
+                'size_bytes' => $file->size_bytes,
+                'sort_order' => $file->sort_order ?? $index,
+                'uploaded_by_user_id' => $file->uploaded_by_user_id,
+                'uploaded_by_name' => $file->uploaded_by_name,
+                'source' => $file->source,
             ]);
         }
     }

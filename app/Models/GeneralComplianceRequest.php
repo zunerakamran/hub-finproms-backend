@@ -155,9 +155,8 @@ class GeneralComplianceRequest extends Model
             'attachments' => $version
                 ? $version->attachments->map(fn (GeneralComplianceRequestAttachment $a) => $a->toApiArray())->values()->all()
                 : [],
-            'supporting_files' => $version
-                ? $version->attachments->map(fn (GeneralComplianceRequestAttachment $a) => $a->toApiArray())->values()->all()
-                : [],
+            // Supporting files live on versions[].supporting_files for version history UI —
+            // do not render a separate request-level supporting-files box.
             'status' => $version?->status ?? self::STATUS_PENDING,
             'feedback' => $version?->feedback,
             'reviewed_by' => $version?->reviewed_by,
@@ -167,7 +166,7 @@ class GeneralComplianceRequest extends Model
         ];
 
         if ($includeVersions) {
-            $this->loadMissing('versions.attachments');
+            $this->loadMissing(['versions.attachments', 'versions.supportingFiles']);
             $payload['versions'] = $this->versions
                 ->sortByDesc('version_number')
                 ->values()

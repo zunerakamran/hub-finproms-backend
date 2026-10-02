@@ -2,6 +2,7 @@
 
 namespace App\Models\WebsiteCompliance;
 
+use App\Support\ComplianceSupportingFiles;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Storage;
@@ -20,6 +21,9 @@ class ChangeRequestAttachment extends Model
         'mime_type',
         'size_bytes',
         'sort_order',
+        'uploaded_by_user_id',
+        'uploaded_by_name',
+        'source',
     ];
 
     protected function casts(): array
@@ -27,6 +31,7 @@ class ChangeRequestAttachment extends Model
         return [
             'size_bytes' => 'integer',
             'sort_order' => 'integer',
+            'uploaded_by_user_id' => 'integer',
         ];
     }
 
@@ -59,6 +64,8 @@ class ChangeRequestAttachment extends Model
      */
     public function toApiArray(): array
     {
+        $source = $this->source;
+
         return [
             'id' => $this->id,
             'version_id' => $this->version_id,
@@ -68,6 +75,11 @@ class ChangeRequestAttachment extends Model
             'mime_type' => $this->mime_type,
             'size_bytes' => $this->size_bytes,
             'sort_order' => $this->sort_order,
+            'uploaded_by_user_id' => $this->uploaded_by_user_id ? (int) $this->uploaded_by_user_id : null,
+            'uploaded_by_name' => $this->uploaded_by_name,
+            'source' => $source,
+            'uploaded_by_role' => ComplianceSupportingFiles::roleForSource($source),
+            'created_at' => optional($this->created_at)?->toIso8601String(),
         ];
     }
 }

@@ -675,6 +675,7 @@ class WhiteLabelControlPlaneTest extends TestCase
             Schema::connection($connection)->create('general_compliance_request_attachments', function (Blueprint $table) {
                 $table->id();
                 $table->unsignedBigInteger('version_id');
+                $table->string('kind', 32)->default('attachment');
                 $table->string('original_name');
                 $table->string('file_path', 500)->nullable();
                 $table->string('file_url', 500)->nullable();

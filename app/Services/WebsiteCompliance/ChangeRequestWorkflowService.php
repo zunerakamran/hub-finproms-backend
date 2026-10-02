@@ -94,7 +94,9 @@ class ChangeRequestWorkflowService
         ChangeRequest $changeRequest,
         string $proposedContent,
         string $status = ChangeRequest::STATUS_PENDING,
-        array $supportingFiles = []
+        array $supportingFiles = [],
+        ?User $uploader = null,
+        string $source = 'submit'
     ): ChangeRequestVersion {
         $version = ChangeRequestVersion::create([
             'request_id' => $changeRequest->id,
@@ -108,7 +110,7 @@ class ChangeRequestWorkflowService
 
         if ($supportingFiles !== []) {
             ComplianceSupportingFiles::assertWithinLimits($supportingFiles);
-            $this->storeSupportingFilesForVersion($version, $supportingFiles);
+            $this->storeSupportingFilesForVersion($version, $supportingFiles, $uploader, $source);
         }
 
         return $version;
@@ -171,7 +173,7 @@ class ChangeRequestWorkflowService
 
         $version = $changeRequest->fresh(['currentVersionRow.supportingFiles'])->currentVersionRow;
         if ($version) {
-            $this->appendSupportingFilesToVersion($version, $supportingFiles);
+            $this->appendSupportingFilesToVersion($version, $supportingFiles, $user, 'approve_with_feedback');
         }
 
         $this->activityLogs->log([
@@ -293,7 +295,7 @@ class ChangeRequestWorkflowService
             $nextOrder = $newVersionRow->supportingFiles->isEmpty()
                 ? 0
                 : ((int) $newVersionRow->supportingFiles->max('sort_order')) + 1;
-            $this->storeSupportingFilesForVersion($newVersionRow, $newUploads, $nextOrder);
+            $this->storeSupportingFilesForVersion($newVersionRow, $newUploads, $user, 'change_status', $nextOrder);
         }
 
         if ($status === ChangeRequest::STATUS_APPROVED) {
@@ -375,12 +377,12 @@ class ChangeRequestWorkflowService
 
         if ($current) {
             if ($hasNewSupporting) {
-                $this->storeSupportingFilesForVersion($newVersionRow, $normalizedSupporting);
+                $this->storeSupportingFilesForVersion($newVersionRow, $normalizedSupporting, $user, 'resubmit');
             } else {
                 $this->copySupportingFilesFromVersion($current, $newVersionRow);
             }
         } elseif ($hasNewSupporting) {
-            $this->storeSupportingFilesForVersion($newVersionRow, $normalizedSupporting);
+            $this->storeSupportingFilesForVersion($newVersionRow, $normalizedSupporting, $user, 'resubmit');
         }
 
         $this->activityLogs->log([
@@ -453,12 +455,12 @@ class ChangeRequestWorkflowService
 
             if ($current) {
                 if ($hasNewSupporting) {
-                    $this->storeSupportingFilesForVersion($newVersionRow, $normalizedSupporting);
+                    $this->storeSupportingFilesForVersion($newVersionRow, $normalizedSupporting, $user, 'confirm_feedback');
                 } else {
                     $this->copySupportingFilesFromVersion($current, $newVersionRow);
                 }
             } elseif ($hasNewSupporting) {
-                $this->storeSupportingFilesForVersion($newVersionRow, $normalizedSupporting);
+                $this->storeSupportingFilesForVersion($newVersionRow, $normalizedSupporting, $user, 'confirm_feedback');
             }
         } else {
             // Confirm without content changes still creates a new version (match SMC/GC).
@@ -482,12 +484,12 @@ class ChangeRequestWorkflowService
 
             if ($current) {
                 if ($hasNewSupporting) {
-                    $this->storeSupportingFilesForVersion($newVersionRow, $normalizedSupporting);
+                    $this->storeSupportingFilesForVersion($newVersionRow, $normalizedSupporting, $user, 'confirm_feedback');
                 } else {
                     $this->copySupportingFilesFromVersion($current, $newVersionRow);
                 }
             } elseif ($hasNewSupporting) {
-                $this->storeSupportingFilesForVersion($newVersionRow, $normalizedSupporting);
+                $this->storeSupportingFilesForVersion($newVersionRow, $normalizedSupporting, $user, 'confirm_feedback');
             }
 
             // Re-lock briefly so publish unlock path stays consistent.
@@ -529,8 +531,12 @@ class ChangeRequestWorkflowService
     /**
      * @param  list<UploadedFile>  $files
      */
-    public function appendSupportingFilesToVersion(ChangeRequestVersion $version, array $files): void
-    {
+    public function appendSupportingFilesToVersion(
+        ChangeRequestVersion $version,
+        array $files,
+        ?User $uploader = null,
+        ?string $source = null
+    ): void {
         $normalized = ComplianceSupportingFiles::normalize($files);
         ComplianceSupportingFiles::assertWithinLimits($normalized);
         if ($normalized === []) {
@@ -541,7 +547,7 @@ class ChangeRequestWorkflowService
         $nextOrder = $version->supportingFiles->isEmpty()
             ? 0
             : ((int) $version->supportingFiles->max('sort_order')) + 1;
-        $this->storeSupportingFilesForVersion($version, $normalized, $nextOrder);
+        $this->storeSupportingFilesForVersion($version, $normalized, $uploader, $source, $nextOrder);
     }
 
     /**
@@ -550,9 +556,12 @@ class ChangeRequestWorkflowService
     private function storeSupportingFilesForVersion(
         ChangeRequestVersion $version,
         array $files,
+        ?User $uploader = null,
+        ?string $source = null,
         ?int $startOrder = null
     ): void {
         $baseOrder = $startOrder ?? 0;
+        $attribution = ComplianceSupportingFiles::attributionPayload($uploader, $source);
 
         foreach (array_values($files) as $index => $file) {
             $path = $file->store('website-compliance-files', 'public');
@@ -564,6 +573,9 @@ class ChangeRequestWorkflowService
                 'mime_type' => $file->getClientMimeType() ?: $file->getMimeType(),
                 'size_bytes' => (int) $file->getSize(),
                 'sort_order' => $baseOrder + $index,
+                'uploaded_by_user_id' => $attribution['uploaded_by_user_id'],
+                'uploaded_by_name' => $attribution['uploaded_by_name'],
+                'source' => $attribution['source'],
             ]);
         }
     }
@@ -582,6 +594,9 @@ class ChangeRequestWorkflowService
                 'mime_type' => $attachment->mime_type,
                 'size_bytes' => $attachment->size_bytes,
                 'sort_order' => $attachment->sort_order ?? $index,
+                'uploaded_by_user_id' => $attachment->uploaded_by_user_id,
+                'uploaded_by_name' => $attachment->uploaded_by_name,
+                'source' => $attachment->source,
             ]);
         }
     }

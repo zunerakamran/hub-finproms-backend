@@ -53,6 +53,7 @@ return new class extends Migration
                 $table->foreignId('version_id')
                     ->constrained('general_compliance_request_versions')
                     ->cascadeOnDelete();
+                $table->string('kind', 32)->default('attachment'); // attachment | supporting_file
                 $table->string('original_name');
                 $table->string('file_path', 500);
                 $table->string('file_url', 500)->nullable();
@@ -62,6 +63,7 @@ return new class extends Migration
                 $table->timestamps();
 
                 $table->index(['version_id', 'sort_order'], 'gc_attachments_version_sort_index');
+                $table->index(['version_id', 'kind', 'sort_order'], 'gc_attachments_version_kind_sort_idx');
             });
         }
 
