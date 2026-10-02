@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-02 (module uncheck→check creates a new enable invoice)
+Last updated: 2026-10-02 (WTL enable = wc_templates count; re-enable deletes prior invoice)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -633,13 +633,14 @@ Notes:
     (capabilities blurred while this module is off)
 - Managed via `dashboard_manage_modules` / Modules API on Central Hub.
 - When `charge_amount_per_module` is ON, newly enabling a module (including
-  uncheck → check again) creates a one-time invoice. Previous unpaid enable
-  invoices for that module are canceled/superseded so only the new enable
-  invoice remains unpaid. £0 catalogue prices still create a paid/complimentary
-  invoice. Website Template Library creates ONE consolidated invoice for all
-  currently deployed websites (unit rate × count). Later individual deploys
-  each add one invoice for that new site only. Invoices-page backfill does not
-  duplicate enable invoices.
+  uncheck → check again) creates a one-time invoice. Previous enable invoices
+  for that module are deleted so only the new enable invoice remains. £0
+  catalogue prices still create a paid/complimentary invoice. Website Template
+  Library creates ONE invoice for all catalogue templates in `wc_templates`
+  (unit rate × template count) — not template requests / deployments. Deploying
+  a website no longer creates a separate one-time invoice. Recurring WTL still
+  uses deployed website count. Invoices-page backfill does not duplicate enable
+  invoices.
 
 5.1B Module catalogue pricing (Modules pricing)
 - Official default catalogue (editable via capability / database):
@@ -647,7 +648,7 @@ Notes:
   1) Shared Hub / White Label Hub — £14,500 (one time)
   2) Social Media Template Library — £0 (one time / included; invoice still created, auto-paid)
   3) Social Media Pre Approval Workflow — £5,000 (one time)
-  4) Website Template Library — £300 per website
+  4) Website Template Library — £300 × catalogue templates (wc_templates) on enable
   5) Website Content Pre Approval Workflow — £10,000 (one time)
   6) Generic Content Pre Approval Workflow — £3,500 (one time)
   Recurring (functionality `charge_recurring_per_module`):
@@ -1051,7 +1052,7 @@ STEP 1 — Shared hub core (content hub)
 [x] Capabilities group Modules pricing — set prices + view module invoices +
     mark module invoices as paid
 [x] One-time module invoices on enable (skip £0 and per-website until websites billed)
-[x] Website Template Library — £300 one-time per deployed wc_template_request;
+[x] Website Template Library — £300 × count of wc_templates on module enable;
     £125/month × count of status=deployed template requests (hub DB / remote WL)
 [x] All module invoices (incl. Shared / White Label hub packaging) created as unpaid
     until payment is recorded

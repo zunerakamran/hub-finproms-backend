@@ -118,7 +118,7 @@ class InvoiceService
         );
         $breakdown = $billing->billingBreakdownForApi();
         $domain = (string) ($billing->meta['domain_name'] ?? '');
-        $websiteCount = max(1, (int) ($billing->meta['website_count'] ?? 0));
+        $websiteCount = max(1, (int) ($billing->meta['website_count'] ?? $billing->meta['template_count'] ?? 0));
         $unitAmount = isset($billing->meta['unit_amount'])
             ? (float) $billing->meta['unit_amount']
             : $amount;
@@ -126,10 +126,13 @@ class InvoiceService
             ? "Module (one time) — {$moduleLabel} — {$domain} ({$hubName})"
             : "Module (one time) — {$moduleLabel} ({$hubName})";
 
-        $qty = ($websiteCount > 1 || ! empty($billing->meta['consolidated_websites']))
+        $qty = ($websiteCount > 1 || ! empty($billing->meta['consolidated_websites']) || ! empty($billing->meta['template_count']))
             ? $websiteCount
             : 1;
         $lineUnit = $qty > 1 ? $unitAmount : $amount;
+        $unitLabel = (($billing->meta['billed_by'] ?? '') === 'wc_templates' || ! empty($billing->meta['wc_template_ids']))
+            ? 'templates'
+            : 'websites';
 
         return $this->createInvoice([
             'user_id' => $user->id,
@@ -148,7 +151,7 @@ class InvoiceService
             'due_on' => now()->toDateString(),
             'line_items' => [[
                 'label' => $qty > 1
-                    ? "{$moduleLabel} — {$qty} websites × £".number_format($lineUnit, 2)
+                    ? "{$moduleLabel} — {$qty} {$unitLabel} × £".number_format($lineUnit, 2)
                     : "{$moduleLabel} — one-time module charge",
                 'quantity' => $qty,
                 'unit_amount' => $lineUnit,

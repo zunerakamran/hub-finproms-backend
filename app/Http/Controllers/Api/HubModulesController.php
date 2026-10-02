@@ -110,12 +110,12 @@ class HubModulesController extends Controller
                     $moduleInvoiceWarning = 'Website Template Library was enabled, but “Charge amount per module (one time)” is off on this hub — turn it on under Functionalities to generate invoices.';
                 } else {
                     try {
-                        if ($this->moduleBilling->countDeployedWebsites($fresh) === 0) {
-                            $moduleInvoiceWarning = 'Website Template Library was enabled, but no deployed websites were found on this hub’s database (status = deployed). Check deploy wiring / remote DB if controlling from Central.';
+                        if ($this->moduleBilling->countLibraryTemplates($fresh) === 0) {
+                            $moduleInvoiceWarning = 'Website Template Library was enabled, but no catalogue templates (wc_templates) were found on this hub’s database. Check deploy wiring / remote DB if controlling from Central.';
                         }
                     } catch (\Throwable $e) {
                         report($e);
-                        $moduleInvoiceWarning = 'Website Template Library was enabled, but deployed websites could not be counted: '.$e->getMessage();
+                        $moduleInvoiceWarning = 'Website Template Library was enabled, but catalogue templates could not be counted: '.$e->getMessage();
                     }
                 }
             }

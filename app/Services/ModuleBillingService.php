@@ -7,6 +7,7 @@ use App\Models\HubModuleBilling;
 use App\Models\HubModuleRecurringBilling;
 use App\Models\Invoice;
 use App\Models\User;
+use App\Models\WebsiteCompliance\Template;
 use App\Models\WebsiteCompliance\TemplateRequest;
 use App\Support\WebsiteCompliance\WcDatabaseContext;
 use Illuminate\Http\UploadedFile;
@@ -32,12 +33,33 @@ class ModuleBillingService
 
     /**
      * Deployed showcase / advisor websites on this hub (wc_template_requests).
-     * Uses the hub's own DB when remote wiring is configured.
+     * Used for recurring per-website charges.
      */
     public function countDeployedWebsites(Hub $hub): int
     {
         return (int) $this->onHubDatabase($hub, function () {
             return TemplateRequest::query()->where('status', 'deployed')->count();
+        });
+    }
+
+    /**
+     * Catalogue website templates on this hub (wc_templates) — used for WTL
+     * one-time enable invoices (not template requests / deployments).
+     */
+    public function countLibraryTemplates(Hub $hub): int
+    {
+        return (int) $this->onHubDatabase($hub, function () {
+            return Template::query()->count();
+        });
+    }
+
+    /**
+     * @return \Illuminate\Support\Collection<int, Template>
+     */
+    public function libraryTemplates(Hub $hub)
+    {
+        return $this->onHubDatabase($hub, function () {
+            return Template::query()->orderBy('id')->get();
         });
     }
 
@@ -77,86 +99,12 @@ class ModuleBillingService
     }
 
     /**
-     * One-time £/website invoice when a WC template request is deployed.
-     * Idempotent per hub + template_request id (also skips if already covered
-     * by a consolidated enable invoice).
+     * Deploy-time one-time invoicing is disabled — WTL one-time charges are
+     * based on catalogue wc_templates at module enable, not template requests.
      */
     public function invoiceWebsiteDeploy(Hub $hub, TemplateRequest $templateRequest, User $actor): ?Invoice
     {
-        if (! $this->billingEnabled($hub)) {
-            return null;
-        }
-
-        if (! $hub->moduleEffectivelyEnabled(self::WEBSITE_MODULE_KEY)) {
-            return null;
-        }
-
-        if ((string) $templateRequest->status !== 'deployed') {
-            return null;
-        }
-
-        $requestId = (int) $templateRequest->id;
-        $existing = $this->billingCoveringWebsiteRequest($hub, $requestId);
-
-        if ($existing) {
-            return $existing->invoice ?: $this->invoices->createForModuleBilling($existing);
-        }
-
-        $quote = $this->pricing->quote(self::WEBSITE_MODULE_KEY);
-        // £0 catalogue prices still produce an invoice row (audit / settle trail).
-
-        if (($quote['billing_unit'] ?? '') !== ModulePricingService::BILLING_UNIT_PER_WEBSITE) {
-            // Misconfigured catalogue — still allow amount as one website charge.
-        }
-
-        $payer = $this->resolvePayer($actor);
-        $domain = (string) ($templateRequest->domain_name ?: $templateRequest->cpanel_domain ?: 'website #'.$requestId);
-        $isComplimentary = (float) $quote['amount'] <= 0;
-        $status = $isComplimentary
-            ? HubModuleBilling::STATUS_PAID
-            : HubModuleBilling::STATUS_UNPAID;
-
-        return DB::transaction(function () use ($hub, $quote, $payer, $requestId, $domain, $templateRequest, $status, $isComplimentary, $actor) {
-            $billing = HubModuleBilling::query()->create([
-                'hub_id' => $hub->id,
-                'module_key' => self::WEBSITE_MODULE_KEY,
-                'billed_user_id' => $payer->id,
-                'amount' => $quote['amount'],
-                'currency' => $quote['currency'],
-                'status' => $status,
-                'payment_status' => $status,
-                'paid_at' => $isComplimentary ? now() : null,
-                'paid_by_user_id' => $isComplimentary ? $actor->id : null,
-                'payment_method' => $isComplimentary ? 'complimentary' : null,
-                'payment_notes' => $isComplimentary ? '£0 catalogue price — included' : null,
-                'meta' => [
-                    'module_label' => Hub::CHECKLIST_DEFINITIONS[self::WEBSITE_MODULE_KEY]['label'] ?? self::WEBSITE_MODULE_KEY,
-                    'billing_cadence' => Invoice::TYPES_ONE_TIME,
-                    'billing_unit' => ModulePricingService::BILLING_UNIT_PER_WEBSITE,
-                    'website_count' => 1,
-                    'unit_amount' => $quote['amount'],
-                    'wc_template_request_id' => $requestId,
-                    'wc_template_request_ids' => [$requestId],
-                    'domain_name' => $domain,
-                    'domains' => [$domain],
-                    'template_name' => $templateRequest->template_name,
-                    'auto_paid_on_hub_enable' => $isComplimentary,
-                ],
-            ]);
-
-            $invoice = $this->invoices->createForModuleBilling($billing);
-            // Clarify description for website deploys.
-            $invoice->forceFill([
-                'description' => sprintf(
-                    'Module (one time) — Website Template Library — %s (%s)',
-                    $domain,
-                    $hub->name
-                ),
-                'due_on' => now()->toDateString(),
-            ])->save();
-
-            return $invoice->fresh();
-        });
+        return null;
     }
 
     /**
@@ -178,6 +126,7 @@ class ModuleBillingService
 
     /**
      * Deployed WC template requests on this hub (local or remote DB).
+     * Kept for recurring billing counts / tooling.
      *
      * @return \Illuminate\Support\Collection<int, TemplateRequest>
      */
@@ -298,7 +247,7 @@ class ModuleBillingService
 
         $invoice = DB::transaction(function () use ($hub, $moduleKey, $quote, $payer, $status, $isComplimentary, $actor, $forceNew) {
             if ($forceNew) {
-                $this->cancelUnpaidEnableBillingsForModule($hub, $moduleKey);
+                $this->removePreviousEnableInvoicesForModule($hub, $moduleKey);
             }
 
             $billing = HubModuleBilling::query()->create([
@@ -329,9 +278,8 @@ class ModuleBillingService
     }
 
     /**
-     * Create one consolidated WTL enable invoice (unit rate × deployed websites).
-     * When $forceNew is true (module unchecked → checked), always create a new
-     * invoice and cancel previous unpaid enable / per-site rows for this module.
+     * Create one WTL enable invoice (unit rate × catalogue wc_templates count).
+     * Uncheck → check (forceNew) removes previous enable invoices and creates a new one.
      *
      * @return list<Invoice>
      */
@@ -345,19 +293,17 @@ class ModuleBillingService
             return [];
         }
 
-        $deployed = $this->deployedWebsiteRequests($hub);
-        if ($deployed->isEmpty()) {
+        $templates = $this->libraryTemplates($hub);
+        if ($templates->isEmpty()) {
             return [];
         }
 
         $quote = $this->pricing->quote(self::WEBSITE_MODULE_KEY);
         $unitAmount = (float) $quote['amount'];
-        $count = $deployed->count();
+        $count = $templates->count();
         $amount = round($unitAmount * $count, 2);
-        $requestIds = $deployed->map(fn (TemplateRequest $r) => (int) $r->id)->all();
-        $domains = $deployed->map(function (TemplateRequest $r) {
-            return (string) ($r->domain_name ?: $r->cpanel_domain ?: 'website #'.$r->id);
-        })->all();
+        $templateIds = $templates->map(fn (Template $t) => (int) $t->id)->all();
+        $templateNames = $templates->map(fn (Template $t) => (string) ($t->name ?: $t->slug ?: 'template #'.$t->id))->all();
 
         $payer = $this->resolvePayer($actor);
         $isComplimentary = $amount <= 0;
@@ -372,16 +318,15 @@ class ModuleBillingService
             $amount,
             $unitAmount,
             $count,
-            $requestIds,
-            $domains,
+            $templateIds,
+            $templateNames,
             $status,
             $isComplimentary,
             $actor,
             $forceNew
         ) {
-            // Replace unpaid enable / legacy per-site rows with this single invoice.
-            $this->cancelUnpaidEnableBillingsForModule($hub, self::WEBSITE_MODULE_KEY);
-            $this->cancelUnpaidLegacyPerSiteWtlBillings($hub);
+            // Always remove prior WTL one-time rows before creating the enable invoice.
+            $this->removePreviousEnableInvoicesForModule($hub, self::WEBSITE_MODULE_KEY);
 
             if (! $forceNew && $this->existingWtlEnableBilling($hub)) {
                 return null;
@@ -406,11 +351,15 @@ class ModuleBillingService
                     'consolidated_websites' => true,
                     'wtl_enable_invoice' => true,
                     'module_enable_invoice' => true,
+                    'billed_by' => 'wc_templates',
                     'website_count' => $count,
+                    'template_count' => $count,
                     'unit_amount' => $unitAmount,
-                    'wc_template_request_ids' => $requestIds,
-                    'domains' => $domains,
-                    'domain_name' => $count === 1 ? ($domains[0] ?? '') : sprintf('%d websites', $count),
+                    'wc_template_ids' => $templateIds,
+                    'template_names' => $templateNames,
+                    'domain_name' => $count === 1
+                        ? ($templateNames[0] ?? '')
+                        : sprintf('%d templates', $count),
                     'auto_paid_on_hub_enable' => $isComplimentary,
                 ],
             ]);
@@ -418,7 +367,7 @@ class ModuleBillingService
             $invoice = $this->invoices->createForModuleBilling($billing);
             $invoice->forceFill([
                 'description' => sprintf(
-                    'Module (one time) — Website Template Library — %d website%s × £%s (%s)',
+                    'Module (one time) — Website Template Library — %d template%s × £%s (%s)',
                     $count,
                     $count === 1 ? '' : 's',
                     number_format($unitAmount, 2),
@@ -451,87 +400,68 @@ class ModuleBillingService
     }
 
     /**
-     * Cancel unpaid module-enable billings (not paid history) for a module.
+     * Hard-delete previous one-time enable invoices for a module (and legacy
+     * per-site WTL rows) so uncheck → check replaces them entirely.
      */
-    public function cancelUnpaidEnableBillingsForModule(Hub $hub, string $moduleKey): int
+    public function removePreviousEnableInvoicesForModule(Hub $hub, string $moduleKey): int
     {
         $rows = HubModuleBilling::query()
             ->where('hub_id', $hub->id)
             ->where('module_key', $moduleKey)
-            ->where('status', HubModuleBilling::STATUS_UNPAID)
             ->with('invoice')
             ->get()
-            ->filter(function (HubModuleBilling $row) {
-                // Enable / consolidated rows — not incremental per-site deploy rows
-                // unless they are being handled by cancelUnpaidLegacyPerSiteWtlBillings.
-                if ((int) ($row->meta['wc_template_request_id'] ?? 0) > 0
-                    && empty($row->meta['consolidated_websites'])
-                    && empty($row->meta['wtl_enable_invoice'])
-                    && empty($row->meta['module_enable_invoice'])
+            ->filter(function (HubModuleBilling $row) use ($moduleKey) {
+                // Always remove enable / consolidated rows.
+                if (! empty($row->meta['module_enable_invoice'])
+                    || ! empty($row->meta['wtl_enable_invoice'])
+                    || ! empty($row->meta['consolidated_websites'])
+                    || ! empty($row->meta['wc_template_ids'])
+                    || ! empty($row->meta['wc_template_request_ids'])
                 ) {
-                    return false;
+                    return true;
                 }
 
-                return empty($row->meta['wc_template_request_id'])
-                    || ! empty($row->meta['consolidated_websites'])
-                    || ! empty($row->meta['wtl_enable_invoice'])
-                    || ! empty($row->meta['module_enable_invoice'])
-                    || ! empty($row->meta['wc_template_request_ids']);
+                // Flat enable rows have no template-request id.
+                if (empty($row->meta['wc_template_request_id'])) {
+                    return true;
+                }
+
+                // Legacy per-site WTL deploy invoices — remove on WTL re-enable.
+                return $moduleKey === self::WEBSITE_MODULE_KEY
+                    && (int) ($row->meta['wc_template_request_id'] ?? 0) > 0;
             });
 
-        return $this->cancelBillingRows($rows, 'Superseded by new module-enable invoice');
+        $removed = 0;
+        foreach ($rows as $billing) {
+            if ($billing->invoice) {
+                $billing->invoice->delete();
+            }
+            $billing->delete();
+            $removed++;
+        }
+
+        return $removed;
     }
 
     /**
-     * Cancel unpaid legacy per-website (non-consolidated) WTL billings.
+     * @deprecated Use removePreviousEnableInvoicesForModule()
+     */
+    public function cancelUnpaidEnableBillingsForModule(Hub $hub, string $moduleKey): int
+    {
+        return $this->removePreviousEnableInvoicesForModule($hub, $moduleKey);
+    }
+
+    /**
+     * @deprecated Use removePreviousEnableInvoicesForModule()
      */
     public function cancelUnpaidLegacyPerSiteWtlBillings(Hub $hub): int
     {
-        $rows = HubModuleBilling::query()
-            ->where('hub_id', $hub->id)
-            ->where('module_key', self::WEBSITE_MODULE_KEY)
-            ->where('status', HubModuleBilling::STATUS_UNPAID)
-            ->with('invoice')
-            ->get()
-            ->filter(function (HubModuleBilling $row) {
-                if (! empty($row->meta['consolidated_websites']) || ! empty($row->meta['wtl_enable_invoice'])) {
-                    return false;
-                }
-
-                return (int) ($row->meta['wc_template_request_id'] ?? 0) > 0;
-            });
-
-        return $this->cancelBillingRows($rows, 'Superseded by consolidated Website Template Library enable invoice');
-    }
-
-    /**
-     * @param  \Illuminate\Support\Collection<int, HubModuleBilling>  $rows
-     */
-    private function cancelBillingRows($rows, string $reason): int
-    {
-        $canceled = 0;
-        foreach ($rows as $billing) {
-            $billing->forceFill([
-                'status' => HubModuleBilling::STATUS_CANCELED,
-                'payment_status' => HubModuleBilling::STATUS_CANCELED,
-                'meta' => array_merge($billing->meta ?? [], [
-                    'canceled_reason' => $reason,
-                ]),
-            ])->save();
-
-            if ($billing->invoice && ! in_array($billing->invoice->status, ['paid', 'canceled'], true)) {
-                $billing->invoice->forceFill([
-                    'status' => 'canceled',
-                ])->save();
-            }
-            $canceled++;
-        }
-
-        return $canceled;
+        return $this->removePreviousEnableInvoicesForModule($hub, self::WEBSITE_MODULE_KEY);
     }
 
     /**
      * Existing non-canceled WTL billing that already covers this template request.
+     * Deploy-time one-time invoicing is disabled; kept for older rows.
      */
     public function billingCoveringWebsiteRequest(Hub $hub, int $requestId): ?HubModuleBilling
     {

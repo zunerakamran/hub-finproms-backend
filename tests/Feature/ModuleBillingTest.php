@@ -179,7 +179,7 @@ class ModuleBillingTest extends TestCase
         ]);
     }
 
-    public function test_website_template_library_invoices_existing_deployed_websites_on_enable(): void
+    public function test_website_template_library_invoices_catalogue_templates_on_enable(): void
     {
         $hub = Hub::query()->create([
             'name' => 'WL Hub',
@@ -202,6 +202,17 @@ class ModuleBillingTest extends TestCase
         Sanctum::actingAs($admin);
         app(ModulePricingService::class)->seedDefaultsIfEmpty();
 
+        \App\Models\WebsiteCompliance\Template::query()->create([
+            'name' => 'Classic',
+            'slug' => 'classic',
+            'is_active' => true,
+        ]);
+        \App\Models\WebsiteCompliance\Template::query()->create([
+            'name' => 'Modern',
+            'slug' => 'modern',
+            'is_active' => true,
+        ]);
+        // Deployed template requests must NOT affect the enable invoice count.
         \App\Models\WebsiteCompliance\TemplateRequest::query()->create([
             'template_name' => 'classic',
             'request_type' => 'advisor_website',
@@ -219,8 +230,9 @@ class ModuleBillingTest extends TestCase
         \App\Models\WebsiteCompliance\TemplateRequest::query()->create([
             'template_name' => 'classic',
             'request_type' => 'advisor_website',
-            'domain_name' => 'pending.example.test',
-            'status' => 'pending',
+            'domain_name' => 'three.example.test',
+            'status' => 'deployed',
+            'cpanel_domain' => 'three.example.test',
         ]);
 
         $response = $this->putJson('/api/power-admin/modules?hub_id='.$hub->id, [
@@ -234,12 +246,11 @@ class ModuleBillingTest extends TestCase
         $created = collect($response->json('module_invoices'));
         $this->assertCount(1, $created);
         $this->assertSame(600.0, (float) $created->first()['amount']);
-        $this->assertStringContainsString('2 websites', $created->first()['description']);
+        $this->assertStringContainsString('2 templates', $created->first()['description']);
         $this->assertTrue($hub->fresh()->hasWebsiteTemplateLibraryModule());
         $this->assertSame(1, \App\Models\HubModuleBilling::query()
             ->where('hub_id', $hub->id)
             ->where('module_key', 'module_website_template_library')
-            ->where('status', '!=', 'canceled')
             ->count());
 
         // Saving while already enabled does not create another invoice.
@@ -254,10 +265,11 @@ class ModuleBillingTest extends TestCase
         $this->assertSame(1, \App\Models\HubModuleBilling::query()
             ->where('hub_id', $hub->id)
             ->where('module_key', 'module_website_template_library')
-            ->where('status', '!=', 'canceled')
             ->count());
 
-        // Uncheck then re-check MUST create a new enable invoice (previous unpaid superseded).
+        $firstInvoiceId = $created->first()['id'];
+
+        // Uncheck then re-check MUST create a new enable invoice and delete the previous one.
         $this->putJson('/api/power-admin/modules?hub_id='.$hub->id, [
             'hub_id' => $hub->id,
             'modules' => [
@@ -274,18 +286,14 @@ class ModuleBillingTest extends TestCase
         $createdAgain = collect($reenable->json('module_invoices'));
         $this->assertCount(1, $createdAgain);
         $this->assertSame(600.0, (float) $createdAgain->first()['amount']);
+        $this->assertNotSame($firstInvoiceId, $createdAgain->first()['id']);
         $this->assertSame(1, \App\Models\HubModuleBilling::query()
             ->where('hub_id', $hub->id)
             ->where('module_key', 'module_website_template_library')
-            ->where('status', 'unpaid')
             ->count());
-        $this->assertSame(1, \App\Models\HubModuleBilling::query()
-            ->where('hub_id', $hub->id)
-            ->where('module_key', 'module_website_template_library')
-            ->where('status', 'canceled')
-            ->count());
+        $this->assertDatabaseMissing('invoices', ['id' => $firstInvoiceId]);
 
-        // No deployed sites → enabling creates no WTL invoices.
+        // No catalogue templates → enabling creates no WTL invoices.
         $hub2 = Hub::query()->create([
             'name' => 'WL Empty',
             'slug' => 'wl-wtl-empty',
@@ -626,19 +634,12 @@ class ModuleBillingTest extends TestCase
 
         $this->assertSame(2, $billing->countDeployedWebsites($hub));
 
+        // Deploy no longer creates one-time invoices (enable uses wc_templates instead).
         $invoice1 = $billing->invoiceWebsiteDeploy($hub, $first, $admin);
         $invoice2 = $billing->invoiceWebsiteDeploy($hub, $second, $admin);
-        $this->assertNotNull($invoice1);
-        $this->assertNotNull($invoice2);
-        $this->assertSame(300.0, (float) $invoice1->amount);
-        $this->assertSame(300.0, (float) $invoice2->amount);
-        $this->assertSame('unpaid', $invoice1->status);
-        $this->assertStringContainsString('one.example.test', $invoice1->description);
-
-        // Idempotent per template request.
-        $again = $billing->invoiceWebsiteDeploy($hub, $first, $admin);
-        $this->assertSame($invoice1->id, $again->id);
-        $this->assertSame(2, \App\Models\HubModuleBilling::query()
+        $this->assertNull($invoice1);
+        $this->assertNull($invoice2);
+        $this->assertSame(0, \App\Models\HubModuleBilling::query()
             ->where('hub_id', $hub->id)
             ->where('module_key', 'module_website_template_library')
             ->count());

@@ -119,22 +119,26 @@ class HubModuleBilling extends Model
             ? (float) $this->meta['unit_amount']
             : $amount;
         $domain = (string) ($this->meta['domain_name'] ?? '');
-        $domains = array_values(array_filter(array_map('strval', (array) ($this->meta['domains'] ?? []))));
         $lines = [];
 
-        if ($websiteCount > 1 || ! empty($this->meta['consolidated_websites'])) {
-            $count = max(1, $websiteCount);
+        if ($websiteCount > 1 || ! empty($this->meta['consolidated_websites']) || ! empty($this->meta['template_count'])) {
+            $count = max(1, (int) ($this->meta['template_count'] ?? $websiteCount));
+            $billedByTemplates = ($this->meta['billed_by'] ?? '') === 'wc_templates'
+                || ! empty($this->meta['wc_template_ids']);
+            $unitLabel = $billedByTemplates ? 'template' : 'website';
             $lines[] = sprintf(
-                'One-time Website Template Library charge for %d deployed website%s.',
+                'One-time Website Template Library charge for %d %s%s.',
                 $count,
+                $unitLabel,
                 $count === 1 ? '' : 's'
             );
-            $lines[] = sprintf('Unit rate: £%s per website', number_format($unitAmount, 2));
+            $lines[] = sprintf('Unit rate: £%s per %s', number_format($unitAmount, 2), $unitLabel);
             $lines[] = sprintf('Total: £%s × %d = £%s', number_format($unitAmount, 2), $count, number_format($amount, 2));
-            if ($domains !== []) {
-                $lines[] = 'Domains: '.implode(', ', $domains);
+            $names = array_values(array_filter(array_map('strval', (array) ($this->meta['template_names'] ?? $this->meta['domains'] ?? []))));
+            if ($names !== []) {
+                $lines[] = ($billedByTemplates ? 'Templates: ' : 'Domains: ').implode(', ', $names);
             }
-            $summary = sprintf('%d websites — £%s', $count, number_format($amount, 2));
+            $summary = sprintf('%d %ss — £%s', $count, $unitLabel, number_format($amount, 2));
         } elseif ($requestId > 0 || $unit === 'per_website') {
             $lines[] = 'One-time charge for a deployed website (Website Template Library).';
             if ($domain !== '') {
