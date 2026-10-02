@@ -83,7 +83,7 @@ class WhiteLabelHubSyncService
                 // Content hub .env HUB_SLUG can differ from the Central registry slug;
                 // updating only by registry slug left the live site on a stale checklist.
                 $targetIds = DB::connection($connection)->table('hubs')
-                    ->where(function ($q) use ($hub) {
+                    ->where(function ($q) use ($hub, $schema) {
                         $q->where('slug', $hub->slug);
                         if ($schema->hasColumn('hubs', 'type')) {
                             $q->orWhereIn('type', [Hub::TYPE_SHARED, Hub::TYPE_WHITE_LABEL]);
