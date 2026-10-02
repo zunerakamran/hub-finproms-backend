@@ -82,7 +82,8 @@ class ModuleBillingService
 
     /**
      * One-time £/website invoice when a WC template request is deployed.
-     * Idempotent per hub + template_request id.
+     * Idempotent per hub + template_request id (also skips if already covered
+     * by a consolidated enable invoice).
      */
     public function invoiceWebsiteDeploy(Hub $hub, TemplateRequest $templateRequest, User $actor): ?Invoice
     {
@@ -99,14 +100,7 @@ class ModuleBillingService
         }
 
         $requestId = (int) $templateRequest->id;
-        $existing = HubModuleBilling::query()
-            ->where('hub_id', $hub->id)
-            ->where('module_key', self::WEBSITE_MODULE_KEY)
-            ->where('status', '!=', HubModuleBilling::STATUS_CANCELED)
-            ->get()
-            ->first(function (HubModuleBilling $row) use ($requestId) {
-                return (int) ($row->meta['wc_template_request_id'] ?? 0) === $requestId;
-            });
+        $existing = $this->billingCoveringWebsiteRequest($hub, $requestId);
 
         if ($existing) {
             return $existing->invoice ?: $this->invoices->createForModuleBilling($existing);
@@ -143,8 +137,12 @@ class ModuleBillingService
                     'module_label' => Hub::CHECKLIST_DEFINITIONS[self::WEBSITE_MODULE_KEY]['label'] ?? self::WEBSITE_MODULE_KEY,
                     'billing_cadence' => Invoice::TYPES_ONE_TIME,
                     'billing_unit' => ModulePricingService::BILLING_UNIT_PER_WEBSITE,
+                    'website_count' => 1,
+                    'unit_amount' => $quote['amount'],
                     'wc_template_request_id' => $requestId,
+                    'wc_template_request_ids' => [$requestId],
                     'domain_name' => $domain,
+                    'domains' => [$domain],
                     'template_name' => $templateRequest->template_name,
                     'auto_paid_on_hub_enable' => $isComplimentary,
                 ],
@@ -260,8 +258,8 @@ class ModuleBillingService
 
         $quote = $this->pricing->quote($moduleKey);
 
-        // Per-website modules: invoice each currently deployed site (£/website × count).
-        // Future deploys are billed via invoiceWebsiteDeploy().
+        // Per-website modules: one consolidated invoice for currently deployed sites
+        // (unit rate × count). Later individual deploys still bill via invoiceWebsiteDeploy().
         if (($quote['billing_unit'] ?? ModulePricingService::BILLING_UNIT_ONE_TIME)
             === ModulePricingService::BILLING_UNIT_PER_WEBSITE
         ) {
@@ -322,7 +320,8 @@ class ModuleBillingService
     }
 
     /**
-     * Bill every currently deployed website that has no WTL one-time invoice yet.
+     * Bill currently deployed websites that are not yet covered by a WTL one-time
+     * invoice — as a SINGLE consolidated invoice (unit rate × unbilled count).
      * Used when WTL is enabled / charge flag turns on with sites already live.
      *
      * @return list<Invoice>
@@ -333,26 +332,105 @@ class ModuleBillingService
             return [];
         }
 
-        $created = [];
-        foreach ($this->deployedWebsiteRequests($hub) as $templateRequest) {
-            $requestId = (int) $templateRequest->id;
-            $alreadyInvoiced = HubModuleBilling::query()
-                ->where('hub_id', $hub->id)
-                ->where('module_key', self::WEBSITE_MODULE_KEY)
-                ->where('status', '!=', HubModuleBilling::STATUS_CANCELED)
-                ->get()
-                ->contains(function (HubModuleBilling $row) use ($requestId) {
-                    return (int) ($row->meta['wc_template_request_id'] ?? 0) === $requestId
-                        && $row->invoice !== null;
-                });
+        $unbilled = $this->deployedWebsiteRequests($hub)
+            ->filter(fn (TemplateRequest $request) => $this->billingCoveringWebsiteRequest($hub, (int) $request->id) === null)
+            ->values();
 
-            $invoice = $this->invoiceWebsiteDeploy($hub, $templateRequest, $actor);
-            if ($invoice && ! $alreadyInvoiced) {
-                $created[] = $invoice;
-            }
+        if ($unbilled->isEmpty()) {
+            return [];
         }
 
-        return $created;
+        $quote = $this->pricing->quote(self::WEBSITE_MODULE_KEY);
+        $unitAmount = (float) $quote['amount'];
+        $count = $unbilled->count();
+        $amount = round($unitAmount * $count, 2);
+        $requestIds = $unbilled->map(fn (TemplateRequest $r) => (int) $r->id)->all();
+        $domains = $unbilled->map(function (TemplateRequest $r) {
+            return (string) ($r->domain_name ?: $r->cpanel_domain ?: 'website #'.$r->id);
+        })->all();
+
+        $payer = $this->resolvePayer($actor);
+        $isComplimentary = $amount <= 0;
+        $status = $isComplimentary
+            ? HubModuleBilling::STATUS_PAID
+            : HubModuleBilling::STATUS_UNPAID;
+
+        $invoice = DB::transaction(function () use (
+            $hub,
+            $quote,
+            $payer,
+            $amount,
+            $unitAmount,
+            $count,
+            $requestIds,
+            $domains,
+            $status,
+            $isComplimentary,
+            $actor
+        ) {
+            $billing = HubModuleBilling::query()->create([
+                'hub_id' => $hub->id,
+                'module_key' => self::WEBSITE_MODULE_KEY,
+                'billed_user_id' => $payer->id,
+                'amount' => $amount,
+                'currency' => $quote['currency'],
+                'status' => $status,
+                'payment_status' => $status,
+                'paid_at' => $isComplimentary ? now() : null,
+                'paid_by_user_id' => $isComplimentary ? $actor->id : null,
+                'payment_method' => $isComplimentary ? 'complimentary' : null,
+                'payment_notes' => $isComplimentary ? '£0 catalogue price — included' : null,
+                'meta' => [
+                    'module_label' => Hub::CHECKLIST_DEFINITIONS[self::WEBSITE_MODULE_KEY]['label'] ?? self::WEBSITE_MODULE_KEY,
+                    'billing_cadence' => Invoice::TYPES_ONE_TIME,
+                    'billing_unit' => ModulePricingService::BILLING_UNIT_PER_WEBSITE,
+                    'consolidated_websites' => true,
+                    'website_count' => $count,
+                    'unit_amount' => $unitAmount,
+                    'wc_template_request_ids' => $requestIds,
+                    'domains' => $domains,
+                    'domain_name' => $count === 1 ? ($domains[0] ?? '') : sprintf('%d websites', $count),
+                    'auto_paid_on_hub_enable' => $isComplimentary,
+                ],
+            ]);
+
+            $invoice = $this->invoices->createForModuleBilling($billing);
+            $invoice->forceFill([
+                'description' => sprintf(
+                    'Module (one time) — Website Template Library — %d website%s × £%s (%s)',
+                    $count,
+                    $count === 1 ? '' : 's',
+                    number_format($unitAmount, 2),
+                    $hub->name
+                ),
+                'due_on' => now()->toDateString(),
+            ])->save();
+
+            return $invoice->fresh();
+        });
+
+        return [$invoice];
+    }
+
+    /**
+     * Existing non-canceled WTL billing that already covers this template request.
+     */
+    public function billingCoveringWebsiteRequest(Hub $hub, int $requestId): ?HubModuleBilling
+    {
+        return HubModuleBilling::query()
+            ->where('hub_id', $hub->id)
+            ->where('module_key', self::WEBSITE_MODULE_KEY)
+            ->where('status', '!=', HubModuleBilling::STATUS_CANCELED)
+            ->get()
+            ->first(function (HubModuleBilling $row) use ($requestId) {
+                if ((int) ($row->meta['wc_template_request_id'] ?? 0) === $requestId) {
+                    return true;
+                }
+
+                $ids = array_map('intval', (array) ($row->meta['wc_template_request_ids'] ?? []));
+
+                return in_array($requestId, $ids, true);
+            });
     }
 
     public function invoiceModuleIfNeeded(Hub $hub, string $moduleKey, User $actor): ?Invoice

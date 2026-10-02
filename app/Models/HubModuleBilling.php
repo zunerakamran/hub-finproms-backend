@@ -114,10 +114,28 @@ class HubModuleBilling extends Model
         $amount = (float) $this->amount;
         $unit = (string) ($this->meta['billing_unit'] ?? 'one_time');
         $requestId = (int) ($this->meta['wc_template_request_id'] ?? 0);
+        $websiteCount = (int) ($this->meta['website_count'] ?? 0);
+        $unitAmount = isset($this->meta['unit_amount'])
+            ? (float) $this->meta['unit_amount']
+            : $amount;
         $domain = (string) ($this->meta['domain_name'] ?? '');
+        $domains = array_values(array_filter(array_map('strval', (array) ($this->meta['domains'] ?? []))));
         $lines = [];
 
-        if ($requestId > 0 || $unit === 'per_website') {
+        if ($websiteCount > 1 || ! empty($this->meta['consolidated_websites'])) {
+            $count = max(1, $websiteCount);
+            $lines[] = sprintf(
+                'One-time Website Template Library charge for %d deployed website%s.',
+                $count,
+                $count === 1 ? '' : 's'
+            );
+            $lines[] = sprintf('Unit rate: £%s per website', number_format($unitAmount, 2));
+            $lines[] = sprintf('Total: £%s × %d = £%s', number_format($unitAmount, 2), $count, number_format($amount, 2));
+            if ($domains !== []) {
+                $lines[] = 'Domains: '.implode(', ', $domains);
+            }
+            $summary = sprintf('%d websites — £%s', $count, number_format($amount, 2));
+        } elseif ($requestId > 0 || $unit === 'per_website') {
             $lines[] = 'One-time charge for a deployed website (Website Template Library).';
             if ($domain !== '') {
                 $lines[] = 'Domain: '.$domain;

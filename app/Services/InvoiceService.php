@@ -118,9 +118,18 @@ class InvoiceService
         );
         $breakdown = $billing->billingBreakdownForApi();
         $domain = (string) ($billing->meta['domain_name'] ?? '');
+        $websiteCount = max(1, (int) ($billing->meta['website_count'] ?? 0));
+        $unitAmount = isset($billing->meta['unit_amount'])
+            ? (float) $billing->meta['unit_amount']
+            : $amount;
         $description = $domain !== ''
             ? "Module (one time) — {$moduleLabel} — {$domain} ({$hubName})"
             : "Module (one time) — {$moduleLabel} ({$hubName})";
+
+        $qty = ($websiteCount > 1 || ! empty($billing->meta['consolidated_websites']))
+            ? $websiteCount
+            : 1;
+        $lineUnit = $qty > 1 ? $unitAmount : $amount;
 
         return $this->createInvoice([
             'user_id' => $user->id,
@@ -138,9 +147,11 @@ class InvoiceService
             'status' => $billing->status === HubModuleBilling::STATUS_PAID ? 'paid' : 'unpaid',
             'due_on' => now()->toDateString(),
             'line_items' => [[
-                'label' => "{$moduleLabel} — one-time module charge",
-                'quantity' => 1,
-                'unit_amount' => $amount,
+                'label' => $qty > 1
+                    ? "{$moduleLabel} — {$qty} websites × £".number_format($lineUnit, 2)
+                    : "{$moduleLabel} — one-time module charge",
+                'quantity' => $qty,
+                'unit_amount' => $lineUnit,
                 'total' => $amount,
                 'note' => implode(' · ', $breakdown['lines']),
                 'breakdown' => $breakdown,

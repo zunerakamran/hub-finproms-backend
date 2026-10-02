@@ -782,7 +782,7 @@ class Hub extends Model
         ],
         'charge_amount_per_module' => [
             'label' => 'Charge amount per module (one time)',
-            'description' => 'When on, enabling a product module generates a one-time invoice at the configured module price (including £0 catalogue prices, recorded as paid). Per-website modules invoice each currently deployed site on enable, then again for each new deploy.',
+            'description' => 'When on, enabling a product module generates a one-time invoice at the configured module price (including £0 catalogue prices, recorded as paid). Website Template Library creates one consolidated invoice for currently deployed sites (unit rate × count); later deploys bill individually.',
             'group' => self::GROUP_BEHAVIOUR,
             'default_shared' => false,
             'default_white_label' => true,

@@ -232,10 +232,25 @@ class ModuleBillingTest extends TestCase
 
         $response->assertOk();
         $created = collect($response->json('module_invoices'));
-        $this->assertCount(2, $created);
-        $this->assertTrue($created->every(fn ($row) => (float) $row['amount'] === 300.0));
+        $this->assertCount(1, $created);
+        $this->assertSame(600.0, (float) $created->first()['amount']);
+        $this->assertStringContainsString('2 websites', $created->first()['description']);
         $this->assertTrue($hub->fresh()->hasWebsiteTemplateLibraryModule());
-        $this->assertSame(2, \App\Models\HubModuleBilling::query()
+        $this->assertSame(1, \App\Models\HubModuleBilling::query()
+            ->where('hub_id', $hub->id)
+            ->where('module_key', 'module_website_template_library')
+            ->count());
+
+        // Idempotent — enabling again does not duplicate the consolidated invoice.
+        $again = $this->putJson('/api/power-admin/modules?hub_id='.$hub->id, [
+            'hub_id' => $hub->id,
+            'modules' => [
+                'module_website_template_library' => true,
+            ],
+        ]);
+        $again->assertOk();
+        $this->assertSame([], $again->json('module_invoices'));
+        $this->assertSame(1, \App\Models\HubModuleBilling::query()
             ->where('hub_id', $hub->id)
             ->where('module_key', 'module_website_template_library')
             ->count());
