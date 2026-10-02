@@ -55,6 +55,8 @@ class HubController extends Controller
                 try {
                     $acting = $this->actingHubs->actingHub($user);
                     $payload['acting_checklist'] = $acting->resolvedChecklist();
+                    $payload['firm_document_rights'] = app(\App\Services\FirmDocumentAccessService::class)
+                        ->effectiveRightsSummary($user, $acting);
                 } catch (\Throwable) {
                     $payload['acting_checklist'] = $payload['checklist'] ?? [];
                 }
@@ -69,7 +71,9 @@ class HubController extends Controller
                     }
                 }
                 $payload['effective_capabilities'] = $this->actingHubs
-                    ->mergeFirmDocumentEffectiveCapabilities($user, $effective);
+                    ->mergeFirmDocumentEffectiveCapabilities($user, $effective, $hub);
+                $payload['firm_document_rights'] = app(\App\Services\FirmDocumentAccessService::class)
+                    ->effectiveRightsSummary($user, $hub);
             }
             $payload['viewer_role'] = $user->role;
             $payload['effective_role'] = $this->matrix->effectiveRoleFor($user);

@@ -294,7 +294,7 @@ class ActingHubService
             }
         }
 
-        return $this->mergeFirmDocumentEffectiveCapabilities($user, $effective);
+        return $this->mergeFirmDocumentEffectiveCapabilities($user, $effective, $acting);
     }
 
     /**
@@ -304,10 +304,12 @@ class ActingHubService
      * @param  array<string, bool>  $effective
      * @return array<string, bool>
      */
-    public function mergeFirmDocumentEffectiveCapabilities(User $user, array $effective): array
+    public function mergeFirmDocumentEffectiveCapabilities(User $user, array $effective, ?Hub $hub = null): array
     {
+        $hub = $hub ?? $this->hubs->current();
+
         try {
-            $summary = app(FirmDocumentAccessService::class)->effectiveRightsSummary($user);
+            $summary = app(FirmDocumentAccessService::class)->effectiveRightsSummary($user, $hub);
         } catch (\Throwable) {
             return $effective;
         }
@@ -321,6 +323,7 @@ class ActingHubService
             return $effective;
         }
 
+        // Never downgrade a matrix true; only OR in head / grant rights.
         if ($summary['can_view']) {
             $effective['firm_documents_view'] = true;
         }
