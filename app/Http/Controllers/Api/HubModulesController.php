@@ -79,6 +79,7 @@ class HubModulesController extends Controller
         $this->hubs->forgetCurrentCache();
 
         $moduleInvoices = [];
+        $moduleInvoiceWarning = null;
         $actor = $request->user();
         if ($actor) {
             $newlyEnabled = $this->moduleBilling->newlyEnabledModuleKeys(
@@ -86,11 +87,40 @@ class HubModulesController extends Controller
                 $beforeChecklist,
                 $checklist
             );
-            $moduleInvoices = $this->moduleBilling->invoiceNewlyEnabledModules(
-                $hub->fresh(),
-                $newlyEnabled,
-                $actor
-            );
+            try {
+                $moduleInvoices = $this->moduleBilling->invoiceNewlyEnabledModules(
+                    $hub->fresh(),
+                    $newlyEnabled,
+                    $actor
+                );
+            } catch (InvalidArgumentException $e) {
+                $moduleInvoiceWarning = $e->getMessage();
+            } catch (\Throwable $e) {
+                report($e);
+                $moduleInvoiceWarning = 'Module invoice could not be created: '.$e->getMessage();
+            }
+
+            if (
+                $moduleInvoiceWarning === null
+                && $moduleInvoices === []
+                && in_array('module_website_template_library', $newlyEnabled, true)
+            ) {
+                $fresh = $hub->fresh();
+                if (! $this->moduleBilling->billingEnabled($fresh)) {
+                    $moduleInvoiceWarning = 'Website Template Library was enabled, but “Charge amount per module (one time)” is off on this hub — turn it on under Functionalities to generate invoices.';
+                } elseif ($this->moduleBilling->existingWtlEnableBilling($fresh)) {
+                    // Already billed on a previous enable — expected on re-check.
+                } else {
+                    try {
+                        if ($this->moduleBilling->countDeployedWebsites($fresh) === 0) {
+                            $moduleInvoiceWarning = 'Website Template Library was enabled, but no deployed websites were found on this hub’s database (status = deployed). Check deploy wiring / remote DB if controlling from Central.';
+                        }
+                    } catch (\Throwable $e) {
+                        report($e);
+                        $moduleInvoiceWarning = 'Website Template Library was enabled, but deployed websites could not be counted: '.$e->getMessage();
+                    }
+                }
+            }
         }
 
         try {
@@ -123,11 +153,17 @@ class HubModulesController extends Controller
                         'types' => $invoice->types,
                     ])
                     ->all(),
+                'module_invoice_warning' => $moduleInvoiceWarning,
             ],
         ]);
 
+        $message = 'Modules updated successfully.';
+        if ($moduleInvoiceWarning) {
+            $message .= ' '.$moduleInvoiceWarning;
+        }
+
         return response()->json([
-            'message' => 'Modules updated successfully.',
+            'message' => $message,
             'hub' => [
                 'id' => $hub->id,
                 'name' => $hub->name,
@@ -144,6 +180,7 @@ class HubModulesController extends Controller
                 'status' => $invoice->status,
                 'description' => $invoice->description,
             ])->all(),
+            'module_invoice_warning' => $moduleInvoiceWarning,
         ]);
     }
 

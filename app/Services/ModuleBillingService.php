@@ -66,15 +66,11 @@ class ModuleBillingService
     public function onHubDatabase(Hub $hub, callable $callback): mixed
     {
         if ($hub->isContentHub() && $hub->hasRemoteDatabaseConfigured()) {
-            try {
-                return $this->remoteDb->run($hub, function (string $connection) use ($callback) {
-                    return WcDatabaseContext::using($connection, fn () => $callback($connection));
-                });
-            } catch (\Throwable $e) {
-                report($e);
-
-                return $callback(null);
-            }
+            // Do not fall back to Central's empty local WC tables — that silently
+            // yields 0 websites and skips Shared / WL enable invoices.
+            return $this->remoteDb->run($hub, function (string $connection) use ($callback) {
+                return WcDatabaseContext::using($connection, fn () => $callback($connection));
+            });
         }
 
         return $callback(null);
@@ -320,12 +316,11 @@ class ModuleBillingService
     }
 
     /**
-     * Bill currently deployed websites as a SINGLE consolidated invoice
-     * (unit rate × unbilled count) when WTL is enabled / charge turns on.
+     * On WTL enable / charge-on / backfill: create at most ONE consolidated
+     * enable invoice per hub (unit rate × currently deployed websites).
      *
-     * Unpaid legacy per-site WTL billings are canceled first so re-enabling
-     * after the old “one invoice per website” behaviour produces one invoice
-     * instead of appearing to create none.
+     * Re-checking the module must NOT create another enable invoice.
+     * Later individual website deploys still bill via invoiceWebsiteDeploy().
      *
      * @return list<Invoice>
      */
@@ -335,38 +330,22 @@ class ModuleBillingService
             return [];
         }
 
+        // Strict idempotency: one enable invoice per hub (until canceled).
+        if ($this->existingWtlEnableBilling($hub)) {
+            return [];
+        }
+
         $deployed = $this->deployedWebsiteRequests($hub);
         if ($deployed->isEmpty()) {
             return [];
         }
 
-        // Already have a consolidated enable invoice — only bill sites not covered yet.
-        $existingConsolidated = HubModuleBilling::query()
-            ->where('hub_id', $hub->id)
-            ->where('module_key', self::WEBSITE_MODULE_KEY)
-            ->where('status', '!=', HubModuleBilling::STATUS_CANCELED)
-            ->get()
-            ->first(fn (HubModuleBilling $row) => ! empty($row->meta['consolidated_websites']));
-
-        if (! $existingConsolidated) {
-            // Supersede unpaid one-invoice-per-site rows so enable can emit one total.
-            $this->cancelUnpaidLegacyPerSiteWtlBillings($hub);
-        }
-
-        $unbilled = $deployed
-            ->filter(fn (TemplateRequest $request) => $this->billingCoveringWebsiteRequest($hub, (int) $request->id) === null)
-            ->values();
-
-        if ($unbilled->isEmpty()) {
-            return [];
-        }
-
         $quote = $this->pricing->quote(self::WEBSITE_MODULE_KEY);
         $unitAmount = (float) $quote['amount'];
-        $count = $unbilled->count();
+        $count = $deployed->count();
         $amount = round($unitAmount * $count, 2);
-        $requestIds = $unbilled->map(fn (TemplateRequest $r) => (int) $r->id)->all();
-        $domains = $unbilled->map(function (TemplateRequest $r) {
+        $requestIds = $deployed->map(fn (TemplateRequest $r) => (int) $r->id)->all();
+        $domains = $deployed->map(function (TemplateRequest $r) {
             return (string) ($r->domain_name ?: $r->cpanel_domain ?: 'website #'.$r->id);
         })->all();
 
@@ -389,6 +368,14 @@ class ModuleBillingService
             $isComplimentary,
             $actor
         ) {
+            // Coalesce unpaid per-site rows into this single enable invoice (same txn).
+            $this->cancelUnpaidLegacyPerSiteWtlBillings($hub);
+
+            // Re-check inside the transaction against concurrent enables.
+            if ($this->existingWtlEnableBilling($hub)) {
+                return null;
+            }
+
             $billing = HubModuleBilling::query()->create([
                 'hub_id' => $hub->id,
                 'module_key' => self::WEBSITE_MODULE_KEY,
@@ -406,6 +393,7 @@ class ModuleBillingService
                     'billing_cadence' => Invoice::TYPES_ONE_TIME,
                     'billing_unit' => ModulePricingService::BILLING_UNIT_PER_WEBSITE,
                     'consolidated_websites' => true,
+                    'wtl_enable_invoice' => true,
                     'website_count' => $count,
                     'unit_amount' => $unitAmount,
                     'wc_template_request_ids' => $requestIds,
@@ -430,7 +418,23 @@ class ModuleBillingService
             return $invoice->fresh();
         });
 
-        return [$invoice];
+        return $invoice ? [$invoice] : [];
+    }
+
+    /**
+     * Non-canceled consolidated / enable invoice for Website Template Library.
+     */
+    public function existingWtlEnableBilling(Hub $hub): ?HubModuleBilling
+    {
+        return HubModuleBilling::query()
+            ->where('hub_id', $hub->id)
+            ->where('module_key', self::WEBSITE_MODULE_KEY)
+            ->where('status', '!=', HubModuleBilling::STATUS_CANCELED)
+            ->get()
+            ->first(function (HubModuleBilling $row) {
+                return ! empty($row->meta['consolidated_websites'])
+                    || ! empty($row->meta['wtl_enable_invoice']);
+            });
     }
 
     /**
@@ -446,7 +450,7 @@ class ModuleBillingService
             ->with('invoice')
             ->get()
             ->filter(function (HubModuleBilling $row) {
-                if (! empty($row->meta['consolidated_websites'])) {
+                if (! empty($row->meta['consolidated_websites']) || ! empty($row->meta['wtl_enable_invoice'])) {
                     return false;
                 }
 
@@ -464,7 +468,7 @@ class ModuleBillingService
                 ]),
             ])->save();
 
-            if ($billing->invoice && $billing->invoice->status !== 'paid') {
+            if ($billing->invoice && ! in_array($billing->invoice->status, ['paid', 'canceled'], true)) {
                 $billing->invoice->forceFill([
                     'status' => 'canceled',
                 ])->save();

@@ -242,7 +242,7 @@ class ModuleBillingTest extends TestCase
             ->where('status', '!=', 'canceled')
             ->count());
 
-        // Idempotent — enabling again does not duplicate the consolidated invoice.
+        // Idempotent — enabling again does not create another enable invoice.
         $again = $this->putJson('/api/power-admin/modules?hub_id='.$hub->id, [
             'hub_id' => $hub->id,
             'modules' => [
@@ -257,75 +257,31 @@ class ModuleBillingTest extends TestCase
             ->where('status', '!=', 'canceled')
             ->count());
 
-        // Legacy unpaid per-site invoices are superseded by one consolidated invoice on re-enable.
-        $hubLegacy = Hub::query()->create([
-            'name' => 'WL Legacy',
-            'slug' => 'wl-wtl-legacy',
-            'type' => Hub::TYPE_WHITE_LABEL,
-            'is_active' => true,
-            'checklist' => array_merge(Hub::defaultChecklist(Hub::TYPE_WHITE_LABEL), [
-                'charge_amount_per_module' => true,
+        // Uncheck then re-check must not create a second enable invoice.
+        $this->putJson('/api/power-admin/modules?hub_id='.$hub->id, [
+            'hub_id' => $hub->id,
+            'modules' => [
                 'module_website_template_library' => false,
-            ]),
-        ]);
-        $capsLegacy = $matrix->resolvedRoleCapabilities($hubLegacy);
-        $capsLegacy[User::ROLE_POWER_ADMIN]['dashboard_manage_modules'] = true;
-        $hubLegacy->role_capabilities = $capsLegacy;
-        $hubLegacy->save();
-
-        $siteA = \App\Models\WebsiteCompliance\TemplateRequest::query()->create([
-            'template_name' => 'classic',
-            'request_type' => 'advisor_website',
-            'domain_name' => 'legacy-a.example.test',
-            'status' => 'deployed',
-            'cpanel_domain' => 'legacy-a.example.test',
-        ]);
-        $siteB = \App\Models\WebsiteCompliance\TemplateRequest::query()->create([
-            'template_name' => 'classic',
-            'request_type' => 'advisor_website',
-            'domain_name' => 'legacy-b.example.test',
-            'status' => 'deployed',
-            'cpanel_domain' => 'legacy-b.example.test',
-        ]);
-        $billingSvc = app(\App\Services\ModuleBillingService::class);
-        // Pretend module already on so per-site deploy invoices can be created.
-        $hubLegacy->checklist = array_merge($hubLegacy->resolvedChecklist(), [
-            'module_website_template_library' => true,
-        ]);
-        $hubLegacy->save();
-        $billingSvc->invoiceWebsiteDeploy($hubLegacy->fresh(), $siteA, $admin);
-        $billingSvc->invoiceWebsiteDeploy($hubLegacy->fresh(), $siteB, $admin);
-        $this->assertSame(2, \App\Models\HubModuleBilling::query()
-            ->where('hub_id', $hubLegacy->id)
-            ->where('module_key', 'module_website_template_library')
-            ->where('status', 'unpaid')
-            ->count());
-
-        $hubLegacy->checklist = array_merge($hubLegacy->resolvedChecklist(), [
-            'module_website_template_library' => false,
-        ]);
-        $hubLegacy->save();
-
-        $replace = $this->putJson('/api/power-admin/modules?hub_id='.$hubLegacy->id, [
-            'hub_id' => $hubLegacy->id,
+            ],
+        ])->assertOk();
+        $reenable = $this->putJson('/api/power-admin/modules?hub_id='.$hub->id, [
+            'hub_id' => $hub->id,
             'modules' => [
                 'module_website_template_library' => true,
             ],
         ]);
-        $replace->assertOk();
-        $replaced = collect($replace->json('module_invoices'));
-        $this->assertCount(1, $replaced);
-        $this->assertSame(600.0, (float) $replaced->first()['amount']);
+        $reenable->assertOk();
+        $this->assertSame([], $reenable->json('module_invoices'));
         $this->assertSame(1, \App\Models\HubModuleBilling::query()
-            ->where('hub_id', $hubLegacy->id)
+            ->where('hub_id', $hub->id)
             ->where('module_key', 'module_website_template_library')
             ->where('status', 'unpaid')
             ->count());
-        $this->assertSame(2, \App\Models\HubModuleBilling::query()
-            ->where('hub_id', $hubLegacy->id)
+        $this->assertSame(600.0, (float) \App\Models\HubModuleBilling::query()
+            ->where('hub_id', $hub->id)
             ->where('module_key', 'module_website_template_library')
-            ->where('status', 'canceled')
-            ->count());
+            ->where('status', 'unpaid')
+            ->value('amount'));
 
         // No deployed sites → enabling creates no WTL invoices.
         $hub2 = Hub::query()->create([
