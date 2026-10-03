@@ -342,7 +342,8 @@ class TemplateRequestController extends Controller
     }
 
     /**
-     * Requester marks a staging site ready to move to the intended main/live URL.
+     * Requester submits a go-live request for a staging site.
+     * Power Admin sees this as a new deployable request for the main/live URL.
      */
     public function requestGoLive(Request $request, int $id): JsonResponse
     {
@@ -356,48 +357,65 @@ class TemplateRequestController extends Controller
             $this->gate->assertCan($user, 'wc_request_deployments');
         }
 
+        $request->validate([
+            'domain_name' => 'nullable|string|max:255',
+            'notes' => 'nullable|string|max:5000',
+        ]);
+
         $templateRequest = TemplateRequest::findOrFail($id);
         $tenantUserId = (int) ($this->gate->tenantUserIdOrNull($user) ?? $user->id);
 
         if ((int) ($templateRequest->requested_by_id ?? 0) !== $tenantUserId) {
             return response()->json([
-                'message' => 'Only the original requester can mark this site ready for live deployment.',
+                'message' => 'Only the original requester can submit a go-live request for this site.',
             ], 403);
         }
 
         if (! $templateRequest->canRequestGoLive()) {
             return response()->json([
                 'message' => $templateRequest->status === TemplateRequest::STATUS_READY_FOR_LIVE
-                    ? 'Go-live has already been requested. Power Admin will promote this site to the main URL.'
-                    : 'Go-live can only be requested while the site is on its temporary (staging) URL.',
+                    ? 'A go-live request has already been submitted. Power Admin will deploy this site to the main URL.'
+                    : 'Go-live requests can only be submitted while the site is on its temporary (staging) URL.',
             ], 422);
         }
 
+        $liveDomain = trim((string) ($request->input('domain_name') ?: $templateRequest->domain_name));
+        if ($liveDomain === '') {
+            return response()->json([
+                'message' => 'Please confirm the main/live domain for this go-live request.',
+            ], 422);
+        }
+
+        $notes = trim((string) $request->input('notes', ''));
+
         $templateRequest->update([
             'status' => TemplateRequest::STATUS_READY_FOR_LIVE,
+            'domain_name' => $liveDomain,
             'go_live_requested_at' => now(),
             'go_live_requested_by_id' => $tenantUserId,
+            'go_live_notes' => $notes !== '' ? $notes : null,
         ]);
         $templateRequest->refresh();
 
         $this->activityLogs->log([
             'action' => 'wc.template_request.request_go_live',
-            'description' => 'Requester marked deployment ready for live. Staging: '
+            'description' => 'Requester submitted go-live request. Staging: '
                 .($templateRequest->staging_domain ?: $templateRequest->cpanel_domain)
-                .' → intended live: '.($templateRequest->domain_name ?: 'n/a'),
+                .' → requested live: '.$liveDomain
+                .($notes !== '' ? ' | notes: '.$notes : ''),
             'user' => $user,
             'subject' => $templateRequest,
             'request' => $request,
         ]);
 
         return response()->json([
-            'message' => 'Go-live requested. Power Admin will move this site from the temporary URL to the main domain.',
+            'message' => 'Go-live request submitted. Power Admin will see this as a new request and can deploy it to the main URL.',
             'template_request' => $templateRequest->load($this->requestRelations()),
-        ]);
+        ], 201);
     }
 
     /**
-     * Power Admin promotes a ready_for_live staging site onto the main/live URL.
+     * Power Admin deploys a submitted go-live request onto the main/live URL.
      */
     public function promoteToLive(Request $request, int $id): JsonResponse
     {
@@ -424,7 +442,7 @@ class TemplateRequestController extends Controller
             return response()->json([
                 'message' => $templateRequest->isLive()
                     ? 'This site is already live.'
-                    : 'Promote to live is only available after the requester marks the staging site ready for live.',
+                    : 'Deploy to live is only available after the requester submits a go-live request.',
             ], 422);
         }
 
@@ -436,12 +454,13 @@ class TemplateRequestController extends Controller
 
         if ($liveDomain === '') {
             return response()->json([
-                'message' => 'A main/live domain is required to promote this site.',
+                'message' => 'A main/live domain is required to deploy this site live.',
             ], 422);
         }
 
         $updates = [
             'status' => TemplateRequest::STATUS_LIVE,
+            'domain_name' => $liveDomain,
             'cpanel_domain' => $liveDomain,
             'live_promoted_at' => now(),
         ];
@@ -475,8 +494,8 @@ class TemplateRequestController extends Controller
         }
 
         $this->activityLogs->log([
-            'action' => 'wc.template_request.promote_live',
-            'description' => 'Promoted staging site to live URL: '.$liveDomain
+            'action' => 'wc.template_request.deploy_live',
+            'description' => 'Deployed go-live request to main URL: '.$liveDomain
                 .(filled($templateRequest->staging_domain) ? ' (from staging '.$templateRequest->staging_domain.')' : '')
                 .($configSynced ? ' (remote config written)' : ' (remote config sync failed)')
                 .($contentSynced ? ' (content pushed)' : ''),
@@ -486,7 +505,7 @@ class TemplateRequestController extends Controller
         ]);
 
         $message = $configSynced
-            ? 'Site promoted to the main/live URL. Compliance continues against the live site.'
+            ? 'Go-live request deployed to the main URL. Compliance continues against the live site.'
             : 'Site marked live, but remote cPanel config could not be verified. Check Laravel logs and that api.php is reachable.';
 
         return response()->json([

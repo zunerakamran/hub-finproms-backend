@@ -72,7 +72,7 @@ class Hub extends Model
         'scheduled' => 'Scheduled',
         'deployed' => 'Deployed',
         'staging' => 'On staging',
-        'ready_for_live' => 'Ready for live',
+        'ready_for_live' => 'Go-live requested',
         'live' => 'Live',
     ];
 

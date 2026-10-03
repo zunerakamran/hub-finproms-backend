@@ -62,6 +62,7 @@ class TemplateRequest extends Model
         'rejection_reason',
         'go_live_requested_at',
         'go_live_requested_by_id',
+        'go_live_notes',
         'live_promoted_at',
         'cpanel_domain',
         'cpanel_db_host',
