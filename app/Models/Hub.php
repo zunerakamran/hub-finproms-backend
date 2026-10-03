@@ -797,13 +797,8 @@ class Hub extends Model
             'default_shared' => false,
             'default_white_label' => true,
         ],
-        'require_login_otp' => [
-            'label' => 'Two-factor authentication (login OTP)',
-            'description' => 'When on, every user on this hub must enter a one-time passcode emailed to them after a successful password check, on every sign-in. Available for Shared, White-label, and Central hubs.',
-            'group' => self::GROUP_BEHAVIOUR,
-            'default_shared' => false,
-            'default_white_label' => false,
-        ],
+        // require_login_otp removed: 2FA is now a per-user opt-in on Update profile
+        // (users.two_factor_enabled), not a hub-wide Functionalities checkbox.
         'firm_documents' => [
             'label' => 'Firm documents',
             'description' => 'When on, hub-wide Firm document Capabilities (view / add / delete / archive across ALL firms) become available on the matrix. Head of Firm always unlocks Firm documents for their own firm when appointed — that does not require this flag. Assign Head of Firm is separate. When toggled from Central, this flag is synced to the content hub database (deploy wiring required).',
@@ -2429,7 +2424,9 @@ class Hub extends Model
             'auth' => [
                 'registration_enabled' => $registrationEnabled,
                 'invite_only' => (bool) ($checklist['private_invite_only'] ?? false),
-                'login_otp_required' => (bool) ($checklist['require_login_otp'] ?? false),
+                // Kept as false for older frontends; OTP is per-user via profile.
+                'login_otp_required' => false,
+                'login_otp_per_user' => true,
                 'terms' => $this->termsPublicPayload(),
             ],
         ];

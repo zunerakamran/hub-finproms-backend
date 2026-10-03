@@ -14,8 +14,11 @@ use App\Services\PowerAdminCapabilitiesService;
 use App\Services\WelcomeMailService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password as PasswordBroker;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationException;
 
@@ -307,7 +310,7 @@ class AuthController extends Controller
             ], 403);
         }
 
-        if ($this->hubs->can('require_login_otp')) {
+        if ($user->hasTwoFactorEnabled()) {
             $otp = $this->loginOtp->create($user);
             try {
                 $this->functionalMail->sendLoginOtp($user, $otp['code']);
@@ -341,12 +344,6 @@ class AuthController extends Controller
 
     public function verifyLoginOtp(Request $request): JsonResponse
     {
-        if (! $this->hubs->can('require_login_otp')) {
-            return response()->json([
-                'message' => 'Two-factor authentication is not enabled on this hub.',
-            ], 403);
-        }
-
         $validated = $request->validate([
             'email' => ['required', 'email'],
             'challenge' => ['required', 'string'],
@@ -397,12 +394,6 @@ class AuthController extends Controller
 
     public function resendLoginOtp(Request $request): JsonResponse
     {
-        if (! $this->hubs->can('require_login_otp')) {
-            return response()->json([
-                'message' => 'Two-factor authentication is not enabled on this hub.',
-            ], 403);
-        }
-
         $validated = $request->validate([
             'email' => ['required', 'email'],
             'challenge' => ['required', 'string'],
@@ -622,5 +613,141 @@ class AuthController extends Controller
         }
 
         return response()->json($payload);
+    }
+
+    /**
+     * Self-serve profile update: name, email, avatar, and per-user 2FA toggle.
+     */
+    public function updateProfile(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'name' => ['sometimes', 'string', 'max:255'],
+            'email' => [
+                'sometimes',
+                'string',
+                'email',
+                'max:255',
+                Rule::unique('users', 'email')->ignore($user->id),
+            ],
+            'two_factor_enabled' => ['sometimes', 'boolean'],
+            'avatar' => ['sometimes', 'nullable', 'image', 'mimes:jpeg,jpg,png,webp,gif', 'max:2048'],
+            'remove_avatar' => ['sometimes', 'boolean'],
+            'current_password' => ['nullable', 'string'],
+        ]);
+
+        $emailChanging = array_key_exists('email', $validated)
+            && strcasecmp((string) $validated['email'], (string) $user->email) !== 0;
+        $twoFactorProvided = array_key_exists('two_factor_enabled', $validated);
+        // Use Request::boolean so FormData "0"/"1" strings are parsed correctly.
+        $twoFactorEnabled = $twoFactorProvided ? $request->boolean('two_factor_enabled') : (bool) $user->two_factor_enabled;
+        $twoFactorChanging = $twoFactorProvided
+            && $twoFactorEnabled !== (bool) $user->two_factor_enabled;
+
+        if ($emailChanging || $twoFactorChanging) {
+            $currentPassword = (string) ($validated['current_password'] ?? '');
+            if ($currentPassword === '' || ! Hash::check($currentPassword, $user->password)) {
+                throw ValidationException::withMessages([
+                    'current_password' => ['Your current password is required to change email or two-factor authentication.'],
+                ]);
+            }
+        }
+
+        $changes = [];
+
+        if (array_key_exists('name', $validated) && $validated['name'] !== $user->name) {
+            $user->name = $validated['name'];
+            $changes[] = 'name';
+        }
+
+        if ($emailChanging) {
+            $user->email = $validated['email'];
+            $user->email_verified_at = null;
+            $changes[] = 'email';
+        }
+
+        if ($twoFactorChanging) {
+            $user->two_factor_enabled = $twoFactorEnabled;
+            $changes[] = $user->two_factor_enabled ? 'two_factor_enabled' : 'two_factor_disabled';
+        }
+
+        $removeAvatar = $request->boolean('remove_avatar');
+        if ($removeAvatar && $user->avatar_path) {
+            $this->deleteAvatarFile($user->avatar_path);
+            $user->avatar_path = null;
+            $changes[] = 'avatar_removed';
+        }
+
+        if ($request->hasFile('avatar')) {
+            /** @var UploadedFile $file */
+            $file = $request->file('avatar');
+            $oldPath = $user->avatar_path;
+            $path = $file->store('avatars/'.$user->id, 'public');
+            $user->avatar_path = $path;
+            if ($oldPath && $oldPath !== $path) {
+                $this->deleteAvatarFile($oldPath);
+            }
+            $changes[] = 'avatar';
+        }
+
+        if ($changes !== []) {
+            $user->save();
+        }
+
+        if ($emailChanging) {
+            try {
+                $token = $this->emailVerification->createToken($user);
+                $this->functionalMail->sendEmailVerificationLink($user, $token);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
+
+        try {
+            $this->activityLogs->log([
+                'action' => 'auth.profile_updated',
+                'description' => 'Profile updated: '.$user->email.($changes !== [] ? ' ('.implode(', ', $changes).')' : ''),
+                'user' => $user,
+                'request' => $request,
+                'subject' => $user,
+                'status_code' => 200,
+                'properties' => ['changes' => $changes],
+            ]);
+        } catch (\Throwable) {
+            //
+        }
+
+        $user = $user->fresh();
+        $hub = $this->hubs->current();
+        $user->setAttribute('terms_accepted', $user->hasAcceptedTerms($hub));
+        $user->setAttribute('terms_required_version', $hub->termsVersion());
+
+        $message = 'Profile updated successfully.';
+        if ($emailChanging) {
+            $message = 'Profile updated. Please verify your new email address — a confirmation link has been sent.';
+        }
+
+        return response()->json([
+            'message' => $message,
+            'user' => $user,
+            'email_verification_required' => $emailChanging,
+        ]);
+    }
+
+    private function deleteAvatarFile(?string $path): void
+    {
+        if (! is_string($path) || $path === '') {
+            return;
+        }
+
+        try {
+            if (Storage::disk('public')->exists($path)) {
+                Storage::disk('public')->delete($path);
+            }
+        } catch (\Throwable) {
+            //
+        }
     }
 }

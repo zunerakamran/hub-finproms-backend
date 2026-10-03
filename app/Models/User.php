@@ -108,16 +108,20 @@ class User extends Authenticatable
         'modules',
         'terms_accepted_at',
         'terms_accepted_version',
+        'two_factor_enabled',
+        'avatar_path',
     ];
 
     protected $hidden = [
         'password',
         'remember_token',
         'stripe_payment_method_id',
+        'avatar_path',
     ];
 
     protected $appends = [
         'role_label',
+        'avatar_url',
     ];
 
     protected function casts(): array
@@ -135,7 +139,25 @@ class User extends Authenticatable
             'is_discontinued' => 'boolean',
             'discontinued_at' => 'datetime',
             'modules' => 'array',
+            'two_factor_enabled' => 'boolean',
         ];
+    }
+
+    public function getAvatarUrlAttribute(): ?string
+    {
+        $path = $this->avatar_path;
+        if (! is_string($path) || $path === '') {
+            return null;
+        }
+
+        $path = ltrim(str_replace('\\', '/', $path), '/');
+
+        return rtrim((string) config('app.url'), '/').'/api/media/'.$path;
+    }
+
+    public function hasTwoFactorEnabled(): bool
+    {
+        return (bool) $this->two_factor_enabled;
     }
 
     /**

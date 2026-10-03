@@ -25,22 +25,21 @@ class LoginOtpTest extends TestCase
             'slug' => 'shared',
             'type' => Hub::TYPE_SHARED,
             'is_active' => true,
-            'checklist' => array_merge(Hub::defaultChecklist(Hub::TYPE_SHARED), [
-                'require_login_otp' => true,
-            ]),
+            'checklist' => Hub::defaultChecklist(Hub::TYPE_SHARED),
         ]);
         app(HubService::class)->forgetCurrentCache();
 
         Mail::fake();
     }
 
-    public function test_login_requires_otp_when_hub_flag_enabled(): void
+    public function test_login_requires_otp_when_user_enabled_two_factor(): void
     {
         $user = User::factory()->create([
             'email' => 'otp.user@example.com',
             'password' => 'password12',
             'role' => User::ROLE_USER,
             'email_verified_at' => now(),
+            'two_factor_enabled' => true,
         ]);
 
         $response = $this->postJson('/api/auth/login', [
@@ -65,6 +64,7 @@ class LoginOtpTest extends TestCase
             'password' => 'password12',
             'role' => User::ROLE_USER,
             'email_verified_at' => now(),
+            'two_factor_enabled' => true,
         ]);
 
         $otp = app(LoginOtpService::class)->create($user);
@@ -87,6 +87,7 @@ class LoginOtpTest extends TestCase
             'email' => 'otp.bad@example.com',
             'role' => User::ROLE_USER,
             'email_verified_at' => now(),
+            'two_factor_enabled' => true,
         ]);
 
         $otp = app(LoginOtpService::class)->create($user);
@@ -98,18 +99,14 @@ class LoginOtpTest extends TestCase
         ])->assertStatus(422);
     }
 
-    public function test_login_skips_otp_when_hub_flag_disabled(): void
+    public function test_login_skips_otp_when_user_has_not_enabled_two_factor(): void
     {
-        $hub = Hub::query()->where('slug', 'shared')->first();
-        $hub->checklist = array_merge($hub->checklist ?? [], ['require_login_otp' => false]);
-        $hub->save();
-        app(HubService::class)->forgetCurrentCache();
-
         $user = User::factory()->create([
             'email' => 'no.otp@example.com',
             'password' => 'password12',
             'role' => User::ROLE_USER,
             'email_verified_at' => now(),
+            'two_factor_enabled' => false,
         ]);
 
         $this->postJson('/api/auth/login', [
@@ -127,6 +124,7 @@ class LoginOtpTest extends TestCase
             'email' => 'otp.resend@example.com',
             'role' => User::ROLE_USER,
             'email_verified_at' => now(),
+            'two_factor_enabled' => true,
         ]);
 
         $service = app(LoginOtpService::class);
@@ -149,10 +147,11 @@ class LoginOtpTest extends TestCase
         $this->assertFalse(Hash::check($first['code'], DB::table('login_otp_tokens')->where('email', $user->email)->value('code')));
     }
 
-    public function test_public_hub_payload_exposes_login_otp_flag(): void
+    public function test_public_hub_payload_exposes_per_user_login_otp_flag(): void
     {
         $this->getJson('/api/hub')
             ->assertOk()
-            ->assertJsonPath('auth.login_otp_required', true);
+            ->assertJsonPath('auth.login_otp_required', false)
+            ->assertJsonPath('auth.login_otp_per_user', true);
     }
 }

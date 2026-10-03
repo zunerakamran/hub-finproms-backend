@@ -71,6 +71,8 @@ Route::prefix('auth')->group(function () {
         Route::post('/logout', [AuthController::class, 'logout']);
         Route::get('/me', [AuthController::class, 'me']);
         Route::post('/accept-terms', [AuthController::class, 'acceptTerms']);
+        // POST accepts multipart avatar; PUT/PATCH for JSON-only updates.
+        Route::match(['put', 'patch', 'post'], '/profile', [AuthController::class, 'updateProfile']);
     });
 });
 

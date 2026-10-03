@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-02 (Website template request form: services, images, contact, policies, pages + content)
+Last updated: 2026-10-03 (Per-user 2FA + Update profile: name, email, avatar)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -134,19 +134,25 @@ Deploy rule:
 - APIs: POST /api/auth/verify-email, POST /api/auth/resend-verification.
 - Frontend: Register shows “check your email”; VerifyEmail page; Login offers resend.
 
-2.2b Two-factor authentication (login OTP) — all hub types
-- Hub Functionalities checklist flag: `require_login_otp`
-  (“Two-factor authentication (login OTP)”). Default OFF for Shared,
-  White-label, and Central. Power Admin enables it per hub on Functionalities.
-- When ON for a hub, EVERY user on that hub (all roles) must complete an email
-  OTP step after a successful password check, on every sign-in.
-- Login returns `otp_required` + `otp_challenge` (no Sanctum token yet).
+2.2b Two-factor authentication (login OTP) — per user (all hub types)
+- NOT a hub Functionalities checkbox. Each user opts in from Update profile
+  (`users.two_factor_enabled`, default OFF). Only that user gets email OTP
+  after a successful password check on every sign-in.
+- Enabling / disabling 2FA (and changing email) requires `current_password`.
+- Login returns `otp_required` + `otp_challenge` (no Sanctum token yet)
+  only when that user has 2FA enabled.
   A 6-digit code is emailed (hub From address / MAIL_FROM fallback).
   Code expires in 10 minutes; max 5 failed attempts; resend throttled 60s.
 - APIs: POST /api/auth/verify-login-otp, POST /api/auth/resend-login-otp.
-- Public GET /hub exposes `auth.login_otp_required`.
-- Email template catalog event: `login_otp`.
-- Frontend Login shows a second step for the code when the hub requires OTP.
+- Public GET /hub exposes `auth.login_otp_per_user` (true) and
+  `auth.login_otp_required` (always false; legacy clients).
+- Email template catalog event: `login_otp` (always available to edit).
+- Frontend Login shows a second step when the login response has otp_required.
+- Profile page (all authenticated users): Update profile — name, email,
+  avatar (profile picture), and two-factor toggle.
+  API: PUT/PATCH/POST /api/auth/profile (POST for multipart avatar).
+  Changing email clears verification and sends a new verification link.
+  Avatar stored on public disk (`avatars/{user_id}/…`); URL via /api/media/.
 
 2.2c Terms & Conditions (all hub types)
 - Capability matrix key: `dashboard_manage_terms` (“Manage terms & conditions”)
@@ -1061,8 +1067,10 @@ STEP 1 — Shared hub core (content hub)
 [x] Checklist gates: public register, self-serve subscribe, one-off purchase, unlimited credits
 [x] Shared Hub self-registration requires email verification before login
     (verify-email + resend; welcome mail after verify; admin/import users auto-verified)
-[x] Hub Functionalities: require_login_otp — email OTP on every login when enabled
-    (all hub types; verify-login-otp + resend-login-otp; Login UI second step)
+[x] Per-user two-factor (login OTP) via Update profile — not hub Functionalities
+    (users.two_factor_enabled; verify-login-otp + resend-login-otp; Login UI second step)
+[x] Update profile (all users): name, email, avatar, two-factor toggle
+    (POST/PUT /api/auth/profile; frontend /my-dashboard/profile)
 [x] Capability: dashboard_manage_terms — who can edit Terms & Conditions (all hubs)
 [x] Terms & Conditions rich content + first-login accept gate (saved on user;
     versioned; type-specific defaults for Shared / White-label / Central)

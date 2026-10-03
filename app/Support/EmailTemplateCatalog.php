@@ -540,9 +540,9 @@ class EmailTemplateCatalog
 
             'login_otp' => [
                 'label' => 'Login OTP (two-factor)',
-                'description' => 'Sent when two-factor authentication is enabled on the hub and a user signs in with a correct password.',
+                'description' => 'Sent when a user who enabled two-factor authentication in their profile signs in with a correct password.',
                 'group' => 'Accounts',
-                'requires_any' => ['require_login_otp'],
+                'requires_any' => null,
                 'requires_module' => null,
                 'requires_private' => false,
                 'requires_public' => false,
