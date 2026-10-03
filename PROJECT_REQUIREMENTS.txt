@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-03 (Support Tickets module + st_* capabilities)
+Last updated: 2026-10-03 (Support Tickets functionality + st_* capabilities)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -358,16 +358,16 @@ Notes:
   reports and request detail include full history with actor name/email/role.
 
 3.3e Support Tickets (error / bug reporting)
-- Power Admin enables the **Support Tickets** module per hub
-  (`module_support_tickets`). Available on Shared, White-label, AND Central Hub
-  Controller (Central Modules page shows it after the locked base module).
+- Power Admin enables **Support Tickets** as a hub Functionalities flag
+  (`support_tickets`) — NOT a Modules-page product module (the 6 product
+  modules stay unchanged). Available on Shared, White-label, and Central Hub.
 - Users with `st_submit_ticket` can report system errors:
   - Required: subject, module area (dropdown of product areas), description
   - Optional: category (bug / UI / performance / data / access / feature / other),
     priority (low / medium / high / critical), page URL, browser info,
     screenshots (`screenshots[]` — images or PDF, max 8 × 5 MB)
 - Statuses: Open → In Progress → Waiting on User → Resolved → Closed
-- Capabilities (`st_*`, blurred while module is off):
+- Capabilities (`st_*`, blurred while Functionalities → Support Tickets is off):
   - `st_submit_ticket` — submit tickets
   - `st_view_own_tickets` — own ticket history & detail
   - `st_view_all_tickets` — full hub queue (developer inbox)
@@ -732,6 +732,9 @@ Notes:
       for Central Hub Controller itself
     - When ON, enabling a billable product module generates a one-time invoice
       at the configured catalogue price (see 5.1B)
+  - Support Tickets — `support_tickets` (default OFF). When on, Support Tickets
+    capabilities (`st_*`) become available on the matrix (section 3.3e). Not a
+    Modules-page product module.
 - Each content hub (each Shared + each White-label) has its own configuration.
 - Edited ONLY from Hub Functionalities / hub checklist screens on Central Hub
   — not from the Capabilities matrix (no duplication).
@@ -752,8 +755,6 @@ Notes:
     (capabilities blurred while this module is off)
   - Generic Content Pre Approval Workflow — activates GC capability section
     (capabilities blurred while this module is off)
-  - Support Tickets — activates Support Tickets capability section
-    (capabilities blurred while this module is off); also listed on Central Hub
 - Managed via `dashboard_manage_modules` / Modules API on Central Hub.
 - When `charge_amount_per_module` is ON, newly enabling a module (including
   uncheck → check again) creates a one-time invoice. Previous enable invoices
@@ -889,7 +890,7 @@ Notes:
   - gc_view_reports — reports, CSV export, approver workload & advisor charts
   - All roles available in the matrix; defaults OFF until Power Admin enables
 
-  Support Tickets (blurred while module_support_tickets is off):
+  Support Tickets (blurred while Functionalities → support_tickets is off):
   - st_submit_ticket — submit error reports (module + description + screenshots)
   - st_view_own_tickets — own ticket history & detail
   - st_view_all_tickets — full hub queue (developer inbox)
@@ -900,7 +901,7 @@ Notes:
 
   Hub-admin dashboard also includes:
   - Manage hub modules (`dashboard_manage_modules`) — who may enable/disable
-    Social Media / Website / General Compliance / Support Tickets modules for that hub
+    Social Media / Website / General Compliance modules for that hub
 
   Modules pricing (blurred while charge_amount_per_module is off):
   - `dashboard_manage_module_pricing` — set catalogue amounts / billing unit
@@ -1239,8 +1240,8 @@ STEP 1 — Shared hub core (content hub)
 [x] Head grants firm-member document rights (add / view / delete / archive)
 [x] Firm Head & Firm Documents activity logs (`firm.head.*`, `firm.documents.*`)
 [x] Frontend: Assign Head of Firm + Firm Documents UI (rights-gated)
-[x] Support Tickets module + APIs (submit with module/screenshots, queue,
-    change status, comments) + `st_*` capabilities
+[x] Support Tickets functionality (`support_tickets`) + APIs (submit with
+    module/screenshots, queue, change status, comments) + `st_*` capabilities
 [x] Frontend: Support Tickets nav (My tickets / New ticket / All tickets) + pages
 
 ================================================================================

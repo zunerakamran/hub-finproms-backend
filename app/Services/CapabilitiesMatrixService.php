@@ -213,7 +213,7 @@ class CapabilitiesMatrixService
 
         $smcModuleOn = $hub->hasSocialMediaComplianceModule();
         $gcModuleOn = $hub->hasGeneralComplianceModule();
-        $stModuleOn = $hub->hasSupportTicketsModule();
+        $stOn = $hub->hasSupportTicketsFunctionality();
         $wcModuleOn = $hub->hasWebsiteComplianceModule();
         $wtlModuleOn = $hub->hasWebsiteTemplateLibraryModule();
         $smtlModuleOn = $hub->hasSocialMediaTemplateLibraryModule();
@@ -243,7 +243,7 @@ class CapabilitiesMatrixService
             $requiresPublic = Hub::isPublicCapability($key);
             $requiresSmcModule = Hub::isSocialMediaComplianceCapability($key);
             $requiresGcModule = Hub::isGeneralComplianceCapability($key);
-            $requiresStModule = Hub::isSupportTicketsCapability($key);
+            $requiresSupportTickets = Hub::isSupportTicketsCapability($key);
             $requiresWcModule = Hub::isWebsiteComplianceCapability($key);
             $requiresWtlModule = Hub::isWebsiteTemplateLibraryCapability($key);
             $requiresSmtlModule = Hub::isSocialMediaTemplateLibraryCapability($key);
@@ -255,6 +255,8 @@ class CapabilitiesMatrixService
             // editable — Central has no SMTL product module, but Power Admin may
             // still enable a public site shell and content tools via the matrix
             // (enforced in roleCan the same way Shared/WL honour checked cells).
+            // Support Tickets / Firm documents are Functionalities — available on
+            // Central when those flags are on.
             $inactive = false;
             if ($isCentralHub) {
                 if ($requiresSmcModule
@@ -263,6 +265,7 @@ class CapabilitiesMatrixService
                     || $requiresWtlModule
                     || ($requiresModulePricing && ! $modulePricingOn)
                     || ($requiresFirmDocuments && ! $firmDocumentsOn)
+                    || ($requiresSupportTickets && ! $stOn)
                 ) {
                     $inactive = true;
                 }
@@ -271,7 +274,7 @@ class CapabilitiesMatrixService
                     || ($requiresPublic && $privateMode)
                     || ($requiresSmcModule && ! $smcModuleOn)
                     || ($requiresGcModule && ! $gcModuleOn)
-                    || ($requiresStModule && ! $stModuleOn)
+                    || ($requiresSupportTickets && ! $stOn)
                     || ($requiresWcModule && ! $wcModuleOn)
                     || ($requiresWtlModule && ! $wtlModuleOn)
                     || ($requiresSmtlModule && ! $smtlModuleOn)
@@ -296,8 +299,8 @@ class CapabilitiesMatrixService
                     $inactiveReason = 'module_social_media_compliance_off';
                 } elseif ($requiresGcModule && ! $gcModuleOn) {
                     $inactiveReason = 'module_general_compliance_off';
-                } elseif ($requiresStModule && ! $stModuleOn) {
-                    $inactiveReason = 'module_support_tickets_off';
+                } elseif ($requiresSupportTickets && ! $stOn) {
+                    $inactiveReason = 'support_tickets_off';
                 } elseif ($requiresWtlModule && ! $wtlModuleOn) {
                     $inactiveReason = 'module_website_template_library_off';
                 } elseif ($requiresWcModule && ! $wcModuleOn) {
@@ -348,14 +351,16 @@ class CapabilitiesMatrixService
                 $requiresModule = 'module_social_media_compliance';
             } elseif ($requiresGcModule) {
                 $requiresModule = 'module_general_compliance';
-            } elseif ($requiresStModule) {
-                $requiresModule = 'module_support_tickets';
+            } elseif ($requiresSupportTickets) {
+                $requiresModule = 'support_tickets';
             } elseif ($requiresWtlModule) {
                 $requiresModule = 'module_website_template_library';
             } elseif ($requiresWcModule) {
                 $requiresModule = 'module_website_compliance';
             } elseif ($requiresModulePricing) {
                 $requiresModule = 'charge_amount_per_module|charge_recurring_per_module';
+            } elseif ($requiresFirmDocuments) {
+                $requiresModule = 'firm_documents';
             }
 
             $rows[] = [
@@ -413,7 +418,7 @@ class CapabilitiesMatrixService
                 'module_website_template_library' => $wtlModuleOn,
                 'module_website_compliance' => $wcModuleOn,
                 'module_general_compliance' => $gcModuleOn,
-                'module_support_tickets' => $stModuleOn,
+                'support_tickets' => $stOn,
                 'charge_amount_per_module' => $hub->can('charge_amount_per_module'),
                 'charge_recurring_per_module' => $hub->can('charge_recurring_per_module'),
                 'module_pricing_enabled' => $modulePricingOn,
@@ -1056,10 +1061,6 @@ class CapabilitiesMatrixService
             return 'module_general_compliance';
         }
 
-        if (Hub::isSupportTicketsCapability($flag)) {
-            return 'module_support_tickets';
-        }
-
         if (Hub::isWebsiteTemplateLibraryCapability($flag)) {
             return 'module_website_template_library';
         }
@@ -1123,8 +1124,8 @@ class CapabilitiesMatrixService
             return false;
         }
 
-        // Support Tickets caps are inactive while the module is off.
-        if (Hub::isSupportTicketsCapability($flag) && ! $hub->hasSupportTicketsModule()) {
+        // Support Tickets caps are inactive while Functionalities → Support Tickets is off.
+        if (Hub::isSupportTicketsCapability($flag) && ! $hub->hasSupportTicketsFunctionality()) {
             return false;
         }
 

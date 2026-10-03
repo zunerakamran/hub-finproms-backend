@@ -25,7 +25,7 @@ class SupportTicketsTest extends TestCase
             'type' => Hub::TYPE_SHARED,
             'is_active' => true,
             'checklist' => array_merge(Hub::defaultChecklist(Hub::TYPE_SHARED), [
-                'module_support_tickets' => true,
+                'support_tickets' => true,
             ]),
         ]);
 
@@ -53,9 +53,10 @@ class SupportTicketsTest extends TestCase
     public function test_capability_keys_are_registered(): void
     {
         $this->assertContains('st_submit_ticket', Hub::SUPPORT_TICKETS_CAPABILITY_KEYS);
-        $this->assertContains('module_support_tickets', Hub::MODULE_KEYS);
+        $this->assertNotContains('module_support_tickets', Hub::MODULE_KEYS);
         $this->assertArrayHasKey('st_change_ticket_status', Hub::CHECKLIST_DEFINITIONS);
-        $this->assertArrayHasKey('module_support_tickets', Hub::CHECKLIST_DEFINITIONS);
+        $this->assertArrayHasKey('support_tickets', Hub::CHECKLIST_DEFINITIONS);
+        $this->assertSame(Hub::GROUP_BEHAVIOUR, Hub::CHECKLIST_DEFINITIONS['support_tickets']['group']);
     }
 
     public function test_user_can_submit_and_view_own_ticket(): void
@@ -128,7 +129,7 @@ class SupportTicketsTest extends TestCase
             ->assertJsonFragment(['id' => $ticket->id]);
     }
 
-    public function test_submit_blocked_when_module_off(): void
+    public function test_submit_blocked_when_functionality_off(): void
     {
         Hub::query()->create([
             'name' => 'Shared Hub Off',
@@ -136,7 +137,7 @@ class SupportTicketsTest extends TestCase
             'type' => Hub::TYPE_SHARED,
             'is_active' => true,
             'checklist' => array_merge(Hub::defaultChecklist(Hub::TYPE_SHARED), [
-                'module_support_tickets' => false,
+                'support_tickets' => false,
             ]),
         ]);
         app(HubService::class)->forgetCurrentCache();

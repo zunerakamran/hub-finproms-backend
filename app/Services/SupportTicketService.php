@@ -29,9 +29,9 @@ class SupportTicketService
 
     public function assertModuleEnabled(Hub $hub): void
     {
-        if (! $hub->hasSupportTicketsModule()) {
+        if (! $hub->hasSupportTicketsFunctionality()) {
             throw ValidationException::withMessages([
-                'module' => 'Support Tickets is not enabled for this hub.',
+                'support_tickets' => 'Support Tickets is not enabled for this hub.',
             ]);
         }
     }

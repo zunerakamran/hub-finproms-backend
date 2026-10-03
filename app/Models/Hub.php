@@ -184,7 +184,6 @@ class Hub extends Model
         'module_website_template_library',
         'module_website_compliance',
         'module_general_compliance',
-        'module_support_tickets',
     ];
 
     /**
@@ -198,7 +197,6 @@ class Hub extends Model
         'module_website_template_library',
         'module_website_compliance',
         'module_general_compliance',
-        'module_support_tickets',
     ];
 
     /**
@@ -228,7 +226,6 @@ class Hub extends Model
         'module_website_template_library' => ['__base__'],
         'module_website_compliance' => ['__base__', 'module_website_template_library'],
         'module_general_compliance' => ['__base__'],
-        'module_support_tickets' => ['__base__'],
     ];
 
     /**
@@ -252,9 +249,7 @@ class Hub extends Model
     public function moduleKeysForPage(): array
     {
         if ($this->isCentral()) {
-            // Support Tickets is available on Central so Power Admin / developers
-            // can take error reports on the control plane as well as content hubs.
-            return ['module_central_hub', 'module_support_tickets'];
+            return ['module_central_hub'];
         }
 
         return array_values(array_merge([$this->baseModuleKey()], self::PRODUCT_MODULE_KEYS));
@@ -376,11 +371,6 @@ class Hub extends Model
         // Generic compliance (standalone)
         if (! empty($enabled['module_general_compliance'])) {
             $trees[] = [['module_general_compliance']];
-        }
-
-        // Support tickets (standalone)
-        if (! empty($enabled['module_support_tickets'])) {
-            $trees[] = [['module_support_tickets']];
         }
 
         if ($trees === []) {
@@ -834,6 +824,13 @@ class Hub extends Model
             'default_shared' => false,
             'default_white_label' => false,
         ],
+        'support_tickets' => [
+            'label' => 'Support Tickets',
+            'description' => 'When on, Support Tickets capabilities become available on the matrix so users can report system errors (module area, description, screenshots) and capable roles can manage the queue / change status. Available on Shared, White-label, and Central Hub.',
+            'group' => self::GROUP_BEHAVIOUR,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
 
         // --- Modules (hub Modules page) ---
         'module_central_hub' => [
@@ -888,13 +885,6 @@ class Hub extends Model
         'module_general_compliance' => [
             'label' => 'Generic Content Pre Approval Workflow',
             'description' => 'Enable generic content pre-approval workflow (free-form description + file attachments). Requires Shared / White Label Hub.',
-            'group' => self::GROUP_MODULES,
-            'default_shared' => false,
-            'default_white_label' => false,
-        ],
-        'module_support_tickets' => [
-            'label' => 'Support Tickets',
-            'description' => 'Let users report system errors (module, screenshots, description). Developers / capable roles can view the queue and change ticket status. Available on Shared, White-label, and Central Hub.',
             'group' => self::GROUP_MODULES,
             'default_shared' => false,
             'default_white_label' => false,
@@ -1361,7 +1351,7 @@ class Hub extends Model
             'default_white_label' => false,
         ],
 
-        // --- Support Tickets (blurred while module_support_tickets is off) ---
+        // --- Support Tickets (blurred while Functionalities → support_tickets is off) ---
         'st_submit_ticket' => [
             'label' => 'Submit support tickets',
             'description' => 'Report a system error or issue: select module, describe the problem, and attach screenshots.',
@@ -1840,9 +1830,9 @@ class Hub extends Model
         return $this->moduleEffectivelyEnabled('module_general_compliance');
     }
 
-    public function hasSupportTicketsModule(): bool
+    public function hasSupportTicketsFunctionality(): bool
     {
-        return $this->moduleEffectivelyEnabled('module_support_tickets');
+        return (bool) ($this->resolvedChecklist()['support_tickets'] ?? false);
     }
 
     public function hasWebsiteTemplateLibraryModule(): bool
@@ -1920,7 +1910,7 @@ class Hub extends Model
             $defaults['module_website_template_library'] = false;
             $defaults['module_website_compliance'] = false;
             $defaults['module_general_compliance'] = false;
-            $defaults['module_support_tickets'] = false;
+            $defaults['support_tickets'] = false;
             $defaults['charge_amount_per_module'] = false;
             $defaults['charge_recurring_per_module'] = false;
             $defaults['one_off_purchase'] = false;

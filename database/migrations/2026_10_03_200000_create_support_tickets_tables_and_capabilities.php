@@ -72,8 +72,11 @@ return new class extends Migration
         Hub::query()->orderBy('id')->each(function (Hub $hub) use ($matrix) {
             $checklist = $hub->resolvedChecklist();
 
-            if (! array_key_exists('module_support_tickets', $checklist)) {
-                $checklist['module_support_tickets'] = false;
+            // Functionality flag (not a Modules-page product module).
+            $legacyModuleOn = ! empty($checklist['module_support_tickets']);
+            unset($checklist['module_support_tickets']);
+            if (! array_key_exists('support_tickets', $checklist)) {
+                $checklist['support_tickets'] = $legacyModuleOn;
             }
 
             $roleCaps = $matrix->resolvedRoleCapabilities($hub);
@@ -113,7 +116,7 @@ return new class extends Migration
 
         Hub::query()->orderBy('id')->each(function (Hub $hub) {
             $checklist = is_array($hub->checklist) ? $hub->checklist : [];
-            unset($checklist['module_support_tickets']);
+            unset($checklist['support_tickets'], $checklist['module_support_tickets']);
             foreach (Hub::SUPPORT_TICKETS_CAPABILITY_KEYS as $key) {
                 unset($checklist[$key]);
             }
