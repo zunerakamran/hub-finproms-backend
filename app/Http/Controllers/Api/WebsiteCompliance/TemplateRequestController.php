@@ -223,20 +223,18 @@ class TemplateRequestController extends Controller
         $targetDomain = trim((string) $request->cpanel_domain);
         $isLiveUpdate = $templateRequest->isLive();
         $wasPending = (string) $templateRequest->status === TemplateRequest::STATUS_PENDING;
+        $isLegacyDeployed = (string) $templateRequest->status === TemplateRequest::STATUS_DEPLOYED;
 
-        // Pending → staging. Staging/ready_for_live → refresh staging host.
-        // Live/deployed → update live host (compliance keeps pointing at cpanel_domain).
+        // Pending → staging. Staging/ready_for_live/legacy deployed → refresh staging host.
+        // Live → update live host (compliance keeps pointing at cpanel_domain).
         if ($isLiveUpdate) {
-            $nextStatus = (string) $templateRequest->status === TemplateRequest::STATUS_DEPLOYED
-                ? TemplateRequest::STATUS_LIVE
-                : (string) $templateRequest->status;
             $updates = [
-                'status' => $nextStatus,
+                'status' => TemplateRequest::STATUS_LIVE,
                 'cpanel_domain' => $targetDomain,
             ];
         } else {
             $updates = [
-                'status' => $wasPending
+                'status' => ($wasPending || $isLegacyDeployed)
                     ? TemplateRequest::STATUS_STAGING
                     : (string) $templateRequest->status,
                 'staging_domain' => $targetDomain,

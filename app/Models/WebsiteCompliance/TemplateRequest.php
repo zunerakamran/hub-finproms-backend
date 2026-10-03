@@ -29,12 +29,11 @@ class TemplateRequest extends Model
         self::STATUS_STAGING,
         self::STATUS_READY_FOR_LIVE,
         self::STATUS_LIVE,
-        self::STATUS_DEPLOYED,
+        self::STATUS_DEPLOYED, // legacy — treated as staging after migration
     ];
 
     public const LIVE_STATUSES = [
         self::STATUS_LIVE,
-        self::STATUS_DEPLOYED,
     ];
 
     protected $table = 'wc_template_requests';
@@ -118,12 +117,16 @@ class TemplateRequest extends Model
         return in_array((string) $this->status, [
             self::STATUS_STAGING,
             self::STATUS_READY_FOR_LIVE,
+            self::STATUS_DEPLOYED, // legacy deployed rows = staging
         ], true);
     }
 
     public function canRequestGoLive(): bool
     {
-        return (string) $this->status === self::STATUS_STAGING;
+        return in_array((string) $this->status, [
+            self::STATUS_STAGING,
+            self::STATUS_DEPLOYED,
+        ], true);
     }
 
     public function canPromoteToLive(): bool

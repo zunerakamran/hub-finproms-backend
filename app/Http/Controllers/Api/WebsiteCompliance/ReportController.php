@@ -222,10 +222,11 @@ class ReportController extends Controller
             'total' => (int) $stats['template_requests_total'],
             'by_status' => [
                 'pending' => (int) ($trStatus['pending'] ?? 0),
-                'staging' => (int) ($trStatus['staging'] ?? 0),
+                // Legacy "deployed" counts as staging under the new lifecycle.
+                'staging' => (int) (($trStatus['staging'] ?? 0) + ($trStatus['deployed'] ?? 0)),
                 'ready_for_live' => (int) ($trStatus['ready_for_live'] ?? 0),
-                'live' => (int) (($trStatus['live'] ?? 0) + ($trStatus['deployed'] ?? 0)),
-                'deployed' => (int) (($trStatus['live'] ?? 0) + ($trStatus['deployed'] ?? 0)),
+                'live' => (int) ($trStatus['live'] ?? 0),
+                'deployed' => (int) (($trStatus['staging'] ?? 0) + ($trStatus['deployed'] ?? 0)),
                 'rejected' => (int) ($trStatus['rejected'] ?? 0),
             ],
             'by_type' => [

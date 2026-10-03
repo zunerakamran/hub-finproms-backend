@@ -70,7 +70,7 @@ class Hub extends Model
         'approved_with_feedback' => 'Approved with Feedback',
         'under_review' => 'Under review',
         'scheduled' => 'Scheduled',
-        'deployed' => 'Deployed',
+        'deployed' => 'On staging', // legacy key — existing deployed sites map to staging
         'staging' => 'On staging',
         'ready_for_live' => 'Go-live requested',
         'live' => 'Live',
