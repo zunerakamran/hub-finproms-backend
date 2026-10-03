@@ -213,6 +213,7 @@ class CapabilitiesMatrixService
 
         $smcModuleOn = $hub->hasSocialMediaComplianceModule();
         $gcModuleOn = $hub->hasGeneralComplianceModule();
+        $stModuleOn = $hub->hasSupportTicketsModule();
         $wcModuleOn = $hub->hasWebsiteComplianceModule();
         $wtlModuleOn = $hub->hasWebsiteTemplateLibraryModule();
         $smtlModuleOn = $hub->hasSocialMediaTemplateLibraryModule();
@@ -242,6 +243,7 @@ class CapabilitiesMatrixService
             $requiresPublic = Hub::isPublicCapability($key);
             $requiresSmcModule = Hub::isSocialMediaComplianceCapability($key);
             $requiresGcModule = Hub::isGeneralComplianceCapability($key);
+            $requiresStModule = Hub::isSupportTicketsCapability($key);
             $requiresWcModule = Hub::isWebsiteComplianceCapability($key);
             $requiresWtlModule = Hub::isWebsiteTemplateLibraryCapability($key);
             $requiresSmtlModule = Hub::isSocialMediaTemplateLibraryCapability($key);
@@ -269,6 +271,7 @@ class CapabilitiesMatrixService
                     || ($requiresPublic && $privateMode)
                     || ($requiresSmcModule && ! $smcModuleOn)
                     || ($requiresGcModule && ! $gcModuleOn)
+                    || ($requiresStModule && ! $stModuleOn)
                     || ($requiresWcModule && ! $wcModuleOn)
                     || ($requiresWtlModule && ! $wtlModuleOn)
                     || ($requiresSmtlModule && ! $smtlModuleOn)
@@ -293,6 +296,8 @@ class CapabilitiesMatrixService
                     $inactiveReason = 'module_social_media_compliance_off';
                 } elseif ($requiresGcModule && ! $gcModuleOn) {
                     $inactiveReason = 'module_general_compliance_off';
+                } elseif ($requiresStModule && ! $stModuleOn) {
+                    $inactiveReason = 'module_support_tickets_off';
                 } elseif ($requiresWtlModule && ! $wtlModuleOn) {
                     $inactiveReason = 'module_website_template_library_off';
                 } elseif ($requiresWcModule && ! $wcModuleOn) {
@@ -343,6 +348,8 @@ class CapabilitiesMatrixService
                 $requiresModule = 'module_social_media_compliance';
             } elseif ($requiresGcModule) {
                 $requiresModule = 'module_general_compliance';
+            } elseif ($requiresStModule) {
+                $requiresModule = 'module_support_tickets';
             } elseif ($requiresWtlModule) {
                 $requiresModule = 'module_website_template_library';
             } elseif ($requiresWcModule) {
@@ -406,6 +413,7 @@ class CapabilitiesMatrixService
                 'module_website_template_library' => $wtlModuleOn,
                 'module_website_compliance' => $wcModuleOn,
                 'module_general_compliance' => $gcModuleOn,
+                'module_support_tickets' => $stModuleOn,
                 'charge_amount_per_module' => $hub->can('charge_amount_per_module'),
                 'charge_recurring_per_module' => $hub->can('charge_recurring_per_module'),
                 'module_pricing_enabled' => $modulePricingOn,
@@ -423,6 +431,7 @@ class CapabilitiesMatrixService
             'social_media_template_library_capability_keys' => Hub::SOCIAL_MEDIA_TEMPLATE_LIBRARY_CAPABILITY_KEYS,
             'social_media_compliance_capability_keys' => Hub::SOCIAL_MEDIA_COMPLIANCE_CAPABILITY_KEYS,
             'general_compliance_capability_keys' => Hub::GENERAL_COMPLIANCE_CAPABILITY_KEYS,
+            'support_tickets_capability_keys' => Hub::SUPPORT_TICKETS_CAPABILITY_KEYS,
             'website_template_library_capability_keys' => Hub::WEBSITE_TEMPLATE_LIBRARY_CAPABILITY_KEYS,
             'website_compliance_capability_keys' => Hub::WEBSITE_COMPLIANCE_CAPABILITY_KEYS,
             'module_pricing_capability_keys' => Hub::MODULE_PRICING_CAPABILITY_KEYS,
@@ -851,6 +860,15 @@ class CapabilitiesMatrixService
             }
         }
 
+        // Support Tickets caps default OFF for every role until Power Admin enables them.
+        foreach ($this->allMatrixRoles() as $role) {
+            foreach (Hub::SUPPORT_TICKETS_CAPABILITY_KEYS as $key) {
+                if (isset($matrix[$role])) {
+                    $matrix[$role][$key] = false;
+                }
+            }
+        }
+
         // Change-status + review defaults ON for managers (firm-scoped in services).
         // Managers get the same review actions as Approvers, plus hub-wide queue tools.
         foreach ([
@@ -860,6 +878,8 @@ class CapabilitiesMatrixService
             'wc_review_change_requests',
             'wc_assign_change_requests',
             'wc_view_all_change_requests',
+            'st_change_ticket_status',
+            'st_view_all_tickets',
         ] as $key) {
             if (isset($matrix[User::ROLE_MANAGER][$key])) {
                 $matrix[User::ROLE_MANAGER][$key] = true;
@@ -889,6 +909,7 @@ class CapabilitiesMatrixService
             if (! Hub::isDashboardCapabilityGroup($group)
                 && $group !== Hub::GROUP_SOCIAL_MEDIA_COMPLIANCE
                 && $group !== Hub::GROUP_GENERAL_COMPLIANCE
+                && $group !== Hub::GROUP_SUPPORT_TICKETS
                 && $group !== Hub::GROUP_WEBSITE_COMPLIANCE
                 && $key !== 'dashboard_manage_email_templates'
             ) {
@@ -1035,6 +1056,10 @@ class CapabilitiesMatrixService
             return 'module_general_compliance';
         }
 
+        if (Hub::isSupportTicketsCapability($flag)) {
+            return 'module_support_tickets';
+        }
+
         if (Hub::isWebsiteTemplateLibraryCapability($flag)) {
             return 'module_website_template_library';
         }
@@ -1095,6 +1120,11 @@ class CapabilitiesMatrixService
 
         // Generic Content Pre Approval caps are inactive while the module is off.
         if (Hub::isGeneralComplianceCapability($flag) && ! $hub->hasGeneralComplianceModule()) {
+            return false;
+        }
+
+        // Support Tickets caps are inactive while the module is off.
+        if (Hub::isSupportTicketsCapability($flag) && ! $hub->hasSupportTicketsModule()) {
             return false;
         }
 

@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\FirmHeadController;
 use App\Http\Controllers\Api\SocialMediaComplianceController;
 use App\Http\Controllers\Api\GeneralComplianceController;
 use App\Http\Controllers\Api\GeneralComplianceContentTypeController;
+use App\Http\Controllers\Api\SupportTicketController;
 use App\Http\Controllers\Api\WebsiteCompliance\ChangeRequestController as WcChangeRequestController;
 use App\Http\Controllers\Api\WebsiteCompliance\PageController as WcPageController;
 use App\Http\Controllers\Api\WebsiteCompliance\PublicController as WcPublicController;
@@ -193,6 +194,19 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::get('/general-compliance/requests/mine', [GeneralComplianceController::class, 'mine']);
         Route::get('/general-compliance/requests/{generalComplianceRequest}', [GeneralComplianceController::class, 'show']);
+    });
+
+    // Support Tickets — member / role-gated by st_* capabilities.
+    Route::middleware('acting_wl_wc_db')->group(function () {
+        Route::get('/support-tickets/options', [SupportTicketController::class, 'options']);
+
+        Route::middleware('hub_can:st_submit_ticket')->group(function () {
+            Route::post('/support-tickets', [SupportTicketController::class, 'store']);
+        });
+
+        Route::get('/support-tickets/mine', [SupportTicketController::class, 'mine']);
+        Route::get('/support-tickets/{supportTicket}', [SupportTicketController::class, 'show']);
+        Route::post('/support-tickets/{supportTicket}/comments', [SupportTicketController::class, 'comment']);
     });
 
     // Website Compliance — authenticated domain (module + capability gated in controllers / hub_can)
@@ -563,6 +577,19 @@ Route::middleware('auth:sanctum')->group(function () {
             });
         });
 
+        // Support Tickets — queue / change status
+        Route::middleware('acting_wl_wc_db')->group(function () {
+            Route::middleware('hub_can:st_view_all_tickets,st_change_ticket_status')->group(function () {
+                Route::get('/support-tickets', [SupportTicketController::class, 'index']);
+                Route::get('/support-tickets/options', [SupportTicketController::class, 'options']);
+                Route::get('/support-tickets/{supportTicket}', [SupportTicketController::class, 'show']);
+            });
+            Route::middleware('hub_can:st_change_ticket_status')->group(function () {
+                Route::post('/support-tickets/{supportTicket}/change-status', [SupportTicketController::class, 'changeStatus']);
+            });
+            Route::post('/support-tickets/{supportTicket}/comments', [SupportTicketController::class, 'comment']);
+        });
+
         // Website Compliance — queue / assign / review / reports / deployments
         Route::prefix('website-compliance')->middleware('acting_wl_wc_db')->group(function () {
             Route::middleware('hub_can:wc_view_all_change_requests,wc_assign_change_requests,wc_review_change_requests,wc_change_request_status')->group(function () {
@@ -901,6 +928,19 @@ Route::middleware('auth:sanctum')->group(function () {
                 Route::get('/general-compliance/charts/approver-workload', [GeneralComplianceController::class, 'approverWorkload']);
                 Route::get('/general-compliance/charts/advisor-comparison', [GeneralComplianceController::class, 'advisorComparison']);
             });
+        });
+
+        // Support Tickets — queue / change status
+        Route::middleware('acting_wl_wc_db')->group(function () {
+            Route::middleware('hub_can:st_view_all_tickets,st_change_ticket_status')->group(function () {
+                Route::get('/support-tickets', [SupportTicketController::class, 'index']);
+                Route::get('/support-tickets/options', [SupportTicketController::class, 'options']);
+                Route::get('/support-tickets/{supportTicket}', [SupportTicketController::class, 'show']);
+            });
+            Route::middleware('hub_can:st_change_ticket_status')->group(function () {
+                Route::post('/support-tickets/{supportTicket}/change-status', [SupportTicketController::class, 'changeStatus']);
+            });
+            Route::post('/support-tickets/{supportTicket}/comments', [SupportTicketController::class, 'comment']);
         });
 
         // Website Compliance — queue / assign / review / reports / deployments

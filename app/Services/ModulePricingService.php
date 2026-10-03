@@ -76,6 +76,13 @@ class ModulePricingService
             'recurring_billing_unit' => ModuleRecurringBillingService::UNIT_PER_USER,
             'recurring_tier_slot' => 3,
         ],
+        'module_support_tickets' => [
+            'amount' => 0.00,
+            'billing_unit' => self::BILLING_UNIT_ONE_TIME,
+            'recurring_amount' => 0.00,
+            'recurring_billing_unit' => ModuleRecurringBillingService::UNIT_PER_USER,
+            'recurring_tier_slot' => null,
+        ],
     ];
 
     /** @deprecated Use DEFAULT_CATALOGUE */
@@ -87,6 +94,7 @@ class ModulePricingService
         'module_website_template_library' => 300.00,
         'module_website_compliance' => 10000.00,
         'module_general_compliance' => 3500.00,
+        'module_support_tickets' => 0.00,
     ];
 
     public function seedDefaultsIfEmpty(): void
