@@ -99,7 +99,7 @@ class CpanelSyncService
             $q->where('advisor_id', $advisorId)
                 ->orWhere('assigned_advisor_id', $advisorId);
         })
-            ->where('status', 'deployed')
+            ->onSite()
             ->latest()
             ->first();
     }

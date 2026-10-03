@@ -56,9 +56,9 @@ class SectionController extends Controller
 
             [$scopedAdvisorId, $scopedRequestId, $templateSlug] = $resolved;
 
-            // Only materialize sections for deployed sites (created on Power Admin deploy).
+            // Only materialize sections for staging/live sites (created on Power Admin deploy).
             $deployment = TemplateRequest::find($scopedRequestId);
-            if (! $deployment || $deployment->status !== 'deployed') {
+            if (! $deployment || ! $deployment->isOnSite()) {
                 return response()->json([]);
             }
 
@@ -113,7 +113,7 @@ class SectionController extends Controller
         }
 
         $active = TemplateRequest::query()
-            ->where('status', 'deployed')
+            ->onSite()
             ->where(function ($q) use ($advisorId) {
                 $q->where('advisor_id', $advisorId)
                     ->orWhere('assigned_advisor_id', $advisorId);

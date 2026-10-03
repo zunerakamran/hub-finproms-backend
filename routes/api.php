@@ -250,9 +250,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/template-requests', [WcTemplateRequestController::class, 'index']);
         Route::middleware('hub_can:wc_request_deployments,wc_assign_website_templates')->group(function () {
             Route::post('/template-requests', [WcTemplateRequestController::class, 'store']);
+            Route::post('/template-requests/{id}/request-go-live', [WcTemplateRequestController::class, 'requestGoLive'])->whereNumber('id');
         });
         Route::middleware('hub_can:wc_deploy_websites')->group(function () {
             Route::post('/template-requests/{id}/deploy', [WcTemplateRequestController::class, 'deploy'])->whereNumber('id');
+            Route::post('/template-requests/{id}/promote-to-live', [WcTemplateRequestController::class, 'promoteToLive'])->whereNumber('id');
             Route::put('/template-requests/{id}/branding', [WcTemplateRequestController::class, 'updateBranding'])->whereNumber('id');
             Route::post('/template-requests/{id}/reject', [WcTemplateRequestController::class, 'reject'])->whereNumber('id');
         });
@@ -579,8 +581,12 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::middleware('hub_can:wc_view_all_deployments,wc_request_deployments,wc_deploy_websites')->group(function () {
                 Route::get('/template-requests', [WcTemplateRequestController::class, 'index']);
             });
+            Route::middleware('hub_can:wc_request_deployments,wc_assign_website_templates')->group(function () {
+                Route::post('/template-requests/{id}/request-go-live', [WcTemplateRequestController::class, 'requestGoLive'])->whereNumber('id');
+            });
             Route::middleware('hub_can:wc_deploy_websites')->group(function () {
                 Route::post('/template-requests/{id}/deploy', [WcTemplateRequestController::class, 'deploy'])->whereNumber('id');
+                Route::post('/template-requests/{id}/promote-to-live', [WcTemplateRequestController::class, 'promoteToLive'])->whereNumber('id');
                 Route::put('/template-requests/{id}/branding', [WcTemplateRequestController::class, 'updateBranding'])->whereNumber('id');
                 Route::post('/template-requests/{id}/reject', [WcTemplateRequestController::class, 'reject'])->whereNumber('id');
             });
@@ -914,8 +920,12 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::middleware('hub_can:wc_view_all_deployments,wc_request_deployments,wc_deploy_websites')->group(function () {
                 Route::get('/template-requests', [WcTemplateRequestController::class, 'index']);
             });
+            Route::middleware('hub_can:wc_request_deployments,wc_assign_website_templates')->group(function () {
+                Route::post('/template-requests/{id}/request-go-live', [WcTemplateRequestController::class, 'requestGoLive'])->whereNumber('id');
+            });
             Route::middleware('hub_can:wc_deploy_websites')->group(function () {
                 Route::post('/template-requests/{id}/deploy', [WcTemplateRequestController::class, 'deploy'])->whereNumber('id');
+                Route::post('/template-requests/{id}/promote-to-live', [WcTemplateRequestController::class, 'promoteToLive'])->whereNumber('id');
                 Route::put('/template-requests/{id}/branding', [WcTemplateRequestController::class, 'updateBranding'])->whereNumber('id');
                 Route::post('/template-requests/{id}/reject', [WcTemplateRequestController::class, 'reject'])->whereNumber('id');
             });

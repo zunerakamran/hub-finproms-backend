@@ -69,7 +69,7 @@ class PublicController extends Controller
                     ->where('template_request_id', (int) $templateRequestId);
             } else {
                 $templateRequest = TemplateRequest::query()
-                    ->where('status', 'deployed')
+                    ->onSite()
                     ->where(function ($q) use ($advisorIdInt) {
                         $q->where('advisor_id', $advisorIdInt)
                             ->orWhere('assigned_advisor_id', $advisorIdInt);

@@ -44,7 +44,7 @@ class TemplateRequestController extends Controller
     /** @return list<string> */
     private function requestRelations(): array
     {
-        return ['advisor', 'assignedAdvisor', 'requestedBy'];
+        return ['advisor', 'assignedAdvisor', 'requestedBy', 'goLiveRequestedBy'];
     }
 
     public function store(Request $request): JsonResponse
@@ -214,17 +214,43 @@ class TemplateRequestController extends Controller
 
         $templateRequest = TemplateRequest::findOrFail($id);
 
-        $updates = [
-            'status' => 'deployed',
-            'cpanel_domain' => $request->cpanel_domain,
+        if ((string) $templateRequest->status === TemplateRequest::STATUS_REJECTED) {
+            return response()->json([
+                'message' => 'Rejected deployments cannot be deployed. Submit a new request instead.',
+            ], 422);
+        }
+
+        $targetDomain = trim((string) $request->cpanel_domain);
+        $isLiveUpdate = $templateRequest->isLive();
+        $wasPending = (string) $templateRequest->status === TemplateRequest::STATUS_PENDING;
+
+        // Pending → staging. Staging/ready_for_live → refresh staging host.
+        // Live/deployed → update live host (compliance keeps pointing at cpanel_domain).
+        if ($isLiveUpdate) {
+            $nextStatus = (string) $templateRequest->status === TemplateRequest::STATUS_DEPLOYED
+                ? TemplateRequest::STATUS_LIVE
+                : (string) $templateRequest->status;
+            $updates = [
+                'status' => $nextStatus,
+                'cpanel_domain' => $targetDomain,
+            ];
+        } else {
+            $updates = [
+                'status' => $wasPending
+                    ? TemplateRequest::STATUS_STAGING
+                    : (string) $templateRequest->status,
+                'staging_domain' => $targetDomain,
+                'cpanel_domain' => $targetDomain,
+            ];
+        }
+
+        $updates = array_merge($updates, [
             'cpanel_db_host' => $request->cpanel_db_host,
             'cpanel_db_name' => $request->cpanel_db_name,
             'cpanel_db_user' => $request->cpanel_db_user,
             'cpanel_db_password' => $request->cpanel_db_password ?? $request->input('cpanel_db_pass'),
             'cpanel_api_key' => $request->cpanel_api_key,
-        ];
-
-        $updates = array_merge($updates, $this->brandingUpdatesFromRequest($request));
+        ], $this->brandingUpdatesFromRequest($request));
 
         $templateRequest->update($updates);
         $templateRequest->refresh();
@@ -253,8 +279,11 @@ class TemplateRequestController extends Controller
         }
 
         $this->activityLogs->log([
-            'action' => 'wc.template_request.deploy',
-            'description' => 'Deployed template to cPanel domain: '.$request->cpanel_domain
+            'action' => $isLiveUpdate ? 'wc.template_request.update_live' : 'wc.template_request.deploy_staging',
+            'description' => ($isLiveUpdate
+                ? 'Updated live hosting for domain: '
+                : 'Deployed template to staging URL: ').$targetDomain
+                .(! $isLiveUpdate ? ' (intended live: '.($templateRequest->domain_name ?: 'n/a').')' : '')
                 .($configSynced ? ' (remote config written)' : ' (remote config sync failed)')
                 .($contentSynced ? ' (initial content pushed)' : '')
                 .($targetAdvisorId
@@ -267,16 +296,24 @@ class TemplateRequestController extends Controller
 
         // One-time £/website invoice (idempotent per template request) when charging is on.
         $moduleInvoice = null;
-        try {
-            $hub = $this->actingHubs->actingHub($user);
-            $moduleInvoice = $this->moduleBilling->invoiceWebsiteDeploy($hub, $templateRequest, $user);
-        } catch (\Throwable $e) {
-            report($e);
+        if (! $isLiveUpdate) {
+            try {
+                $hub = $this->actingHubs->actingHub($user);
+                $moduleInvoice = $this->moduleBilling->invoiceWebsiteDeploy($hub, $templateRequest, $user);
+            } catch (\Throwable $e) {
+                report($e);
+            }
         }
 
-        $message = $configSynced
-            ? 'Template deployed and remote cPanel config written successfully!'
-            : 'Template marked deployed, but remote cPanel config could not be verified. Check Laravel logs and that api.php is reachable.';
+        if ($isLiveUpdate) {
+            $message = $configSynced
+                ? 'Live deployment settings updated and synced. Compliance continues on the live URL.'
+                : 'Live settings saved, but remote cPanel config could not be verified. Check Laravel logs and that api.php is reachable.';
+        } else {
+            $message = $configSynced
+                ? 'Site deployed to the temporary (staging) URL. Compliance can run there until the requester asks to go live.'
+                : 'Site marked as staging, but remote cPanel config could not be verified. Check Laravel logs and that api.php is reachable.';
+        }
 
         if (! $targetAdvisorId) {
             $message .= ' No advisor is linked to this request, so hub sections were not created — the advisor will have nothing to edit in the dashboard.';
@@ -300,6 +337,162 @@ class TemplateRequestController extends Controller
                 'status' => $moduleInvoice->status,
                 'description' => $moduleInvoice->description,
             ] : null,
+            'template_request' => $templateRequest->load($this->requestRelations()),
+        ]);
+    }
+
+    /**
+     * Requester marks a staging site ready to move to the intended main/live URL.
+     */
+    public function requestGoLive(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        $this->gate->assertModuleEnabled($user);
+
+        if (
+            ! $this->gate->can($user, 'wc_request_deployments')
+            && ! $this->gate->can($user, 'wc_assign_website_templates')
+        ) {
+            $this->gate->assertCan($user, 'wc_request_deployments');
+        }
+
+        $templateRequest = TemplateRequest::findOrFail($id);
+        $tenantUserId = (int) ($this->gate->tenantUserIdOrNull($user) ?? $user->id);
+
+        if ((int) ($templateRequest->requested_by_id ?? 0) !== $tenantUserId) {
+            return response()->json([
+                'message' => 'Only the original requester can mark this site ready for live deployment.',
+            ], 403);
+        }
+
+        if (! $templateRequest->canRequestGoLive()) {
+            return response()->json([
+                'message' => $templateRequest->status === TemplateRequest::STATUS_READY_FOR_LIVE
+                    ? 'Go-live has already been requested. Power Admin will promote this site to the main URL.'
+                    : 'Go-live can only be requested while the site is on its temporary (staging) URL.',
+            ], 422);
+        }
+
+        $templateRequest->update([
+            'status' => TemplateRequest::STATUS_READY_FOR_LIVE,
+            'go_live_requested_at' => now(),
+            'go_live_requested_by_id' => $tenantUserId,
+        ]);
+        $templateRequest->refresh();
+
+        $this->activityLogs->log([
+            'action' => 'wc.template_request.request_go_live',
+            'description' => 'Requester marked deployment ready for live. Staging: '
+                .($templateRequest->staging_domain ?: $templateRequest->cpanel_domain)
+                .' → intended live: '.($templateRequest->domain_name ?: 'n/a'),
+            'user' => $user,
+            'subject' => $templateRequest,
+            'request' => $request,
+        ]);
+
+        return response()->json([
+            'message' => 'Go-live requested. Power Admin will move this site from the temporary URL to the main domain.',
+            'template_request' => $templateRequest->load($this->requestRelations()),
+        ]);
+    }
+
+    /**
+     * Power Admin promotes a ready_for_live staging site onto the main/live URL.
+     */
+    public function promoteToLive(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        $this->gate->assertCan($user, 'wc_deploy_websites');
+
+        $request->validate([
+            'cpanel_domain' => 'nullable|string|max:255',
+            'cpanel_db_host' => 'nullable|string|max:255',
+            'cpanel_db_name' => 'nullable|string|max:255',
+            'cpanel_db_user' => 'nullable|string|max:255',
+            'cpanel_db_password' => 'nullable|string|max:255',
+            'cpanel_api_key' => 'nullable|string|max:255',
+            'logo_url' => 'nullable|string|max:1000',
+            'white_logo_url' => 'nullable|string|max:1000',
+            'favicon_url' => 'nullable|string|max:1000',
+            'primary_color' => 'nullable|string|max:50',
+            'secondary_color' => 'nullable|string|max:50',
+        ]);
+
+        $templateRequest = TemplateRequest::findOrFail($id);
+
+        if (! $templateRequest->canPromoteToLive()) {
+            return response()->json([
+                'message' => $templateRequest->isLive()
+                    ? 'This site is already live.'
+                    : 'Promote to live is only available after the requester marks the staging site ready for live.',
+            ], 422);
+        }
+
+        $liveDomain = trim((string) (
+            $request->input('cpanel_domain')
+            ?: $templateRequest->domain_name
+            ?: $templateRequest->cpanel_domain
+        ));
+
+        if ($liveDomain === '') {
+            return response()->json([
+                'message' => 'A main/live domain is required to promote this site.',
+            ], 422);
+        }
+
+        $updates = [
+            'status' => TemplateRequest::STATUS_LIVE,
+            'cpanel_domain' => $liveDomain,
+            'live_promoted_at' => now(),
+        ];
+
+        if ($request->filled('cpanel_db_host')) {
+            $updates['cpanel_db_host'] = $request->cpanel_db_host;
+        }
+        if ($request->filled('cpanel_db_name')) {
+            $updates['cpanel_db_name'] = $request->cpanel_db_name;
+        }
+        if ($request->filled('cpanel_db_user')) {
+            $updates['cpanel_db_user'] = $request->cpanel_db_user;
+        }
+        if ($request->filled('cpanel_db_password') || $request->filled('cpanel_db_pass')) {
+            $updates['cpanel_db_password'] = $request->cpanel_db_password ?? $request->input('cpanel_db_pass');
+        }
+        if ($request->filled('cpanel_api_key')) {
+            $updates['cpanel_api_key'] = $request->cpanel_api_key;
+        }
+
+        $updates = array_merge($updates, $this->brandingUpdatesFromRequest($request));
+
+        $templateRequest->update($updates);
+        $templateRequest->refresh();
+
+        $targetAdvisorId = $templateRequest->assigned_advisor_id ?? $templateRequest->advisor_id;
+        $configSynced = CpanelSyncService::pushDeployConfig($templateRequest, $targetAdvisorId);
+        $contentSynced = false;
+        if ($targetAdvisorId) {
+            $contentSynced = CpanelSyncService::pushToTemplateRequestCpanel($templateRequest);
+        }
+
+        $this->activityLogs->log([
+            'action' => 'wc.template_request.promote_live',
+            'description' => 'Promoted staging site to live URL: '.$liveDomain
+                .(filled($templateRequest->staging_domain) ? ' (from staging '.$templateRequest->staging_domain.')' : '')
+                .($configSynced ? ' (remote config written)' : ' (remote config sync failed)')
+                .($contentSynced ? ' (content pushed)' : ''),
+            'user' => $user,
+            'subject' => $templateRequest,
+            'request' => $request,
+        ]);
+
+        $message = $configSynced
+            ? 'Site promoted to the main/live URL. Compliance continues against the live site.'
+            : 'Site marked live, but remote cPanel config could not be verified. Check Laravel logs and that api.php is reachable.';
+
+        return response()->json([
+            'message' => $message,
+            'config_synced' => $configSynced,
+            'content_synced' => $contentSynced,
             'template_request' => $templateRequest->load($this->requestRelations()),
         ]);
     }
@@ -398,12 +591,12 @@ class TemplateRequestController extends Controller
             ]);
         }
 
-        // Do not materialize hub sections before Power Admin deploys.
-        if ($templateRequest->status !== 'deployed') {
+        // Do not materialize hub sections before Power Admin deploys to staging/live.
+        if (! $templateRequest->isOnSite()) {
             return response()->json([
                 'template_request' => $templateRequest,
                 'sections' => [],
-                'message' => 'Sections are created after this site is deployed.',
+                'message' => 'Sections are created after this site is deployed to staging.',
             ]);
         }
 
@@ -549,8 +742,8 @@ class TemplateRequestController extends Controller
 
         $templateRequest = TemplateRequest::findOrFail($id);
 
-        if ($templateRequest->status !== 'deployed') {
-            return response()->json(['message' => 'Can only publish content for deployed sites.'], 422);
+        if (! $templateRequest->isOnSite()) {
+            return response()->json(['message' => 'Can only publish content for staging or live sites.'], 422);
         }
 
         $advisorId = $templateRequest->assigned_advisor_id ?? $templateRequest->advisor_id;
@@ -651,7 +844,7 @@ class TemplateRequestController extends Controller
         $configSynced = false;
         $targetAdvisorId = $templateRequest->assigned_advisor_id ?? $templateRequest->advisor_id;
 
-        if ($templateRequest->status === 'deployed' && filled($templateRequest->cpanel_domain)) {
+        if ($templateRequest->isOnSite() && filled($templateRequest->cpanel_domain)) {
             $configSynced = CpanelSyncService::pushBrandingToCpanel($templateRequest, $targetAdvisorId);
         }
 
@@ -665,10 +858,10 @@ class TemplateRequestController extends Controller
         ]);
 
         $message = 'Branding updated successfully.';
-        if ($templateRequest->status === 'deployed') {
+        if ($templateRequest->isOnSite()) {
             $message = $configSynced
-                ? 'Branding updated and pushed to the live site.'
-                : 'Branding saved on the hub, but the live site sync could not be verified. Check Laravel logs and cPanel configuration.';
+                ? 'Branding updated and pushed to the deployed site.'
+                : 'Branding saved on the hub, but the site sync could not be verified. Check Laravel logs and cPanel configuration.';
         }
 
         return response()->json([

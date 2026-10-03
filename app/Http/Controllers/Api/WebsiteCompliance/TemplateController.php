@@ -67,7 +67,7 @@ class TemplateController extends Controller
             $templateRequestId = $request->query('template_request_id');
             if ($templateRequestId) {
                 $deployment = TemplateRequest::find((int) $templateRequestId);
-                if ($deployment && $deployment->status === 'deployed') {
+                if ($deployment && $deployment->isOnSite()) {
                     AdvisorSectionService::ensureForAdvisor(
                         (int) $advisorId,
                         $template->slug,
