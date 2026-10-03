@@ -1165,6 +1165,7 @@ STEP 1 — Shared hub core (content hub)
 [x] Social Media Compliance API — submit / assign / review / versions / reports / charts
 [x] Social Media Compliance activity logging (smc.* actions in activity_logs)
 [x] Compliance audit trail (SMC / GC / WC) — per-request history with actor name/email/role, assigner, status transitions; exposed on detail + reports (+ WC reports/change-requests)
+[x] compliance:backfill-audit-trail — reconstruct prior request history from activity_logs + versions
 [x] Optional compliance supporting files (SMC / GC / WC) on submit, review/approve-reject, and change-status — shown in version history with uploader role (advisor / approver / manager), not as a separate request-level box
 [x] Approver / manager dedicated front-end UIs (SMC & ops flows)
 [x] Power Admin user management UI (pa_manage_users_roles — create/update/delete/roles)
