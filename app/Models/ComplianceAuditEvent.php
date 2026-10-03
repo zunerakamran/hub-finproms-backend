@@ -93,6 +93,7 @@ class ComplianceAuditEvent extends Model
         return [
             'id' => $this->id,
             'module' => $this->module,
+            'subject_id' => $this->subject_id,
             'event_type' => $this->event_type,
             'description' => $this->description,
             'from_status' => $this->from_status,

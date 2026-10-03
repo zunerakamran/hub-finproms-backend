@@ -153,10 +153,14 @@ class ReportController extends Controller
             ];
         }
 
+        $hub = $this->gate->hubFor($user, 'wc_view_platform_report');
+        $requestIds = $rows->pluck('id')->map(fn ($id) => (int) $id)->all();
+
         $this->activityLogs->log([
             'action' => 'wc.reports.change_requests',
             'description' => 'Viewed website compliance change-request audit report',
             'user' => $user,
+            'hub' => $hub,
             'request' => $request,
             'properties' => ['total' => count($export)],
         ]);
@@ -168,6 +172,16 @@ class ReportController extends Controller
                     'by_status' => $byStatus,
                 ],
                 'rows' => $export,
+                'audit_events' => $this->auditTrail->forHub(
+                    ComplianceAuditEvent::MODULE_WC,
+                    $hub,
+                    $requestIds
+                ),
+                'hub' => [
+                    'id' => $hub->id,
+                    'name' => $hub->name,
+                    'slug' => $hub->slug,
+                ],
             ],
             'statuses' => ChangeRequest::STATUSES,
         ]);

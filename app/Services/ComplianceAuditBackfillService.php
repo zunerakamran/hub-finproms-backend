@@ -66,7 +66,112 @@ class ComplianceAuditBackfillService
             $force
         ));
 
+        // Catch activity-log subjects that were not found as local request rows
+        // (e.g. remote white-label DB ids, or deleted requests).
+        $stats = $this->mergeStats($stats, $this->backfillOrphanActivityLogs(
+            ComplianceAuditEvent::MODULE_SMC,
+            SocialMediaComplianceRequest::class,
+            [
+                'smc.submit', 'smc.assign', 'smc.unassign', 'smc.review',
+                'smc.resubmit', 'smc.confirm_feedback', 'smc.change_status',
+            ],
+            $force
+        ));
+        $stats = $this->mergeStats($stats, $this->backfillOrphanActivityLogs(
+            ComplianceAuditEvent::MODULE_GC,
+            GeneralComplianceRequest::class,
+            [
+                'gc.submit', 'gc.assign', 'gc.unassign', 'gc.review',
+                'gc.resubmit', 'gc.confirm_feedback', 'gc.change_status',
+            ],
+            $force
+        ));
+        $stats = $this->mergeStats($stats, $this->backfillOrphanActivityLogs(
+            ComplianceAuditEvent::MODULE_WC,
+            ChangeRequest::class,
+            [
+                'wc.change_request.submit',
+                'wc.change_request.assign',
+                'wc.change_request.reject',
+                'wc.change_request.schedule',
+                'wc.change_request.approve',
+                'wc.change_request.approve_with_feedback',
+                'wc.change_request.resubmit',
+                'wc.change_request.confirm_feedback',
+                'wc.change_request.change_status',
+            ],
+            $force
+        ));
+
         return $stats;
+    }
+
+    /**
+     * @param  list<string>  $actions
+     * @return array{created: int, skipped_subjects: int, from_activity_logs: int, from_versions: int}
+     */
+    private function backfillOrphanActivityLogs(
+        string $module,
+        string $subjectClass,
+        array $actions,
+        bool $force
+    ): array {
+        $subjectIds = ActivityLog::query()
+            ->where('subject_type', $subjectClass)
+            ->whereIn('action', $actions)
+            ->whereNotNull('subject_id')
+            ->distinct()
+            ->pluck('subject_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        $created = 0;
+        $skipped = 0;
+        $fromLogs = 0;
+
+        foreach ($subjectIds as $subjectId) {
+            $existing = ComplianceAuditEvent::query()
+                ->where('module', $module)
+                ->where('subject_id', $subjectId)
+                ->count();
+
+            if ($existing > 0 && ! $force) {
+                $skipped++;
+                continue;
+            }
+
+            if ($force) {
+                ComplianceAuditEvent::query()
+                    ->where('module', $module)
+                    ->where('subject_id', $subjectId)
+                    ->where('metadata->source', 'backfill')
+                    ->delete();
+
+                if (ComplianceAuditEvent::query()
+                    ->where('module', $module)
+                    ->where('subject_id', $subjectId)
+                    ->exists()
+                ) {
+                    $skipped++;
+                    continue;
+                }
+            }
+
+            $events = $this->eventsFromActivityLogs($module, $subjectClass, $subjectId);
+            if ($events === []) {
+                continue;
+            }
+
+            $created += $this->insertEvents($events);
+            $fromLogs += count($events);
+        }
+
+        return [
+            'created' => $created,
+            'skipped_subjects' => $skipped,
+            'from_activity_logs' => $fromLogs,
+            'from_versions' => 0,
+        ];
     }
 
     /**

@@ -930,6 +930,8 @@ class SocialMediaComplianceService
             ];
         }
 
+        $requestIds = $rows->pluck('id')->map(fn ($id) => (int) $id)->all();
+
         return [
             'summary' => [
                 'total' => $rows->count(),
@@ -938,6 +940,18 @@ class SocialMediaComplianceService
                 'approved_multiple_attempts' => $approvedMultiple,
             ],
             'rows' => $export,
+            // Hub-scoped trail so Audit tab works even when firm-visibility hides some rows
+            // (e.g. Power Admin on Central viewing / acting on a content hub).
+            'audit_events' => $this->auditTrail->forHub(
+                ComplianceAuditEvent::MODULE_SMC,
+                $hub,
+                $requestIds
+            ),
+            'hub' => [
+                'id' => $hub->id,
+                'name' => $hub->name,
+                'slug' => $hub->slug,
+            ],
         ];
     }
 

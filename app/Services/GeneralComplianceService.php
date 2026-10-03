@@ -1066,6 +1066,8 @@ class GeneralComplianceService
             ];
         }
 
+        $requestIds = $rows->pluck('id')->map(fn ($id) => (int) $id)->all();
+
         return [
             'summary' => [
                 'total' => $rows->count(),
@@ -1074,6 +1076,16 @@ class GeneralComplianceService
                 'approved_multiple_attempts' => $approvedMultiple,
             ],
             'rows' => $export,
+            'audit_events' => $this->auditTrail->forHub(
+                ComplianceAuditEvent::MODULE_GC,
+                $hub,
+                $requestIds
+            ),
+            'hub' => [
+                'id' => $hub->id,
+                'name' => $hub->name,
+                'slug' => $hub->slug,
+            ],
         ];
     }
 

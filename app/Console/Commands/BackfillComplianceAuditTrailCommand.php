@@ -2,6 +2,8 @@
 
 namespace App\Console\Commands;
 
+use App\Models\ComplianceAuditEvent;
+use App\Models\Hub;
 use App\Services\ComplianceAuditBackfillService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Schema;
@@ -35,7 +37,31 @@ class BackfillComplianceAuditTrailCommand extends Command
             ]
         );
 
-        $this->info('Done. Refresh the compliance Reports → Audit trail tab.');
+        $byHub = ComplianceAuditEvent::query()
+            ->selectRaw('hub_id, module, COUNT(*) as total')
+            ->groupBy('hub_id', 'module')
+            ->orderBy('hub_id')
+            ->get();
+
+        if ($byHub->isNotEmpty()) {
+            $hubNames = Hub::query()
+                ->whereIn('id', $byHub->pluck('hub_id')->filter()->all())
+                ->pluck('name', 'id');
+
+            $this->newLine();
+            $this->info('Events currently stored by hub (open Reports while on / acting as that hub):');
+            $this->table(
+                ['Hub ID', 'Hub name', 'Module', 'Events'],
+                $byHub->map(fn ($row) => [
+                    $row->hub_id ?? 'null',
+                    $row->hub_id ? ($hubNames[$row->hub_id] ?? 'unknown') : '(no hub_id)',
+                    $row->module,
+                    $row->total,
+                ])->all()
+            );
+        }
+
+        $this->info('Done. Refresh the compliance Reports → Audit trail tab on the matching content hub.');
 
         return self::SUCCESS;
     }

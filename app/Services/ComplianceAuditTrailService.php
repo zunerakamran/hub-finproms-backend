@@ -124,6 +124,34 @@ class ComplianceAuditTrailService
     }
 
     /**
+     * Hub-scoped audit events for reports (oldest first).
+     * Prefer hub_id matches; also include events for the given subject ids
+     * (covers backfills / remote DBs where hub_id may be null).
+     *
+     * @param  list<int>  $subjectIds
+     * @return list<array<string, mixed>>
+     */
+    public function forHub(string $module, Hub $hub, array $subjectIds = []): array
+    {
+        $ids = array_values(array_unique(array_map('intval', $subjectIds)));
+
+        $events = ComplianceAuditEvent::query()
+            ->where('module', $module)
+            ->where(function ($query) use ($hub, $ids) {
+                $query->where('hub_id', $hub->id);
+                if ($ids !== []) {
+                    $query->orWhereIn('subject_id', $ids);
+                }
+            })
+            ->orderBy('id')
+            ->get()
+            ->map(fn (ComplianceAuditEvent $event) => $event->toApiArray())
+            ->all();
+
+        return $events;
+    }
+
+    /**
      * Human-readable one-line summary of an audit trail (for CSV export).
      *
      * @param  list<array<string, mixed>>  $trail
