@@ -274,6 +274,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:wc_view_platform_report')->group(function () {
             Route::get('/reports/summary', [WcReportController::class, 'summary']);
             Route::post('/reports/summary/refresh', [WcReportController::class, 'refresh']);
+            Route::get('/reports/change-requests', [WcReportController::class, 'changeRequests']);
             Route::get('/reports', [WcReportController::class, 'index']);
         });
 
@@ -601,6 +602,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::middleware('hub_can:wc_view_platform_report')->group(function () {
                 Route::get('/reports/summary', [WcReportController::class, 'summary']);
                 Route::post('/reports/summary/refresh', [WcReportController::class, 'refresh']);
+                Route::get('/reports/change-requests', [WcReportController::class, 'changeRequests']);
                 Route::get('/reports', [WcReportController::class, 'index']);
             });
             Route::middleware('hub_can:wc_request_deployments,wc_assign_website_templates,wc_view_all_deployments,wc_deploy_websites')->group(function () {
@@ -940,6 +942,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::middleware('hub_can:wc_view_platform_report')->group(function () {
                 Route::get('/reports/summary', [WcReportController::class, 'summary']);
                 Route::post('/reports/summary/refresh', [WcReportController::class, 'refresh']);
+                Route::get('/reports/change-requests', [WcReportController::class, 'changeRequests']);
                 Route::get('/reports', [WcReportController::class, 'index']);
             });
             Route::middleware('hub_can:wc_request_deployments,wc_assign_website_templates,wc_view_all_deployments,wc_deploy_websites')->group(function () {

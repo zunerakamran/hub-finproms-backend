@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\ComplianceAuditEvent;
 use App\Models\Firm;
 use App\Models\SocialMediaComplianceRequest;
 use App\Models\SocialMediaComplianceRequestAttachment;
@@ -22,6 +23,7 @@ class SocialMediaComplianceService
         private readonly CapabilitiesMatrixService $matrix,
         private readonly SocialMediaComplianceMailService $mail,
         private readonly ActivityLogService $activityLogs,
+        private readonly ComplianceAuditTrailService $auditTrail,
         private readonly FirmComplianceVisibilityService $firmVisibility,
         private readonly ActingAdvisorService $actingAdvisors
     ) {}
@@ -136,10 +138,12 @@ class SocialMediaComplianceService
 
         $this->mail->notifyRequestSubmitted($compliance, $subject);
 
+        $description = 'Submitted social media compliance request #'.$compliance->id
+            .($onBehalfById ? ' on behalf of user #'.$subject->id : '');
+
         $this->activityLogs->log([
             'action' => 'smc.submit',
-            'description' => 'Submitted social media compliance request #'.$compliance->id
-                .($onBehalfById ? ' on behalf of user #'.$subject->id : ''),
+            'description' => $description,
             'user' => $user,
             'hub' => $hub,
             'subject' => $compliance,
@@ -148,6 +152,21 @@ class SocialMediaComplianceService
             'properties' => [
                 'version' => 1,
                 'status' => SocialMediaComplianceRequest::STATUS_PENDING,
+                'on_behalf_of_user_id' => $onBehalfById ? $subject->id : null,
+            ],
+        ]);
+
+        $this->auditTrail->record([
+            'module' => ComplianceAuditEvent::MODULE_SMC,
+            'subject' => $compliance,
+            'event_type' => ComplianceAuditEvent::EVENT_SUBMITTED,
+            'actor' => $user,
+            'hub' => $hub,
+            'description' => $description,
+            'to_status' => SocialMediaComplianceRequest::STATUS_PENDING,
+            'version_number' => 1,
+            'related_user' => $onBehalfById ? $subject : null,
+            'metadata' => [
                 'on_behalf_of_user_id' => $onBehalfById ? $subject->id : null,
             ],
         ]);
@@ -223,9 +242,11 @@ class SocialMediaComplianceService
             $this->mail->notifyResubmitted($compliance, $compliance->assignee, $user);
         }
 
+        $description = 'Resubmitted social media compliance request #'.$compliance->id.' as v'.$newVersion;
+
         $this->activityLogs->log([
             'action' => 'smc.resubmit',
-            'description' => 'ReSubmitted social media compliance request #'.$compliance->id.' as v'.$newVersion,
+            'description' => $description,
             'user' => $user,
             'hub' => $hub,
             'subject' => $compliance,
@@ -234,6 +255,22 @@ class SocialMediaComplianceService
             'properties' => [
                 'version' => $newVersion,
                 'status' => SocialMediaComplianceRequest::STATUS_PENDING,
+                'assigned_to' => $compliance->assigned_to,
+            ],
+        ]);
+
+        $this->auditTrail->record([
+            'module' => ComplianceAuditEvent::MODULE_SMC,
+            'subject' => $compliance,
+            'event_type' => ComplianceAuditEvent::EVENT_RESUBMITTED,
+            'actor' => $user,
+            'hub' => $hub,
+            'description' => $description,
+            'from_status' => SocialMediaComplianceRequest::STATUS_REJECTED,
+            'to_status' => SocialMediaComplianceRequest::STATUS_PENDING,
+            'version_number' => $newVersion,
+            'related_user' => $compliance->assignee,
+            'metadata' => [
                 'assigned_to' => $compliance->assigned_to,
             ],
         ]);
@@ -325,9 +362,11 @@ class SocialMediaComplianceService
 
         $compliance = $compliance->fresh(['currentVersionRow.supportingFiles', 'post', 'user', 'onBehalfBy']);
 
+        $description = 'Confirmed approved-with-feedback for request #'.$compliance->id.' as v'.$newVersion;
+
         $this->activityLogs->log([
             'action' => 'smc.confirm_feedback',
-            'description' => 'Confirmed approved-with-feedback for request #'.$compliance->id.' as v'.$newVersion,
+            'description' => $description,
             'user' => $user,
             'hub' => $hub,
             'subject' => $compliance,
@@ -337,6 +376,21 @@ class SocialMediaComplianceService
                 'version' => $newVersion,
                 'new_image' => $hasNewImage,
                 'status' => SocialMediaComplianceRequest::STATUS_APPROVED,
+            ],
+        ]);
+
+        $this->auditTrail->record([
+            'module' => ComplianceAuditEvent::MODULE_SMC,
+            'subject' => $compliance,
+            'event_type' => ComplianceAuditEvent::EVENT_FEEDBACK_CONFIRMED,
+            'actor' => $user,
+            'hub' => $hub,
+            'description' => $description,
+            'from_status' => SocialMediaComplianceRequest::STATUS_APPROVED_WITH_FEEDBACK,
+            'to_status' => SocialMediaComplianceRequest::STATUS_APPROVED,
+            'version_number' => $newVersion,
+            'metadata' => [
+                'new_image' => $hasNewImage,
             ],
         ]);
 
@@ -385,6 +439,10 @@ class SocialMediaComplianceService
             }
         }
 
+        $compliance->loadMissing(['assignee', 'currentVersionRow']);
+        $previousAssignee = $compliance->assignee;
+        $currentStatus = $compliance->currentStatus();
+
         if ($assignTo) {
             $approver = User::query()->findOrFail($assignTo);
             if (! $this->matrix->roleCan($hub, (string) $approver->role, 'smc_review_requests')) {
@@ -408,9 +466,11 @@ class SocialMediaComplianceService
 
             $this->mail->notifyApproverAssigned($compliance->fresh(), $approver, $actor);
 
+            $description = 'Assigned social media compliance request #'.$compliance->id.' to '.$approver->name;
+
             $this->activityLogs->log([
                 'action' => 'smc.assign',
-                'description' => 'Assigned social media compliance request #'.$compliance->id.' to '.$approver->name,
+                'description' => $description,
                 'user' => $actor,
                 'hub' => $hub,
                 'subject' => $compliance,
@@ -422,6 +482,26 @@ class SocialMediaComplianceService
                     'self_assign' => (int) $approver->id === (int) $actor->id,
                 ],
             ]);
+
+            $this->auditTrail->record([
+                'module' => ComplianceAuditEvent::MODULE_SMC,
+                'subject' => $compliance,
+                'event_type' => ComplianceAuditEvent::EVENT_ASSIGNED,
+                'actor' => $actor,
+                'hub' => $hub,
+                'description' => $description,
+                'from_status' => $currentStatus,
+                'to_status' => $currentStatus,
+                'version_number' => $compliance->current_version,
+                'related_user' => $approver,
+                'metadata' => [
+                    'previous_assignee_id' => $previousAssignee?->id,
+                    'previous_assignee_name' => $previousAssignee?->name,
+                    'previous_assignee_email' => $previousAssignee?->email,
+                    'previous_assignee_role' => $previousAssignee?->role,
+                    'self_assign' => (int) $approver->id === (int) $actor->id,
+                ],
+            ]);
         } else {
             $compliance->update([
                 'assigned_to' => null,
@@ -429,15 +509,33 @@ class SocialMediaComplianceService
                 'assigned_by' => null,
             ]);
 
+            $description = 'Unassigned social media compliance request #'.$compliance->id
+                .($previousAssignee ? ' (was '.$previousAssignee->name.')' : '');
+
             $this->activityLogs->log([
                 'action' => 'smc.unassign',
-                'description' => 'UnAssigned social media compliance request #'.$compliance->id,
+                'description' => $description,
                 'user' => $actor,
                 'hub' => $hub,
                 'subject' => $compliance,
                 'request' => $request,
                 'status_code' => 200,
-                'properties' => [],
+                'properties' => [
+                    'previous_assignee_id' => $previousAssignee?->id,
+                ],
+            ]);
+
+            $this->auditTrail->record([
+                'module' => ComplianceAuditEvent::MODULE_SMC,
+                'subject' => $compliance,
+                'event_type' => ComplianceAuditEvent::EVENT_UNASSIGNED,
+                'actor' => $actor,
+                'hub' => $hub,
+                'description' => $description,
+                'from_status' => $currentStatus,
+                'to_status' => $currentStatus,
+                'version_number' => $compliance->current_version,
+                'related_user' => $previousAssignee,
             ]);
         }
 
@@ -493,6 +591,8 @@ class SocialMediaComplianceService
             ]);
         }
 
+        $fromStatus = $version->status;
+
         $version->update([
             'status' => $status,
             'feedback' => $feedback,
@@ -520,9 +620,11 @@ class SocialMediaComplianceService
             );
         }
 
+        $description = 'Reviewed social media compliance request #'.$compliance->id.' → '.$status;
+
         $this->activityLogs->log([
             'action' => 'smc.review',
-            'description' => 'Reviewed social media compliance request #'.$compliance->id.' → '.$status,
+            'description' => $description,
             'user' => $actor,
             'hub' => $hub,
             'subject' => $compliance,
@@ -532,6 +634,22 @@ class SocialMediaComplianceService
                 'status' => $status,
                 'version' => $compliance->current_version,
                 'has_feedback' => $feedback !== '',
+            ],
+        ]);
+
+        $this->auditTrail->record([
+            'module' => ComplianceAuditEvent::MODULE_SMC,
+            'subject' => $compliance,
+            'event_type' => ComplianceAuditEvent::EVENT_REVIEWED,
+            'actor' => $actor,
+            'hub' => $hub,
+            'description' => $description,
+            'from_status' => $fromStatus,
+            'to_status' => $status,
+            'version_number' => $compliance->current_version,
+            'metadata' => [
+                'has_feedback' => $feedback !== '',
+                'feedback' => $feedback !== '' ? $feedback : null,
             ],
         ]);
 
@@ -587,6 +705,7 @@ class SocialMediaComplianceService
         $supportingFiles = $this->supportingFilesFromData($data);
         ComplianceSupportingFiles::assertWithinLimits($supportingFiles);
         $newVersion = (int) $compliance->current_version + 1;
+        $fromStatus = $current->status;
 
         DB::transaction(function () use ($compliance, $actor, $current, $newVersion, $status, $comment, $supportingFiles) {
             $compliance->update(['current_version' => $newVersion]);
@@ -628,9 +747,12 @@ class SocialMediaComplianceService
             );
         }
 
+        $description = 'Changed status of social media compliance request #'.$compliance->id
+            .' → '.$status.' (v'.$newVersion.')';
+
         $this->activityLogs->log([
             'action' => 'smc.change_status',
-            'description' => 'Changed status of social media compliance request #'.$compliance->id.' → '.$status.' (v'.$newVersion.')',
+            'description' => $description,
             'user' => $actor,
             'hub' => $hub,
             'subject' => $compliance,
@@ -640,6 +762,22 @@ class SocialMediaComplianceService
                 'status' => $status,
                 'version' => $newVersion,
                 'has_comment' => $comment !== '',
+            ],
+        ]);
+
+        $this->auditTrail->record([
+            'module' => ComplianceAuditEvent::MODULE_SMC,
+            'subject' => $compliance,
+            'event_type' => ComplianceAuditEvent::EVENT_STATUS_CHANGED,
+            'actor' => $actor,
+            'hub' => $hub,
+            'description' => $description,
+            'from_status' => $fromStatus,
+            'to_status' => $status,
+            'version_number' => $newVersion,
+            'metadata' => [
+                'has_comment' => $comment !== '',
+                'comment' => $comment !== '' ? $comment : null,
             ],
         ]);
 
@@ -713,10 +851,11 @@ class SocialMediaComplianceService
         $query = SocialMediaComplianceRequest::query()
             ->with([
                 'currentVersionRow.supportingFiles',
-                'assignee:id,name,email',
-                'user:id,name,email,firm_id',
+                'assignee:id,name,email,role',
+                'assigner:id,name,email,role',
+                'user:id,name,email,firm_id,role',
                 'user.firm:id,name',
-                'onBehalfBy:id,name,email',
+                'onBehalfBy:id,name,email,role',
                 'post:id,title',
             ])
             ->orderByDesc('id');
@@ -728,6 +867,10 @@ class SocialMediaComplianceService
         $this->applyFilters($query, $filters);
 
         $rows = $query->get();
+        $auditByRequest = $this->auditTrail->forSubjects(
+            ComplianceAuditEvent::MODULE_SMC,
+            $rows->pluck('id')->all()
+        );
         $byStatus = [];
         foreach (SocialMediaComplianceRequest::STATUSES as $status) {
             $byStatus[$status] = 0;
@@ -752,13 +895,17 @@ class SocialMediaComplianceService
                 $row->name,
                 $row->onBehalfBy?->name
             );
+            $auditTrail = $auditByRequest[(int) $row->id] ?? [];
 
             $export[] = [
                 'id' => $row->id,
                 'submitted_by' => $attribution ? ($row->onBehalfBy?->name ?: $row->name) : $row->name,
                 'submitter_email' => $row->user?->email,
+                'submitter_role' => $row->user?->role,
                 'firm_name' => $row->user?->firm?->name,
                 'on_behalf_by' => $row->onBehalfBy?->name,
+                'on_behalf_by_email' => $row->onBehalfBy?->email,
+                'on_behalf_by_role' => $row->onBehalfBy?->role,
                 'on_behalf_of' => $attribution ? $row->name : null,
                 'post_id' => $row->post_id,
                 'post_title' => $row->post?->title,
@@ -769,10 +916,17 @@ class SocialMediaComplianceService
                 'status' => $status,
                 'assigned_to' => $row->assignee?->name,
                 'assigned_to_email' => $row->assignee?->email,
+                'assigned_to_role' => $row->assignee?->role,
+                'assigned_by' => $row->assigner?->name,
+                'assigned_by_email' => $row->assigner?->email,
+                'assigned_by_role' => $row->assigner?->role,
+                'assigned_date' => optional($row->assigned_date)?->toDateTimeString(),
                 'reviewed_by' => $row->currentVersionRow?->reviewed_by,
                 'feedback' => $row->currentVersionRow?->feedback,
                 'submission_date' => optional($row->submission_date)?->toDateTimeString(),
                 'reviewed_at' => optional($row->currentVersionRow?->reviewed_at)?->toDateTimeString(),
+                'audit_trail' => $auditTrail,
+                'audit_trail_summary' => $this->auditTrail->summarizeForExport($auditTrail),
             ];
         }
 

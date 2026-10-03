@@ -329,6 +329,12 @@ Notes:
 - All Social Media Compliance mutations and report/chart views are written to
   activity_logs (actions: smc.submit / assign / unassign / review / resubmit /
   confirm_feedback / change_status / reports.* / charts.*).
+- Each request also gets a dedicated **compliance audit trail**
+  (`compliance_audit_events`): submit / assign / unassign / review / resubmit /
+  confirm_feedback / change_status, with actor **name, email, role**, optional
+  related user (e.g. assignee), from→to status, version, and description.
+  Detail (`includeVersions`) and reports expose `audit_trail[]` plus
+  `audit_trail_summary` on CSV export; rows also include assigner name/email/role.
 
 3.3b General Compliance
 - Same review flow as Social Media Compliance (submit → assign → review →
@@ -348,6 +354,8 @@ Notes:
 - Power Admin enables the **General Compliance** module per hub. Capabilities
   (`gc_*`) are blurred while the module is off.
 - Activity logs use `gc.*` actions.
+- Same **compliance audit trail** as SMC (`module=gc`) on every lifecycle event;
+  reports and request detail include full history with actor name/email/role.
 
 3.3c Website Content Pre Approval supporting files
 - Change requests accept optional supporting files on submit (advisor/editor),
@@ -357,6 +365,11 @@ Notes:
   attribution (`source`, `uploaded_by_*`, `uploaded_by_role`).
 - **UI:** show supporting files inside each version in version history only —
   never as a separate request-level supporting-files box.
+- Change requests record a **compliance audit trail** (`module=wc`) for submit /
+  assign / review / reject / schedule / publish / resubmit / confirm_feedback /
+  change_status, with actor name/email/role. Detail responses include
+  `audit_trail[]`. Platform report also has
+  `GET .../website-compliance/reports/change-requests` for full history rows.
 
 3.3d Website Template Library vs Website Content Pre Approval Workflow
 - Formerly one combined “Website Compliance” product. They are now TWO Modules
@@ -1151,6 +1164,7 @@ STEP 1 — Shared hub core (content hub)
 [x] Social Media Compliance capability section (blurred while module off)
 [x] Social Media Compliance API — submit / assign / review / versions / reports / charts
 [x] Social Media Compliance activity logging (smc.* actions in activity_logs)
+[x] Compliance audit trail (SMC / GC / WC) — per-request history with actor name/email/role, assigner, status transitions; exposed on detail + reports (+ WC reports/change-requests)
 [x] Optional compliance supporting files (SMC / GC / WC) on submit, review/approve-reject, and change-status — shown in version history with uploader role (advisor / approver / manager), not as a separate request-level box
 [x] Approver / manager dedicated front-end UIs (SMC & ops flows)
 [x] Power Admin user management UI (pa_manage_users_roles — create/update/delete/roles)

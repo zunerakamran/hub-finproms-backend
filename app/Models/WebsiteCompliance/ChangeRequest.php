@@ -2,8 +2,10 @@
 
 namespace App\Models\WebsiteCompliance;
 
+use App\Models\ComplianceAuditEvent;
 use App\Models\User;
 use App\Services\ActingAdvisorService;
+use App\Services\ComplianceAuditTrailService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -158,10 +160,10 @@ class ChangeRequest extends Model
 
         $this->loadMissing([
             'currentVersionRow',
-            'editor:id,name,email,firm_id',
+            'editor:id,name,email,firm_id,role',
             'editor.firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
-            'onBehalfBy:id,name,email',
-            'approver:id,name,email',
+            'onBehalfBy:id,name,email,role',
+            'approver:id,name,email,role',
             'section:id,name,display_name,advisor_id',
         ]);
 
@@ -206,6 +208,7 @@ class ChangeRequest extends Model
                 'id' => $this->editor->id,
                 'name' => $this->editor->name,
                 'email' => $this->editor->email,
+                'role' => $this->editor->role,
                 'firm_id' => $this->editor->firm_id ? (int) $this->editor->firm_id : null,
                 'firm' => $this->editor->firm ? [
                     'id' => (int) $this->editor->firm->id,
@@ -229,6 +232,7 @@ class ChangeRequest extends Model
                 'id' => $this->approver->id,
                 'name' => $this->approver->name,
                 'email' => $this->approver->email,
+                'role' => $this->approver->role,
             ] : null,
             'section' => $this->section ? [
                 'id' => $this->section->id,
@@ -244,6 +248,8 @@ class ChangeRequest extends Model
                 ->values()
                 ->map(fn (ChangeRequestVersion $version) => $version->toApiArray())
                 ->all();
+            $payload['audit_trail'] = app(ComplianceAuditTrailService::class)
+                ->forSubject(ComplianceAuditEvent::MODULE_WC, (int) $this->id);
         }
 
         return $payload;

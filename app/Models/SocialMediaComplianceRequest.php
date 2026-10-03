@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Models\WebsiteCompliance\UsesWcDatabaseContext;
 use App\Services\ActingAdvisorService;
+use App\Services\ComplianceAuditTrailService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -111,11 +112,12 @@ class SocialMediaComplianceRequest extends Model
 
         $this->loadMissing([
             'currentVersionRow',
-            'assignee:id,name,email',
+            'assignee:id,name,email,role',
+            'assigner:id,name,email,role',
             'post:id,title,type,attachment_path,attachment_name,attachment_mime',
-            'user:id,name,email,firm_id',
+            'user:id,name,email,firm_id,role',
             'user.firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
-            'onBehalfBy:id,name,email',
+            'onBehalfBy:id,name,email,role',
         ]);
 
         $version = $this->currentVersionRow;
@@ -137,11 +139,19 @@ class SocialMediaComplianceRequest extends Model
                 'id' => $this->assignee->id,
                 'name' => $this->assignee->name,
                 'email' => $this->assignee->email,
+                'role' => $this->assignee->role,
+            ] : null,
+            'assigner' => $this->assigner ? [
+                'id' => $this->assigner->id,
+                'name' => $this->assigner->name,
+                'email' => $this->assigner->email,
+                'role' => $this->assigner->role,
             ] : null,
             'submitter' => $this->user ? [
                 'id' => $this->user->id,
                 'name' => $this->user->name,
                 'email' => $this->user->email,
+                'role' => $this->user->role,
                 'firm_id' => $this->user->firm_id ? (int) $this->user->firm_id : null,
                 'firm' => $this->user->firm ? [
                     'id' => (int) $this->user->firm->id,
@@ -187,6 +197,8 @@ class SocialMediaComplianceRequest extends Model
                 ->values()
                 ->map(fn (SocialMediaComplianceRequestVersion $v) => $v->toApiArray())
                 ->all();
+            $payload['audit_trail'] = app(ComplianceAuditTrailService::class)
+                ->forSubject(ComplianceAuditEvent::MODULE_SMC, (int) $this->id);
         }
 
         return $payload;

@@ -374,13 +374,16 @@ class GeneralComplianceController extends Controller
 
         $filename = 'general-compliance-report-'.now()->format('Y-m-d').'.csv';
         $headers = [
-            'ID', 'Submitted By', 'Submitter Email',
+            'ID', 'Submitted By', 'Submitter Email', 'Submitter Role', 'Firm',
             'Current Version', 'Version Count', 'Content Type', 'Description',
             'Attachment Count', 'Attachment Names',
             'Supporting File Count', 'Supporting File Names',
             'Status',
-            'Assigned To', 'Assigned To Email', 'Reviewed By', 'Feedback',
+            'Assigned To', 'Assigned To Email', 'Assigned To Role',
+            'Assigned By', 'Assigned By Email', 'Assigned By Role', 'Assigned Date',
+            'Reviewed By', 'Feedback',
             'Submission Date', 'Reviewed At',
+            'Audit Trail',
         ];
 
         return response()->streamDownload(function () use ($report, $headers) {
@@ -391,6 +394,8 @@ class GeneralComplianceController extends Controller
                     $row['id'],
                     $row['submitted_by'],
                     $row['submitter_email'],
+                    $row['submitter_role'] ?? '',
+                    $row['firm_name'] ?? '',
                     $row['current_version'],
                     $row['version_count'],
                     $row['content_type'] ?? '',
@@ -402,10 +407,16 @@ class GeneralComplianceController extends Controller
                     $row['status'],
                     $row['assigned_to'],
                     $row['assigned_to_email'],
+                    $row['assigned_to_role'] ?? '',
+                    $row['assigned_by'] ?? '',
+                    $row['assigned_by_email'] ?? '',
+                    $row['assigned_by_role'] ?? '',
+                    DateFormat::dateTime($row['assigned_date'] ?? null),
                     $row['reviewed_by'],
                     $row['feedback'],
                     DateFormat::dateTime($row['submission_date'] ?? null),
                     DateFormat::dateTime($row['reviewed_at'] ?? null),
+                    $row['audit_trail_summary'] ?? '',
                 ]);
             }
             fclose($out);

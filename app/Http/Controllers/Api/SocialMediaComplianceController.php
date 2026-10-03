@@ -369,10 +369,14 @@ class SocialMediaComplianceController extends Controller
 
         $filename = 'social-media-compliance-report-'.now()->format('Y-m-d').'.csv';
         $headers = [
-            'ID', 'Submitted By', 'Submitter Email', 'Post ID', 'Post Title',
+            'ID', 'Submitted By', 'Submitter Email', 'Submitter Role', 'Firm',
+            'Post ID', 'Post Title',
             'Current Version', 'Version Count', 'Description', 'Image URL', 'Status',
-            'Assigned To', 'Assigned To Email', 'Reviewed By', 'Feedback',
+            'Assigned To', 'Assigned To Email', 'Assigned To Role',
+            'Assigned By', 'Assigned By Email', 'Assigned By Role', 'Assigned Date',
+            'Reviewed By', 'Feedback',
             'Submission Date', 'Reviewed At',
+            'Audit Trail',
         ];
 
         return response()->streamDownload(function () use ($report, $headers) {
@@ -383,6 +387,8 @@ class SocialMediaComplianceController extends Controller
                     $row['id'],
                     $row['submitted_by'],
                     $row['submitter_email'],
+                    $row['submitter_role'] ?? '',
+                    $row['firm_name'] ?? '',
                     $row['post_id'],
                     $row['post_title'],
                     $row['current_version'],
@@ -392,10 +398,16 @@ class SocialMediaComplianceController extends Controller
                     $row['status'],
                     $row['assigned_to'],
                     $row['assigned_to_email'],
+                    $row['assigned_to_role'] ?? '',
+                    $row['assigned_by'] ?? '',
+                    $row['assigned_by_email'] ?? '',
+                    $row['assigned_by_role'] ?? '',
+                    DateFormat::dateTime($row['assigned_date'] ?? null),
                     $row['reviewed_by'],
                     $row['feedback'],
                     DateFormat::dateTime($row['submission_date'] ?? null),
                     DateFormat::dateTime($row['reviewed_at'] ?? null),
+                    $row['audit_trail_summary'] ?? '',
                 ]);
             }
             fclose($out);

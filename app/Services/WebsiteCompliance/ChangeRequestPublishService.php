@@ -2,9 +2,11 @@
 
 namespace App\Services\WebsiteCompliance;
 
+use App\Models\ComplianceAuditEvent;
 use App\Models\WebsiteCompliance\ChangeRequest;
 use App\Models\WebsiteCompliance\Section;
 use App\Services\ActivityLogService;
+use App\Services\ComplianceAuditTrailService;
 use Illuminate\Support\Facades\DB;
 
 class ChangeRequestPublishService
@@ -199,15 +201,17 @@ class ChangeRequestPublishService
                 $actor = \App\Models\User::find($actorUserId);
             }
 
+            $eventDescription = $scheduled
+                ? ($cpanelSynced
+                    ? 'Scheduled content published for change request #'.$changeRequest->id
+                    : 'Scheduled content published in hub DB for change request #'.$changeRequest->id.' but live site was not updated')
+                : ($cpanelSynced
+                    ? 'Content approved and published for change request #'.$changeRequest->id
+                    : 'Content approved in hub DB for change request #'.$changeRequest->id.' but live site was not updated');
+
             app(ActivityLogService::class)->log([
                 'action' => 'wc.change_request.approve',
-                'description' => $scheduled
-                    ? ($cpanelSynced
-                        ? 'Scheduled content published to advisor cPanel DB & hub DB'
-                        : 'Scheduled content published in hub DB but cPanel push did not update the live site')
-                    : ($cpanelSynced
-                        ? 'Content approved and published to advisor cPanel DB & hub DB'
-                        : 'Content approved in hub DB but cPanel push did not update the live site'),
+                'description' => $eventDescription,
                 'subject' => $changeRequest,
                 'user' => $actor,
                 'properties' => array_filter([
@@ -216,8 +220,23 @@ class ChangeRequestPublishService
                     'via' => $scheduled ? 'scheduled' : null,
                 ], fn ($v) => $v !== null),
             ]);
+
+            app(ComplianceAuditTrailService::class)->record([
+                'module' => ComplianceAuditEvent::MODULE_WC,
+                'subject' => $changeRequest,
+                'event_type' => ComplianceAuditEvent::EVENT_PUBLISHED,
+                'actor' => $actor,
+                'description' => $eventDescription,
+                'to_status' => ChangeRequest::STATUS_APPROVED,
+                'version_number' => $changeRequest->current_version,
+                'metadata' => array_filter([
+                    'cpanel_synced' => $cpanelSynced,
+                    'approver_id' => $actorUserId ?: $changeRequest->approver_id,
+                    'via' => $scheduled ? 'scheduled' : null,
+                ], fn ($v) => $v !== null),
+            ]);
         } catch (\Throwable) {
-            // Activity logging must not block publish.
+            // Activity / audit logging must not block publish.
         }
     }
 }

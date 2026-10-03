@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\WebsiteCompliance;
 
 use App\Jobs\WebsiteCompliance\PublishScheduledChangeRequestJob;
 use App\Http\Controllers\Controller;
+use App\Models\ComplianceAuditEvent;
 use App\Models\User;
 use App\Models\WebsiteCompliance\ChangeRequest;
 use App\Models\WebsiteCompliance\Section;
@@ -11,6 +12,7 @@ use App\Models\WebsiteCompliance\TemplateRequest;
 use App\Services\ActingAdvisorService;
 use App\Services\ActingHubService;
 use App\Services\ActivityLogService;
+use App\Services\ComplianceAuditTrailService;
 use App\Services\FirmComplianceVisibilityService;
 use App\Services\WebsiteCompliance\ChangeRequestPublishService;
 use App\Services\WebsiteCompliance\ChangeRequestWorkflowService;
@@ -28,6 +30,7 @@ class ChangeRequestController extends Controller
     public function __construct(
         private readonly WebsiteComplianceGate $gate,
         private readonly ActivityLogService $activityLogs,
+        private readonly ComplianceAuditTrailService $auditTrail,
         private readonly ChangeRequestWorkflowService $workflow,
         private readonly FirmComplianceVisibilityService $firmVisibility,
         private readonly ActingAdvisorService $actingAdvisors
@@ -70,13 +73,30 @@ class ChangeRequestController extends Controller
 
             $this->workflow->createVersionOne($changeRequest, $proposedContent, ChangeRequest::STATUS_PENDING, $supportingFiles, $user, 'submit');
 
+            $eventDescription = 'Submitted change request #'.$changeRequest->id.' for '.count($edits).' section(s)'
+                .($onBehalfById ? ' on behalf of user #'.$editorId : '');
+
             $this->activityLogs->log([
                 'action' => 'wc.change_request.submit',
-                'description' => 'Submitted change request for '.count($edits).' section(s)'
-                    .($onBehalfById ? ' on behalf of user #'.$editorId : ''),
+                'description' => $eventDescription,
                 'user' => $user,
                 'subject' => $changeRequest,
                 'request' => $request,
+            ]);
+
+            $this->auditTrail->record([
+                'module' => ComplianceAuditEvent::MODULE_WC,
+                'subject' => $changeRequest,
+                'event_type' => ComplianceAuditEvent::EVENT_SUBMITTED,
+                'actor' => $user,
+                'description' => $eventDescription,
+                'to_status' => ChangeRequest::STATUS_PENDING,
+                'version_number' => 1,
+                'related_user' => $onBehalfById ? $subject : null,
+                'metadata' => [
+                    'section_count' => count($edits),
+                    'on_behalf_of_user_id' => $onBehalfById ? $editorId : null,
+                ],
             ]);
 
             return response()->json($changeRequest->fresh(['editor', 'onBehalfBy', 'section', 'currentVersionRow.supportingFiles', 'versions.supportingFiles'])->toApiArray(includeVersions: true), 201);
@@ -110,13 +130,29 @@ class ChangeRequestController extends Controller
 
         $this->workflow->createVersionOne($changeRequest, $proposedContent, ChangeRequest::STATUS_PENDING, $supportingFiles, $user, 'submit');
 
+        $eventDescription = 'Submitted change request #'.$changeRequest->id
+            .($onBehalfById ? ' on behalf of user #'.$editorId : '');
+
         $this->activityLogs->log([
             'action' => 'wc.change_request.submit',
-            'description' => 'Submitted change request'
-                .($onBehalfById ? ' on behalf of user #'.$editorId : ''),
+            'description' => $eventDescription,
             'user' => $user,
             'subject' => $changeRequest,
             'request' => $request,
+        ]);
+
+        $this->auditTrail->record([
+            'module' => ComplianceAuditEvent::MODULE_WC,
+            'subject' => $changeRequest,
+            'event_type' => ComplianceAuditEvent::EVENT_SUBMITTED,
+            'actor' => $user,
+            'description' => $eventDescription,
+            'to_status' => ChangeRequest::STATUS_PENDING,
+            'version_number' => 1,
+            'related_user' => $onBehalfById ? $subject : null,
+            'metadata' => [
+                'on_behalf_of_user_id' => $onBehalfById ? $editorId : null,
+            ],
         ]);
 
         return response()->json($changeRequest->fresh(['editor', 'onBehalfBy', 'section', 'currentVersionRow.supportingFiles', 'versions.supportingFiles'])->toApiArray(includeVersions: true), 201);
@@ -288,6 +324,8 @@ class ChangeRequestController extends Controller
             null
         );
 
+        $fromStatus = (string) $changeRequest->status;
+
         $changeRequest->update([
             'approver_id' => $this->gate->tenantUserIdOrNull($user),
             // Stay Pending when claimed — same as SMC/GC assignment (status changes via review / manager override).
@@ -299,15 +337,30 @@ class ChangeRequestController extends Controller
             ChangeRequest::STATUS_PENDING
         );
 
+        $eventDescription = 'Approver assigned change request #'.$changeRequest->id.' to themselves';
+
         $this->activityLogs->log([
             'action' => 'wc.change_request.assign',
-            'description' => 'Approver assigned request to themselves',
+            'description' => $eventDescription,
             'user' => $user,
             'subject' => $changeRequest,
             'request' => $request,
         ]);
 
-        return response()->json($changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow'])->toApiArray());
+        $this->auditTrail->record([
+            'module' => ComplianceAuditEvent::MODULE_WC,
+            'subject' => $changeRequest,
+            'event_type' => ComplianceAuditEvent::EVENT_ASSIGNED,
+            'actor' => $user,
+            'description' => $eventDescription,
+            'from_status' => $fromStatus,
+            'to_status' => ChangeRequest::STATUS_PENDING,
+            'version_number' => $changeRequest->current_version,
+            'related_user' => $user,
+            'metadata' => ['self_assign' => true],
+        ]);
+
+        return response()->json($changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow'])->toApiArray(includeVersions: true));
     }
 
     public function assignToApprover(Request $request, int $id): JsonResponse
@@ -319,7 +372,7 @@ class ChangeRequestController extends Controller
             'approver_id' => ['required', Rule::exists(User::class, 'id')],
         ]);
 
-        $changeRequest = ChangeRequest::with('editor.firm')->findOrFail($id);
+        $changeRequest = ChangeRequest::with(['editor.firm', 'approver'])->findOrFail($id);
 
         if (! in_array((string) $changeRequest->status, [
             ChangeRequest::STATUS_PENDING,
@@ -347,6 +400,9 @@ class ChangeRequestController extends Controller
             ], 422);
         }
 
+        $fromStatus = (string) $changeRequest->status;
+        $previousApprover = $changeRequest->approver;
+
         $changeRequest->update([
             'approver_id' => $request->approver_id,
             // Stay Pending when assigned — manager can still change status; approver reviews while Pending.
@@ -358,15 +414,36 @@ class ChangeRequestController extends Controller
             ChangeRequest::STATUS_PENDING
         );
 
+        $eventDescription = 'Assigned change request #'.$changeRequest->id.' to '.$approver->name;
+
         $this->activityLogs->log([
             'action' => 'wc.change_request.assign',
-            'description' => 'Assigned request to user ID '.$request->approver_id,
+            'description' => $eventDescription,
             'user' => $user,
             'subject' => $changeRequest,
             'request' => $request,
         ]);
 
-        return response()->json($changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow'])->toApiArray());
+        $this->auditTrail->record([
+            'module' => ComplianceAuditEvent::MODULE_WC,
+            'subject' => $changeRequest,
+            'event_type' => ComplianceAuditEvent::EVENT_ASSIGNED,
+            'actor' => $user,
+            'description' => $eventDescription,
+            'from_status' => $fromStatus,
+            'to_status' => ChangeRequest::STATUS_PENDING,
+            'version_number' => $changeRequest->current_version,
+            'related_user' => $approver,
+            'metadata' => [
+                'previous_approver_id' => $previousApprover?->id,
+                'previous_approver_name' => $previousApprover?->name,
+                'previous_approver_email' => $previousApprover?->email,
+                'previous_approver_role' => $previousApprover?->role,
+                'self_assign' => (int) $approver->id === (int) $user->id,
+            ],
+        ]);
+
+        return response()->json($changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow'])->toApiArray(includeVersions: true));
     }
 
     public function approve(Request $request, int $id): JsonResponse
@@ -402,6 +479,8 @@ class ChangeRequestController extends Controller
                 ], 422);
             }
 
+            $fromStatus = (string) $changeRequest->status;
+
             $changeRequest->update([
                 'status' => ChangeRequest::STATUS_SCHEDULED,
                 'scheduled_at' => $scheduledAt,
@@ -435,9 +514,12 @@ class ChangeRequestController extends Controller
                 $scheduledAt->toIso8601String(),
             )->delay($scheduledAt);
 
+            $eventDescription = 'Change request #'.$changeRequest->id
+                .' approved and scheduled for '.$scheduledAt->toIso8601String();
+
             $this->activityLogs->log([
                 'action' => 'wc.change_request.schedule',
-                'description' => 'Content approved and scheduled for '.$scheduledAt->toIso8601String(),
+                'description' => $eventDescription,
                 'user' => $user,
                 'subject' => $changeRequest,
                 'request' => $request,
@@ -445,6 +527,21 @@ class ChangeRequestController extends Controller
                     'scheduled_at' => $scheduledAt->toIso8601String(),
                     'hub_id' => $hubId,
                     'dispatch' => 'delayed_job',
+                ],
+            ]);
+
+            $this->auditTrail->record([
+                'module' => ComplianceAuditEvent::MODULE_WC,
+                'subject' => $changeRequest,
+                'event_type' => ComplianceAuditEvent::EVENT_SCHEDULED,
+                'actor' => $user,
+                'description' => $eventDescription,
+                'from_status' => $fromStatus,
+                'to_status' => ChangeRequest::STATUS_SCHEDULED,
+                'version_number' => $changeRequest->current_version,
+                'metadata' => [
+                    'scheduled_at' => $scheduledAt->toIso8601String(),
+                    'hub_id' => $hubId,
                 ],
             ]);
 
@@ -486,6 +583,7 @@ class ChangeRequestController extends Controller
         $this->workflow->assertReviewable($changeRequest, $user);
 
         $supportingFiles = ComplianceSupportingFiles::fromRequest($request);
+        $fromStatus = (string) $changeRequest->status;
 
         $proposed = $changeRequest->resolvedProposedContent();
         $this->workflow->unlockSectionsFromProposedContent($proposed, $changeRequest->section);
@@ -509,12 +607,28 @@ class ChangeRequestController extends Controller
             $this->workflow->appendSupportingFilesToVersion($rejectVersion, $supportingFiles, $user, 'reject');
         }
 
+        $eventDescription = 'Change request #'.$changeRequest->id.' rejected: '.$request->rejection_reason;
+
         $this->activityLogs->log([
             'action' => 'wc.change_request.reject',
-            'description' => 'Change request rejected: '.$request->rejection_reason,
+            'description' => $eventDescription,
             'user' => $user,
             'subject' => $changeRequest,
             'request' => $request,
+        ]);
+
+        $this->auditTrail->record([
+            'module' => ComplianceAuditEvent::MODULE_WC,
+            'subject' => $changeRequest,
+            'event_type' => ComplianceAuditEvent::EVENT_REJECTED,
+            'actor' => $user,
+            'description' => $eventDescription,
+            'from_status' => $fromStatus,
+            'to_status' => ChangeRequest::STATUS_REJECTED,
+            'version_number' => $changeRequest->current_version,
+            'metadata' => [
+                'rejection_reason' => $request->rejection_reason,
+            ],
         ]);
 
         return response()->json([

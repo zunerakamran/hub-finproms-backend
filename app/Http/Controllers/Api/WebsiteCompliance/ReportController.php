@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\WebsiteCompliance;
 
 use App\Http\Controllers\Controller;
+use App\Models\ComplianceAuditEvent;
 use App\Models\User;
 use App\Models\WebsiteCompliance\ChangeRequest;
 use App\Models\WebsiteCompliance\PlatformReport;
@@ -10,6 +11,7 @@ use App\Models\WebsiteCompliance\Template;
 use App\Models\WebsiteCompliance\TemplateRequest;
 use App\Support\WebsiteCompliance\WcDatabaseContext;
 use App\Services\ActivityLogService;
+use App\Services\ComplianceAuditTrailService;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -21,7 +23,8 @@ class ReportController extends Controller
 {
     public function __construct(
         private readonly WebsiteComplianceGate $gate,
-        private readonly ActivityLogService $activityLogs
+        private readonly ActivityLogService $activityLogs,
+        private readonly ComplianceAuditTrailService $auditTrail
     ) {}
 
     public function summary(Request $request): JsonResponse
@@ -86,6 +89,88 @@ class ReportController extends Controller
         );
 
         return response()->json($reports);
+    }
+
+    /**
+     * Detailed change-request report with full audit trail per request.
+     */
+    public function changeRequests(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $this->gate->assertCan($user, 'wc_view_platform_report');
+
+        $rows = ChangeRequest::query()
+            ->with([
+                'editor:id,name,email,role,firm_id',
+                'editor.firm:id,name',
+                'onBehalfBy:id,name,email,role',
+                'approver:id,name,email,role',
+                'currentVersionRow',
+                'section:id,name,display_name',
+            ])
+            ->orderByDesc('id')
+            ->get();
+
+        $auditByRequest = $this->auditTrail->forSubjects(
+            ComplianceAuditEvent::MODULE_WC,
+            $rows->pluck('id')->all()
+        );
+
+        $byStatus = [];
+        foreach (ChangeRequest::STATUSES as $status) {
+            $byStatus[$status] = 0;
+        }
+
+        $export = [];
+        foreach ($rows as $row) {
+            $status = (string) $row->status;
+            $byStatus[$status] = ($byStatus[$status] ?? 0) + 1;
+            $auditTrail = $auditByRequest[(int) $row->id] ?? [];
+
+            $export[] = [
+                'id' => $row->id,
+                'status' => $status,
+                'current_version' => (int) ($row->current_version ?: 1),
+                'submitted_by' => $row->onBehalfBy?->name ?: $row->editor?->name,
+                'submitter_email' => $row->editor?->email,
+                'submitter_role' => $row->editor?->role,
+                'firm_name' => $row->editor?->firm?->name,
+                'on_behalf_by' => $row->onBehalfBy?->name,
+                'on_behalf_by_email' => $row->onBehalfBy?->email,
+                'on_behalf_by_role' => $row->onBehalfBy?->role,
+                'assigned_to' => $row->approver?->name,
+                'assigned_to_email' => $row->approver?->email,
+                'assigned_to_role' => $row->approver?->role,
+                'reviewed_by' => $row->currentVersionRow?->reviewed_by,
+                'feedback' => $row->feedback ?: $row->currentVersionRow?->feedback,
+                'rejection_reason' => $row->rejection_reason,
+                'scheduled_at' => optional($row->scheduled_at)?->toDateTimeString(),
+                'section_name' => $row->section?->display_name ?: $row->section?->name,
+                'submission_date' => optional($row->created_at)?->toDateTimeString(),
+                'reviewed_at' => optional($row->currentVersionRow?->reviewed_at)?->toDateTimeString(),
+                'audit_trail' => $auditTrail,
+                'audit_trail_summary' => $this->auditTrail->summarizeForExport($auditTrail),
+            ];
+        }
+
+        $this->activityLogs->log([
+            'action' => 'wc.reports.change_requests',
+            'description' => 'Viewed website compliance change-request audit report',
+            'user' => $user,
+            'request' => $request,
+            'properties' => ['total' => count($export)],
+        ]);
+
+        return response()->json([
+            'report' => [
+                'summary' => [
+                    'total' => count($export),
+                    'by_status' => $byStatus,
+                ],
+                'rows' => $export,
+            ],
+            'statuses' => ChangeRequest::STATUSES,
+        ]);
     }
 
     /**

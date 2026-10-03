@@ -2,6 +2,7 @@
 
 namespace App\Services\WebsiteCompliance;
 
+use App\Models\ComplianceAuditEvent;
 use App\Models\User;
 use App\Models\WebsiteCompliance\ChangeRequest;
 use App\Models\WebsiteCompliance\ChangeRequestAttachment;
@@ -12,6 +13,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use App\Services\ActingAdvisorService;
 use App\Services\ActivityLogService;
+use App\Services\ComplianceAuditTrailService;
 use App\Services\FirmComplianceVisibilityService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -21,6 +23,7 @@ class ChangeRequestWorkflowService
 {
     public function __construct(
         private readonly ActivityLogService $activityLogs,
+        private readonly ComplianceAuditTrailService $auditTrail,
         private readonly WebsiteComplianceGate $gate,
         private readonly FirmComplianceVisibilityService $firmVisibility
     ) {}
@@ -152,6 +155,7 @@ class ChangeRequestWorkflowService
     ): ChangeRequest {
         $this->assertReviewable($changeRequest, $user);
 
+        $fromStatus = (string) $changeRequest->status;
         $proposed = $changeRequest->resolvedProposedContent();
         $changeRequest->loadMissing('section');
         $this->unlockSectionsFromProposedContent($proposed, $changeRequest->section);
@@ -176,13 +180,27 @@ class ChangeRequestWorkflowService
             $this->appendSupportingFilesToVersion($version, $supportingFiles, $user, 'approve_with_feedback');
         }
 
+        $eventDescription = 'Change request #'.$changeRequest->id.' approved with feedback';
+
         $this->activityLogs->log([
             'action' => 'wc.change_request.approve_with_feedback',
-            'description' => 'Change request approved with feedback',
+            'description' => $eventDescription,
             'user' => $user,
             'subject' => $changeRequest,
             'request' => $request,
             'properties' => ['feedback' => $feedback],
+        ]);
+
+        $this->auditTrail->record([
+            'module' => ComplianceAuditEvent::MODULE_WC,
+            'subject' => $changeRequest,
+            'event_type' => ComplianceAuditEvent::EVENT_REVIEWED,
+            'actor' => $user,
+            'description' => $eventDescription,
+            'from_status' => $fromStatus,
+            'to_status' => ChangeRequest::STATUS_APPROVED_WITH_FEEDBACK,
+            'version_number' => $changeRequest->current_version,
+            'metadata' => ['feedback' => $feedback],
         ]);
 
         return $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow.supportingFiles']);
@@ -305,9 +323,12 @@ class ChangeRequestWorkflowService
             );
         }
 
+        $eventDescription = 'Changed website compliance request #'.$changeRequest->id
+            .' status to '.$status.' (v'.$nextVersion.')';
+
         $this->activityLogs->log([
             'action' => 'wc.change_request.change_status',
-            'description' => 'Changed website compliance request status to '.$status.' (v'.$nextVersion.')',
+            'description' => $eventDescription,
             'user' => $user,
             'subject' => $changeRequest,
             'request' => $request,
@@ -316,6 +337,21 @@ class ChangeRequestWorkflowService
                 'version' => $nextVersion,
                 'has_comment' => $comment !== '',
                 'previous_status' => $currentStatus,
+            ],
+        ]);
+
+        $this->auditTrail->record([
+            'module' => ComplianceAuditEvent::MODULE_WC,
+            'subject' => $changeRequest,
+            'event_type' => ComplianceAuditEvent::EVENT_STATUS_CHANGED,
+            'actor' => $user,
+            'description' => $eventDescription,
+            'from_status' => $currentStatus,
+            'to_status' => $status,
+            'version_number' => $nextVersion,
+            'metadata' => [
+                'has_comment' => $comment !== '',
+                'comment' => $comment !== '' ? $comment : null,
             ],
         ]);
 
@@ -385,12 +421,25 @@ class ChangeRequestWorkflowService
             $this->storeSupportingFilesForVersion($newVersionRow, $normalizedSupporting, $user, 'resubmit');
         }
 
+        $eventDescription = 'Resubmitted change request #'.$changeRequest->id.' as version '.$nextVersion;
+
         $this->activityLogs->log([
             'action' => 'wc.change_request.resubmit',
-            'description' => 'Resubmitted change request as version '.$nextVersion,
+            'description' => $eventDescription,
             'user' => $user,
             'subject' => $changeRequest,
             'request' => $request,
+        ]);
+
+        $this->auditTrail->record([
+            'module' => ComplianceAuditEvent::MODULE_WC,
+            'subject' => $changeRequest,
+            'event_type' => ComplianceAuditEvent::EVENT_RESUBMITTED,
+            'actor' => $user,
+            'description' => $eventDescription,
+            'from_status' => ChangeRequest::STATUS_REJECTED,
+            'to_status' => ChangeRequest::STATUS_PENDING,
+            'version_number' => $nextVersion,
         ]);
 
         return $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow.supportingFiles', 'versions.supportingFiles']);
@@ -510,15 +559,33 @@ class ChangeRequestWorkflowService
         $changeRequest = $changeRequest->fresh(['section', 'currentVersionRow']);
         $result = ChangeRequestPublishService::publish($changeRequest, $user->id);
 
+        $eventDescription = 'Confirmed approved-with-feedback and published change request #'
+            .$changeRequest->id.' as version '.$nextVersion;
+
         $this->activityLogs->log([
             'action' => 'wc.change_request.confirm_feedback',
-            'description' => 'Confirmed approved-with-feedback and published as version '.$nextVersion,
+            'description' => $eventDescription,
             'user' => $user,
             'subject' => $changeRequest,
             'request' => $request,
             'properties' => [
                 'version' => $nextVersion,
                 'revised' => $sectionEdits !== null,
+            ],
+        ]);
+
+        $this->auditTrail->record([
+            'module' => ComplianceAuditEvent::MODULE_WC,
+            'subject' => $changeRequest,
+            'event_type' => ComplianceAuditEvent::EVENT_FEEDBACK_CONFIRMED,
+            'actor' => $user,
+            'description' => $eventDescription,
+            'from_status' => ChangeRequest::STATUS_APPROVED_WITH_FEEDBACK,
+            'to_status' => ChangeRequest::STATUS_APPROVED,
+            'version_number' => $nextVersion,
+            'metadata' => [
+                'revised' => $sectionEdits !== null,
+                'cpanel_synced' => $result['cpanel_synced'] ?? null,
             ],
         ]);
 

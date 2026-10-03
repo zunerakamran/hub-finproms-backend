@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\ComplianceAuditEvent;
 use App\Models\Firm;
 use App\Models\GeneralComplianceContentType;
 use App\Models\GeneralComplianceRequest;
@@ -29,6 +30,7 @@ class GeneralComplianceService
         private readonly CapabilitiesMatrixService $matrix,
         private readonly GeneralComplianceMailService $mail,
         private readonly ActivityLogService $activityLogs,
+        private readonly ComplianceAuditTrailService $auditTrail,
         private readonly FirmComplianceVisibilityService $firmVisibility,
         private readonly ActingAdvisorService $actingAdvisors
     ) {}
@@ -156,10 +158,12 @@ class GeneralComplianceService
 
         $this->mail->notifyRequestSubmitted($compliance, $subject);
 
+        $eventDescription = 'Submitted general compliance request #'.$compliance->id
+            .($onBehalfById ? ' on behalf of user #'.$subject->id : '');
+
         $this->activityLogs->log([
             'action' => 'gc.submit',
-            'description' => 'Submitted general compliance request #'.$compliance->id
-                .($onBehalfById ? ' on behalf of user #'.$subject->id : ''),
+            'description' => $eventDescription,
             'user' => $user,
             'hub' => $hub,
             'subject' => $compliance,
@@ -168,6 +172,24 @@ class GeneralComplianceService
             'properties' => [
                 'version' => 1,
                 'status' => GeneralComplianceRequest::STATUS_PENDING,
+                'content_type' => $contentType,
+                'attachment_count' => count($attachments),
+                'supporting_file_count' => count($supportingFiles),
+                'on_behalf_of_user_id' => $onBehalfById ? $subject->id : null,
+            ],
+        ]);
+
+        $this->auditTrail->record([
+            'module' => ComplianceAuditEvent::MODULE_GC,
+            'subject' => $compliance,
+            'event_type' => ComplianceAuditEvent::EVENT_SUBMITTED,
+            'actor' => $user,
+            'hub' => $hub,
+            'description' => $eventDescription,
+            'to_status' => GeneralComplianceRequest::STATUS_PENDING,
+            'version_number' => 1,
+            'related_user' => $onBehalfById ? $subject : null,
+            'metadata' => [
                 'content_type' => $contentType,
                 'attachment_count' => count($attachments),
                 'supporting_file_count' => count($supportingFiles),
@@ -289,9 +311,11 @@ class GeneralComplianceService
             $this->mail->notifyResubmitted($compliance, $compliance->assignee, $user);
         }
 
+        $eventDescription = 'Resubmitted general compliance request #'.$compliance->id.' as v'.$newVersion;
+
         $this->activityLogs->log([
             'action' => 'gc.resubmit',
-            'description' => 'ReSubmitted general compliance request #'.$compliance->id.' as v'.$newVersion,
+            'description' => $eventDescription,
             'user' => $user,
             'hub' => $hub,
             'subject' => $compliance,
@@ -300,6 +324,25 @@ class GeneralComplianceService
             'properties' => [
                 'version' => $newVersion,
                 'status' => GeneralComplianceRequest::STATUS_PENDING,
+                'content_type' => $contentType,
+                'assigned_to' => $compliance->assigned_to,
+                'new_attachments' => $hasNewAttachments,
+                'new_supporting_files' => $hasNewSupportingFiles,
+            ],
+        ]);
+
+        $this->auditTrail->record([
+            'module' => ComplianceAuditEvent::MODULE_GC,
+            'subject' => $compliance,
+            'event_type' => ComplianceAuditEvent::EVENT_RESUBMITTED,
+            'actor' => $user,
+            'hub' => $hub,
+            'description' => $eventDescription,
+            'from_status' => GeneralComplianceRequest::STATUS_REJECTED,
+            'to_status' => GeneralComplianceRequest::STATUS_PENDING,
+            'version_number' => $newVersion,
+            'related_user' => $compliance->assignee,
+            'metadata' => [
                 'content_type' => $contentType,
                 'assigned_to' => $compliance->assigned_to,
                 'new_attachments' => $hasNewAttachments,
@@ -418,9 +461,11 @@ class GeneralComplianceService
             'onBehalfBy',
         ]);
 
+        $eventDescription = 'Confirmed approved-with-feedback for request #'.$compliance->id.' as v'.$newVersion;
+
         $this->activityLogs->log([
             'action' => 'gc.confirm_feedback',
-            'description' => 'Confirmed approved-with-feedback for request #'.$compliance->id.' as v'.$newVersion,
+            'description' => $eventDescription,
             'user' => $user,
             'hub' => $hub,
             'subject' => $compliance,
@@ -431,6 +476,22 @@ class GeneralComplianceService
                 'new_attachments' => $hasNewAttachments,
                 'new_supporting_files' => $hasNewSupportingFiles,
                 'status' => GeneralComplianceRequest::STATUS_APPROVED,
+            ],
+        ]);
+
+        $this->auditTrail->record([
+            'module' => ComplianceAuditEvent::MODULE_GC,
+            'subject' => $compliance,
+            'event_type' => ComplianceAuditEvent::EVENT_FEEDBACK_CONFIRMED,
+            'actor' => $user,
+            'hub' => $hub,
+            'description' => $eventDescription,
+            'from_status' => GeneralComplianceRequest::STATUS_APPROVED_WITH_FEEDBACK,
+            'to_status' => GeneralComplianceRequest::STATUS_APPROVED,
+            'version_number' => $newVersion,
+            'metadata' => [
+                'new_attachments' => $hasNewAttachments,
+                'new_supporting_files' => $hasNewSupportingFiles,
             ],
         ]);
 
@@ -479,6 +540,10 @@ class GeneralComplianceService
             }
         }
 
+        $compliance->loadMissing(['assignee', 'currentVersionRow']);
+        $previousAssignee = $compliance->assignee;
+        $currentStatus = $compliance->currentStatus();
+
         if ($assignTo) {
             $approver = User::query()->findOrFail($assignTo);
             if (! $this->matrix->roleCan($hub, (string) $approver->role, 'gc_review_requests')) {
@@ -502,9 +567,11 @@ class GeneralComplianceService
 
             $this->mail->notifyApproverAssigned($compliance->fresh(), $approver, $actor);
 
+            $eventDescription = 'Assigned general compliance request #'.$compliance->id.' to '.$approver->name;
+
             $this->activityLogs->log([
                 'action' => 'gc.assign',
-                'description' => 'Assigned general compliance request #'.$compliance->id.' to '.$approver->name,
+                'description' => $eventDescription,
                 'user' => $actor,
                 'hub' => $hub,
                 'subject' => $compliance,
@@ -516,6 +583,26 @@ class GeneralComplianceService
                     'self_assign' => (int) $approver->id === (int) $actor->id,
                 ],
             ]);
+
+            $this->auditTrail->record([
+                'module' => ComplianceAuditEvent::MODULE_GC,
+                'subject' => $compliance,
+                'event_type' => ComplianceAuditEvent::EVENT_ASSIGNED,
+                'actor' => $actor,
+                'hub' => $hub,
+                'description' => $eventDescription,
+                'from_status' => $currentStatus,
+                'to_status' => $currentStatus,
+                'version_number' => $compliance->current_version,
+                'related_user' => $approver,
+                'metadata' => [
+                    'previous_assignee_id' => $previousAssignee?->id,
+                    'previous_assignee_name' => $previousAssignee?->name,
+                    'previous_assignee_email' => $previousAssignee?->email,
+                    'previous_assignee_role' => $previousAssignee?->role,
+                    'self_assign' => (int) $approver->id === (int) $actor->id,
+                ],
+            ]);
         } else {
             $compliance->update([
                 'assigned_to' => null,
@@ -523,15 +610,33 @@ class GeneralComplianceService
                 'assigned_by' => null,
             ]);
 
+            $eventDescription = 'Unassigned general compliance request #'.$compliance->id
+                .($previousAssignee ? ' (was '.$previousAssignee->name.')' : '');
+
             $this->activityLogs->log([
                 'action' => 'gc.unassign',
-                'description' => 'UnAssigned general compliance request #'.$compliance->id,
+                'description' => $eventDescription,
                 'user' => $actor,
                 'hub' => $hub,
                 'subject' => $compliance,
                 'request' => $request,
                 'status_code' => 200,
-                'properties' => [],
+                'properties' => [
+                    'previous_assignee_id' => $previousAssignee?->id,
+                ],
+            ]);
+
+            $this->auditTrail->record([
+                'module' => ComplianceAuditEvent::MODULE_GC,
+                'subject' => $compliance,
+                'event_type' => ComplianceAuditEvent::EVENT_UNASSIGNED,
+                'actor' => $actor,
+                'hub' => $hub,
+                'description' => $eventDescription,
+                'from_status' => $currentStatus,
+                'to_status' => $currentStatus,
+                'version_number' => $compliance->current_version,
+                'related_user' => $previousAssignee,
             ]);
         }
 
@@ -592,6 +697,8 @@ class GeneralComplianceService
             ]);
         }
 
+        $fromStatus = $version->status;
+
         $version->update([
             'status' => $status,
             'feedback' => $feedback,
@@ -631,9 +738,11 @@ class GeneralComplianceService
             );
         }
 
+        $eventDescription = 'Reviewed general compliance request #'.$compliance->id.' → '.$status;
+
         $this->activityLogs->log([
             'action' => 'gc.review',
-            'description' => 'Reviewed general compliance request #'.$compliance->id.' → '.$status,
+            'description' => $eventDescription,
             'user' => $actor,
             'hub' => $hub,
             'subject' => $compliance,
@@ -643,6 +752,23 @@ class GeneralComplianceService
                 'status' => $status,
                 'version' => $compliance->current_version,
                 'has_feedback' => $feedback !== '',
+                'supporting_file_count' => count($supportingFiles),
+            ],
+        ]);
+
+        $this->auditTrail->record([
+            'module' => ComplianceAuditEvent::MODULE_GC,
+            'subject' => $compliance,
+            'event_type' => ComplianceAuditEvent::EVENT_REVIEWED,
+            'actor' => $actor,
+            'hub' => $hub,
+            'description' => $eventDescription,
+            'from_status' => $fromStatus,
+            'to_status' => $status,
+            'version_number' => $compliance->current_version,
+            'metadata' => [
+                'has_feedback' => $feedback !== '',
+                'feedback' => $feedback !== '' ? $feedback : null,
                 'supporting_file_count' => count($supportingFiles),
             ],
         ]);
@@ -699,6 +825,7 @@ class GeneralComplianceService
         $supportingFiles = $this->supportingFilesFromData($data);
         ComplianceSupportingFiles::assertWithinLimits($supportingFiles);
         $newVersion = (int) $compliance->current_version + 1;
+        $fromStatus = $current->status;
 
         DB::transaction(function () use ($compliance, $actor, $current, $newVersion, $status, $comment, $supportingFiles) {
             $compliance->update(['current_version' => $newVersion]);
@@ -751,9 +878,12 @@ class GeneralComplianceService
             );
         }
 
+        $eventDescription = 'Changed status of general compliance request #'.$compliance->id
+            .' → '.$status.' (v'.$newVersion.')';
+
         $this->activityLogs->log([
             'action' => 'gc.change_status',
-            'description' => 'Changed status of general compliance request #'.$compliance->id.' → '.$status.' (v'.$newVersion.')',
+            'description' => $eventDescription,
             'user' => $actor,
             'hub' => $hub,
             'subject' => $compliance,
@@ -763,6 +893,23 @@ class GeneralComplianceService
                 'status' => $status,
                 'version' => $newVersion,
                 'has_comment' => $comment !== '',
+                'supporting_file_count' => count($supportingFiles),
+            ],
+        ]);
+
+        $this->auditTrail->record([
+            'module' => ComplianceAuditEvent::MODULE_GC,
+            'subject' => $compliance,
+            'event_type' => ComplianceAuditEvent::EVENT_STATUS_CHANGED,
+            'actor' => $actor,
+            'hub' => $hub,
+            'description' => $eventDescription,
+            'from_status' => $fromStatus,
+            'to_status' => $status,
+            'version_number' => $newVersion,
+            'metadata' => [
+                'has_comment' => $comment !== '',
+                'comment' => $comment !== '' ? $comment : null,
                 'supporting_file_count' => count($supportingFiles),
             ],
         ]);
@@ -838,10 +985,11 @@ class GeneralComplianceService
             ->with([
                 'currentVersionRow.attachments',
                 'currentVersionRow.supportingFiles',
-                'assignee:id,name,email',
-                'user:id,name,email,firm_id',
+                'assignee:id,name,email,role',
+                'assigner:id,name,email,role',
+                'user:id,name,email,firm_id,role',
                 'user.firm:id,name',
-                'onBehalfBy:id,name,email',
+                'onBehalfBy:id,name,email,role',
             ])
             ->orderByDesc('id');
 
@@ -852,6 +1000,10 @@ class GeneralComplianceService
         $this->applyFilters($query, $filters);
 
         $rows = $query->get();
+        $auditByRequest = $this->auditTrail->forSubjects(
+            ComplianceAuditEvent::MODULE_GC,
+            $rows->pluck('id')->all()
+        );
         $byStatus = [];
         foreach (GeneralComplianceRequest::STATUSES as $status) {
             $byStatus[$status] = 0;
@@ -878,12 +1030,16 @@ class GeneralComplianceService
                 $row->name,
                 $row->onBehalfBy?->name
             );
+            $auditTrail = $auditByRequest[(int) $row->id] ?? [];
             $export[] = [
                 'id' => $row->id,
                 'submitted_by' => $attribution ? ($row->onBehalfBy?->name ?: $row->name) : $row->name,
                 'submitter_email' => $row->user?->email,
+                'submitter_role' => $row->user?->role,
                 'firm_name' => $row->user?->firm?->name,
                 'on_behalf_by' => $row->onBehalfBy?->name,
+                'on_behalf_by_email' => $row->onBehalfBy?->email,
+                'on_behalf_by_role' => $row->onBehalfBy?->role,
                 'on_behalf_of' => $attribution ? $row->name : null,
                 'current_version' => $row->current_version,
                 'version_count' => $versionCount,
@@ -896,10 +1052,17 @@ class GeneralComplianceService
                 'status' => $status,
                 'assigned_to' => $row->assignee?->name,
                 'assigned_to_email' => $row->assignee?->email,
+                'assigned_to_role' => $row->assignee?->role,
+                'assigned_by' => $row->assigner?->name,
+                'assigned_by_email' => $row->assigner?->email,
+                'assigned_by_role' => $row->assigner?->role,
+                'assigned_date' => optional($row->assigned_date)?->toDateTimeString(),
                 'reviewed_by' => $row->currentVersionRow?->reviewed_by,
                 'feedback' => $row->currentVersionRow?->feedback,
                 'submission_date' => optional($row->submission_date)?->toDateTimeString(),
                 'reviewed_at' => optional($row->currentVersionRow?->reviewed_at)?->toDateTimeString(),
+                'audit_trail' => $auditTrail,
+                'audit_trail_summary' => $this->auditTrail->summarizeForExport($auditTrail),
             ];
         }
 
