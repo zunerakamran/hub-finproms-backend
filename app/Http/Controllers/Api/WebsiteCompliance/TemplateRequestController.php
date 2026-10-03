@@ -810,10 +810,12 @@ class TemplateRequestController extends Controller
         }
 
         $cpanelSynced = CpanelSyncService::pushToTemplateRequestCpanel($templateRequest, $updatedSections);
+        $targetLabel = $templateRequest->isLive() ? 'live' : 'staging';
 
         $this->activityLogs->log([
             'action' => 'wc.template_request.publish_content',
-            'description' => 'Published '.count($updatedSections).' section(s) directly to live'
+            'description' => 'Published '.count($updatedSections)." section(s) directly to {$targetLabel}"
+                .' ('.$templateRequest->cpanel_domain.')'
                 .($cpanelSynced ? ' (cPanel synced)' : ' (cPanel sync skipped or failed)'),
             'user' => $user,
             'subject' => $templateRequest,
@@ -822,8 +824,8 @@ class TemplateRequestController extends Controller
 
         return response()->json([
             'message' => $cpanelSynced
-                ? 'Content published directly to the live site.'
-                : 'Content saved in the hub database, but the live site was not updated. Check Laravel logs and cPanel configuration.',
+                ? "Content published directly to the {$targetLabel} site."
+                : "Content saved in the hub database, but the {$targetLabel} site was not updated. Check Laravel logs and cPanel configuration.",
             'cpanel_synced' => $cpanelSynced,
         ]);
     }
