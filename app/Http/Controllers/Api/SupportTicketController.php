@@ -12,6 +12,7 @@ use App\Services\SupportTicketService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Validation\Rule;
 
 class SupportTicketController extends Controller
 {
@@ -144,7 +145,7 @@ class SupportTicketController extends Controller
         $hub = $this->ticketHub($user);
 
         $validated = $request->validate([
-            'status' => ['required', 'string', 'in:'.implode(',', SupportTicket::STATUSES)],
+            'status' => ['required', 'string', Rule::in(SupportTicket::STATUSES)],
             'comment' => ['nullable', 'string', 'max:10000'],
             'screenshots' => ['nullable', 'array', 'max:'.SupportTicketService::MAX_ATTACHMENTS],
             'screenshots.*' => [

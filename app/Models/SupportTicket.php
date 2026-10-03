@@ -207,11 +207,21 @@ class SupportTicket extends Model
      */
     public function toApiArray(bool $includeDetails = false): array
     {
-        $this->loadMissing([
-            'user:id,name,email,role',
-            'statusChangedByUser:id,name,email,role',
-            'attachments',
-        ]);
+        try {
+            $this->loadMissing([
+                'user:id,name,email,role',
+                'statusChangedByUser:id,name,email,role',
+                'attachments',
+            ]);
+        } catch (\Throwable) {
+            $this->loadMissing(['attachments']);
+            try {
+                $this->loadMissing(['user:id,name,email,role']);
+            } catch (\Throwable) {
+                $this->unsetRelation('user');
+            }
+            $this->unsetRelation('statusChangedByUser');
+        }
 
         $payload = [
             'id' => $this->id,
@@ -256,7 +266,7 @@ class SupportTicket extends Model
         ];
 
         if ($includeDetails) {
-            $this->loadMissing(['comments.user:id,name,email,role']);
+            $this->loadMissing(['comments']);
             $payload['comments'] = $this->comments
                 ->map(fn (SupportTicketComment $c) => $c->toApiArray())
                 ->values()

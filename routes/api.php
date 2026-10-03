@@ -206,7 +206,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::get('/support-tickets/mine', [SupportTicketController::class, 'mine']);
         Route::get('/support-tickets/{supportTicket}', [SupportTicketController::class, 'show']);
-        Route::post('/support-tickets/{supportTicket}/comments', [SupportTicketController::class, 'comment']);
+        Route::middleware('hub_can:st_comment_on_tickets')->group(function () {
+            Route::post('/support-tickets/{supportTicket}/comments', [SupportTicketController::class, 'comment']);
+        });
     });
 
     // Website Compliance — authenticated domain (module + capability gated in controllers / hub_can)
@@ -587,7 +589,9 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::middleware('hub_can:st_change_ticket_status')->group(function () {
                 Route::post('/support-tickets/{supportTicket}/change-status', [SupportTicketController::class, 'changeStatus']);
             });
-            Route::post('/support-tickets/{supportTicket}/comments', [SupportTicketController::class, 'comment']);
+            Route::middleware('hub_can:st_comment_on_tickets')->group(function () {
+                Route::post('/support-tickets/{supportTicket}/comments', [SupportTicketController::class, 'comment']);
+            });
         });
 
         // Website Compliance — queue / assign / review / reports / deployments
@@ -940,7 +944,9 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::middleware('hub_can:st_change_ticket_status')->group(function () {
                 Route::post('/support-tickets/{supportTicket}/change-status', [SupportTicketController::class, 'changeStatus']);
             });
-            Route::post('/support-tickets/{supportTicket}/comments', [SupportTicketController::class, 'comment']);
+            Route::middleware('hub_can:st_comment_on_tickets')->group(function () {
+                Route::post('/support-tickets/{supportTicket}/comments', [SupportTicketController::class, 'comment']);
+            });
         });
 
         // Website Compliance — queue / assign / review / reports / deployments

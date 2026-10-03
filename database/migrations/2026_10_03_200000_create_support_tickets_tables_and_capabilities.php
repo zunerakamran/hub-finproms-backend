@@ -23,7 +23,8 @@ return new class extends Migration
                 $table->string('page_url', 500)->nullable();
                 $table->string('browser_info', 500)->nullable();
                 $table->text('status_note')->nullable();
-                $table->foreignId('status_changed_by')->nullable()->constrained('users')->nullOnDelete();
+                // No FK: Power Admin acting remotely may not exist in this hub's users table.
+                $table->unsignedBigInteger('status_changed_by')->nullable();
                 $table->timestamp('status_changed_at')->nullable();
                 $table->timestamp('resolved_at')->nullable();
                 $table->timestamp('closed_at')->nullable();
@@ -45,7 +46,8 @@ return new class extends Migration
                 $table->string('mime_type', 120)->nullable();
                 $table->unsignedBigInteger('size_bytes')->default(0);
                 $table->unsignedSmallInteger('sort_order')->default(0);
-                $table->foreignId('uploaded_by_user_id')->nullable()->constrained('users')->nullOnDelete();
+                // No FK: uploader may be a control-plane user absent from this hub DB.
+                $table->unsignedBigInteger('uploaded_by_user_id')->nullable();
                 $table->string('uploaded_by_name')->nullable();
                 $table->timestamps();
 
@@ -57,7 +59,9 @@ return new class extends Migration
             Schema::create('support_ticket_comments', function (Blueprint $table) {
                 $table->id();
                 $table->foreignId('ticket_id')->constrained('support_tickets')->cascadeOnDelete();
-                $table->foreignId('user_id')->constrained()->cascadeOnDelete();
+                // No FK: commenter may be a control-plane user absent from this hub DB.
+                $table->unsignedBigInteger('user_id')->nullable();
+                $table->string('author_name')->nullable();
                 $table->text('body');
                 $table->string('from_status', 40)->nullable();
                 $table->string('to_status', 40)->nullable();

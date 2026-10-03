@@ -133,6 +133,7 @@ class SupportTicketService
             SupportTicketComment::query()->create([
                 'ticket_id' => $ticket->id,
                 'user_id' => $user->id,
+                'author_name' => $user->name,
                 'body' => 'Ticket submitted.',
                 'from_status' => null,
                 'to_status' => SupportTicket::STATUS_OPEN,
@@ -224,9 +225,8 @@ class SupportTicketService
 
         return $ticket->fresh([
             'attachments',
-            'comments.user:id,name,email,role',
+            'comments',
             'user:id,name,email,role',
-            'statusChangedByUser:id,name,email,role',
         ]);
     }
 
@@ -287,6 +287,7 @@ class SupportTicketService
             SupportTicketComment::query()->create([
                 'ticket_id' => $ticket->id,
                 'user_id' => $user->id,
+                'author_name' => $user->name,
                 'body' => $body,
                 'from_status' => $from,
                 'to_status' => $status,
@@ -294,9 +295,8 @@ class SupportTicketService
 
             return $ticket->fresh([
                 'attachments',
-                'comments.user:id,name,email,role',
+                'comments',
                 'user:id,name,email,role',
-                'statusChangedByUser:id,name,email,role',
             ]);
         });
 
@@ -326,10 +326,7 @@ class SupportTicketService
         $this->assertCanView($hub, $user, $ticket);
 
         $role = $this->matrix->effectiveRoleFor($user);
-        $canComment = $this->matrix->roleCan($hub, $role, 'st_comment_on_tickets')
-            || $this->matrix->roleCan($hub, $role, 'st_change_ticket_status')
-            || $this->matrix->roleCan($hub, $role, 'st_submit_ticket');
-        if (! $canComment) {
+        if (! $this->matrix->roleCan($hub, $role, 'st_comment_on_tickets')) {
             throw ValidationException::withMessages([
                 'capability' => 'You do not have permission to comment on support tickets.',
             ]);
@@ -347,6 +344,7 @@ class SupportTicketService
             SupportTicketComment::query()->create([
                 'ticket_id' => $ticket->id,
                 'user_id' => $user->id,
+                'author_name' => $user->name,
                 'body' => $body,
                 'from_status' => null,
                 'to_status' => null,
@@ -371,9 +369,8 @@ class SupportTicketService
 
         return $ticket->fresh([
             'attachments',
-            'comments.user:id,name,email,role',
+            'comments',
             'user:id,name,email,role',
-            'statusChangedByUser:id,name,email,role',
         ]);
     }
 

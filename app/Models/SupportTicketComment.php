@@ -15,6 +15,7 @@ class SupportTicketComment extends Model
     protected $fillable = [
         'ticket_id',
         'user_id',
+        'author_name',
         'body',
         'from_status',
         'to_status',
@@ -35,21 +36,29 @@ class SupportTicketComment extends Model
      */
     public function toApiArray(): array
     {
-        $this->loadMissing(['user:id,name,email,role']);
+        try {
+            $this->loadMissing(['user:id,name,email,role']);
+        } catch (\Throwable) {
+            // Actor may not exist on this hub DB (e.g. Central Power Admin).
+            $this->unsetRelation('user');
+        }
+
+        $authorName = $this->user?->name ?: $this->author_name;
 
         return [
             'id' => $this->id,
             'ticket_id' => $this->ticket_id,
             'user_id' => $this->user_id,
+            'author_name' => $authorName,
             'body' => $this->body,
             'from_status' => $this->from_status,
             'to_status' => $this->to_status,
             'is_status_change' => $this->from_status !== null || $this->to_status !== null,
-            'author' => $this->user ? [
-                'id' => $this->user->id,
-                'name' => $this->user->name,
-                'email' => $this->user->email,
-                'role' => $this->user->role,
+            'author' => $authorName ? [
+                'id' => $this->user?->id,
+                'name' => $authorName,
+                'email' => $this->user?->email,
+                'role' => $this->user?->role,
             ] : null,
             'created_at' => optional($this->created_at)?->toIso8601String(),
             'updated_at' => optional($this->updated_at)?->toIso8601String(),
