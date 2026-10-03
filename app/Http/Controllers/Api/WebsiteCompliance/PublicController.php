@@ -3,13 +3,16 @@
 namespace App\Http\Controllers\Api\WebsiteCompliance;
 
 use App\Http\Controllers\Controller;
+use App\Models\Hub;
 use App\Models\WebsiteCompliance\Page;
 use App\Models\WebsiteCompliance\Section;
 use App\Models\WebsiteCompliance\TemplateRequest;
 use App\Services\WebsiteCompliance\AdvisorSectionService;
 use App\Services\WebsiteCompliance\CpanelSyncService;
+use App\Services\WhiteLabelDatabaseService;
 use App\Support\WebsiteCompliance\BrandColor;
 use App\Support\WebsiteCompliance\HubTemplateCatalog;
+use App\Support\WebsiteCompliance\WcDatabaseContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -207,6 +210,9 @@ class PublicController extends Controller
      * Reverse-proxy an advisor cPanel site so the hub can iframe it.
      * Live advisor hosts often send X-Frame-Options: SAMEORIGIN ("refused to connect").
      * Only the registered cpanel_domain for this TemplateRequest may be fetched (SSRF-safe).
+     *
+     * Optional ?hub_id= — when Central Hub embeds a content-hub deployment, TemplateRequest
+     * lives on that hub's remote DB (not Central's local tables).
      */
     public function embedAdvisorSite(Request $request, int $templateRequestId, ?string $path = null): Response
     {
@@ -214,7 +220,9 @@ class PublicController extends Controller
             abort(405);
         }
 
-        $templateRequest = TemplateRequest::find($templateRequestId);
+        $hubId = (int) $request->query('hub_id', 0);
+        $templateRequest = $this->resolveEmbedTemplateRequest($templateRequestId, $hubId > 0 ? $hubId : null);
+
         if (! $templateRequest || ! filled($templateRequest->cpanel_domain)) {
             abort(404, 'Deployment site not configured');
         }
@@ -227,8 +235,11 @@ class PublicController extends Controller
         }
 
         $target = $base.$path;
-        if ($qs = $request->getQueryString()) {
-            $target .= '?'.$qs;
+        // Forward upstream query params except hub_id (Central-only routing hint).
+        $forwardQuery = $request->query();
+        unset($forwardQuery['hub_id']);
+        if ($forwardQuery !== []) {
+            $target .= '?'.http_build_query($forwardQuery);
         }
 
         $baseHostPath = $this->embedUrlPrefix($base);
@@ -268,6 +279,38 @@ class PublicController extends Controller
             ->header('Content-Type', $contentType)
             ->header('Cache-Control', 'private, no-store')
             ->header('Content-Security-Policy', "frame-ancestors *");
+    }
+
+    /**
+     * Resolve a TemplateRequest for embed proxying.
+     * Local DB first; optional hub_id remounts onto that content hub's remote DB
+     * (Central Hub acting on a Shared / White-label deploy).
+     */
+    private function resolveEmbedTemplateRequest(int $templateRequestId, ?int $hubId): ?TemplateRequest
+    {
+        $local = TemplateRequest::query()->find($templateRequestId);
+        if ($local) {
+            return $local;
+        }
+
+        if (! $hubId) {
+            return null;
+        }
+
+        $hub = Hub::query()->find($hubId);
+        if (! $hub || ! $hub->isContentHub() || ! $hub->hasRemoteDatabaseConfigured()) {
+            return null;
+        }
+
+        try {
+            return app(WhiteLabelDatabaseService::class)->run($hub, function (string $connection) use ($templateRequestId) {
+                return WcDatabaseContext::using($connection, function () use ($templateRequestId) {
+                    return TemplateRequest::query()->find($templateRequestId);
+                });
+            });
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**
