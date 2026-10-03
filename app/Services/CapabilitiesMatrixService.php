@@ -122,12 +122,13 @@ class CapabilitiesMatrixService
             || $group === Hub::GROUP_GENERAL
             || $group === Hub::GROUP_SOCIAL_MEDIA_COMPLIANCE
             || $group === Hub::GROUP_GENERAL_COMPLIANCE
+            || $group === Hub::GROUP_SUPPORT_TICKETS
             || $group === Hub::GROUP_WEBSITE_TEMPLATE_LIBRARY
             || $group === Hub::GROUP_WEBSITE_COMPLIANCE
             || $group === Hub::GROUP_MODULE_PRICING
         ) {
-            // User-facing / compliance caps apply to every role column so Power Admin
-            // can enable them for staff and users alike (no hard role lock-in).
+            // User-facing / compliance / support caps apply to every role column so
+            // Power Admin can enable them for staff and users alike (no hard role lock-in).
             return $this->allMatrixRoles();
         }
 
