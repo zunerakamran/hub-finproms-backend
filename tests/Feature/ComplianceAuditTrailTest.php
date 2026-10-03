@@ -12,6 +12,7 @@ use App\Services\CapabilitiesMatrixService;
 use App\Services\ComplianceAuditTrailService;
 use App\Services\HubService;
 use App\Services\SocialMediaComplianceService;
+use App\Support\WebsiteCompliance\WcDatabaseContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -157,5 +158,59 @@ class ComplianceAuditTrailTest extends TestCase
         );
         $this->assertSame([], $trail);
         $this->assertSame([], $request->toApiArray(includeVersions: true)['audit_trail']);
+    }
+
+    public function test_audit_event_model_follows_acting_hub_wc_database_context(): void
+    {
+        $model = new ComplianceAuditEvent;
+        $this->assertNull($model->getConnectionName());
+
+        WcDatabaseContext::using('hub_remote_99', function () {
+            $remounted = new ComplianceAuditEvent;
+            $this->assertSame('hub_remote_99', $remounted->getConnectionName());
+        });
+
+        $this->assertNull((new ComplianceAuditEvent)->getConnectionName());
+    }
+
+    public function test_report_audit_events_include_rows_even_when_hub_id_mismatches_registry(): void
+    {
+        $hub = $this->createSharedHubWithSmc();
+        $user = User::factory()->create(['role' => User::ROLE_MANAGER, 'name' => 'Mgr']);
+
+        $request = SocialMediaComplianceRequest::query()->create([
+            'user_id' => $user->id,
+            'name' => $user->name,
+            'current_version' => 1,
+            'submission_date' => now(),
+        ]);
+        SocialMediaComplianceRequestVersion::query()->create([
+            'request_id' => $request->id,
+            'version_number' => 1,
+            'description' => 'Body',
+            'submitted_by' => $user->id,
+            'submitted_at' => now(),
+            'status' => SocialMediaComplianceRequest::STATUS_PENDING,
+            'feedback' => '',
+        ]);
+
+        // Simulate content-hub local hubs.id differing from Central registry id.
+        ComplianceAuditEvent::query()->create([
+            'hub_id' => 9999,
+            'module' => ComplianceAuditEvent::MODULE_SMC,
+            'subject_type' => SocialMediaComplianceRequest::class,
+            'subject_id' => $request->id,
+            'event_type' => ComplianceAuditEvent::EVENT_SUBMITTED,
+            'description' => 'Submitted',
+            'actor_user_id' => $user->id,
+            'actor_name' => $user->name,
+            'actor_email' => $user->email,
+            'actor_role' => $user->role,
+            'created_at' => now(),
+        ]);
+
+        $report = app(SocialMediaComplianceService::class)->report($hub, [], $user);
+        $this->assertNotEmpty($report['audit_events']);
+        $this->assertSame(ComplianceAuditEvent::EVENT_SUBMITTED, $report['audit_events'][0]['event_type']);
     }
 }

@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Models\WebsiteCompliance\UsesWcDatabaseContext;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ComplianceAuditEvent extends Model
 {
+    use UsesWcDatabaseContext;
+
     public $timestamps = false;
 
     public const MODULE_SMC = 'smc';

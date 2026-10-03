@@ -125,8 +125,10 @@ class ComplianceAuditTrailService
 
     /**
      * Hub-scoped audit events for reports (oldest first).
-     * Prefer hub_id matches; also include events for the given subject ids
-     * (covers backfills / remote DBs where hub_id may be null).
+     *
+     * Content-hub databases are single-tenant (including when Central remounts
+     * them via acting-hub). Do not require hub_id === Central registry id —
+     * local hubs.id on the content DB often differs from the registry row.
      *
      * @param  list<int>  $subjectIds
      * @return list<array<string, mixed>>
@@ -135,15 +137,27 @@ class ComplianceAuditTrailService
     {
         $ids = array_values(array_unique(array_map('intval', $subjectIds)));
 
-        $events = ComplianceAuditEvent::query()
+        $query = ComplianceAuditEvent::query()
             ->where('module', $module)
-            ->where(function ($query) use ($hub, $ids) {
-                $query->where('hub_id', $hub->id);
+            ->orderBy('id');
+
+        // Content hub (local deploy or remounted from Central): all module events
+        // on this connection belong to the acting content hub.
+        if ($hub->isContentHub()) {
+            return $query
+                ->get()
+                ->map(fn (ComplianceAuditEvent $event) => $event->toApiArray())
+                ->all();
+        }
+
+        // Control-plane / Central local DB: filter by registry hub id + subjects.
+        $events = $query
+            ->where(function ($inner) use ($hub, $ids) {
+                $inner->where('hub_id', $hub->id);
                 if ($ids !== []) {
-                    $query->orWhereIn('subject_id', $ids);
+                    $inner->orWhereIn('subject_id', $ids);
                 }
             })
-            ->orderBy('id')
             ->get()
             ->map(fn (ComplianceAuditEvent $event) => $event->toApiArray())
             ->all();

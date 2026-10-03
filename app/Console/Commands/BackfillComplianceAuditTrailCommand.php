@@ -61,7 +61,7 @@ class BackfillComplianceAuditTrailCommand extends Command
             );
         }
 
-        $this->info('Done. Refresh the compliance Reports → Audit trail tab on the matching content hub.');
+        $this->info('Done. From Central Hub, select that content hub in the hub switcher, then open Reports → Audit trail.');
 
         return self::SUCCESS;
     }
