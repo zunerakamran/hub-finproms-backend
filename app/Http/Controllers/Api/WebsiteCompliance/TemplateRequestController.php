@@ -10,6 +10,7 @@ use App\Models\WebsiteCompliance\TemplateRequest;
 use App\Services\ActivityLogService;
 use App\Services\ActingAdvisorService;
 use App\Services\ActingHubService;
+use App\Services\FirmComplianceVisibilityService;
 use App\Services\ModuleBillingService;
 use App\Services\WebsiteCompliance\AdvisorSectionService;
 use App\Services\WebsiteCompliance\CpanelSyncService;
@@ -20,6 +21,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class TemplateRequestController extends Controller
 {
@@ -28,7 +30,8 @@ class TemplateRequestController extends Controller
         private readonly ActivityLogService $activityLogs,
         private readonly ActingAdvisorService $actingAdvisors,
         private readonly ActingHubService $actingHubs,
-        private readonly ModuleBillingService $moduleBilling
+        private readonly ModuleBillingService $moduleBilling,
+        private readonly FirmComplianceVisibilityService $firmVisibility
     ) {}
 
     private function resolveTemplateName(?string $requested): ?string
@@ -44,7 +47,50 @@ class TemplateRequestController extends Controller
     /** @return list<string> */
     private function requestRelations(): array
     {
-        return ['advisor', 'assignedAdvisor', 'requestedBy', 'goLiveRequestedBy'];
+        return [
+            'advisor',
+            'advisor.firm',
+            'assignedAdvisor',
+            'assignedAdvisor.firm',
+            'requestedBy',
+            'requestedBy.firm',
+            'goLiveRequestedBy',
+        ];
+    }
+
+    /**
+     * Ensure assigned advisor is allowed for the submitter firm's visibility settings.
+     *
+     * @throws ValidationException
+     */
+    private function assertAssignableAdvisor(User $actor, ?int $advisorId, ?User $submitter): void
+    {
+        if (! $advisorId) {
+            return;
+        }
+
+        $advisor = User::query()->with('firm:id,name,is_central')->find($advisorId);
+        if (! $advisor) {
+            return;
+        }
+
+        $submitter?->loadMissing([
+            'firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
+        ]);
+        $submitterFirm = $submitter?->firm;
+
+        if ($this->firmVisibility->userIsEligibleAssignee($advisor, $submitterFirm)) {
+            return;
+        }
+
+        // Power / FinProms admin creating without a firm may assign any advisor.
+        if ($this->firmVisibility->actorBypassesFirmScope($actor) && ! $submitterFirm) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'assigned_advisor_id' => ['Selected advisor is not allowed for this firm’s visibility settings.'],
+        ]);
     }
 
     public function store(Request $request): JsonResponse
@@ -104,6 +150,14 @@ class TemplateRequestController extends Controller
             ], 422);
         }
 
+        $assignedAdvisorId = $mustAssignAdvisor || $request->filled('assigned_advisor_id')
+            ? ($request->assigned_advisor_id ? (int) $request->assigned_advisor_id : null)
+            : null;
+        $user->loadMissing([
+            'firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
+        ]);
+        $this->assertAssignableAdvisor($user, $assignedAdvisorId, $user);
+
         $requestType = $request->request_type
             ?? ($this->gate->can($user, 'wc_deploy_websites') ? 'hub_main_website' : 'advisor_website');
 
@@ -120,9 +174,7 @@ class TemplateRequestController extends Controller
             'requested_by_id' => $tenantUserId,
             'template_name' => $templateName,
             'request_type' => $requestType,
-            'assigned_advisor_id' => $mustAssignAdvisor || $request->filled('assigned_advisor_id')
-                ? $request->assigned_advisor_id
-                : null,
+            'assigned_advisor_id' => $assignedAdvisorId,
             'domain_name' => $request->domain_name,
             'logo_url' => CpanelSyncService::absoluteAssetUrl($request->logo_url),
             'white_logo_url' => CpanelSyncService::absoluteAssetUrl($request->white_logo_url),
@@ -535,6 +587,19 @@ class TemplateRequestController extends Controller
                 'message' => 'This deployment was requested by an advisor and cannot be reassigned.',
             ], 422);
         }
+
+        $this->firmVisibility->assertActorCanActOnRequest(
+            $user,
+            $templateRequest->requested_by_id ? (int) $templateRequest->requested_by_id : null,
+            $requester?->firm_id ? (int) $requester->firm_id : null,
+            $templateRequest->assigned_advisor_id ? (int) $templateRequest->assigned_advisor_id : null
+        );
+
+        $this->assertAssignableAdvisor(
+            $user,
+            (int) $request->assigned_advisor_id,
+            $requester
+        );
 
         // Only store the assignment. Sections are created when Power Admin deploys.
         $templateRequest->update([

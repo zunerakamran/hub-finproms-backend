@@ -478,6 +478,19 @@ class AuthController extends Controller
         $user->setAttribute('terms_accepted', $user->hasAcceptedTerms($hub));
         $user->setAttribute('terms_required_version', $hub->termsVersion());
 
+        $user->loadMissing([
+            'firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
+        ]);
+        if ($user->firm) {
+            $user->firm->setAttribute('compliance_visibility', [
+                'visible_to_own' => (bool) $user->firm->compliance_visible_to_own,
+                'visible_to_central' => (bool) $user->firm->compliance_visible_to_central,
+                'visible_to_firm_id' => $user->firm->compliance_visible_to_firm_id
+                    ? (int) $user->firm->compliance_visible_to_firm_id
+                    : null,
+            ]);
+        }
+
         return $user;
     }
 
@@ -537,8 +550,7 @@ class AuthController extends Controller
     public function me(Request $request): JsonResponse
     {
         /** @var User $user */
-        $user = $request->user();
-        $user->load('firm:id,name');
+        $user = $this->decorateUserForAuthResponse($request->user());
 
         $actingAdvisors = app(\App\Services\ActingAdvisorService::class);
         $subject = $actingAdvisors->billingSubject($user);
@@ -557,9 +569,6 @@ class AuthController extends Controller
             $user->setAttribute('billing_subject_id', (int) $subject->id);
             $user->setAttribute('billing_subject_name', $subject->name);
         }
-
-        $user->setAttribute('terms_accepted', $user->hasAcceptedTerms($hub));
-        $user->setAttribute('terms_required_version', $hub->termsVersion());
 
         $payload = [
             'user' => $user,
