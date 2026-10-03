@@ -212,16 +212,31 @@ class PublicController extends Controller
      * Only the registered cpanel_domain for this TemplateRequest may be fetched (SSRF-safe).
      *
      * Optional ?hub_id= — when Central Hub embeds a content-hub deployment, TemplateRequest
-     * lives on that hub's remote DB (not Central's local tables).
+     * lives on that hub's remote DB (not Central's local tables). Prefer path-based
+     * embedAdvisorSiteForHub so the iframe query string stays clean for templates.
      */
     public function embedAdvisorSite(Request $request, int $templateRequestId, ?string $path = null): Response
+    {
+        $hubId = (int) $request->query('hub_id', 0);
+
+        return $this->proxyAdvisorEmbed($request, $templateRequestId, $hubId > 0 ? $hubId : null, $path);
+    }
+
+    /**
+     * Same as embedAdvisorSite, but hub id is in the path (keeps ?section= clean for templates).
+     */
+    public function embedAdvisorSiteForHub(Request $request, int $hubId, int $templateRequestId, ?string $path = null): Response
+    {
+        return $this->proxyAdvisorEmbed($request, $templateRequestId, $hubId > 0 ? $hubId : null, $path);
+    }
+
+    private function proxyAdvisorEmbed(Request $request, int $templateRequestId, ?int $hubId, ?string $path = null): Response
     {
         if (! in_array($request->method(), ['GET', 'HEAD'], true)) {
             abort(405);
         }
 
-        $hubId = (int) $request->query('hub_id', 0);
-        $templateRequest = $this->resolveEmbedTemplateRequest($templateRequestId, $hubId > 0 ? $hubId : null);
+        $templateRequest = $this->resolveEmbedTemplateRequest($templateRequestId, $hubId);
 
         if (! $templateRequest || ! filled($templateRequest->cpanel_domain)) {
             abort(404, 'Deployment site not configured');
@@ -283,34 +298,32 @@ class PublicController extends Controller
 
     /**
      * Resolve a TemplateRequest for embed proxying.
-     * Local DB first; optional hub_id remounts onto that content hub's remote DB
-     * (Central Hub acting on a Shared / White-label deploy).
+     *
+     * When hub_id is provided (Central acting on a content hub), always resolve
+     * from that hub's remote DB — Central may have a leftover row with the same
+     * id that would otherwise win and produce a blank / wrong preview.
      */
     private function resolveEmbedTemplateRequest(int $templateRequestId, ?int $hubId): ?TemplateRequest
     {
-        $local = TemplateRequest::query()->find($templateRequestId);
-        if ($local) {
-            return $local;
+        if ($hubId) {
+            $hub = Hub::query()->find($hubId);
+            if ($hub && $hub->isContentHub() && $hub->hasRemoteDatabaseConfigured()) {
+                try {
+                    $remote = app(WhiteLabelDatabaseService::class)->run($hub, function (string $connection) use ($templateRequestId) {
+                        return WcDatabaseContext::using($connection, function () use ($templateRequestId) {
+                            return TemplateRequest::query()->find($templateRequestId);
+                        });
+                    });
+                    if ($remote) {
+                        return $remote;
+                    }
+                } catch (\Throwable) {
+                    // Fall through to local lookup.
+                }
+            }
         }
 
-        if (! $hubId) {
-            return null;
-        }
-
-        $hub = Hub::query()->find($hubId);
-        if (! $hub || ! $hub->isContentHub() || ! $hub->hasRemoteDatabaseConfigured()) {
-            return null;
-        }
-
-        try {
-            return app(WhiteLabelDatabaseService::class)->run($hub, function (string $connection) use ($templateRequestId) {
-                return WcDatabaseContext::using($connection, function () use ($templateRequestId) {
-                    return TemplateRequest::query()->find($templateRequestId);
-                });
-            });
-        } catch (\Throwable) {
-            return null;
-        }
+        return TemplateRequest::query()->find($templateRequestId);
     }
 
     /**
