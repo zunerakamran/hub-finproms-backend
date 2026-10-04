@@ -27,13 +27,17 @@ class LogApiActivity
             return $response;
         }
 
-        dispatch(function () use ($request, $status) {
-            try {
-                app(ActivityLogService::class)->logApiRequest($request, $status);
-            } catch (\Throwable) {
-                // Never break the main request because logging failed.
-            }
-        })->afterResponse();
+        try {
+            dispatch(function () use ($request, $status) {
+                try {
+                    app(ActivityLogService::class)->logApiRequest($request, $status);
+                } catch (\Throwable) {
+                    // Never break the main request because logging failed.
+                }
+            })->afterResponse();
+        } catch (\Throwable) {
+            // Queue/cache misconfig must not turn a successful API response into 500.
+        }
 
         return $response;
     }

@@ -68,21 +68,38 @@ class HubController extends Controller
                 }
             } else {
                 $effective = [];
-                foreach (array_keys($payload['checklist']) as $flag) {
-                    $effective[$flag] = $this->matrix->userCan($hub, $user, $flag);
+                $checklist = is_array($payload['checklist'] ?? null) ? $payload['checklist'] : [];
+                foreach (array_keys($checklist) as $flag) {
+                    try {
+                        $effective[$flag] = $this->matrix->userCan($hub, $user, $flag);
+                    } catch (\Throwable) {
+                        $effective[$flag] = false;
+                    }
                 }
                 if ($user->isPowerAdmin()) {
-                    foreach (app(\App\Services\PowerAdminCapabilitiesService::class)->resolved() as $key => $enabled) {
-                        $effective[$key] = $enabled;
+                    try {
+                        foreach (app(\App\Services\PowerAdminCapabilitiesService::class)->resolved() as $key => $enabled) {
+                            $effective[$key] = $enabled;
+                        }
+                    } catch (\Throwable) {
+                        // keep checklist-derived caps
                     }
                 }
                 $payload['effective_capabilities'] = $this->actingHubs
                     ->mergeFirmDocumentEffectiveCapabilities($user, $effective, $hub);
-                $payload['firm_document_rights'] = app(\App\Services\FirmDocumentAccessService::class)
-                    ->effectiveRightsSummary($user, $hub);
+                try {
+                    $payload['firm_document_rights'] = app(\App\Services\FirmDocumentAccessService::class)
+                        ->effectiveRightsSummary($user, $hub);
+                } catch (\Throwable) {
+                    // Hub boot must succeed even if firm-document rights fail.
+                }
             }
             $payload['viewer_role'] = $user->role;
-            $payload['effective_role'] = $this->matrix->effectiveRoleFor($user);
+            try {
+                $payload['effective_role'] = $this->matrix->effectiveRoleFor($user);
+            } catch (\Throwable) {
+                $payload['effective_role'] = $user->role;
+            }
 
             try {
                 $advisorSwitcher = app(\App\Services\ActingAdvisorService::class)->switcherPayload($user);

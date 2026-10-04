@@ -16,71 +16,90 @@ class HubService
         $slug = (string) config('hub.current_slug', 'shared');
 
         // 5 minutes — hub branding/checklist rarely changes; forgetCurrentCache() on writes.
-        return Cache::remember("hub:current:{$slug}", 300, function () use ($slug) {
-            // Schema healing only on cache miss (not every authenticated request).
-            $this->ensureRemoteDatabaseColumns();
+        // If Redis/cache is misconfigured, fall back to DB so /api/hub never hard-crashes the UI.
+        try {
+            $cached = Cache::remember("hub:current:{$slug}", 300, function () use ($slug) {
+                return $this->resolveCurrentFromDatabase($slug);
+            });
 
-            $hub = Hub::query()->where('slug', $slug)->where('is_active', true)->first();
-
-            // Inactive / missing row for this slug — create or reactivate.
-            if (! $hub) {
-                $hub = Hub::query()->where('slug', $slug)->first();
+            if ($cached instanceof Hub) {
+                return $cached;
             }
+        } catch (Throwable $e) {
+            report($e);
+        }
 
-            $type = $this->resolveDeployType($slug);
+        return $this->resolveCurrentFromDatabase($slug);
+    }
 
-            if ($hub) {
-                // Heal: Central .env was set but hubs.type was never promoted.
-                if ($type === Hub::TYPE_CENTRAL && $hub->type !== Hub::TYPE_CENTRAL) {
-                    $hub->forceFill([
-                        'type' => Hub::TYPE_CENTRAL,
-                        'is_active' => true,
-                        'name' => $hub->name === '' || $hub->name === 'Shared Hub'
-                            ? 'Central Hub Controller'
-                            : $hub->name,
-                        'checklist' => Hub::defaultChecklist(Hub::TYPE_CENTRAL),
-                        'role_capabilities' => app(CapabilitiesMatrixService::class)
-                            ->defaultRoleCapabilities(Hub::TYPE_CENTRAL),
-                    ])->save();
-                    $hub = $hub->fresh() ?? $hub;
-                } elseif ($type === Hub::TYPE_CENTRAL
-                    && (! is_array($hub->role_capabilities) || $hub->role_capabilities === [])
-                ) {
-                    // Fresh Central row with empty matrix — seed Power Admin defaults.
-                    $hub->forceFill([
-                        'role_capabilities' => app(CapabilitiesMatrixService::class)
-                            ->defaultRoleCapabilities(Hub::TYPE_CENTRAL),
-                    ])->save();
-                    $hub = $hub->fresh() ?? $hub;
-                } elseif (! $hub->is_active) {
-                    $hub->forceFill(['is_active' => true])->save();
-                    $hub = $hub->fresh() ?? $hub;
-                }
+    /**
+     * Load (and heal) the current deploy hub from the database.
+     */
+    private function resolveCurrentFromDatabase(string $slug): Hub
+    {
+        // Schema healing only on cache miss / cache-bypass path.
+        $this->ensureRemoteDatabaseColumns();
 
-                return $hub;
-            }
+        $hub = Hub::query()->where('slug', $slug)->where('is_active', true)->first();
 
-            $name = match ($type) {
-                Hub::TYPE_CENTRAL => 'Central Hub Controller',
-                Hub::TYPE_SHARED => $slug === 'shared' ? 'Shared Hub' : 'Hub',
-                default => 'Hub',
-            };
+        // Inactive / missing row for this slug — create or reactivate.
+        if (! $hub) {
+            $hub = Hub::query()->where('slug', $slug)->first();
+        }
 
-            return Hub::query()->firstOrCreate(
-                ['slug' => $slug],
-                [
-                    'name' => $name,
-                    'type' => $type,
+        $type = $this->resolveDeployType($slug);
+
+        if ($hub) {
+            // Heal: Central .env was set but hubs.type was never promoted.
+            if ($type === Hub::TYPE_CENTRAL && $hub->type !== Hub::TYPE_CENTRAL) {
+                $hub->forceFill([
+                    'type' => Hub::TYPE_CENTRAL,
                     'is_active' => true,
-                    'primary_color' => null,
-                    'secondary_color' => null,
-                    'logo_url' => null,
-                    'white_logo_url' => null,
-                    'favicon_url' => null,
-                    'checklist' => Hub::defaultChecklist($type),
-                ]
-            );
-        });
+                    'name' => $hub->name === '' || $hub->name === 'Shared Hub'
+                        ? 'Central Hub Controller'
+                        : $hub->name,
+                    'checklist' => Hub::defaultChecklist(Hub::TYPE_CENTRAL),
+                    'role_capabilities' => app(CapabilitiesMatrixService::class)
+                        ->defaultRoleCapabilities(Hub::TYPE_CENTRAL),
+                ])->save();
+                $hub = $hub->fresh() ?? $hub;
+            } elseif ($type === Hub::TYPE_CENTRAL
+                && (! is_array($hub->role_capabilities) || $hub->role_capabilities === [])
+            ) {
+                // Fresh Central row with empty matrix — seed Power Admin defaults.
+                $hub->forceFill([
+                    'role_capabilities' => app(CapabilitiesMatrixService::class)
+                        ->defaultRoleCapabilities(Hub::TYPE_CENTRAL),
+                ])->save();
+                $hub = $hub->fresh() ?? $hub;
+            } elseif (! $hub->is_active) {
+                $hub->forceFill(['is_active' => true])->save();
+                $hub = $hub->fresh() ?? $hub;
+            }
+
+            return $hub;
+        }
+
+        $name = match ($type) {
+            Hub::TYPE_CENTRAL => 'Central Hub Controller',
+            Hub::TYPE_SHARED => $slug === 'shared' ? 'Shared Hub' : 'Hub',
+            default => 'Hub',
+        };
+
+        return Hub::query()->firstOrCreate(
+            ['slug' => $slug],
+            [
+                'name' => $name,
+                'type' => $type,
+                'is_active' => true,
+                'primary_color' => null,
+                'secondary_color' => null,
+                'logo_url' => null,
+                'white_logo_url' => null,
+                'favicon_url' => null,
+                'checklist' => Hub::defaultChecklist($type),
+            ]
+        );
     }
 
     /**
@@ -101,7 +120,11 @@ class HubService
     public function forgetCurrentCache(): void
     {
         $slug = (string) config('hub.current_slug', 'shared');
-        Cache::forget("hub:current:{$slug}");
+        try {
+            Cache::forget("hub:current:{$slug}");
+        } catch (Throwable $e) {
+            report($e);
+        }
     }
 
     /**
