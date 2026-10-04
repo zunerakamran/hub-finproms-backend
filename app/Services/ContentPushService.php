@@ -31,7 +31,7 @@ class ContentPushService
     /**
      * @param  list<int>  $postIds
      * @param  list<int>  $hubIds
-     * @return array{results: list<array<string, mixed>>, pushed: int, failed: int}
+     * @return array{results: list<array<string, mixed>>, pushed: int, failed: int, skipped: int}
      */
     public function pushPosts(array $postIds, array $hubIds, ?User $actor = null): array
     {
@@ -46,7 +46,7 @@ class ContentPushService
     /**
      * @param  list<int>  $ids
      * @param  list<int>  $hubIds
-     * @return array{results: list<array<string, mixed>>, pushed: int, failed: int}
+     * @return array{results: list<array<string, mixed>>, pushed: int, failed: int, skipped: int}
      */
     public function pushCategories(array $ids, array $hubIds, ?User $actor = null): array
     {
@@ -61,7 +61,7 @@ class ContentPushService
     /**
      * @param  list<int>  $ids
      * @param  list<int>  $hubIds
-     * @return array{results: list<array<string, mixed>>, pushed: int, failed: int}
+     * @return array{results: list<array<string, mixed>>, pushed: int, failed: int, skipped: int}
      */
     public function pushContentTypes(array $ids, array $hubIds, ?User $actor = null): array
     {
@@ -76,7 +76,7 @@ class ContentPushService
     /**
      * @param  list<int>  $ids
      * @param  list<int>  $hubIds
-     * @return array{results: list<array<string, mixed>>, pushed: int, failed: int}
+     * @return array{results: list<array<string, mixed>>, pushed: int, failed: int, skipped: int}
      */
     public function pushTags(array $ids, array $hubIds, ?User $actor = null): array
     {
@@ -91,7 +91,7 @@ class ContentPushService
     /**
      * @param  list<int>  $ids
      * @param  list<int>  $hubIds
-     * @return array{results: list<array<string, mixed>>, pushed: int, failed: int}
+     * @return array{results: list<array<string, mixed>>, pushed: int, failed: int, skipped: int}
      */
     public function pushBundles(array $ids, array $hubIds, ?User $actor = null): array
     {
@@ -176,7 +176,7 @@ class ContentPushService
     /**
      * @param  list<object>  $models
      * @param  list<int>  $hubIds
-     * @return array{results: list<array<string, mixed>>, pushed: int, failed: int}
+     * @return array{results: list<array<string, mixed>>, pushed: int, failed: int, skipped: int}
      */
     private function pushModels(string $entityType, array $models, array $hubIds, ?User $actor): array
     {
@@ -198,15 +198,44 @@ class ContentPushService
         $results = [];
         $pushed = 0;
         $failed = 0;
+        $skipped = 0;
 
         foreach ($targets as $hub) {
-            foreach ($models as $model) {
-                $row = $this->pushOneEntity($sourceHub, $hub, $entityType, $model, $actor);
-                $results[] = $row;
-                if ($row['status'] === 'success') {
-                    $pushed++;
-                } else {
-                    $failed++;
+            $connection = null;
+            $ownsConnection = false;
+
+            try {
+                if ($hub->can('receive_content_from_shared') && $hub->hasRemoteDatabaseConfigured()) {
+                    try {
+                        $connection = $this->remoteDb->connect($hub);
+                        $ownsConnection = true;
+                    } catch (Throwable) {
+                        // Per-entity push will surface the connection error.
+                        $connection = null;
+                    }
+                }
+
+                foreach ($models as $model) {
+                    $row = $this->pushOneEntity(
+                        $sourceHub,
+                        $hub,
+                        $entityType,
+                        $model,
+                        $actor,
+                        $connection
+                    );
+                    $results[] = $row;
+                    if ($row['status'] === 'success') {
+                        $pushed++;
+                    } elseif ($row['status'] === 'skipped') {
+                        $skipped++;
+                    } else {
+                        $failed++;
+                    }
+                }
+            } finally {
+                if ($ownsConnection) {
+                    $this->remoteDb->disconnect($hub);
                 }
             }
         }
@@ -215,6 +244,7 @@ class ContentPushService
             'results' => $results,
             'pushed' => $pushed,
             'failed' => $failed,
+            'skipped' => $skipped,
         ];
     }
 
@@ -226,7 +256,8 @@ class ContentPushService
         Hub $targetHub,
         string $entityType,
         object $model,
-        ?User $actor
+        ?User $actor,
+        ?string $connection = null
     ): array {
         $label = $this->entityLabel($entityType, $model);
         $entityId = (int) ($model->id ?? 0);
@@ -241,11 +272,11 @@ class ContentPushService
         ];
 
         if (! $targetHub->can('receive_content_from_shared')) {
-            return $this->recordResult($sourceHub, $targetHub, $entityType, $model, $actor, $base, false, null, 'Hub does not allow receiving content from Central.');
+            return $this->recordResult($sourceHub, $targetHub, $entityType, $model, $actor, $base, 'failed', null, 'Hub does not allow receiving content from Central.');
         }
 
         if (! $targetHub->hasRemoteDatabaseConfigured()) {
-            return $this->recordResult($sourceHub, $targetHub, $entityType, $model, $actor, $base, false, null, 'Remote database credentials are not configured.');
+            return $this->recordResult($sourceHub, $targetHub, $entityType, $model, $actor, $base, 'failed', null, 'Remote database credentials are not configured.');
         }
 
         if ($entityType === 'post' && $model instanceof Post) {
@@ -259,7 +290,7 @@ class ContentPushService
                     $model,
                     $actor,
                     $base,
-                    false,
+                    'failed',
                     null,
                     'This post is archived and cannot be distributed. Use a non-archived library post.'
                 );
@@ -274,7 +305,7 @@ class ContentPushService
                         $model,
                         $actor,
                         $base,
-                        false,
+                        'failed',
                         null,
                         'Target hub only accepts manual posts (AI posts functionality is off).'
                     );
@@ -287,15 +318,44 @@ class ContentPushService
                     $model,
                     $actor,
                     $base,
-                    false,
+                    'failed',
                     null,
                     'Target hub only accepts AI posts (Manual posts functionality is off).'
                 );
             }
         }
 
+        $ownsConnection = false;
+
         try {
-            $connection = $this->remoteDb->connect($targetHub);
+            if ($connection === null) {
+                $connection = $this->remoteDb->connect($targetHub);
+                $ownsConnection = true;
+            }
+
+            if ($entityType === 'post' && $model instanceof Post) {
+                $priorRemoteId = $this->existingSuccessfulRemotePostId($entityId, (int) $targetHub->id);
+                if ($priorRemoteId !== null) {
+                    $stillThere = DB::connection($connection)
+                        ->table('posts')
+                        ->where('id', $priorRemoteId)
+                        ->exists();
+                    if ($stillThere) {
+                        return $this->recordResult(
+                            $sourceHub,
+                            $targetHub,
+                            $entityType,
+                            $model,
+                            $actor,
+                            $base,
+                            'skipped',
+                            $priorRemoteId,
+                            'Already on this hub (remote #'.$priorRemoteId.'). Skipped duplicate insert.'
+                        );
+                    }
+                }
+            }
+
             $remoteId = match ($entityType) {
                 'post' => $this->insertPostOnRemote($connection, $model),
                 'category' => $this->upsertCategoryOnRemote($connection, $model),
@@ -312,7 +372,7 @@ class ContentPushService
                 $model,
                 $actor,
                 $base,
-                true,
+                'success',
                 $remoteId,
                 'Pushed successfully (remote #'.$remoteId.').'
             );
@@ -324,13 +384,29 @@ class ContentPushService
                 $model,
                 $actor,
                 $base,
-                false,
+                'failed',
                 null,
                 $e->getMessage()
             );
         } finally {
-            $this->remoteDb->disconnect($targetHub);
+            if ($ownsConnection) {
+                $this->remoteDb->disconnect($targetHub);
+            }
         }
+    }
+
+    private function existingSuccessfulRemotePostId(int $postId, int $targetHubId): ?int
+    {
+        $remoteId = ContentPush::query()
+            ->where('post_id', $postId)
+            ->where('target_hub_id', $targetHubId)
+            ->where('entity_type', 'post')
+            ->where('status', 'success')
+            ->whereNotNull('remote_post_id')
+            ->orderByDesc('id')
+            ->value('remote_post_id');
+
+        return $remoteId !== null ? (int) $remoteId : null;
     }
 
     /**
@@ -344,7 +420,7 @@ class ContentPushService
         object $model,
         ?User $actor,
         array $base,
-        bool $ok,
+        string $status,
         ?int $remoteId,
         string $message
     ): array {
@@ -359,12 +435,12 @@ class ContentPushService
             'entity_label' => $this->entityLabel($entityType, $model),
             'pushed_by' => $actor?->id,
             'remote_post_id' => $remoteId,
-            'status' => $ok ? 'success' : 'failed',
+            'status' => $status,
             'message' => $message,
         ]);
 
         return array_merge($base, [
-            'status' => $ok ? 'success' : 'failed',
+            'status' => $status,
             'remote_post_id' => $remoteId,
             'message' => $message,
         ]);

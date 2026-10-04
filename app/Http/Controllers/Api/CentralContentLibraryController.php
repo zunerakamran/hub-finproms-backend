@@ -61,7 +61,19 @@ class CentralContentLibraryController extends Controller
             });
         }
 
-        return response()->json($query->paginate($perPage));
+        $posts = $query->paginate($perPage);
+
+        $distributions = $this->pushes->successfulDistributionsForPosts(
+            $posts->getCollection()->pluck('id')->map(fn ($id) => (int) $id)->all()
+        );
+
+        $posts->getCollection()->transform(function (Post $post) use ($distributions) {
+            $post->setAttribute('distributed_hubs', $distributions[(int) $post->id] ?? []);
+
+            return $post;
+        });
+
+        return response()->json($posts);
     }
 
     public function store(Request $request): JsonResponse

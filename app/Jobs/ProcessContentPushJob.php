@@ -51,12 +51,19 @@ class ProcessContentPushJob implements ShouldQueue
             $result = $pushes->pushPosts($this->postIds, $this->hubIds, $actor);
             $payload = json_decode(json_encode($result), true) ?? [];
 
-            $message = ($payload['pushed'] ?? 0) > 0
-                ? 'Distributed '.($payload['pushed']).' post(s).'
-                : 'No posts were distributed.';
-            if (($payload['failed'] ?? 0) > 0) {
-                $message .= ' '.($payload['failed']).' failed.';
+            $parts = [];
+            if (($payload['pushed'] ?? 0) > 0) {
+                $parts[] = 'Distributed '.($payload['pushed']).' post(s)';
             }
+            if (($payload['skipped'] ?? 0) > 0) {
+                $parts[] = ($payload['skipped']).' already on hub (skipped)';
+            }
+            if (($payload['failed'] ?? 0) > 0) {
+                $parts[] = ($payload['failed']).' failed';
+            }
+            $message = $parts !== []
+                ? implode('. ', $parts).'.'
+                : 'No posts were distributed.';
 
             Cache::put($cacheKey, [
                 'status' => 'completed',

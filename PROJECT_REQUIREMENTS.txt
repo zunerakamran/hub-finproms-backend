@@ -661,15 +661,17 @@ Notes:
     advisor import). Posts remain in the Central DB.
   - AI posts tab is under development (empty stub).
   - Distribute non-archived (ready) library posts to Shared / White-labelled
-    hubs. Copies are inserted into the target hub DB. Archive is optional:
+    hubs. Copies are inserted into the target hub DB. Re-distributing a post
+    to a hub that already has it (tracked via content_pushes + remote row)
+    skips the insert — no duplicate. Archive is optional:
     it retires a post from the distribute pool with required remarks but does
     not delete or hide it from the Central library list. Unarchive clears
     remarks and restores the post to the distribute pool.
   - Central posts list lives on `/my-dashboard/posts` (ready + archived, with
     search/filters and “published on” hubs). Editing a Central post also
     updates the copies on hubs it was successfully distributed to.
-  - Central library page is create / AI / distribute only (no separate Library
-    tab).
+  - Central library page tabs: Create / AI posts / Distribute / Archive
+    (archive / unarchive is its own tab, not nested under Distribute).
   - Distribution checks: non-archived posts only; AI posts only to hubs with
     `ai_posts`; manual posts only to hubs with `manual_posts`.
   - Target hubs list includes every active Shared and White-labelled registry
