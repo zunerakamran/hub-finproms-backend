@@ -10,15 +10,9 @@ use Throwable;
 
 /**
  * Opens a temporary Laravel DB connection to a white-labelled hub's own database.
- *
- * Connections are leased per request: nested run()/connect() calls reuse the same
- * PDO instead of purge+reconnect on every call (important under Central remote control).
  */
 class WhiteLabelDatabaseService
 {
-    /** @var array<string, int> */
-    private array $leaseCounts = [];
-
     public function connectionName(Hub $hub): string
     {
         return 'hub_remote_'.$hub->id;
@@ -54,28 +48,14 @@ class WhiteLabelDatabaseService
         $this->assertConfigured($hub);
 
         $name = $this->connectionName($hub);
-        $config = $this->connectionConfig($hub);
-        $existing = Config::get("database.connections.{$name}");
-        $leased = ($this->leaseCounts[$name] ?? 0) > 0;
-
-        // Already wired + leased in this request — keep the live PDO.
-        if ($leased && $existing === $config) {
-            return $name;
-        }
-
-        Config::set("database.connections.{$name}", $config);
-
-        // Only purge when establishing a fresh lease (or credentials changed).
-        if (! $leased || $existing !== $config) {
-            DB::purge($name);
-        }
+        Config::set("database.connections.{$name}", $this->connectionConfig($hub));
+        DB::purge($name);
 
         return $name;
     }
 
     /**
-     * Open the remote connection, run a callback, then disconnect when the
-     * outermost lease for that hub ends.
+     * Open the remote connection, run a callback, then disconnect.
      *
      * @template T
      *
@@ -85,16 +65,11 @@ class WhiteLabelDatabaseService
     public function run(Hub $hub, callable $callback): mixed
     {
         $name = $this->connect($hub);
-        $this->leaseCounts[$name] = ($this->leaseCounts[$name] ?? 0) + 1;
 
         try {
             return $callback($name);
         } finally {
-            $this->leaseCounts[$name] = max(0, ($this->leaseCounts[$name] ?? 1) - 1);
-            if (($this->leaseCounts[$name] ?? 0) === 0) {
-                unset($this->leaseCounts[$name]);
-                $this->disconnect($hub);
-            }
+            $this->disconnect($hub);
         }
     }
 
@@ -122,14 +97,8 @@ class WhiteLabelDatabaseService
 
     public function disconnect(Hub $hub): void
     {
-        $name = $this->connectionName($hub);
-        if (($this->leaseCounts[$name] ?? 0) > 0) {
-            // Nested caller still needs the connection.
-            return;
-        }
-
         try {
-            DB::purge($name);
+            DB::purge($this->connectionName($hub));
         } catch (Throwable) {
             // ignore
         }

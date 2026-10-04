@@ -2,7 +2,6 @@
 
 namespace App\Providers;
 
-use App\Services\WhiteLabelDatabaseService;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
@@ -15,8 +14,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        // One instance per request so remote DB leases nest instead of reconnecting.
-        $this->app->singleton(WhiteLabelDatabaseService::class);
+        //
     }
 
     /**

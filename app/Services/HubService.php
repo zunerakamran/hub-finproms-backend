@@ -15,15 +15,18 @@ class HubService
     {
         $slug = (string) config('hub.current_slug', 'shared');
 
-        // 5 minutes — hub branding/checklist rarely changes; forgetCurrentCache() on writes.
-        // If Redis/cache is misconfigured, fall back to DB so /api/hub never hard-crashes the UI.
+        // Cache only the id (not the Eloquent model) — safer with encrypted db_* fields
+        // and avoids stale serialized models. Fall back to DB if cache is misconfigured.
         try {
-            $cached = Cache::remember("hub:current:{$slug}", 300, function () use ($slug) {
-                return $this->resolveCurrentFromDatabase($slug);
+            $hubId = Cache::remember("hub:current:{$slug}", 300, function () use ($slug) {
+                return $this->resolveCurrentFromDatabase($slug)->id;
             });
 
-            if ($cached instanceof Hub) {
-                return $cached;
+            if ($hubId) {
+                $hub = Hub::query()->find($hubId);
+                if ($hub) {
+                    return $hub;
+                }
             }
         } catch (Throwable $e) {
             report($e);

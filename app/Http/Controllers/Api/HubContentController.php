@@ -44,10 +44,20 @@ class HubContentController extends Controller
     {
         $hub = $this->resolveActingWhiteLabel($request);
 
-        return response()->json($this->content->listPosts(
-            $hub,
-            min(100, max(1, (int) $request->integer('per_page', 50)))
-        ));
+        try {
+            return response()->json($this->content->listPosts(
+                $hub,
+                min(100, max(1, (int) $request->integer('per_page', 50)))
+            ));
+        } catch (InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => 'Could not load posts from '.$hub->name.'. Check that hub’s remote database settings.',
+            ], 503);
+        }
     }
 
     public function storePost(Request $request): JsonResponse
@@ -116,7 +126,17 @@ class HubContentController extends Controller
     {
         $hub = $this->resolveActingWhiteLabel($request);
 
-        return response()->json($this->content->listTypes($hub));
+        try {
+            return response()->json($this->content->listTypes($hub));
+        } catch (InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => 'Could not load types from '.$hub->name.'. Check that hub’s remote database settings.',
+            ], 503);
+        }
     }
 
     public function storeType(Request $request): JsonResponse
@@ -146,7 +166,17 @@ class HubContentController extends Controller
     {
         $hub = $this->resolveActingWhiteLabel($request);
 
-        return response()->json($this->content->listCategories($hub));
+        try {
+            return response()->json($this->content->listCategories($hub));
+        } catch (InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => 'Could not load categories from '.$hub->name.'. Check that hub’s remote database settings.',
+            ], 503);
+        }
     }
 
     public function storeCategory(Request $request): JsonResponse
@@ -176,7 +206,17 @@ class HubContentController extends Controller
     {
         $hub = $this->resolveActingWhiteLabel($request);
 
-        return response()->json($this->content->listTags($hub));
+        try {
+            return response()->json($this->content->listTags($hub));
+        } catch (InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => 'Could not load tags from '.$hub->name.'. Check that hub’s remote database settings.',
+            ], 503);
+        }
     }
 
     public function storeTag(Request $request): JsonResponse
@@ -205,10 +245,20 @@ class HubContentController extends Controller
     {
         $hub = $this->resolveActingWhiteLabel($request);
 
-        return response()->json($this->content->listBundles(
-            $hub,
-            min(100, max(1, (int) $request->integer('per_page', 50)))
-        ));
+        try {
+            return response()->json($this->content->listBundles(
+                $hub,
+                min(100, max(1, (int) $request->integer('per_page', 50)))
+            ));
+        } catch (InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => 'Could not load bundles from '.$hub->name.'. Check that hub’s remote database settings.',
+            ], 503);
+        }
     }
 
     public function storeBundle(Request $request): JsonResponse
