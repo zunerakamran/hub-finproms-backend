@@ -137,8 +137,12 @@ class ActingHubService
         $current = $this->hubs->current();
 
         // Hub switcher + Central content library always live on the control plane.
+        // Public website chrome (member_view_site_pages) is also THIS deploy only —
+        // never the acting Shared / White-label hub (Website button must not open
+        // a remote frontend_url and then break after login).
         if ($capability === self::CAPABILITY
             || $capability === 'dashboard_central_content_library'
+            || $capability === 'member_view_site_pages'
         ) {
             return $current;
         }
@@ -289,6 +293,11 @@ class ActingHubService
             $current,
             $user,
             'dashboard_central_content_library'
+        );
+        $effective['member_view_site_pages'] = $this->matrix->userCan(
+            $current,
+            $user,
+            'member_view_site_pages'
         );
 
         if ($user->isPowerAdmin()) {

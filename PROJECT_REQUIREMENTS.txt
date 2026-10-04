@@ -640,6 +640,10 @@ Notes:
   posts / types / categories / tags is Central-only (Central content library);
   while a content hub is selected those pages are list-only. Bundles and other
   hub tools still write to THAT hub’s own database when enabled.
+- Dashboard “Website” / “Back to website” always opens THIS deploy’s public
+  site (`/`), gated by `member_view_site_pages` on the control-plane (Central)
+  matrix for that user. It must NOT open the selected Shared / White-label
+  `frontend_url` (cross-origin login caused flicker → blank screen).
 - APIs: `GET/PUT /client-admin/acting-hub` (and power-admin / admin aliases).
   Authenticated `GET /hub` includes `hub_switcher` + acting effective caps when
   on Central Hub with remote-control capability.

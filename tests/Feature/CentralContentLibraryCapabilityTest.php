@@ -37,13 +37,16 @@ class CentralContentLibraryCapabilityTest extends TestCase
             'role_capabilities' => $matrix->defaultRoleCapabilities(Hub::TYPE_CENTRAL),
         ]);
 
+        $sharedCaps = $matrix->defaultRoleCapabilities(Hub::TYPE_SHARED);
+        $sharedCaps[User::ROLE_POWER_ADMIN]['member_view_site_pages'] = true;
+
         $shared = Hub::query()->create([
             'name' => 'Shared Hub',
             'slug' => 'shared',
             'type' => Hub::TYPE_SHARED,
             'is_active' => true,
             'checklist' => Hub::defaultChecklist(Hub::TYPE_SHARED),
-            'role_capabilities' => $matrix->defaultRoleCapabilities(Hub::TYPE_SHARED),
+            'role_capabilities' => $sharedCaps,
         ]);
 
         $admin = User::factory()->powerAdmin()->create([
@@ -62,6 +65,11 @@ class CentralContentLibraryCapabilityTest extends TestCase
             ->assertJsonPath(
                 'hub.hub_switcher.effective_capabilities.dashboard_central_content_library',
                 true
+            )
+            // Website chrome follows Central (default off), not the acting hub.
+            ->assertJsonPath(
+                'hub.hub_switcher.effective_capabilities.member_view_site_pages',
+                false
             );
 
         $this->getJson('/api/power-admin/central-library/posts')
