@@ -15,12 +15,14 @@ use App\Services\WelcomeMailService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password as PasswordBroker;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationException;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class AuthController extends Controller
 {
@@ -111,13 +113,7 @@ class AuthController extends Controller
         // Welcome mail is sent only after the address is confirmed.
         $this->welcomeMail->send($user);
 
-        $token = $user->createToken('auth_token')->plainTextToken;
-
-        return response()->json([
-            'message' => 'Email verified successfully. You are now signed in.',
-            'user' => $this->decorateUserForAuthResponse($user),
-            'token' => $token,
-        ]);
+        return $this->issueLoginToken($user, $request, 'Email verified successfully. You are now signed in.');
     }
 
     public function resendVerification(Request $request): JsonResponse
@@ -440,8 +436,15 @@ class AuthController extends Controller
         ]);
     }
 
-    private function issueLoginToken(User $user, Request $request): JsonResponse
+    private function issueLoginToken(User $user, Request $request, ?string $message = null): JsonResponse
     {
+        // httpOnly session cookie (primary for first-party SPA).
+        Auth::guard('web')->login($user);
+        if ($request->hasSession()) {
+            $request->session()->regenerate();
+        }
+
+        // Personal access token kept for Active Sessions / force-logout + legacy clients.
         try {
             $token = $user->createToken('auth_token')->plainTextToken;
         } catch (\Throwable $e) {
@@ -466,9 +469,11 @@ class AuthController extends Controller
         }
 
         return response()->json([
-            'message' => 'Login successful.',
+            'message' => $message ?: 'Login successful.',
             'user' => $this->decorateUserForAuthResponse($user),
+            // Returned for optional Bearer fallback; SPA should rely on cookies.
             'token' => $token,
+            'auth_mode' => 'cookie',
         ]);
     }
 
@@ -508,7 +513,16 @@ class AuthController extends Controller
             'status_code' => 200,
         ]);
 
-        $user->currentAccessToken()->delete();
+        $accessToken = $user->currentAccessToken();
+        if ($accessToken instanceof PersonalAccessToken) {
+            $accessToken->delete();
+        }
+
+        Auth::guard('web')->logout();
+        if ($request->hasSession()) {
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+        }
 
         return response()->json([
             'message' => 'Logged out successfully.',

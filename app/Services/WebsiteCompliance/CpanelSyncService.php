@@ -464,7 +464,7 @@ class CpanelSyncService
                         'Accept' => 'application/json',
                         'X-API-Key' => (string) ($payload['api_key'] ?? ''),
                     ])
-                    ->withOptions(['verify' => false])
+                    ->withOptions(['verify' => (bool) config('services.http_tls_verify', true)])
                     ->asJson()
                     ->post($endpoint, $payload);
 

@@ -266,7 +266,7 @@ class PublicController extends Controller
         try {
             $upstream = Http::timeout(45)
                 ->withOptions([
-                    'verify' => false,
+                    'verify' => (bool) config('services.http_tls_verify', true),
                     'allow_redirects' => ['max' => 5, 'strict' => true, 'referer' => true, 'track_redirects' => true],
                 ])
                 ->withHeaders([
@@ -337,7 +337,7 @@ class PublicController extends Controller
 
         try {
             $brandRes = Http::timeout(12)
-                ->withOptions(['verify' => false])
+                ->withOptions(['verify' => (bool) config('services.http_tls_verify', true)])
                 ->get(rtrim($siteBase, '/').'/api.php');
             if ($brandRes->successful()) {
                 $json = $brandRes->json();

@@ -2,8 +2,11 @@
 
 namespace App\Models;
 
+use App\Casts\SafeEncrypted;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Crypt;
+use Throwable;
 
 class Setting extends Model
 {
@@ -63,6 +66,33 @@ class Setting extends Model
         Cache::forget("setting:{$key}");
 
         return $setting;
+    }
+
+    /**
+     * Read a secret setting (AES via APP_KEY). Tolerates legacy plaintext.
+     */
+    public static function getSecret(string $key, mixed $default = null): mixed
+    {
+        $value = static::getValue($key, null);
+        if ($value === null || $value === '') {
+            return $default;
+        }
+
+        try {
+            return Crypt::decryptString((string) $value);
+        } catch (Throwable) {
+            return SafeEncrypted::looksLikeLaravelCiphertext((string) $value)
+                ? $default
+                : $value;
+        }
+    }
+
+    /**
+     * Persist a secret setting encrypted at rest.
+     */
+    public static function setSecret(string $key, string $value): self
+    {
+        return static::setValue($key, Crypt::encryptString($value));
     }
 
     public static function newBannerDays(): int

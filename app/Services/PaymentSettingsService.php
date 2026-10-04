@@ -70,8 +70,8 @@ class PaymentSettingsService
         $envCurrency = (string) (config('services.stripe.currency') ?: 'gbp');
 
         $platformKey = Setting::getValue(Setting::KEY_STRIPE_KEY, null) ?: null;
-        $platformSecret = Setting::getValue(Setting::KEY_STRIPE_SECRET, null) ?: null;
-        $platformWebhook = Setting::getValue(Setting::KEY_STRIPE_WEBHOOK_SECRET, null) ?: null;
+        $platformSecret = Setting::getSecret(Setting::KEY_STRIPE_SECRET, null) ?: null;
+        $platformWebhook = Setting::getSecret(Setting::KEY_STRIPE_WEBHOOK_SECRET, null) ?: null;
         $platformCurrency = Setting::getValue(Setting::KEY_STRIPE_CURRENCY, null) ?: null;
 
         $hubKey = $hub?->stripe_key ?: null;
@@ -201,10 +201,10 @@ class PaymentSettingsService
             Setting::setValue(Setting::KEY_STRIPE_KEY, trim($payload['stripe_key']));
         }
         if (array_key_exists('stripe_secret', $payload) && is_string($payload['stripe_secret']) && trim($payload['stripe_secret']) !== '') {
-            Setting::setValue(Setting::KEY_STRIPE_SECRET, trim($payload['stripe_secret']));
+            Setting::setSecret(Setting::KEY_STRIPE_SECRET, trim($payload['stripe_secret']));
         }
         if (array_key_exists('stripe_webhook_secret', $payload) && is_string($payload['stripe_webhook_secret']) && trim($payload['stripe_webhook_secret']) !== '') {
-            Setting::setValue(Setting::KEY_STRIPE_WEBHOOK_SECRET, trim($payload['stripe_webhook_secret']));
+            Setting::setSecret(Setting::KEY_STRIPE_WEBHOOK_SECRET, trim($payload['stripe_webhook_secret']));
         }
         if (array_key_exists('stripe_currency', $payload) && is_string($payload['stripe_currency'])) {
             Setting::setValue(Setting::KEY_STRIPE_CURRENCY, strtolower(trim($payload['stripe_currency'])) ?: 'gbp');
@@ -275,7 +275,7 @@ class PaymentSettingsService
         if (Setting::query()->where('key', Setting::KEY_PAYMENT_BANK_TRANSFER_AUTO_CONFIRM)->doesntExist()) {
             Setting::setValue(
                 Setting::KEY_PAYMENT_BANK_TRANSFER_AUTO_CONFIRM,
-                (bool) config('payments.methods.bank_transfer.auto_confirm', true)
+                (bool) config('payments.methods.bank_transfer.auto_confirm', false)
             );
         }
     }

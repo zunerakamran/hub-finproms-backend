@@ -6,6 +6,7 @@ use App\Models\Hub;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
+use PDO;
 use Throwable;
 
 /**
@@ -120,7 +121,7 @@ class WhiteLabelDatabaseService
             ];
         }
 
-        return [
+        $config = [
             'driver' => $driver,
             'host' => $hub->db_host,
             'port' => $hub->db_port ?: ($driver === 'pgsql' ? 5432 : 3306),
@@ -134,5 +135,56 @@ class WhiteLabelDatabaseService
             'strict' => true,
             'engine' => null,
         ];
+
+        return array_merge($config, $this->sslOptions($hub, $driver));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function sslOptions(Hub $hub, string $driver): array
+    {
+        $mode = strtolower(trim((string) ($hub->db_ssl_mode ?: 'disabled')));
+        if ($mode === '' || $mode === 'disabled' || $mode === 'false' || $mode === '0') {
+            return [];
+        }
+
+        if ($driver === 'pgsql') {
+            // prefer / require / verify-ca / verify-full
+            $pgsqlMode = match ($mode) {
+                'preferred', 'prefer' => 'prefer',
+                'verify_ca', 'verify-ca' => 'verify-ca',
+                'verify_identity', 'verify-full', 'verify_full' => 'verify-full',
+                default => 'require',
+            };
+
+            $out = ['sslmode' => $pgsqlMode];
+            if (filled($hub->db_ssl_ca)) {
+                $out['sslrootcert'] = (string) $hub->db_ssl_ca;
+            }
+
+            return $out;
+        }
+
+        // MySQL / MariaDB via PDO
+        $options = [];
+        if (filled($hub->db_ssl_ca)) {
+            $options[PDO::MYSQL_ATTR_SSL_CA] = (string) $hub->db_ssl_ca;
+        }
+
+        $verify = in_array($mode, ['verify_ca', 'verify-ca', 'verify_identity', 'verify-identity'], true);
+        if (defined('PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT')) {
+            $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = $verify;
+        }
+
+        // "required" / "preferred" without CA still requests an SSL socket when the server supports it.
+        if ($options === [] && in_array($mode, ['required', 'require', 'preferred', 'prefer'], true)) {
+            // Empty CA with verify off — many hosts still negotiate TLS.
+            if (defined('PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT')) {
+                $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = false;
+            }
+        }
+
+        return $options === [] ? [] : ['options' => $options];
     }
 }

@@ -311,9 +311,15 @@ class TemplateRequestController extends Controller
             'cpanel_db_host' => $request->cpanel_db_host,
             'cpanel_db_name' => $request->cpanel_db_name,
             'cpanel_db_user' => $request->cpanel_db_user,
-            'cpanel_db_password' => $request->cpanel_db_password ?? $request->input('cpanel_db_pass'),
-            'cpanel_api_key' => $request->cpanel_api_key,
         ], $this->brandingUpdatesFromRequest($request));
+
+        // Never wipe stored secrets when the deploy form leaves password/API key blank.
+        if ($request->filled('cpanel_db_password') || $request->filled('cpanel_db_pass')) {
+            $updates['cpanel_db_password'] = $request->cpanel_db_password ?? $request->input('cpanel_db_pass');
+        }
+        if ($request->filled('cpanel_api_key')) {
+            $updates['cpanel_api_key'] = $request->cpanel_api_key;
+        }
 
         $templateRequest->update($updates);
         $templateRequest->refresh();

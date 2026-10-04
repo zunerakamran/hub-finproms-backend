@@ -25,6 +25,13 @@ class ActivityLogService
         'secret',
         'stripe_secret',
         'stripe_webhook_secret',
+        'hub_stripe_secret',
+        'hub_stripe_webhook_secret',
+        'cpanel_db_password',
+        'cpanel_db_pass',
+        'cpanel_api_key',
+        'api_key',
+        'db_password',
         'card_number',
         'cvc',
         'cvv',
@@ -369,9 +376,11 @@ class ActivityLogService
         $out = [];
         foreach ($data as $key => $value) {
             $keyStr = (string) $key;
-            if (in_array(strtolower($keyStr), self::SENSITIVE_KEYS, true)
-                || str_contains(strtolower($keyStr), 'password')
-                || str_contains(strtolower($keyStr), 'secret')
+            $lower = strtolower($keyStr);
+            if (in_array($lower, self::SENSITIVE_KEYS, true)
+                || str_contains($lower, 'password')
+                || str_contains($lower, 'secret')
+                || str_contains($lower, 'api_key')
             ) {
                 $out[$keyStr] = '[redacted]';
                 continue;

@@ -70,19 +70,19 @@ class StripeWebhookController extends Controller
     {
         $secrets = $this->candidateWebhookSecrets();
 
+        // Fail closed: never accept unsigned Stripe events (forged checkouts).
         if ($secrets === []) {
-            $event = json_decode($payload);
-            if (json_last_error() !== JSON_ERROR_NONE || ! is_object($event)) {
-                throw new UnexpectedValueException('Invalid payload');
-            }
+            throw new UnexpectedValueException('Stripe webhook secret is not configured');
+        }
 
-            return $event;
+        if (! is_string($signature) || $signature === '') {
+            throw new UnexpectedValueException('Missing Stripe-Signature header');
         }
 
         $lastException = null;
         foreach ($secrets as $secret) {
             try {
-                return Webhook::constructEvent($payload, $signature ?? '', $secret);
+                return Webhook::constructEvent($payload, $signature, $secret);
             } catch (SignatureVerificationException $e) {
                 $lastException = $e;
             }
@@ -106,7 +106,7 @@ class StripeWebhookController extends Controller
         };
 
         $push($this->paymentSettings->stripeWebhookSecret($this->hubs->current()));
-        $push(Setting::getValue(Setting::KEY_STRIPE_WEBHOOK_SECRET, null));
+        $push(Setting::getSecret(Setting::KEY_STRIPE_WEBHOOK_SECRET, null));
         $push(config('services.stripe.webhook_secret'));
 
         foreach (Hub::query()->whereNotNull('stripe_webhook_secret')->get() as $hub) {

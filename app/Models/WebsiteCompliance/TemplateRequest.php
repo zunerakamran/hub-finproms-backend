@@ -2,6 +2,7 @@
 
 namespace App\Models\WebsiteCompliance;
 
+use App\Casts\SafeEncrypted;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -71,6 +72,16 @@ class TemplateRequest extends Model
         'cpanel_api_key',
     ];
 
+    protected $hidden = [
+        'cpanel_db_password',
+        'cpanel_api_key',
+    ];
+
+    protected $appends = [
+        'cpanel_db_password_set',
+        'cpanel_api_key_set',
+    ];
+
     protected $casts = [
         'services' => 'array',
         'images' => 'array',
@@ -80,7 +91,19 @@ class TemplateRequest extends Model
         'page_contents' => 'array',
         'go_live_requested_at' => 'datetime',
         'live_promoted_at' => 'datetime',
+        'cpanel_db_password' => SafeEncrypted::class,
+        'cpanel_api_key' => SafeEncrypted::class,
     ];
+
+    public function getCpanelDbPasswordSetAttribute(): bool
+    {
+        return filled($this->cpanel_db_password);
+    }
+
+    public function getCpanelApiKeySetAttribute(): bool
+    {
+        return filled($this->cpanel_api_key);
+    }
 
     public function advisor(): BelongsTo
     {

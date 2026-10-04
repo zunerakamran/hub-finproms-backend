@@ -202,6 +202,19 @@ class ActiveSessionService
         $tokensRevoked = (int) $query->count();
         $query->delete();
 
+        // Also drop httpOnly cookie sessions so force-logout ends SPA cookie auth.
+        $sessionsRevoked = 0;
+        if (DB::connection($connection)->getSchemaBuilder()->hasTable('sessions')
+            && DB::connection($connection)->getSchemaBuilder()->hasColumn('sessions', 'user_id')
+        ) {
+            $sessionsRevoked = (int) DB::connection($connection)
+                ->table('sessions')
+                ->where('user_id', $userId)
+                ->delete();
+        }
+
+        $ended = $tokensRevoked + $sessionsRevoked;
+
         $loggedOutSelf = $currentTokenId !== null
             && (int) $user->id === (int) $actor->id
             && ! ($hub->isContentHub() && $this->actingHubs->isActingRemotely($actor));
@@ -209,7 +222,8 @@ class ActiveSessionService
         try {
             $this->activityLogs->log([
                 'action' => 'auth.force_logout',
-                'description' => 'Force-logged out user: '.$user->email.' ('.$tokensRevoked.' session(s))',
+                'description' => 'Force-logged out user: '.$user->email
+                    .' ('.$tokensRevoked.' token(s), '.$sessionsRevoked.' cookie session(s))',
                 'user' => $actor,
                 'subject' => $user,
                 'status_code' => 200,
@@ -217,6 +231,7 @@ class ActiveSessionService
                     'target_user_id' => (int) $user->id,
                     'target_email' => $user->email,
                     'tokens_revoked' => $tokensRevoked,
+                    'sessions_revoked' => $sessionsRevoked,
                     'hub_id' => $hub->id,
                     'hub_slug' => $hub->slug,
                 ],
@@ -226,11 +241,12 @@ class ActiveSessionService
         }
 
         return [
-            'message' => $tokensRevoked > 0
-                ? 'User has been logged out ('.$tokensRevoked.' session(s) ended).'
+            'message' => $ended > 0
+                ? 'User has been logged out ('.$ended.' session(s) ended).'
                 : 'User had no active sessions.',
             'user_id' => (int) $user->id,
             'tokens_revoked' => $tokensRevoked,
+            'sessions_revoked' => $sessionsRevoked,
             'logged_out_self' => $loggedOutSelf,
         ];
     }

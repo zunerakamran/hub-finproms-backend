@@ -11,15 +11,20 @@ use Illuminate\Support\Facades\Log;
 /**
  * HTTP-based scheduler webhook.
  *
- *   GET /api/website-compliance/scheduler/publish-scheduled?key=YOUR_SCHEDULER_SECRET
+ * Prefer: GET .../publish-scheduled with header X-Scheduler-Key: YOUR_SCHEDULER_SECRET
+ * Legacy:  GET .../publish-scheduled?key=YOUR_SCHEDULER_SECRET
  */
 class SchedulerController extends Controller
 {
     public function publishScheduled(Request $request, ScheduledChangeRequestPublisher $publisher): JsonResponse
     {
-        $secret = config('services.website_compliance.scheduler_secret');
+        $secret = (string) (config('services.website_compliance.scheduler_secret') ?? '');
+        $provided = (string) (
+            $request->header('X-Scheduler-Key')
+            ?: $request->query('key', '')
+        );
 
-        if (! $secret || $request->query('key') !== $secret) {
+        if ($secret === '' || ! hash_equals($secret, $provided)) {
             Log::warning('wc publish-scheduled webhook: invalid or missing key', [
                 'ip' => $request->ip(),
             ]);

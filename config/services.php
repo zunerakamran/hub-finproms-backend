@@ -42,6 +42,10 @@ return [
         'currency' => env('STRIPE_CURRENCY', 'usd'),
     ],
 
+    // Outbound HTTPS certificate verification (cPanel sync, embed proxy).
+    // Set HTTP_TLS_VERIFY=false only for local/dev with broken/self-signed certs.
+    'http_tls_verify' => filter_var(env('HTTP_TLS_VERIFY', true), FILTER_VALIDATE_BOOLEAN),
+
     'website_compliance' => [
         'hub_api_url' => env('WEBSITE_COMPLIANCE_HUB_API_URL'),
         'uploads_origin' => env('WEBSITE_COMPLIANCE_UPLOADS_ORIGIN'),

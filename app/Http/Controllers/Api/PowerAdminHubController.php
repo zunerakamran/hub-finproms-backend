@@ -128,6 +128,8 @@ class PowerAdminHubController extends Controller
             'db_database' => ['nullable', 'string', 'max:255'],
             'db_username' => ['nullable', 'string', 'max:255'],
             'db_password' => ['nullable', 'string', 'max:1000'],
+            'db_ssl_mode' => ['nullable', 'string', Rule::in(['disabled', 'preferred', 'required', 'verify_ca'])],
+            'db_ssl_ca' => ['nullable', 'string', 'max:5000'],
             'is_active' => ['sometimes', 'boolean'],
             'checklist' => ['sometimes', 'array'],
         ]);
@@ -172,6 +174,8 @@ class PowerAdminHubController extends Controller
                 'db_database' => $validated['db_database'] ?? null,
                 'db_username' => $validated['db_username'] ?? null,
                 'db_password' => $validated['db_password'] ?? null,
+                'db_ssl_mode' => $validated['db_ssl_mode'] ?? 'disabled',
+                'db_ssl_ca' => $validated['db_ssl_ca'] ?? null,
                 'checklist' => $checklist,
             ]);
         } catch (Throwable $e) {
@@ -253,6 +257,9 @@ class PowerAdminHubController extends Controller
             'db_username' => ['nullable', 'string', 'max:255'],
             'db_password' => ['nullable', 'string', 'max:1000'],
             'clear_db_password' => ['sometimes', 'boolean'],
+            'db_ssl_mode' => ['nullable', 'string', Rule::in(['disabled', 'preferred', 'required', 'verify_ca'])],
+            'db_ssl_ca' => ['nullable', 'string', 'max:5000'],
+            'clear_db_ssl_ca' => ['sometimes', 'boolean'],
             'is_active' => ['sometimes', 'boolean'],
             // null / omitted unlimited flag + credits: Power Admin subscriber allotment
             'subscriber_credits_unlimited' => ['sometimes', 'boolean'],
@@ -278,16 +285,24 @@ class PowerAdminHubController extends Controller
 
         $clearDbPassword = (bool) ($validated['clear_db_password'] ?? false);
         unset($validated['clear_db_password']);
+        $clearDbSslCa = (bool) ($validated['clear_db_ssl_ca'] ?? false);
+        unset($validated['clear_db_ssl_ca']);
 
         // Blank password on update means "keep existing".
         if (array_key_exists('db_password', $validated) && ! filled($validated['db_password'])) {
             unset($validated['db_password']);
+        }
+        if (array_key_exists('db_ssl_ca', $validated) && ! filled($validated['db_ssl_ca'])) {
+            unset($validated['db_ssl_ca']);
         }
 
         try {
             $hub->fill($validated);
             if ($clearDbPassword) {
                 $hub->db_password = null;
+            }
+            if ($clearDbSslCa) {
+                $hub->db_ssl_ca = null;
             }
             $hub->save();
         } catch (Throwable $e) {
@@ -573,7 +588,7 @@ class PowerAdminHubController extends Controller
     private function normalizeOptionalUrlFields(Request $request): void
     {
         $merge = [];
-        foreach (['frontend_url', 'api_url', 'deploy_notes', 'logo_url', 'favicon_url', 'db_host', 'db_database', 'db_username', 'db_password'] as $key) {
+        foreach (['frontend_url', 'api_url', 'deploy_notes', 'logo_url', 'favicon_url', 'db_host', 'db_database', 'db_username', 'db_password', 'db_ssl_ca'] as $key) {
             if ($request->exists($key) && $request->input($key) === '') {
                 $merge[$key] = null;
             }

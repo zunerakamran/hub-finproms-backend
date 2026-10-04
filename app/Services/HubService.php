@@ -154,6 +154,8 @@ class HubService
                 'db_database' => fn (Blueprint $table) => $table->string('db_database')->nullable(),
                 'db_username' => fn (Blueprint $table) => $table->string('db_username')->nullable(),
                 'db_password' => fn (Blueprint $table) => $table->text('db_password')->nullable(),
+                'db_ssl_mode' => fn (Blueprint $table) => $table->string('db_ssl_mode', 32)->nullable(),
+                'db_ssl_ca' => fn (Blueprint $table) => $table->text('db_ssl_ca')->nullable(),
             ];
 
             foreach ($columns as $name => $add) {

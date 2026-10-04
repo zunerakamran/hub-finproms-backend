@@ -12,6 +12,9 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // First-party SPA cookie sessions (Sanctum stateful) + CSRF for FRONTEND_URL.
+        $middleware->statefulApi();
+
         $middleware->alias([
             'client_admin' => \App\Http\Middleware\EnsureUserIsClientAdmin::class,
             'power_admin' => \App\Http\Middleware\EnsureUserIsPowerAdmin::class,
@@ -30,6 +33,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         // Record successful mutating API requests (posts, imports, settings, etc.).
         $middleware->appendToGroup('api', [
+            \App\Http\Middleware\SecurityHeaders::class,
             \App\Http\Middleware\LogApiActivity::class,
         ]);
     })

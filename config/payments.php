@@ -19,13 +19,12 @@ return [
             'label' => 'Card (Stripe)',
         ],
 
-        // TEMPORARY: bank transfer fallback for testing until Stripe keys are available.
-        // Remove by setting BANK_TRANSFER_ENABLED=false and deleting related code.
+        // Bank transfer — keep OFF in production unless intentionally used for testing.
         'bank_transfer' => [
-            'enabled' => env('BANK_TRANSFER_ENABLED', true),
+            'enabled' => env('BANK_TRANSFER_ENABLED', false),
             'label' => 'Bank transfer (test)',
             // When true, dummy bank transfer instantly grants credits (no admin step).
-            'auto_confirm' => env('BANK_TRANSFER_AUTO_CONFIRM', true),
+            'auto_confirm' => env('BANK_TRANSFER_AUTO_CONFIRM', false),
         ],
     ],
 

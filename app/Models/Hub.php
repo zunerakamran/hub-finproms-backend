@@ -1554,6 +1554,8 @@ class Hub extends Model
         'db_database',
         'db_username',
         'db_password',
+        'db_ssl_mode',
+        'db_ssl_ca',
         'checklist',
         'role_capabilities',
         'role_display_names',
@@ -2265,6 +2267,8 @@ class Hub extends Model
             'database' => $this->db_database,
             'username' => $this->db_username,
             'password_set' => filled($this->db_password),
+            'ssl_mode' => $this->db_ssl_mode ?: 'disabled',
+            'ssl_ca_set' => filled($this->db_ssl_ca),
         ];
     }
 

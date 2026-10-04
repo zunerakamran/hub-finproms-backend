@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-04 (WC approved vs published status split)
+Last updated: 2026-10-04 (security hardening phase 2 — cookies + DB TLS)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -1277,6 +1277,39 @@ STEP 1 — Shared hub core (content hub)
 [x] Concurrent performance (phase 5): remote DB connection leasing (no nested
     reconnect); Quill + WC CSS deferred from critical path; firm-document rights
     merge after hub boot; production Redis/queue/schedule notes in .env.example
+
+--------------------------------------------------------------------------------
+SECURITY HARDENING (phase 1 — 2026-10-04)
+--------------------------------------------------------------------------------
+[x] Encrypt WC cPanel secrets at rest (cpanel_db_password, cpanel_api_key via
+    SafeEncrypted); hide from API JSON; expose cpanel_*_set flags only
+[x] Encrypt platform Stripe secrets in settings (Setting::getSecret/setSecret)
+[x] Stripe webhooks fail closed when no webhook secret / missing signature
+[x] SecurityHeaders middleware (HSTS, nosniff, CSP for JSON APIs; embed exempt)
+[x] Sanctum token expiry default 24h (SANCTUM_EXPIRATION)
+[x] Outbound TLS verify on by default (HTTP_TLS_VERIFY); cPanel + embed proxy
+[x] Scheduler auth: X-Scheduler-Key header + hash_equals (query key still works)
+[x] Activity log redacts api_key / cpanel_* / hub stripe secrets
+[x] CORS: localhost origins only outside production; CORS_ALLOWED_ORIGINS extra
+[x] Bank-transfer auto-grant defaults OFF in config / .env.example
+[x] Force HTTPS URL scheme in production; SESSION_ENCRYPT=true in .env.example
+[x] Artisan: php artisan security:encrypt-stored-secrets [--dry-run]
+[x] Frontend: do not echo/prefill cPanel secrets; leave blank to keep; 401 clears
+    session; referrer / nosniff meta on index.html
+
+--------------------------------------------------------------------------------
+SECURITY HARDENING (phase 2 — 2026-10-04)
+--------------------------------------------------------------------------------
+[x] Sanctum SPA httpOnly cookie auth (statefulApi + Auth::login session)
+    — frontend credentials:include + CSRF (/sanctum/csrf-cookie); no Bearer in
+      localStorage; Vite proxies /api+/sanctum for local same-origin cookies
+[x] Logout invalidates web session + Sanctum PAT; force-logout also clears
+    sessions.user_id rows
+[x] CORS supports_credentials=true with explicit FRONTEND_URL allowlist
+[x] Hub remote DB TLS wiring: db_ssl_mode + db_ssl_ca (Power Admin UI +
+    WhiteLabelDatabaseService PDO/pgsql ssl options)
+[ ] Future: TOTP authenticator 2FA for Power Admin (in addition to email OTP)
+[ ] Future: mime allowlists on all uploads; disallow/sanitize SVG
 
 ================================================================================
 END OF REQUIREMENTS

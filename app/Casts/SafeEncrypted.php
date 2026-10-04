@@ -9,6 +9,9 @@ use Throwable;
 
 /**
  * Encrypted string that returns null instead of crashing when APP_KEY changed.
+ *
+ * Also tolerates legacy plaintext values written before encryption was enabled
+ * (decrypt fails and payload does not look like a Laravel ciphertext).
  */
 class SafeEncrypted implements CastsAttributes
 {
@@ -21,8 +24,23 @@ class SafeEncrypted implements CastsAttributes
         try {
             return Crypt::decryptString($value);
         } catch (Throwable) {
-            return null;
+            // Wrong APP_KEY / corrupt ciphertext → null. Plain legacy → return as-is
+            // until the next write (or security:encrypt-stored-secrets) encrypts it.
+            return self::looksLikeLaravelCiphertext((string) $value) ? null : $value;
         }
+    }
+
+    public static function looksLikeLaravelCiphertext(string $value): bool
+    {
+        $decoded = base64_decode($value, true);
+        if ($decoded === false) {
+            return false;
+        }
+
+        $json = json_decode($decoded, true);
+
+        return is_array($json)
+            && isset($json['iv'], $json['value'], $json['mac']);
     }
 
     public function set(Model $model, string $key, mixed $value, array $attributes): mixed
