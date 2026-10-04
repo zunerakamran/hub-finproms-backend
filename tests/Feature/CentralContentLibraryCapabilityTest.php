@@ -76,6 +76,61 @@ class CentralContentLibraryCapabilityTest extends TestCase
             ->assertOk();
     }
 
+    public function test_enabling_central_website_pages_while_acting_on_shared_shows_for_power_admin(): void
+    {
+        $matrix = app(CapabilitiesMatrixService::class);
+
+        $centralCaps = $matrix->defaultRoleCapabilities(Hub::TYPE_CENTRAL);
+        $centralCaps[User::ROLE_POWER_ADMIN]['member_view_site_pages'] = false;
+
+        $central = Hub::query()->create([
+            'name' => 'Central Hub Controller',
+            'slug' => 'central',
+            'type' => Hub::TYPE_CENTRAL,
+            'is_active' => true,
+            'checklist' => Hub::defaultChecklist(Hub::TYPE_CENTRAL),
+            'role_capabilities' => $centralCaps,
+        ]);
+
+        $shared = Hub::query()->create([
+            'name' => 'Shared Hub',
+            'slug' => 'shared',
+            'type' => Hub::TYPE_SHARED,
+            'is_active' => true,
+            'checklist' => Hub::defaultChecklist(Hub::TYPE_SHARED),
+            'role_capabilities' => $matrix->defaultRoleCapabilities(Hub::TYPE_SHARED),
+        ]);
+
+        $admin = User::factory()->powerAdmin()->create([
+            'acting_hub_id' => $shared->id,
+        ]);
+        Sanctum::actingAs($admin);
+
+        // Save matrix for Shared while acting on it — Power Admin Website chrome
+        // must still persist onto Central.
+        $this->putJson('/api/power-admin/capabilities/matrix', [
+            'hub_id' => $shared->id,
+            'matrix' => [
+                User::ROLE_POWER_ADMIN => [
+                    'member_view_site_pages' => true,
+                ],
+            ],
+        ])->assertOk();
+
+        $central->refresh();
+        $this->assertTrue(
+            (bool) (app(CapabilitiesMatrixService::class)
+                ->resolvedRoleCapabilities($central)[User::ROLE_POWER_ADMIN]['member_view_site_pages'] ?? false)
+        );
+
+        $this->getJson('/api/hub')
+            ->assertOk()
+            ->assertJsonPath(
+                'hub.hub_switcher.effective_capabilities.member_view_site_pages',
+                true
+            );
+    }
+
     public function test_central_library_is_denied_when_power_admin_cell_is_off(): void
     {
         $matrix = app(CapabilitiesMatrixService::class);

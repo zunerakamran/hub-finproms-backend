@@ -325,10 +325,17 @@ class CapabilitiesMatrixService
                 $applicable = in_array($role, $applicableRoles, true);
                 $enabled = false;
                 if ($applicable) {
-                    // Hub switcher + Central content library always reflect the
-                    // control-plane (Central) matrix — never the acting Shared/WL row.
+                    // Hub switcher + Central content library + Website chrome
+                    // (member_view_site_pages) for control-plane roles always
+                    // reflect the Central matrix — never the acting Shared/WL row.
+                    // Otherwise enabling “View website pages” while a content hub
+                    // is selected never turns on the Central dashboard Website button.
                     if ($key === ActingHubService::CAPABILITY
                         || $key === 'dashboard_central_content_library'
+                        || (
+                            $key === 'member_view_site_pages'
+                            && ActingHubService::isControlPlaneRole($role)
+                        )
                     ) {
                         $enabled = (bool) ($controlPlaneRoleCaps[$role][$key] ?? false);
                     } else {
@@ -364,10 +371,15 @@ class CapabilitiesMatrixService
                 $requiresModule = 'firm_documents';
             }
 
+            $description = (string) $meta['description'];
+            if ($key === 'member_view_site_pages' && ! $hub->isControlPlane()) {
+                $description .= ' Power Admin / FinProms Admin columns control the Central Hub dashboard “Website” button (saved on Central). Other roles still apply to this hub’s own site.';
+            }
+
             $rows[] = [
                 'key' => $key,
                 'label' => $meta['label'],
-                'description' => $meta['description'],
+                'description' => $description,
                 'group' => $group,
                 'group_label' => Hub::CHECKLIST_GROUPS[$group] ?? $group,
                 'group_sort' => $groupSort[$group] ?? 999,
@@ -504,14 +516,19 @@ class CapabilitiesMatrixService
             array_flip(ActingHubService::CONTROL_PLANE_ROLES)
         );
 
-        // Hub switcher + Central content library always live on the Central / control-plane hub.
+        // Hub switcher + Central content library + Website chrome for control-plane
+        // roles always live on the Central / control-plane hub.
         $switcherInput = [];
         foreach (ActingHubService::CONTROL_PLANE_ROLES as $role) {
             if (! isset($controlPlaneInput[$role]) || ! is_array($controlPlaneInput[$role])) {
                 continue;
             }
             $planeOnly = [];
-            foreach ([ActingHubService::CAPABILITY, 'dashboard_central_content_library'] as $planeKey) {
+            foreach ([
+                ActingHubService::CAPABILITY,
+                'dashboard_central_content_library',
+                'member_view_site_pages',
+            ] as $planeKey) {
                 if (array_key_exists($planeKey, $controlPlaneInput[$role])) {
                     $planeOnly[$planeKey] = $controlPlaneInput[$role][$planeKey];
                     unset($controlPlaneInput[$role][$planeKey]);
@@ -524,7 +541,7 @@ class CapabilitiesMatrixService
                 unset($controlPlaneInput[$role]);
             }
         }
-        // Never persist Central-library cells onto Shared / WL matrices.
+        // Never persist Central-library / Central Website-chrome cells onto Shared / WL.
         foreach ($tenantInput as $role => $caps) {
             if (! is_array($caps)) {
                 continue;
@@ -532,6 +549,16 @@ class CapabilitiesMatrixService
             unset($tenantInput[$role]['dashboard_central_content_library']);
             if ($tenantInput[$role] === []) {
                 unset($tenantInput[$role]);
+            }
+        }
+        // Control-plane roles' Website chrome is plane-only (handled above).
+        foreach ($controlPlaneInput as $role => $caps) {
+            if (! is_array($caps) || ! ActingHubService::isControlPlaneRole((string) $role)) {
+                continue;
+            }
+            unset($controlPlaneInput[$role]['member_view_site_pages']);
+            if ($controlPlaneInput[$role] === []) {
+                unset($controlPlaneInput[$role]);
             }
         }
 

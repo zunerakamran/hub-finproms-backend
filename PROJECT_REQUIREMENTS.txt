@@ -644,6 +644,9 @@ Notes:
   site (`/`), gated by `member_view_site_pages` on the control-plane (Central)
   matrix for that user. It must NOT open the selected Shared / White-label
   `frontend_url` (cross-origin login caused flicker → blank screen).
+  Power Admin / FinProms Admin cells for `member_view_site_pages` always
+  read/save on Central (even while the hub switcher is on a content hub), so
+  enabling the capability turns on the Central Website button.
 - APIs: `GET/PUT /client-admin/acting-hub` (and power-admin / admin aliases).
   Authenticated `GET /hub` includes `hub_switcher` + acting effective caps when
   on Central Hub with remote-control capability.
