@@ -40,7 +40,7 @@ class ChangeRequestPublishService
 
             $row->loadMissing(['section', 'currentVersionRow']);
 
-            // Apply section content + flip to approved while still holding the lock.
+            // Apply section content + flip to published while still holding the lock.
             return self::applyPublishedContent($row, $actorUserId);
         });
 
@@ -105,7 +105,7 @@ class ChangeRequestPublishService
     }
 
     /**
-     * Write proposed content to sections and mark the change request approved.
+     * Write proposed content to sections and mark the change request published.
      * Does not push to cPanel (caller does that after any surrounding transaction commits).
      *
      * @return array{change_request: ChangeRequest, sections: array, publish_advisor_id: int|string|null}
@@ -162,7 +162,7 @@ class ChangeRequestPublishService
         }
 
         $changeRequest->update([
-            'status' => ChangeRequest::STATUS_APPROVED,
+            'status' => ChangeRequest::STATUS_PUBLISHED,
             'scheduled_at' => null,
             'proposed_content' => $proposedContent,
             'feedback' => null,
@@ -184,7 +184,7 @@ class ChangeRequestPublishService
             }
 
             $version->update([
-                'status' => ChangeRequest::STATUS_APPROVED,
+                'status' => ChangeRequest::STATUS_PUBLISHED,
                 'proposed_content' => $proposedContent,
                 'reviewed_by' => $version->reviewed_by ?: $reviewerName,
                 'reviewed_at' => $version->reviewed_at ?: now(),
@@ -244,7 +244,7 @@ class ChangeRequestPublishService
                 'event_type' => ComplianceAuditEvent::EVENT_PUBLISHED,
                 'actor' => $actor,
                 'description' => $eventDescription,
-                'to_status' => ChangeRequest::STATUS_APPROVED,
+                'to_status' => ChangeRequest::STATUS_PUBLISHED,
                 'version_number' => $changeRequest->current_version,
                 'metadata' => array_filter([
                     'cpanel_synced' => $cpanelSynced,

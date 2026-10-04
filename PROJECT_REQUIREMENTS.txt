@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-03 (Support Tickets functionality + st_* capabilities)
+Last updated: 2026-10-04 (WC approved vs published status split)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -446,7 +446,10 @@ Notes:
      - Advisor / editor (if capable) locks/edits sections and submits change
        requests (`wc_edit_sections`, `wc_submit_change_requests`).
      - Approver / manager sees the whole flow: assign → review →
-       approve / reject / approve-with-feedback / schedule → publish
+       approve & publish (status → published, immediate) OR approve only
+       (status → approved, then schedule → scheduled → published) /
+       reject / approve-with-feedback.
+       Status overrides are blocked once published or scheduled.
        (`wc_assign_change_requests`, `wc_review_change_requests`,
        `wc_change_request_status`, `wc_view_all_change_requests`, …).
      - Optional bypass: publish live without review (`wc_publish_live_content`).

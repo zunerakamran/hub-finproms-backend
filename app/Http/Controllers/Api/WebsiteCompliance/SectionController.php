@@ -186,7 +186,7 @@ class SectionController extends Controller
             // Remote control-plane operators can take over locks on white-labelled hubs.
             if (! $this->gate->isRemoteControlPlaneOperator($user)) {
                 if (! $section->locked_by) {
-                    return response()->json(['message' => 'This section has a pending or scheduled change request and cannot be edited until it is reviewed.'], 409);
+                    return response()->json(['message' => 'This section has a pending, approved, or scheduled change request and cannot be edited until it is published or rejected.'], 409);
                 }
                 $lockedUser = $section->lockedByUser ? $section->lockedByUser->name : 'another user';
 

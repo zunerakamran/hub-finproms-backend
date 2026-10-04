@@ -341,6 +341,7 @@ class ReportController extends Controller
 
         $openCr = (int) ($crStatus['pending'] ?? 0)
             + (int) ($crStatus['under_review'] ?? 0)
+            + (int) ($crStatus['approved'] ?? 0)
             + (int) ($crStatus['scheduled'] ?? 0)
             + (int) ($crStatus['approved_with_feedback'] ?? 0);
 
@@ -366,6 +367,7 @@ class ReportController extends Controller
                     'under_review' => (int) ($crStatus['under_review'] ?? 0),
                     'scheduled' => (int) ($crStatus['scheduled'] ?? 0),
                     'approved' => (int) ($crStatus['approved'] ?? 0),
+                    'published' => (int) ($crStatus['published'] ?? 0),
                     'rejected' => (int) ($crStatus['rejected'] ?? 0),
                     'approved_with_feedback' => (int) ($crStatus['approved_with_feedback'] ?? 0),
                 ],
@@ -453,6 +455,7 @@ class ReportController extends Controller
             'change_requests_under_review' => (int) ($crStatus['under_review'] ?? 0),
             'change_requests_scheduled' => (int) ($crStatus['scheduled'] ?? 0),
             'change_requests_approved' => (int) ($crStatus['approved'] ?? 0),
+            'change_requests_published' => (int) ($crStatus['published'] ?? 0),
             'change_requests_rejected' => (int) ($crStatus['rejected'] ?? 0),
             'change_requests_approved_with_feedback' => (int) ($crStatus['approved_with_feedback'] ?? 0),
             'generated_by' => $this->gate->tenantUserIdOrNull($user),

@@ -186,14 +186,14 @@ class ComplianceChangeStatusTest extends TestCase
         $published = ChangeRequest::query()->create([
             'editor_id' => $editor->id,
             'proposed_content' => json_encode([['section_id' => 1, 'proposed_content' => 'x']]),
-            'status' => ChangeRequest::STATUS_APPROVED,
+            'status' => ChangeRequest::STATUS_PUBLISHED,
             'current_version' => 1,
         ]);
         ChangeRequestVersion::query()->create([
             'request_id' => $published->id,
             'version_number' => 1,
             'proposed_content' => $published->proposed_content,
-            'status' => ChangeRequest::STATUS_APPROVED,
+            'status' => ChangeRequest::STATUS_PUBLISHED,
             'submitted_by' => $editor->id,
             'submitted_at' => now(),
         ]);

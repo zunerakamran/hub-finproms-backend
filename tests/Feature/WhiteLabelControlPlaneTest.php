@@ -460,6 +460,7 @@ class WhiteLabelControlPlaneTest extends TestCase
                 $table->unsignedInteger('change_requests_under_review')->default(0);
                 $table->unsignedInteger('change_requests_scheduled')->default(0);
                 $table->unsignedInteger('change_requests_approved')->default(0);
+                $table->unsignedInteger('change_requests_published')->default(0);
                 $table->unsignedInteger('change_requests_rejected')->default(0);
                 $table->unsignedInteger('change_requests_approved_with_feedback')->default(0);
                 $table->unsignedBigInteger('generated_by')->nullable();

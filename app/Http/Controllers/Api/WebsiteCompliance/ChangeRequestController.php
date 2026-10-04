@@ -481,12 +481,18 @@ class ChangeRequestController extends Controller
         $user = $request->user();
 
         $this->gate->assertCanAny($user, ['wc_review_change_requests', 'wc_change_request_status']);
-        $this->workflow->assertReviewable($changeRequest, $user);
 
-        $request->validate(ComplianceSupportingFiles::optionalUploadRules());
+        $request->validate(array_merge([
+            'publish_now' => ['sometimes', 'boolean'],
+            'scheduled_at' => ['nullable', 'string'],
+        ], ComplianceSupportingFiles::optionalUploadRules()));
         $supportingFiles = ComplianceSupportingFiles::fromRequest($request);
+        $publishNow = $request->boolean('publish_now');
 
+        // Schedule publish (from approved, or directly from review).
         if ($request->filled('scheduled_at')) {
+            $this->workflow->assertCanScheduleOrPublish($changeRequest, $user);
+
             try {
                 $scheduledAt = Carbon::parse((string) $request->input('scheduled_at'))->utc();
             } catch (\Throwable) {
@@ -501,7 +507,7 @@ class ChangeRequestController extends Controller
             // Never treat a "schedule" request as publish-now — that caused early publishes.
             if ($scheduledAt->lessThanOrEqualTo(now()->addMinute())) {
                 return response()->json([
-                    'message' => 'Schedule time must be at least 1 minute in the future. Leave the schedule empty to publish now.',
+                    'message' => 'Schedule time must be at least 1 minute in the future.',
                     'errors' => [
                         'scheduled_at' => ['Schedule time must be at least 1 minute in the future.'],
                     ],
@@ -544,7 +550,7 @@ class ChangeRequestController extends Controller
             )->delay($scheduledAt);
 
             $eventDescription = 'Change request #'.$changeRequest->id
-                .' approved and scheduled for '.$scheduledAt->toIso8601String();
+                .' scheduled for publication at '.$scheduledAt->toIso8601String();
 
             $this->activityLogs->log([
                 'action' => 'wc.change_request.schedule',
@@ -575,32 +581,55 @@ class ChangeRequestController extends Controller
             ]);
 
             return response()->json([
-                'message' => 'Change request approved & scheduled for '.$scheduledAt->toIso8601String(),
+                'message' => 'Change request scheduled for '.$scheduledAt->toIso8601String(),
                 'status' => ChangeRequest::STATUS_SCHEDULED,
                 'scheduled_at' => $scheduledAt->toIso8601String(),
                 'change_request' => $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow.supportingFiles', 'versions.supportingFiles'])->toApiArray(includeVersions: true),
             ]);
         }
 
-        $approveVersion = $changeRequest->fresh(['currentVersionRow.supportingFiles'])->currentVersionRow;
-        if ($approveVersion) {
-            $this->workflow->appendSupportingFilesToVersion($approveVersion, $supportingFiles, $user, 'approve');
+        // Approve & publish immediately (no scheduler).
+        if ($publishNow) {
+            $this->workflow->assertCanScheduleOrPublish($changeRequest, $user);
+
+            $approveVersion = $changeRequest->fresh(['currentVersionRow.supportingFiles'])->currentVersionRow;
+            if ($approveVersion) {
+                $this->workflow->appendSupportingFilesToVersion($approveVersion, $supportingFiles, $user, 'approve');
+            }
+
+            if (! $changeRequest->approver_id) {
+                $changeRequest->update([
+                    'approver_id' => $this->gate->tenantUserIdOrNull($user),
+                ]);
+            }
+
+            $result = ChangeRequestPublishService::publish(
+                $changeRequest->fresh(['section', 'currentVersionRow']),
+                $user->id
+            );
+
+            $queued = (bool) ($result['cpanel_sync_queued'] ?? false);
+
+            return response()->json([
+                'message' => $result['cpanel_synced']
+                    ? 'Approved and published to the live advisor site.'
+                    : ($queued
+                        ? 'Approved and published in the hub database. Live site sync has been queued.'
+                        : 'Approved and published in the hub database, but the live site was not updated. Check Laravel logs and that cpanel_domain points to the live template URL (e.g. '.rtrim((string) config('app.url'), '/').'/template4)'),
+                'status' => ChangeRequest::STATUS_PUBLISHED,
+                'cpanel_synced' => $result['cpanel_synced'],
+                'cpanel_sync_queued' => $queued,
+                'change_request' => $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow.supportingFiles', 'versions.supportingFiles'])->toApiArray(includeVersions: true),
+            ]);
         }
 
-        $result = ChangeRequestPublishService::publish($changeRequest, $user->id);
-
-        $queued = (bool) ($result['cpanel_sync_queued'] ?? false);
+        // Approve only — content stays unpublished; scheduler UI becomes available.
+        $updated = $this->workflow->approveOnly($changeRequest, $user, $supportingFiles, $request);
 
         return response()->json([
-            'message' => $result['cpanel_synced']
-                ? 'Approved and published to the live advisor site.'
-                : ($queued
-                    ? 'Approved in the hub database. Live site sync has been queued.'
-                    : 'Approved in the hub database, but the live site was not updated. Check Laravel logs and that cpanel_domain points to the live template URL (e.g. '.rtrim((string) config('app.url'), '/').'/template4)'),
+            'message' => 'Request approved. Set a publish schedule when you are ready to go live.',
             'status' => ChangeRequest::STATUS_APPROVED,
-            'cpanel_synced' => $result['cpanel_synced'],
-            'cpanel_sync_queued' => $queued,
-            'change_request' => $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow.supportingFiles', 'versions.supportingFiles'])->toApiArray(includeVersions: true),
+            'change_request' => $updated->toApiArray(includeVersions: true),
         ]);
     }
 
@@ -774,7 +803,7 @@ class ChangeRequestController extends Controller
                 : ($queued
                     ? 'Feedback confirmed in the hub database. Live site sync has been queued.'
                     : 'Feedback confirmed in the hub database, but the live site was not updated.'),
-            'status' => ChangeRequest::STATUS_APPROVED,
+            'status' => ChangeRequest::STATUS_PUBLISHED,
             'cpanel_synced' => $result['cpanel_synced'],
             'cpanel_sync_queued' => $queued,
             'change_request' => $result['change_request']->toApiArray(true),

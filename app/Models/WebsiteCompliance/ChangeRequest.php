@@ -25,6 +25,8 @@ class ChangeRequest extends Model
 
     public const STATUS_APPROVED = 'approved';
 
+    public const STATUS_PUBLISHED = 'published';
+
     public const STATUS_REJECTED = 'rejected';
 
     public const STATUS_APPROVED_WITH_FEEDBACK = 'approved_with_feedback';
@@ -37,8 +39,19 @@ class ChangeRequest extends Model
         self::STATUS_UNDER_REVIEW,
         self::STATUS_SCHEDULED,
         self::STATUS_APPROVED,
+        self::STATUS_PUBLISHED,
         self::STATUS_REJECTED,
         self::STATUS_APPROVED_WITH_FEEDBACK,
+    ];
+
+    /**
+     * Statuses that lock status overrides (content live, or publish timer set).
+     *
+     * @var list<string>
+     */
+    public const STATUS_LOCKED = [
+        self::STATUS_PUBLISHED,
+        self::STATUS_SCHEDULED,
     ];
 
     protected $fillable = [

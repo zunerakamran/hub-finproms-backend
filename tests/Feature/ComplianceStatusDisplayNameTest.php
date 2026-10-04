@@ -34,6 +34,7 @@ class ComplianceStatusDisplayNameTest extends TestCase
         $this->getJson('/api/hub')
             ->assertOk()
             ->assertJsonPath('hub.compliance_status_labels.pending', 'Pending')
+            ->assertJsonPath('hub.compliance_status_labels.published', 'Published')
             ->assertJsonPath('hub.compliance_status_labels.approved_with_feedback', 'Approved with Feedback');
     }
 

@@ -489,7 +489,8 @@ class ComplianceAuditBackfillService
             return match ($status) {
                 ChangeRequest::STATUS_REJECTED => ComplianceAuditEvent::EVENT_REJECTED,
                 ChangeRequest::STATUS_SCHEDULED => ComplianceAuditEvent::EVENT_SCHEDULED,
-                ChangeRequest::STATUS_APPROVED => ComplianceAuditEvent::EVENT_PUBLISHED,
+                ChangeRequest::STATUS_PUBLISHED => ComplianceAuditEvent::EVENT_PUBLISHED,
+                ChangeRequest::STATUS_APPROVED => ComplianceAuditEvent::EVENT_REVIEWED,
                 ChangeRequest::STATUS_APPROVED_WITH_FEEDBACK => ComplianceAuditEvent::EVENT_REVIEWED,
                 default => ComplianceAuditEvent::EVENT_STATUS_CHANGED,
             };

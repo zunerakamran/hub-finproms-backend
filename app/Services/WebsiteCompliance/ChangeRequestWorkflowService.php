@@ -235,10 +235,7 @@ class ChangeRequestWorkflowService
 
         $currentStatus = (string) $changeRequest->status;
         // Locked once live on the website, or once a publish schedule is set.
-        if (in_array($currentStatus, [
-            ChangeRequest::STATUS_APPROVED,
-            ChangeRequest::STATUS_SCHEDULED,
-        ], true)) {
+        if (in_array($currentStatus, ChangeRequest::STATUS_LOCKED, true)) {
             throw ValidationException::withMessages([
                 'status' => 'Status cannot be changed once content is published to the website or a publish schedule is set.',
             ]);
@@ -316,12 +313,7 @@ class ChangeRequestWorkflowService
             $this->storeSupportingFilesForVersion($newVersionRow, $newUploads, $user, 'change_status', $nextOrder);
         }
 
-        if ($status === ChangeRequest::STATUS_APPROVED) {
-            ChangeRequestPublishService::publish(
-                $changeRequest->fresh(['section', 'currentVersionRow']),
-                (int) $user->id
-            );
-        }
+        // Approved here means decision-only (not published). Publishing is a separate action.
 
         $eventDescription = 'Changed website compliance request #'.$changeRequest->id
             .' status to '.$status.' (v'.$nextVersion.')';
@@ -581,7 +573,7 @@ class ChangeRequestWorkflowService
             'actor' => $user,
             'description' => $eventDescription,
             'from_status' => ChangeRequest::STATUS_APPROVED_WITH_FEEDBACK,
-            'to_status' => ChangeRequest::STATUS_APPROVED,
+            'to_status' => ChangeRequest::STATUS_PUBLISHED,
             'version_number' => $nextVersion,
             'metadata' => array_filter([
                 'revised' => $sectionEdits !== null,
@@ -698,10 +690,7 @@ class ChangeRequestWorkflowService
             throw new HttpException(403, 'Unauthorized');
         }
 
-        if (in_array($changeRequest->status, [
-            ChangeRequest::STATUS_APPROVED,
-            ChangeRequest::STATUS_SCHEDULED,
-        ], true)) {
+        if (in_array($changeRequest->status, ChangeRequest::STATUS_LOCKED, true)) {
             throw new HttpException(
                 409,
                 'Status cannot be changed once content is published to the website or a publish schedule is set.'
@@ -709,6 +698,7 @@ class ChangeRequestWorkflowService
         }
 
         // Managers with change-status may still act on rejected / approved-with-feedback.
+        // Approved (decision-only) is not re-reviewed here — use schedule / publish-now instead.
         $allowedStatuses = $canOverrideStatus
             ? [
                 ChangeRequest::STATUS_PENDING,
@@ -724,6 +714,121 @@ class ChangeRequestWorkflowService
         if (! in_array($changeRequest->status, $allowedStatuses, true)) {
             throw new HttpException(409, 'This request can no longer be reviewed.');
         }
+    }
+
+    /**
+     * Approve-only, approve & publish, or schedule from reviewable / already-approved requests.
+     */
+    public function assertCanScheduleOrPublish(ChangeRequest $changeRequest, User $user): void
+    {
+        $canViewAll = $this->gate->can($user, 'wc_view_all_change_requests')
+            && (string) $user->role !== User::ROLE_APPROVER;
+        $canOverrideStatus = $this->gate->can($user, 'wc_change_request_status');
+
+        if (
+            ! $canViewAll
+            && ! $canOverrideStatus
+            && ! $this->gate->isRemoteControlPlaneOperator($user)
+            && $changeRequest->approver_id !== null
+            && (int) $changeRequest->approver_id !== (int) ($this->gate->tenantUserIdOrNull($user) ?? $user->id)
+        ) {
+            throw new HttpException(403, 'Unauthorized');
+        }
+
+        if (! $changeRequest->relationLoaded('editor')) {
+            $changeRequest->load('editor:id,firm_id');
+        }
+
+        if (! $this->firmVisibility->actorCanViewRequest(
+            $user,
+            $changeRequest->editor_id ? (int) $changeRequest->editor_id : null,
+            $changeRequest->editor?->firm_id ? (int) $changeRequest->editor->firm_id : null,
+            $changeRequest->approver_id ? (int) $changeRequest->approver_id : null
+        )) {
+            throw new HttpException(403, 'Unauthorized');
+        }
+
+        if (in_array($changeRequest->status, ChangeRequest::STATUS_LOCKED, true)) {
+            throw new HttpException(
+                409,
+                'Status cannot be changed once content is published to the website or a publish schedule is set.'
+            );
+        }
+
+        $allowedStatuses = $canOverrideStatus
+            ? [
+                ChangeRequest::STATUS_PENDING,
+                ChangeRequest::STATUS_UNDER_REVIEW,
+                ChangeRequest::STATUS_APPROVED,
+                ChangeRequest::STATUS_REJECTED,
+                ChangeRequest::STATUS_APPROVED_WITH_FEEDBACK,
+            ]
+            : [
+                ChangeRequest::STATUS_PENDING,
+                ChangeRequest::STATUS_UNDER_REVIEW,
+                ChangeRequest::STATUS_APPROVED,
+            ];
+
+        if (! in_array($changeRequest->status, $allowedStatuses, true)) {
+            throw new HttpException(409, 'This request cannot be scheduled or published in its current status.');
+        }
+    }
+
+    /**
+     * Mark a change request approved without writing content to the live site.
+     * Sections stay locked until publish / schedule completes.
+     */
+    public function approveOnly(
+        ChangeRequest $changeRequest,
+        User $user,
+        array $supportingFiles = [],
+        ?Request $request = null
+    ): ChangeRequest {
+        $this->assertReviewable($changeRequest, $user);
+
+        $fromStatus = (string) $changeRequest->status;
+
+        $changeRequest->update([
+            'status' => ChangeRequest::STATUS_APPROVED,
+            'approver_id' => $changeRequest->approver_id ?: $this->gate->tenantUserIdOrNull($user),
+            'scheduled_at' => null,
+            'rejection_reason' => null,
+            'feedback' => null,
+        ]);
+
+        $this->syncCurrentVersionStatus(
+            $changeRequest->fresh(['currentVersionRow']),
+            ChangeRequest::STATUS_APPROVED,
+            $user
+        );
+
+        $version = $changeRequest->fresh(['currentVersionRow.supportingFiles'])->currentVersionRow;
+        if ($version) {
+            $this->appendSupportingFilesToVersion($version, $supportingFiles, $user, 'approve');
+        }
+
+        $eventDescription = 'Change request #'.$changeRequest->id.' approved (not published)';
+
+        $this->activityLogs->log([
+            'action' => 'wc.change_request.approve',
+            'description' => $eventDescription,
+            'user' => $user,
+            'subject' => $changeRequest,
+            'request' => $request,
+        ]);
+
+        $this->auditTrail->record([
+            'module' => ComplianceAuditEvent::MODULE_WC,
+            'subject' => $changeRequest,
+            'event_type' => ComplianceAuditEvent::EVENT_REVIEWED,
+            'actor' => $user,
+            'description' => $eventDescription,
+            'from_status' => $fromStatus,
+            'to_status' => ChangeRequest::STATUS_APPROVED,
+            'version_number' => $changeRequest->current_version,
+        ]);
+
+        return $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow.supportingFiles', 'versions.supportingFiles']);
     }
 
     /**

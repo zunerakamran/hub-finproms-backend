@@ -68,6 +68,7 @@ class Hub extends Model
     public const COMPLIANCE_STATUS_LABELS = [
         'pending' => 'Pending',
         'approved' => 'Approved',
+        'published' => 'Published',
         'rejected' => 'Rejected',
         'approved_with_feedback' => 'Approved with Feedback',
         'under_review' => 'Under review',
@@ -1456,14 +1457,14 @@ class Hub extends Model
         ],
         'wc_review_change_requests' => [
             'label' => 'Review website change requests',
-            'description' => 'Approve, reject, schedule, or approve-with-feedback submitted website content changes (full pre-approval flow).',
+            'description' => 'Approve, approve & publish, reject, schedule, or approve-with-feedback submitted website content changes (full pre-approval flow).',
             'group' => self::GROUP_WEBSITE_COMPLIANCE,
             'default_shared' => false,
             'default_white_label' => false,
         ],
         'wc_change_request_status' => [
             'label' => 'Change website content request status',
-            'description' => 'Override a change request with the same decisions as an approver (approve & publish, schedule, approve with feedback, or reject), including after rejection or approved-with-feedback. Not allowed once content is published to the website or a publish schedule is set. Respects firm visibility.',
+            'description' => 'Override a change request with the same decisions as an approver (approve, approve & publish, schedule, approve with feedback, or reject), including after rejection or approved-with-feedback. Not allowed once content is published to the website or a publish schedule is set. Respects firm visibility.',
             'group' => self::GROUP_WEBSITE_COMPLIANCE,
             'default_shared' => false,
             'default_white_label' => false,
