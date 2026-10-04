@@ -20,6 +20,7 @@ use App\Services\WebsiteCompliance\CpanelSyncService;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
 use App\Support\ApiListResponse;
 use App\Support\ComplianceSupportingFiles;
+use App\Support\PlainText;
 use App\Support\WebsiteCompliance\WcDatabaseContext;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -640,7 +641,8 @@ class ChangeRequestController extends Controller
             $this->workflow->appendSupportingFilesToVersion($rejectVersion, $supportingFiles, $user, 'reject');
         }
 
-        $eventDescription = 'Change request #'.$changeRequest->id.' rejected: '.$request->rejection_reason;
+        $eventDescription = 'Change request #'.$changeRequest->id.' rejected: '
+            .PlainText::fromHtml($request->rejection_reason);
 
         $this->activityLogs->log([
             'action' => 'wc.change_request.reject',

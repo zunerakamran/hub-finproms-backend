@@ -16,6 +16,7 @@ use App\Services\WebsiteCompliance\AdvisorSectionService;
 use App\Services\WebsiteCompliance\CpanelSyncService;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
 use App\Support\ApiListResponse;
+use App\Support\PlainText;
 use App\Support\WebsiteCompliance\HubTemplateCatalog;
 use App\Support\WebsiteCompliance\BrandColor;
 use Illuminate\Http\JsonResponse;
@@ -647,7 +648,8 @@ class TemplateRequestController extends Controller
 
         $this->activityLogs->log([
             'action' => 'wc.template_request.reject',
-            'description' => 'Template deployment request rejected: '.$request->rejection_reason,
+            'description' => 'Template deployment request rejected: '
+                .PlainText::fromHtml($request->rejection_reason),
             'user' => $user,
             'subject' => $templateRequest,
             'request' => $request,
