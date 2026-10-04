@@ -1891,6 +1891,10 @@ class Hub extends Model
         }
 
         if ($type === self::TYPE_WHITE_LABEL) {
+            // Same distribute defaults as Shared: Central can push catalog posts here.
+            $defaults['receive_content_from_shared'] = true;
+            $defaults['manual_posts'] = true;
+            $defaults['ai_posts'] = false;
             $defaults['dashboard_manage_posts'] = false;
             $defaults['dashboard_manage_types'] = false;
             $defaults['dashboard_manage_categories'] = false;

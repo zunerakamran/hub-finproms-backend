@@ -665,6 +665,11 @@ Notes:
     tab).
   - Distribution checks: non-archived posts only; AI posts only to hubs with
     `ai_posts`; manual posts only to hubs with `manual_posts`.
+  - Target hubs list includes every active Shared and White-labelled registry
+    hub. Selectable (eligible) hubs need Receive content from Central, remote
+    DB wiring, Social Media Template Library, and Manual or AI posts. Ineligible
+    hubs stay visible but disabled with a reason. White-label hubs default to
+    receive + manual posts (same as Shared).
   - Types / categories / tags with Central library:
     - Central keeps its own taxonomy tables (`content_types`, `categories`,
       `tags`) plus type/categories/tags names stored on each Central post.
@@ -1061,14 +1066,15 @@ ARCHITECTURE — Central Hub Controller separation
 [x] Spawn Shared / White-label by copy-to-cPanel + register on Central Hub
     (Power Admin create accepts type=shared|white_label)
 [x] Rename / clarify receive_content_from_shared → from Central (label/description;
-    key name kept for compatibility; default ON for Shared too)
+    key name kept for compatibility; default ON for Shared and White-label)
 [x] Frontend: hide Power Admin control plane on Shared / White-label deploys
 [ ] Migrate existing Shared-as-controller data/config to Central Hub
     (ops: deploy Central with HUB_SLUG=central; register Shared hubs;
     on each Shared run php artisan hub:strip-control-plane --force;
     set HUB_IS_CONTROL_PLANE=false + HUB_TYPE=shared)
 [x] Multiple Shared hubs supported (unique slug + HUB_TYPE=shared; registry on Central)
-[x] Shared content hubs: control-plane caps off by default; receive_content on
+[x] Shared + White-label content hubs: control-plane caps off by default;
+    receive_content on (WL healed for Central distribute targets)
 [x] EnsureControlPlane middleware on /power-admin routes
 [x] Artisan: hub:strip-control-plane for Shared/WL content DBs
 [x] Frontend build:central + .env.central

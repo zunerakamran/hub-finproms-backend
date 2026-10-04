@@ -119,6 +119,8 @@ class ContentPushService
                 $dbReady = $hub->hasRemoteDatabaseConfigured();
                 $manual = $hub->can('manual_posts');
                 $ai = $hub->can('ai_posts');
+                $smtl = $hub->hasSocialMediaTemplateLibraryModule();
+                $eligible = $canReceive && $dbReady && ($manual || $ai);
 
                 return [
                     'id' => $hub->id,
@@ -129,12 +131,46 @@ class ContentPushService
                     'db_ready' => $dbReady,
                     'manual_posts' => $manual,
                     'ai_posts' => $ai,
-                    'eligible' => $canReceive && $dbReady && ($manual || $ai),
+                    'smtl_enabled' => $smtl,
+                    'eligible' => $eligible,
+                    'reason' => $eligible ? null : $this->ineligibleTargetReason(
+                        $canReceive,
+                        $dbReady,
+                        $manual,
+                        $ai,
+                        $smtl
+                    ),
                     'frontend_url' => $hub->frontend_url,
                 ];
             })
             ->values()
             ->all();
+    }
+
+    private function ineligibleTargetReason(
+        bool $canReceive,
+        bool $dbReady,
+        bool $manual,
+        bool $ai,
+        bool $smtl
+    ): string {
+        $parts = [];
+        if (! $smtl) {
+            $parts[] = 'Social Media Template Library is off';
+        }
+        if (! $canReceive) {
+            $parts[] = 'Receive content from Central Hub is off';
+        }
+        if (! $dbReady) {
+            $parts[] = 'remote database not configured';
+        }
+        if (! $manual && ! $ai) {
+            $parts[] = 'Manual posts and AI posts are both off';
+        }
+
+        return $parts !== []
+            ? implode('; ', $parts)
+            : 'not ready for distribution';
     }
 
     /**
