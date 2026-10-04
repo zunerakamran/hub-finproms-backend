@@ -35,9 +35,8 @@ class WhiteLabelContentService
         if (! $hub->is_active) {
             throw new InvalidArgumentException('That hub is inactive.');
         }
-        if (! $hub->can('receive_content_from_shared')) {
-            throw new InvalidArgumentException('That hub does not allow content from Central Hub.');
-        }
+        // Hub-content CRUD is remote management of that hub's own catalog.
+        // Do NOT require receive_content_from_shared (that flag is only for content push).
         $this->remoteDb->assertConfigured($hub);
     }
 

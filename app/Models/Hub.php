@@ -2228,12 +2228,20 @@ class Hub extends Model
     }
 
     /**
-     * Whether remote DB credentials are complete enough for content push.
+     * Whether remote DB credentials are complete enough for content push / remote control.
      */
     public function hasRemoteDatabaseConfigured(): bool
     {
+        if (! filled($this->db_database)) {
+            return false;
+        }
+
+        $driver = strtolower((string) ($this->db_driver ?: 'mysql'));
+        if ($driver === 'sqlite') {
+            return true;
+        }
+
         return filled($this->db_host)
-            && filled($this->db_database)
             && filled($this->db_username)
             && filled($this->db_password);
     }
