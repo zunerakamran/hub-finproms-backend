@@ -2,11 +2,13 @@
 
 namespace App\Services\WebsiteCompliance;
 
+use App\Jobs\WebsiteCompliance\SyncAdvisorCpanelJob;
 use App\Models\ComplianceAuditEvent;
 use App\Models\WebsiteCompliance\ChangeRequest;
 use App\Models\WebsiteCompliance\Section;
 use App\Services\ActivityLogService;
 use App\Services\ComplianceAuditTrailService;
+use App\Support\WebsiteCompliance\WcDatabaseContext;
 use Illuminate\Support\Facades\DB;
 
 class ChangeRequestPublishService
@@ -17,7 +19,7 @@ class ChangeRequestPublishService
      * Status stays `scheduled` until content is written — if this fails, retries can still pick it up.
      * cPanel sync runs after commit (outside the lock).
      *
-     * @return array{success: bool, cpanel_synced: bool, sections: array}|null
+     * @return array{success: bool, cpanel_synced: bool, cpanel_sync_queued: bool, sections: array}|null
      */
     public static function claimAndPublishDueScheduled(ChangeRequest $changeRequest, ?int $actorUserId = null): ?array
     {
@@ -46,29 +48,33 @@ class ChangeRequestPublishService
             return null;
         }
 
-        $cpanelSynced = CpanelSyncService::pushToAdvisorCpanel(
+        // cPanel HTTP can take 25s+ — queue so PHP workers stay free for other users.
+        SyncAdvisorCpanelJob::dispatch(
             $applied['publish_advisor_id'],
-            $applied['sections']
+            $applied['sections'],
+            WcDatabaseContext::hubId()
         );
 
         self::logPublishActivity(
             $applied['change_request'],
             $actorUserId,
-            $cpanelSynced,
-            scheduled: true
+            cpanelSynced: false,
+            scheduled: true,
+            cpanelQueued: true
         );
 
         return [
             'success' => true,
-            'cpanel_synced' => $cpanelSynced,
+            'cpanel_synced' => false,
+            'cpanel_sync_queued' => true,
             'sections' => $applied['sections'],
         ];
     }
 
     /**
-     * Apply proposed content to hub sections and push to the live advisor site.
+     * Apply proposed content to hub sections and queue a live advisor site push.
      *
-     * @return array{success: bool, cpanel_synced: bool, sections: array}
+     * @return array{success: bool, cpanel_synced: bool, cpanel_sync_queued: bool, sections: array}
      */
     public static function publish(ChangeRequest $changeRequest, ?int $actorUserId = null): array
     {
@@ -76,21 +82,24 @@ class ChangeRequestPublishService
 
         $applied = self::applyPublishedContent($changeRequest, $actorUserId);
 
-        $cpanelSynced = CpanelSyncService::pushToAdvisorCpanel(
+        SyncAdvisorCpanelJob::dispatch(
             $applied['publish_advisor_id'],
-            $applied['sections']
+            $applied['sections'],
+            WcDatabaseContext::hubId()
         );
 
         self::logPublishActivity(
             $applied['change_request'],
             $actorUserId,
-            $cpanelSynced,
-            scheduled: false
+            cpanelSynced: false,
+            scheduled: false,
+            cpanelQueued: true
         );
 
         return [
             'success' => true,
-            'cpanel_synced' => $cpanelSynced,
+            'cpanel_synced' => false,
+            'cpanel_sync_queued' => true,
             'sections' => $applied['sections'],
         ];
     }
@@ -193,7 +202,8 @@ class ChangeRequestPublishService
         ChangeRequest $changeRequest,
         ?int $actorUserId,
         bool $cpanelSynced,
-        bool $scheduled
+        bool $scheduled,
+        bool $cpanelQueued = false
     ): void {
         try {
             $actor = auth()->user();
@@ -201,13 +211,19 @@ class ChangeRequestPublishService
                 $actor = \App\Models\User::find($actorUserId);
             }
 
-            $eventDescription = $scheduled
-                ? ($cpanelSynced
-                    ? 'Scheduled content published for change request #'.$changeRequest->id
-                    : 'Scheduled content published in hub DB for change request #'.$changeRequest->id.' but live site was not updated')
-                : ($cpanelSynced
-                    ? 'Content approved and published for change request #'.$changeRequest->id
-                    : 'Content approved in hub DB for change request #'.$changeRequest->id.' but live site was not updated');
+            if ($cpanelQueued) {
+                $eventDescription = $scheduled
+                    ? 'Scheduled content published in hub DB for change request #'.$changeRequest->id.'; live site sync queued'
+                    : 'Content approved and published in hub DB for change request #'.$changeRequest->id.'; live site sync queued';
+            } else {
+                $eventDescription = $scheduled
+                    ? ($cpanelSynced
+                        ? 'Scheduled content published for change request #'.$changeRequest->id
+                        : 'Scheduled content published in hub DB for change request #'.$changeRequest->id.' but live site was not updated')
+                    : ($cpanelSynced
+                        ? 'Content approved and published for change request #'.$changeRequest->id
+                        : 'Content approved in hub DB for change request #'.$changeRequest->id.' but live site was not updated');
+            }
 
             app(ActivityLogService::class)->log([
                 'action' => 'wc.change_request.approve',
@@ -216,6 +232,7 @@ class ChangeRequestPublishService
                 'user' => $actor,
                 'properties' => array_filter([
                     'cpanel_synced' => $cpanelSynced,
+                    'cpanel_sync_queued' => $cpanelQueued ?: null,
                     'approver_id' => $actorUserId ?: $changeRequest->approver_id,
                     'via' => $scheduled ? 'scheduled' : null,
                 ], fn ($v) => $v !== null),
@@ -231,6 +248,7 @@ class ChangeRequestPublishService
                 'version_number' => $changeRequest->current_version,
                 'metadata' => array_filter([
                     'cpanel_synced' => $cpanelSynced,
+                    'cpanel_sync_queued' => $cpanelQueued ?: null,
                     'approver_id' => $actorUserId ?: $changeRequest->approver_id,
                     'via' => $scheduled ? 'scheduled' : null,
                 ], fn ($v) => $v !== null),

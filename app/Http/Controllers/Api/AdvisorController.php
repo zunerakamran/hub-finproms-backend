@@ -3,16 +3,17 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\ProcessAdvisorImportJob;
 use App\Models\Hub;
 use App\Models\User;
 use App\Services\ActingHubService;
-use App\Services\AdvisorBillingService;
 use App\Services\AdvisorImportService;
 use App\Services\CapabilitiesMatrixService;
-use App\Services\ModuleRecurringBillingService;
 use App\Services\WhiteLabelDatabaseService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\HttpKernel\Exception\HttpException;
@@ -21,8 +22,6 @@ class AdvisorController extends Controller
 {
     public function __construct(
         private readonly AdvisorImportService $importService,
-        private readonly AdvisorBillingService $billingService,
-        private readonly ModuleRecurringBillingService $recurringBilling,
         private readonly ActingHubService $actingHubs,
         private readonly CapabilitiesMatrixService $matrix,
         private readonly WhiteLabelDatabaseService $remoteDb
@@ -131,218 +130,50 @@ class AdvisorController extends Controller
         }
 
         $useRemote = $this->shouldUseRemote($request, $hub);
-        // Recurring module billing replaces legacy advisor-tier import payment gate.
-        $recurringOn = $this->recurringBilling->billingEnabled($hub);
-        $billingOn = ! $recurringOn && $this->billingService->billingEnabled($hub);
+        $jobId = (string) Str::uuid();
+        $storedPath = $file->storeAs(
+            'advisor-imports/tmp',
+            $jobId.'.'.$extension,
+            'local'
+        );
 
-        try {
-            if ($billingOn) {
-                // Stage only — advisors are created when Pay now runs.
-                if ($useRemote) {
-                    $plan = $this->remoteDb->run($hub, function (string $connection) use ($file, $hub) {
-                        return $this->importService->buildPlan($file, $hub, $connection);
-                    });
-                } else {
-                    $plan = $this->importService->buildPlan($file, $hub);
-                }
+        Cache::put(ProcessAdvisorImportJob::cacheKey($jobId), [
+            'status' => 'queued',
+            'user_id' => (int) $request->user()->id,
+            'message' => 'Import queued. Waiting for a worker…',
+        ], now()->addHour());
 
-                $billable = (int) ($plan['summary']['billable_batch'] ?? 0);
-
-                if ($billable < 1) {
-                    // Updates / skips only — nothing to charge; apply immediately.
-                    if ($useRemote) {
-                        $result = $this->remoteDb->run($hub, function (string $connection) use ($plan, $hub) {
-                            return $this->importService->commitPending(
-                                $plan['pending'],
-                                $hub,
-                                $connection,
-                                $plan['skipped']
-                            );
-                        });
-                    } else {
-                        $result = $this->importService->commitPending(
-                            $plan['pending'],
-                            $hub,
-                            null,
-                            $plan['skipped']
-                        );
-                    }
-
-                    $quote = $this->billingService->quotePayload(null, $request->user(), $hub);
-                    $quote['payment_required'] = false;
-                    $quote['message'] = 'No new advisors were imported, so no payment is due.';
-
-                    return response()->json([
-                        'message' => sprintf(
-                            'Import finished: %d created, %d updated, %d skipped.',
-                            $result['summary']['created'],
-                            $result['summary']['updated'],
-                            $result['summary']['skipped']
-                        ),
-                        ...$result,
-                        'awaiting_payment' => false,
-                        'billing' => null,
-                        'quote' => $quote,
-                        'target_hub' => $this->hubPayload($hub),
-                    ]);
-                }
-
-                $billing = null;
-                $quote = null;
-                try {
-                    $billing = $this->billingService->createPendingAfterImport(
-                        $request->user(),
-                        $plan['summary'],
-                        $hub,
-                        $useRemote,
-                        [
-                            'rows' => $plan['pending'],
-                            'skipped' => $plan['skipped'],
-                            'use_remote' => $useRemote,
-                        ]
-                    );
-                    $quote = $this->billingService->quotePayload($billing, $request->user(), $hub);
-
-                    if (! $billing) {
-                        $quote['payment_required'] = true;
-                        $quote['error'] = $quote['error']
-                            ?? 'Billing quote could not be created. Check advisor pricing tiers.';
-                    } else {
-                        $quote['payment_required'] = true;
-                    }
-                } catch (\Throwable $e) {
-                    $quote = [
-                        'billing_enabled' => true,
-                        'payment_required' => true,
-                        'error' => $e->getMessage(),
-                        'payment_methods' => [],
-                    ];
-                }
-
-                return response()->json([
-                    'message' => sprintf(
-                        'Import ready: %d new advisors will be created after you choose a payment method.',
-                        $billable
-                    ),
-                    'created' => [],
-                    'updated' => $plan['preview']['updated'] ?? [],
-                    'reactivated' => [],
-                    'skipped' => $plan['skipped'] ?? [],
-                    'preview' => $plan['preview'] ?? [],
-                    'summary' => $plan['summary'] ?? [],
-                    'awaiting_payment' => (bool) $billing,
-                    'billing' => $billing,
-                    'quote' => $quote,
-                    'target_hub' => $this->hubPayload($hub),
-                ]);
-            }
-
-            // Billing off OR recurring module billing on — create users immediately.
-            if ($useRemote) {
-                $result = $this->remoteDb->run($hub, function (string $connection) use ($file, $hub) {
-                    return $this->importService->import($file, $hub, $connection);
-                });
-            } else {
-                $result = $this->importService->import($file, $hub);
-            }
-        } catch (InvalidArgumentException|\RuntimeException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
-        }
-
-        $moduleInvoices = [];
-        if ($recurringOn) {
-            $importedUsers = $this->collectImportedUsersFromResult($result, $useRemote ? $hub : null);
-            try {
-                if ($useRemote) {
-                    $moduleInvoices = $this->remoteDb->run($hub, function (string $connection) use ($hub, $importedUsers, $request) {
-                        // Prefer connection-local models when IDs were returned from remote.
-                        $users = \App\Models\User::on($connection)
-                            ->whereIn('id', collect($importedUsers)->pluck('id')->filter()->all())
-                            ->get()
-                            ->all();
-
-                        return $this->recurringBilling->invoiceImportBatch(
-                            $hub,
-                            $users,
-                            $request->user(),
-                            $connection
-                        );
-                    });
-                } else {
-                    $moduleInvoices = $this->recurringBilling->invoiceImportBatch(
-                        $hub,
-                        $importedUsers,
-                        $request->user()
-                    );
-                }
-            } catch (\Throwable $e) {
-                report($e);
-            }
-        }
+        ProcessAdvisorImportJob::dispatch(
+            $jobId,
+            $storedPath,
+            $file->getClientOriginalName() ?: ('import.'.$extension),
+            (int) $request->user()->id,
+            (int) $hub->id,
+            $useRemote,
+        );
 
         return response()->json([
-            'message' => sprintf(
-                'Import finished: %d created, %d updated, %d skipped.',
-                $result['summary']['created'],
-                $result['summary']['updated'],
-                $result['summary']['skipped']
-            ),
-            ...$result,
-            'awaiting_payment' => false,
-            'billing' => null,
-            'module_recurring_invoices' => collect($moduleInvoices)->map(fn ($inv) => [
-                'id' => $inv->id,
-                'invoice_number' => $inv->invoice_number,
-                'amount' => (float) $inv->amount,
-                'status' => $inv->status,
-                'due_on' => $inv->due_on,
-                'description' => $inv->description,
-                'types' => $inv->types,
-            ])->values(),
-            'quote' => [
-                'billing_enabled' => $recurringOn,
-                'payment_required' => false,
-                'recurring_module_billing' => $recurringOn,
-                'payment_methods' => [],
-                'message' => $recurringOn
-                    ? 'Recurring module invoices (if any) are due today and will be charged on the hub renew day.'
-                    : null,
-            ],
+            'queued' => true,
+            'job_id' => $jobId,
+            'message' => 'Import queued. Processing in the background…',
             'target_hub' => $this->hubPayload($hub),
-        ]);
+        ], 202);
     }
 
-    /**
-     * @param  array<string, mixed>  $result
-     * @return list<\App\Models\User>
-     */
-    private function collectImportedUsersFromResult(array $result, ?Hub $remoteHub = null): array
+    public function importStatus(Request $request, string $jobId): JsonResponse
     {
-        $emails = collect($result['created'] ?? [])
-            ->merge($result['reactivated'] ?? [])
-            ->pluck('email')
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
+        $this->assertImportEnabled($request);
 
-        if ($emails === []) {
-            return [];
+        if (! preg_match('/^[0-9a-fA-F-]{36}$/', $jobId)) {
+            return response()->json(['message' => 'Invalid import job id.'], 422);
         }
 
-        // Local commit returns user models occasionally; fall back to email lookup.
-        $fromRows = collect($result['created'] ?? [])
-            ->merge($result['reactivated'] ?? [])
-            ->map(fn ($row) => $row['user'] ?? null)
-            ->filter(fn ($u) => $u instanceof User)
-            ->values()
-            ->all();
-
-        if ($fromRows !== []) {
-            return $fromRows;
+        $payload = Cache::get(ProcessAdvisorImportJob::cacheKey($jobId));
+        if (! is_array($payload) || (int) ($payload['user_id'] ?? 0) !== (int) $request->user()->id) {
+            return response()->json(['message' => 'Import job not found.'], 404);
         }
 
-        return User::query()->whereIn('email', $emails)->get()->all();
+        return response()->json($payload);
     }
 
     public function template(Request $request): StreamedResponse

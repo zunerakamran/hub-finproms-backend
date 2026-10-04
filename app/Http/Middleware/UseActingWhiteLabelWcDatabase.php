@@ -38,8 +38,8 @@ class UseActingWhiteLabelWcDatabase
             return response()->json(['message' => $e->getMessage()], $e->getStatusCode());
         }
 
-        return $this->remoteDb->run($hub, function (string $connection) use ($next, $request) {
-            return WcDatabaseContext::using($connection, fn () => $next($request));
+        return $this->remoteDb->run($hub, function (string $connection) use ($next, $request, $hub) {
+            return WcDatabaseContext::using($connection, fn () => $next($request), (int) $hub->id);
         });
     }
 }

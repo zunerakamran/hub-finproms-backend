@@ -9,6 +9,7 @@ use Symfony\Component\HttpFoundation\Response;
 
 /**
  * Persist an activity log entry for successful mutating API requests.
+ * Deferred until after the response is sent so logging never holds the worker.
  */
 class LogApiActivity
 {
@@ -26,11 +27,13 @@ class LogApiActivity
             return $response;
         }
 
-        try {
-            $this->activityLogs->logApiRequest($request, $status);
-        } catch (\Throwable) {
-            // Never break the main request because logging failed.
-        }
+        dispatch(function () use ($request, $status) {
+            try {
+                app(ActivityLogService::class)->logApiRequest($request, $status);
+            } catch (\Throwable) {
+                // Never break the main request because logging failed.
+            }
+        })->afterResponse();
 
         return $response;
     }

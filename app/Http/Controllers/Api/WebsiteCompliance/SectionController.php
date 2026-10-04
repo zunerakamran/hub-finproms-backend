@@ -11,9 +11,11 @@ use App\Models\WebsiteCompliance\TemplateRequest;
 use App\Services\ActivityLogService;
 use App\Services\ActingAdvisorService;
 use App\Services\WebsiteCompliance\AdvisorSectionService;
-use App\Services\WebsiteCompliance\CpanelSyncService;
+use App\Jobs\WebsiteCompliance\SyncAdvisorCpanelJob;
+use App\Jobs\WebsiteCompliance\SyncTemplateRequestCpanelJob;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
 use App\Support\WebsiteCompliance\HubTemplateCatalog;
+use App\Support\WebsiteCompliance\WcDatabaseContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -268,12 +270,17 @@ class SectionController extends Controller
         ]);
 
         if ($section->template_request_id) {
-            $templateRequest = TemplateRequest::find($section->template_request_id);
-            if ($templateRequest) {
-                CpanelSyncService::pushToTemplateRequestCpanel($templateRequest);
-            }
+            SyncTemplateRequestCpanelJob::dispatch(
+                (int) $section->template_request_id,
+                [],
+                WcDatabaseContext::hubId()
+            );
         } elseif ($section->advisor_id) {
-            CpanelSyncService::pushToAdvisorCpanel($section->advisor_id);
+            SyncAdvisorCpanelJob::dispatch(
+                $section->advisor_id,
+                [],
+                WcDatabaseContext::hubId()
+            );
         }
 
         return response()->json($section->fresh()->load(['template', 'advisor', 'lockedByUser']));

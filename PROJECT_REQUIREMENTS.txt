@@ -1243,6 +1243,22 @@ STEP 1 — Shared hub core (content hub)
 [x] Support Tickets functionality (`support_tickets`) + APIs (submit with
     module/screenshots, queue, change status, comments) + `st_*` capabilities
 [x] Frontend: Support Tickets nav (My tickets / New ticket / All tickets) + pages
+[x] Concurrent performance (phase 1): hub cache TTL 5m; Redis recommended for
+    CACHE_STORE/QUEUE_CONNECTION in production; queue cPanel sync + template
+    preview capture; SMC/GC report withCount (no N+1); posts list indexes;
+    frontend React.lazy routes + Vite manualChunks; list fetches per_page 50
+[x] Concurrent performance (phase 2): paginate WC change/template-request lists
+    ({ data, meta }); queue advisor Excel import + status poll; throttle auth /
+    imports / WC publish routes
+[x] Concurrent performance (phase 3): queue Central content distribute + post
+    sync-to-hubs; TanStack Query cache for /auth/me + /hub; WC review/history
+    server page controls (history_only / mine_as_approver)
+[x] Concurrent performance (phase 4): queue Central library Excel import; parallel
+    boot prefetch (/auth/me + /hub); activity logs afterResponse; compliance
+    report row cap (500)
+[x] Concurrent performance (phase 5): remote DB connection leasing (no nested
+    reconnect); Quill + WC CSS deferred from critical path; firm-document rights
+    merge after hub boot; production Redis/queue/schedule notes in .env.example
 
 ================================================================================
 END OF REQUIREMENTS

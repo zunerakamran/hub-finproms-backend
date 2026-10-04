@@ -3,13 +3,17 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\ProcessCentralLibraryImportJob;
 use App\Models\Post;
 use App\Services\ContentPushService;
 use App\Services\ContentTaxonomyService;
 use App\Services\HubService;
 use App\Services\PostImportService;
+use App\Support\QueuesContentPush;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -20,6 +24,8 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class CentralContentLibraryController extends Controller
 {
+    use QueuesContentPush;
+
     public function __construct(
         private readonly HubService $hubs,
         private readonly PostImportService $imports,
@@ -190,25 +196,54 @@ class CentralContentLibraryController extends Controller
     {
         $this->assertCentralLibrary();
 
-        $request->validate([
+        $validated = $request->validate([
             'file' => ['required', 'file', 'mimes:xlsx,xls,csv', 'max:10240'],
         ]);
 
-        try {
-            $result = $this->imports->import($request->file('file'), $request->user());
-        } catch (InvalidArgumentException|\RuntimeException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
-        }
+        /** @var \Illuminate\Http\UploadedFile $file */
+        $file = $validated['file'];
+        $extension = strtolower($file->getClientOriginalExtension() ?: 'xlsx');
+        $jobId = (string) Str::uuid();
+        $storedPath = $file->storeAs(
+            'central-library-imports/tmp',
+            $jobId.'.'.$extension,
+            'local'
+        );
+
+        Cache::put(ProcessCentralLibraryImportJob::cacheKey($jobId), [
+            'status' => 'queued',
+            'user_id' => (int) $request->user()->id,
+            'message' => 'Import queued. Waiting for a worker…',
+        ], now()->addHour());
+
+        ProcessCentralLibraryImportJob::dispatch(
+            $jobId,
+            $storedPath,
+            $file->getClientOriginalName() ?: ('import.'.$extension),
+            (int) $request->user()->id,
+        );
 
         return response()->json([
-            'message' => sprintf(
-                'Import finished: %d created, %d skipped, %d errors.',
-                $result['summary']['created'],
-                $result['summary']['skipped'],
-                $result['summary']['errors']
-            ),
-            ...$result,
-        ]);
+            'queued' => true,
+            'job_id' => $jobId,
+            'message' => 'Import queued. Processing in the background…',
+        ], 202);
+    }
+
+    public function importStatus(Request $request, string $jobId): JsonResponse
+    {
+        $this->assertCentralLibrary();
+
+        if (! preg_match('/^[0-9a-fA-F-]{36}$/', $jobId)) {
+            return response()->json(['message' => 'Invalid import job id.'], 422);
+        }
+
+        $payload = Cache::get(ProcessCentralLibraryImportJob::cacheKey($jobId));
+        if (! is_array($payload) || (int) ($payload['user_id'] ?? 0) !== (int) $request->user()->id) {
+            return response()->json(['message' => 'Import job not found.'], 404);
+        }
+
+        return response()->json($payload);
     }
 
     public function aiStub(): JsonResponse
@@ -242,27 +277,18 @@ class CentralContentLibraryController extends Controller
             'hub_ids.*' => ['integer', 'distinct', 'exists:hubs,id'],
         ]);
 
-        try {
-            $result = $this->pushes->pushPosts(
-                array_map('intval', $validated['post_ids']),
-                array_map('intval', $validated['hub_ids']),
-                $request->user()
-            );
-        } catch (InvalidArgumentException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
-        }
+        return $this->dispatchContentPush(
+            array_map('intval', $validated['post_ids']),
+            array_map('intval', $validated['hub_ids']),
+            $request->user()
+        );
+    }
 
-        $message = $result['pushed'] > 0
-            ? "Distributed {$result['pushed']} post(s)."
-            : 'No posts were distributed.';
-        if ($result['failed'] > 0) {
-            $message .= " {$result['failed']} failed.";
-        }
+    public function pushStatus(Request $request, string $jobId): JsonResponse
+    {
+        $this->assertCentralLibrary();
 
-        return response()->json([
-            'message' => $message,
-            ...$result,
-        ]);
+        return $this->contentPushStatusPayload($jobId, $request->user());
     }
 
     private function assertCentralLibrary(): void

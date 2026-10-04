@@ -18,6 +18,7 @@ use App\Services\WebsiteCompliance\ChangeRequestPublishService;
 use App\Services\WebsiteCompliance\ChangeRequestWorkflowService;
 use App\Services\WebsiteCompliance\CpanelSyncService;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
+use App\Support\ApiListResponse;
 use App\Support\ComplianceSupportingFiles;
 use App\Support\WebsiteCompliance\WcDatabaseContext;
 use Carbon\Carbon;
@@ -185,7 +186,6 @@ class ChangeRequestController extends Controller
         if ($canViewAll || $canChangeStatus || $canAssign) {
             $query = ChangeRequest::with($with)->latest();
             $this->firmVisibility->scopeQueryForActor($query, $user, 'editor', 'approver_id');
-            $requests = $query->get();
         } elseif ($this->gate->can($user, 'wc_review_change_requests')) {
             // Approvers: unassigned pending for pickup + only requests they picked.
             $query = ChangeRequest::with($with)
@@ -198,22 +198,50 @@ class ChangeRequestController extends Controller
                 })
                 ->latest();
             $this->firmVisibility->scopeQueryForActor($query, $user, 'editor', 'approver_id');
-            $requests = $query->get();
         } else {
             // Advisors / Admin-staff (and Admin-staff acting as an advisor): own editor history.
             $subject = $this->actingAdvisors->subjectOrNull($user);
             $editorId = $subject
                 ? ($this->gate->tenantUserIdOrNull($subject) ?? (int) $subject->id)
                 : null;
-            $requests = $editorId
-                ? ChangeRequest::with($with)
-                    ->where('editor_id', $editorId)
-                    ->latest()
-                    ->get()
-                : collect();
+            $query = $editorId
+                ? ChangeRequest::with($with)->where('editor_id', $editorId)->latest()
+                : ChangeRequest::with($with)->whereRaw('0 = 1')->latest();
         }
 
-        return response()->json($requests->map(fn (ChangeRequest $cr) => $cr->toApiArray())->values());
+        if ($request->filled('status')) {
+            $statuses = collect(explode(',', (string) $request->input('status')))
+                ->map(fn ($s) => trim((string) $s))
+                ->filter()
+                ->values()
+                ->all();
+            if ($statuses !== []) {
+                $query->whereIn('status', $statuses);
+            }
+        }
+
+        if ($request->boolean('unassigned_only')) {
+            $query->where('status', ChangeRequest::STATUS_PENDING)->whereNull('approver_id');
+        }
+
+        if ($request->boolean('history_only')) {
+            // Exclude the pickup pool (unassigned pending) from history views.
+            $query->where(function ($q) {
+                $q->whereNotNull('approver_id')
+                    ->orWhere('status', '!=', ChangeRequest::STATUS_PENDING);
+            });
+        }
+
+        if ($request->boolean('mine_as_approver')) {
+            $query->where('approver_id', $actorId);
+        }
+
+        $paginator = $query->paginate(ApiListResponse::perPage($request));
+
+        return ApiListResponse::fromPaginator(
+            $paginator,
+            fn (ChangeRequest $cr) => $cr->toApiArray()
+        );
     }
 
     public function show(Request $request, int $id): JsonResponse
@@ -560,12 +588,17 @@ class ChangeRequestController extends Controller
 
         $result = ChangeRequestPublishService::publish($changeRequest, $user->id);
 
+        $queued = (bool) ($result['cpanel_sync_queued'] ?? false);
+
         return response()->json([
             'message' => $result['cpanel_synced']
                 ? 'Approved and published to the live advisor site.'
-                : 'Approved in the hub database, but the live site was not updated. Check Laravel logs and that cpanel_domain points to the live template URL (e.g. '.rtrim((string) config('app.url'), '/').'/template4)',
+                : ($queued
+                    ? 'Approved in the hub database. Live site sync has been queued.'
+                    : 'Approved in the hub database, but the live site was not updated. Check Laravel logs and that cpanel_domain points to the live template URL (e.g. '.rtrim((string) config('app.url'), '/').'/template4)'),
             'status' => ChangeRequest::STATUS_APPROVED,
             'cpanel_synced' => $result['cpanel_synced'],
+            'cpanel_sync_queued' => $queued,
             'change_request' => $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow.supportingFiles', 'versions.supportingFiles'])->toApiArray(includeVersions: true),
         ]);
     }
@@ -731,12 +764,17 @@ class ChangeRequestController extends Controller
             $request
         );
 
+        $queued = (bool) ($result['cpanel_sync_queued'] ?? false);
+
         return response()->json([
             'message' => $result['cpanel_synced']
                 ? 'Feedback confirmed and published to the live advisor site.'
-                : 'Feedback confirmed in the hub database, but the live site was not updated.',
+                : ($queued
+                    ? 'Feedback confirmed in the hub database. Live site sync has been queued.'
+                    : 'Feedback confirmed in the hub database, but the live site was not updated.'),
             'status' => ChangeRequest::STATUS_APPROVED,
             'cpanel_synced' => $result['cpanel_synced'],
+            'cpanel_sync_queued' => $queued,
             'change_request' => $result['change_request']->toApiArray(true),
         ]);
     }

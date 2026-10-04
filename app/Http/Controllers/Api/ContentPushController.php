@@ -9,12 +9,14 @@ use App\Models\Post;
 use App\Services\ContentPushService;
 use App\Services\HubService;
 use App\Services\WhiteLabelDatabaseService;
+use App\Support\QueuesContentPush;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use InvalidArgumentException;
 
 class ContentPushController extends Controller
 {
+    use QueuesContentPush;
+
     public function __construct(
         private readonly ContentPushService $pushes,
         private readonly WhiteLabelDatabaseService $remoteDb,
@@ -91,27 +93,18 @@ class ContentPushController extends Controller
             'hub_ids.*' => ['integer', 'distinct', 'exists:hubs,id'],
         ]);
 
-        try {
-            $result = $this->pushes->pushPosts(
-                array_map('intval', $validated['post_ids']),
-                array_map('intval', $validated['hub_ids']),
-                $request->user()
-            );
-        } catch (InvalidArgumentException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
-        }
+        return $this->dispatchContentPush(
+            array_map('intval', $validated['post_ids']),
+            array_map('intval', $validated['hub_ids']),
+            $request->user()
+        );
+    }
 
-        $message = $result['pushed'] > 0
-            ? "Pushed {$result['pushed']} post(s)."
-            : 'No posts were pushed.';
-        if ($result['failed'] > 0) {
-            $message .= " {$result['failed']} failed.";
-        }
+    public function pushStatus(Request $request, string $jobId): JsonResponse
+    {
+        $this->assertSharedHub();
 
-        return response()->json([
-            'message' => $message,
-            ...$result,
-        ]);
+        return $this->contentPushStatusPayload($jobId, $request->user());
     }
 
     public function testConnection(Hub $hub): JsonResponse

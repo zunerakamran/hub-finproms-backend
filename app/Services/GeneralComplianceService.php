@@ -991,6 +991,7 @@ class GeneralComplianceService
                 'user.firm:id,name',
                 'onBehalfBy:id,name,email,role',
             ])
+            ->withCount('versions')
             ->orderByDesc('id');
 
         if ($actor) {
@@ -999,7 +1000,8 @@ class GeneralComplianceService
 
         $this->applyFilters($query, $filters);
 
-        $rows = $query->get();
+        $limit = max(1, min(500, (int) ($filters['limit'] ?? 500)));
+        $rows = $query->limit($limit)->get();
         $auditByRequest = $this->auditTrail->forSubjects(
             ComplianceAuditEvent::MODULE_GC,
             $rows->pluck('id')->all()
@@ -1015,7 +1017,7 @@ class GeneralComplianceService
         foreach ($rows as $row) {
             $status = $row->currentVersionRow?->status ?? GeneralComplianceRequest::STATUS_PENDING;
             $byStatus[$status] = ($byStatus[$status] ?? 0) + 1;
-            $versionCount = GeneralComplianceRequestVersion::query()->where('request_id', $row->id)->count();
+            $versionCount = (int) ($row->versions_count ?? 0);
             if ($status === GeneralComplianceRequest::STATUS_APPROVED) {
                 if ($versionCount <= 1) {
                     $approvedFirstTime++;

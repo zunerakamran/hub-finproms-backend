@@ -583,10 +583,11 @@ class ChangeRequestWorkflowService
             'from_status' => ChangeRequest::STATUS_APPROVED_WITH_FEEDBACK,
             'to_status' => ChangeRequest::STATUS_APPROVED,
             'version_number' => $nextVersion,
-            'metadata' => [
+            'metadata' => array_filter([
                 'revised' => $sectionEdits !== null,
                 'cpanel_synced' => $result['cpanel_synced'] ?? null,
-            ],
+                'cpanel_sync_queued' => $result['cpanel_sync_queued'] ?? null,
+            ], fn ($v) => $v !== null),
         ]);
 
         return [

@@ -90,8 +90,8 @@ class ModuleBillingService
         if ($hub->isContentHub() && $hub->hasRemoteDatabaseConfigured()) {
             // Do not fall back to Central's empty local WC tables — that silently
             // yields 0 websites and skips Shared / WL enable invoices.
-            return $this->remoteDb->run($hub, function (string $connection) use ($callback) {
-                return WcDatabaseContext::using($connection, fn () => $callback($connection));
+            return $this->remoteDb->run($hub, function (string $connection) use ($callback, $hub) {
+                return WcDatabaseContext::using($connection, fn () => $callback($connection), (int) $hub->id);
             });
         }
 

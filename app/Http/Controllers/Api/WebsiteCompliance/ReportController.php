@@ -99,6 +99,8 @@ class ReportController extends Controller
         $user = $request->user();
         $this->gate->assertCan($user, 'wc_view_platform_report');
 
+        $limit = max(1, min(500, (int) $request->integer('limit', 500)));
+
         $rows = ChangeRequest::query()
             ->with([
                 'editor:id,name,email,role,firm_id',
@@ -109,6 +111,7 @@ class ReportController extends Controller
                 'section:id,name,display_name',
             ])
             ->orderByDesc('id')
+            ->limit($limit)
             ->get();
 
         $auditByRequest = $this->auditTrail->forSubjects(

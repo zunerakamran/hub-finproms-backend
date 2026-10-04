@@ -9,10 +9,11 @@ use App\Models\WebsiteCompliance\TemplateRequest;
 use App\Services\ActivityLogService;
 use App\Services\WebsiteCompliance\AdvisorSectionService;
 use App\Services\WebsiteCompliance\ShowcaseSectionService;
-use App\Services\WebsiteCompliance\TemplatePreviewCaptureService;
+use App\Jobs\WebsiteCompliance\CaptureTemplatePreviewJob;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
 use App\Support\WebsiteCompliance\BrandColor;
 use App\Support\WebsiteCompliance\HubTemplateCatalog;
+use App\Support\WebsiteCompliance\WcDatabaseContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -148,15 +149,6 @@ class TemplateController extends Controller
         $previewUrl = $request->preview_url ?: $this->defaultPreviewUrl($slug);
         $thumbnailUrl = $request->thumbnail_url;
 
-        if ($previewUrl && ! $thumbnailUrl) {
-            try {
-                $thumbnailUrl = app(TemplatePreviewCaptureService::class)->capture($previewUrl);
-            } catch (\Throwable $e) {
-                report($e);
-                $thumbnailUrl = null;
-            }
-        }
-
         $existing = Template::query()->where('slug', $slug)->first();
         if ($existing) {
             return response()->json([
@@ -176,6 +168,15 @@ class TemplateController extends Controller
             'available_pages' => $this->normalizeAvailablePages($request->input('available_pages')),
             'is_active' => $request->has('is_active') ? (bool) $request->is_active : true,
         ]);
+
+        // Puppeteer capture is CPU-heavy — queue so create stays fast under concurrency.
+        if ($previewUrl && ! $thumbnailUrl) {
+            CaptureTemplatePreviewJob::dispatch(
+                (int) $template->id,
+                $previewUrl,
+                WcDatabaseContext::hubId()
+            );
+        }
 
         try {
             $this->activityLogs->log([
@@ -257,18 +258,15 @@ class TemplateController extends Controller
         $shouldCapture = $request->boolean('regenerate_preview')
             || ($request->has('preview_url') && $previewUrl !== $template->preview_url);
 
-        if ($shouldCapture && $previewUrl) {
-            try {
-                $captured = app(TemplatePreviewCaptureService::class)->capture($previewUrl);
-                if ($captured) {
-                    $data['thumbnail_url'] = $captured;
-                }
-            } catch (\Throwable $e) {
-                report($e);
-            }
-        }
-
         $template->update($data);
+
+        if ($shouldCapture && $previewUrl) {
+            CaptureTemplatePreviewJob::dispatch(
+                (int) $template->id,
+                $previewUrl,
+                WcDatabaseContext::hubId()
+            );
+        }
 
         try {
             $this->activityLogs->log([

@@ -57,7 +57,7 @@ class ScheduledChangeRequestPublisher
                         $this->publishInScope('hub:'.$hub->id.' ('.$hub->name.')', $totals);
 
                         return null;
-                    });
+                    }, (int) $hub->id);
                 });
             } catch (Throwable $e) {
                 Log::warning('wc scheduled publisher: skipped white-labelled hub', [

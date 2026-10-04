@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Api\Concerns\CreatesOnActingWhiteLabelHub;
+use App\Jobs\SyncDistributedPostJob;
 use App\Models\Category;
 use App\Models\ContentType;
 use App\Models\Post;
@@ -373,24 +374,18 @@ class PostController extends Controller
 
         $model->save();
 
-        $sync = ['synced' => 0, 'failed' => 0, 'results' => []];
+        $syncQueued = false;
         if (app(HubService::class)->current()->isControlPlane()) {
-            $sync = app(ContentPushService::class)->syncPostToDistributedHubs($model->fresh());
-        }
-
-        $message = 'Post updated successfully.';
-        if ($sync['synced'] > 0 || $sync['failed'] > 0) {
-            $message .= sprintf(
-                ' Synced to %d hub(s)%s.',
-                $sync['synced'],
-                $sync['failed'] > 0 ? ', '.$sync['failed'].' failed' : ''
-            );
+            SyncDistributedPostJob::dispatch((int) $model->id);
+            $syncQueued = true;
         }
 
         return response()->json([
-            'message' => $message,
+            'message' => $syncQueued
+                ? 'Post updated successfully. Sync to distributed hubs has been queued.'
+                : 'Post updated successfully.',
             'post' => $model->fresh()->load('creator:id,name'),
-            'distribution_sync' => $sync,
+            'distribution_sync_queued' => $syncQueued,
         ]);
     }
 

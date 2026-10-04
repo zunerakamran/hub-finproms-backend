@@ -59,14 +59,16 @@ use App\Http\Middleware\EnsureUserIsPowerAdmin;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->group(function () {
-    Route::post('/register', [AuthController::class, 'register']);
-    Route::post('/login', [AuthController::class, 'login']);
-    Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
-    Route::post('/reset-password', [AuthController::class, 'resetPassword']);
-    Route::post('/verify-email', [AuthController::class, 'verifyEmail']);
-    Route::post('/resend-verification', [AuthController::class, 'resendVerification']);
-    Route::post('/verify-login-otp', [AuthController::class, 'verifyLoginOtp']);
-    Route::post('/resend-login-otp', [AuthController::class, 'resendLoginOtp']);
+    Route::middleware('throttle:auth')->group(function () {
+        Route::post('/register', [AuthController::class, 'register']);
+        Route::post('/login', [AuthController::class, 'login']);
+        Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+        Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+        Route::post('/verify-email', [AuthController::class, 'verifyEmail']);
+        Route::post('/resend-verification', [AuthController::class, 'resendVerification']);
+        Route::post('/verify-login-otp', [AuthController::class, 'verifyLoginOtp']);
+        Route::post('/resend-login-otp', [AuthController::class, 'resendLoginOtp']);
+    });
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::post('/logout', [AuthController::class, 'logout']);
@@ -257,9 +259,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::middleware('hub_can:wc_review_change_requests,wc_change_request_status')->group(function () {
             Route::post('/change-requests/{id}/assign', [WcChangeRequestController::class, 'assign'])->whereNumber('id');
-            Route::post('/change-requests/{id}/approve', [WcChangeRequestController::class, 'approve'])->whereNumber('id');
+            Route::post('/change-requests/{id}/approve', [WcChangeRequestController::class, 'approve'])->middleware('throttle:wc-publish')->whereNumber('id');
             Route::post('/change-requests/{id}/reject', [WcChangeRequestController::class, 'reject'])->whereNumber('id');
-            Route::post('/change-requests/{id}/approve-with-feedback', [WcChangeRequestController::class, 'approveWithFeedback'])->whereNumber('id');
+            Route::post('/change-requests/{id}/approve-with-feedback', [WcChangeRequestController::class, 'approveWithFeedback'])->middleware('throttle:wc-publish')->whereNumber('id');
         });
 
         Route::middleware('hub_can:wc_change_request_status')->group(function () {
@@ -289,7 +291,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::put('/template-requests/{id}/sections', [WcTemplateRequestController::class, 'updateSections'])->whereNumber('id');
         });
         Route::middleware('hub_can:wc_publish_live_content')->group(function () {
-            Route::post('/template-requests/{id}/publish-content', [WcTemplateRequestController::class, 'publishContent'])->whereNumber('id');
+            Route::post('/template-requests/{id}/publish-content', [WcTemplateRequestController::class, 'publishContent'])->middleware('throttle:wc-publish')->whereNumber('id');
         });
 
         Route::middleware('hub_can:wc_view_platform_report')->group(function () {
@@ -350,12 +352,14 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/content-push/posts', [ContentPushController::class, 'posts']);
             Route::get('/content-push/recent', [ContentPushController::class, 'recent']);
             Route::post('/content-push', [ContentPushController::class, 'push']);
+            Route::get('/content-push/{jobId}', [ContentPushController::class, 'pushStatus'])->whereUuid('jobId');
             Route::post('/content-push/hubs/{hub}/test-connection', [ContentPushController::class, 'testConnection']);
         });
 
         Route::middleware('hub_can:dashboard_central_content_library')->group(function () {
             Route::get('/central-library/posts/template', [CentralContentLibraryController::class, 'template']);
-            Route::post('/central-library/posts/import', [CentralContentLibraryController::class, 'import']);
+            Route::post('/central-library/posts/import', [CentralContentLibraryController::class, 'import'])->middleware('throttle:imports');
+            Route::get('/central-library/posts/import/{jobId}', [CentralContentLibraryController::class, 'importStatus'])->whereUuid('jobId');
             Route::get('/central-library/posts', [CentralContentLibraryController::class, 'index']);
             Route::post('/central-library/posts', [CentralContentLibraryController::class, 'store']);
             Route::post('/central-library/posts/{post}/archive', [CentralContentLibraryController::class, 'archive']);
@@ -363,6 +367,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/central-library/ai', [CentralContentLibraryController::class, 'aiStub']);
             Route::get('/central-library/targets', [CentralContentLibraryController::class, 'targets']);
             Route::post('/central-library/distribute', [CentralContentLibraryController::class, 'push']);
+            Route::get('/central-library/distribute/{jobId}', [CentralContentLibraryController::class, 'pushStatus'])->whereUuid('jobId');
         });
 
         Route::middleware('hub_can:dashboard_manage_bundles')->group(function () {
@@ -447,7 +452,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/advisors', [AdvisorController::class, 'index']);
 
         Route::middleware('hub_can:advisor_excel_import')->group(function () {
-            Route::post('/advisors/import', [AdvisorController::class, 'import']);
+            Route::post('/advisors/import', [AdvisorController::class, 'import'])->middleware('throttle:imports');
+            Route::get('/advisors/import/{jobId}', [AdvisorController::class, 'importStatus'])->whereUuid('jobId');
             Route::get('/advisors/template', [AdvisorController::class, 'template']);
             Route::get('/advisor-billings/{billing}', [AdvisorBillingController::class, 'show']);
             Route::post('/advisor-billings/{billing}/checkout', [AdvisorBillingController::class, 'checkout']);
@@ -610,9 +616,9 @@ Route::middleware('auth:sanctum')->group(function () {
             });
             Route::middleware('hub_can:wc_review_change_requests,wc_change_request_status')->group(function () {
                 Route::post('/change-requests/{id}/assign', [WcChangeRequestController::class, 'assign'])->whereNumber('id');
-                Route::post('/change-requests/{id}/approve', [WcChangeRequestController::class, 'approve'])->whereNumber('id');
+                Route::post('/change-requests/{id}/approve', [WcChangeRequestController::class, 'approve'])->middleware('throttle:wc-publish')->whereNumber('id');
                 Route::post('/change-requests/{id}/reject', [WcChangeRequestController::class, 'reject'])->whereNumber('id');
-                Route::post('/change-requests/{id}/approve-with-feedback', [WcChangeRequestController::class, 'approveWithFeedback'])->whereNumber('id');
+                Route::post('/change-requests/{id}/approve-with-feedback', [WcChangeRequestController::class, 'approveWithFeedback'])->middleware('throttle:wc-publish')->whereNumber('id');
             });
             Route::middleware('hub_can:wc_assign_change_requests')->group(function () {
                 Route::post('/change-requests/{id}/assign-to-approver', [WcChangeRequestController::class, 'assignToApprover'])->whereNumber('id');
@@ -708,7 +714,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/advisors', [AdvisorController::class, 'index']);
 
         Route::middleware('hub_can:advisor_excel_import')->group(function () {
-            Route::post('/advisors/import', [AdvisorController::class, 'import']);
+            Route::post('/advisors/import', [AdvisorController::class, 'import'])->middleware('throttle:imports');
+            Route::get('/advisors/import/{jobId}', [AdvisorController::class, 'importStatus'])->whereUuid('jobId');
             Route::get('/advisors/template', [AdvisorController::class, 'template']);
             Route::get('/advisor-billings/{billing}', [AdvisorBillingController::class, 'show']);
             Route::post('/advisor-billings/{billing}/checkout', [AdvisorBillingController::class, 'checkout']);
@@ -804,12 +811,14 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/content-push/posts', [ContentPushController::class, 'posts']);
             Route::get('/content-push/recent', [ContentPushController::class, 'recent']);
             Route::post('/content-push', [ContentPushController::class, 'push']);
+            Route::get('/content-push/{jobId}', [ContentPushController::class, 'pushStatus'])->whereUuid('jobId');
             Route::post('/content-push/hubs/{hub}/test-connection', [ContentPushController::class, 'testConnection']);
         });
 
         Route::middleware('hub_can:dashboard_central_content_library')->group(function () {
             Route::get('/central-library/posts/template', [CentralContentLibraryController::class, 'template']);
-            Route::post('/central-library/posts/import', [CentralContentLibraryController::class, 'import']);
+            Route::post('/central-library/posts/import', [CentralContentLibraryController::class, 'import'])->middleware('throttle:imports');
+            Route::get('/central-library/posts/import/{jobId}', [CentralContentLibraryController::class, 'importStatus'])->whereUuid('jobId');
             Route::get('/central-library/posts', [CentralContentLibraryController::class, 'index']);
             Route::post('/central-library/posts', [CentralContentLibraryController::class, 'store']);
             Route::post('/central-library/posts/{post}/archive', [CentralContentLibraryController::class, 'archive']);
@@ -817,6 +826,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/central-library/ai', [CentralContentLibraryController::class, 'aiStub']);
             Route::get('/central-library/targets', [CentralContentLibraryController::class, 'targets']);
             Route::post('/central-library/distribute', [CentralContentLibraryController::class, 'push']);
+            Route::get('/central-library/distribute/{jobId}', [CentralContentLibraryController::class, 'pushStatus'])->whereUuid('jobId');
         });
 
         Route::middleware('hub_can:dashboard_manage_bundles')->group(function () {
@@ -965,9 +975,9 @@ Route::middleware('auth:sanctum')->group(function () {
             });
             Route::middleware('hub_can:wc_review_change_requests,wc_change_request_status')->group(function () {
                 Route::post('/change-requests/{id}/assign', [WcChangeRequestController::class, 'assign'])->whereNumber('id');
-                Route::post('/change-requests/{id}/approve', [WcChangeRequestController::class, 'approve'])->whereNumber('id');
+                Route::post('/change-requests/{id}/approve', [WcChangeRequestController::class, 'approve'])->middleware('throttle:wc-publish')->whereNumber('id');
                 Route::post('/change-requests/{id}/reject', [WcChangeRequestController::class, 'reject'])->whereNumber('id');
-                Route::post('/change-requests/{id}/approve-with-feedback', [WcChangeRequestController::class, 'approveWithFeedback'])->whereNumber('id');
+                Route::post('/change-requests/{id}/approve-with-feedback', [WcChangeRequestController::class, 'approveWithFeedback'])->middleware('throttle:wc-publish')->whereNumber('id');
             });
             Route::middleware('hub_can:wc_assign_change_requests')->group(function () {
                 Route::post('/change-requests/{id}/assign-to-approver', [WcChangeRequestController::class, 'assignToApprover'])->whereNumber('id');

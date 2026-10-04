@@ -56,7 +56,11 @@ class PublishScheduledChangeRequestJob implements ShouldBeUnique, ShouldQueue
             }
 
             $remoteDb->run($hub, function (string $connection) {
-                WcDatabaseContext::using($connection, fn () => $this->publishIfStillScheduled());
+                WcDatabaseContext::using(
+                    $connection,
+                    fn () => $this->publishIfStillScheduled(),
+                    $this->hubId
+                );
             });
 
             return;

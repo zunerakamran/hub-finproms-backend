@@ -309,10 +309,10 @@ class PublicController extends Controller
             $hub = Hub::query()->find($hubId);
             if ($hub && $hub->isContentHub() && $hub->hasRemoteDatabaseConfigured()) {
                 try {
-                    $remote = app(WhiteLabelDatabaseService::class)->run($hub, function (string $connection) use ($templateRequestId) {
+                    $remote = app(WhiteLabelDatabaseService::class)->run($hub, function (string $connection) use ($templateRequestId, $hub) {
                         return WcDatabaseContext::using($connection, function () use ($templateRequestId) {
                             return TemplateRequest::query()->find($templateRequestId);
-                        });
+                        }, (int) $hub->id);
                     });
                     if ($remote) {
                         return $remote;

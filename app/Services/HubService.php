@@ -13,11 +13,13 @@ class HubService
 {
     public function current(): Hub
     {
-        $this->ensureRemoteDatabaseColumns();
-
         $slug = (string) config('hub.current_slug', 'shared');
 
-        return Cache::remember("hub:current:{$slug}", 5, function () use ($slug) {
+        // 5 minutes — hub branding/checklist rarely changes; forgetCurrentCache() on writes.
+        return Cache::remember("hub:current:{$slug}", 300, function () use ($slug) {
+            // Schema healing only on cache miss (not every authenticated request).
+            $this->ensureRemoteDatabaseColumns();
+
             $hub = Hub::query()->where('slug', $slug)->where('is_active', true)->first();
 
             // Inactive / missing row for this slug — create or reactivate.

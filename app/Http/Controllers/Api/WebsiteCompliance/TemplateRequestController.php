@@ -15,6 +15,7 @@ use App\Services\ModuleBillingService;
 use App\Services\WebsiteCompliance\AdvisorSectionService;
 use App\Services\WebsiteCompliance\CpanelSyncService;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
+use App\Support\ApiListResponse;
 use App\Support\WebsiteCompliance\HubTemplateCatalog;
 use App\Support\WebsiteCompliance\BrandColor;
 use Illuminate\Http\JsonResponse;
@@ -213,13 +214,13 @@ class TemplateRequestController extends Controller
         if ($this->gate->can($user, 'wc_view_all_deployments')
             || $this->gate->can($user, 'wc_publish_live_content')
             || $this->gate->isRemoteControlPlaneOperator($user)) {
-            $requests = $query->latest()->get();
+            $query->latest();
         } elseif (
             $this->gate->can($user, 'wc_request_deployments')
             || $this->gate->can($user, 'wc_assign_website_templates')
         ) {
             $scopeId = $this->actingAdvisors->websiteAdvisorId($user) ?? (int) $user->id;
-            $requests = $query
+            $query
                 ->where(function ($q) use ($user, $scopeId) {
                     $q->where('advisor_id', $scopeId)
                         ->orWhere('assigned_advisor_id', $scopeId)
@@ -229,20 +230,31 @@ class TemplateRequestController extends Controller
                             ->orWhere('assigned_advisor_id', $user->id);
                     }
                 })
-                ->latest()
-                ->get();
+                ->latest();
         } else {
             $scopeId = $this->actingAdvisors->websiteAdvisorId($user) ?? (int) $user->id;
-            $requests = $query
+            $query
                 ->where(function ($q) use ($scopeId) {
                     $q->where('advisor_id', $scopeId)
                         ->orWhere('assigned_advisor_id', $scopeId);
                 })
-                ->latest()
-                ->get();
+                ->latest();
         }
 
-        return response()->json($requests);
+        if ($request->filled('status')) {
+            $statuses = collect(explode(',', (string) $request->input('status')))
+                ->map(fn ($s) => trim((string) $s))
+                ->filter()
+                ->values()
+                ->all();
+            if ($statuses !== []) {
+                $query->whereIn('status', $statuses);
+            }
+        }
+
+        return ApiListResponse::fromPaginator(
+            $query->paginate(ApiListResponse::perPage($request))
+        );
     }
 
     public function deploy(Request $request, int $id): JsonResponse
