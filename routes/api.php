@@ -230,8 +230,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // acting_wl_wc_db: when hub switcher is on a white-label, read/write that hub's wc_* tables.
     Route::prefix('website-compliance')->middleware('acting_wl_wc_db')->group(function () {
         Route::post('/upload-image', [WcUploadController::class, 'uploadImage']);
+        Route::post('/upload-document', [WcUploadController::class, 'uploadDocument']);
 
-        Route::middleware('hub_can:wc_edit_sections,wc_submit_change_requests,wc_manage_templates,wc_request_deployments,wc_view_all_deployments,wc_publish_live_content')->group(function () {
+        Route::middleware('hub_can:wc_edit_sections,wc_submit_change_requests,wc_manage_templates,wc_request_deployments,wc_assign_website_templates,wc_view_all_deployments,wc_publish_live_content')->group(function () {
             Route::get('/templates', [WcTemplateController::class, 'index']);
             Route::get('/templates/{id}', [WcTemplateController::class, 'show'])->whereNumber('id');
             Route::get('/templates/{id}/pages', [WcTemplateController::class, 'getTemplatePages'])->whereNumber('id');
@@ -660,7 +661,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::middleware('hub_can:wc_assign_change_requests')->group(function () {
                 Route::post('/change-requests/{id}/assign-to-approver', [WcChangeRequestController::class, 'assignToApprover'])->whereNumber('id');
             });
-            Route::middleware('hub_can:wc_view_all_deployments,wc_request_deployments,wc_deploy_websites')->group(function () {
+            Route::middleware('hub_can:wc_view_all_deployments,wc_request_deployments,wc_assign_website_templates,wc_deploy_websites')->group(function () {
                 Route::get('/template-requests', [WcTemplateRequestController::class, 'index']);
             });
             Route::middleware('hub_can:wc_request_deployments,wc_assign_website_templates')->group(function () {
@@ -672,8 +673,10 @@ Route::middleware('auth:sanctum')->group(function () {
                 Route::put('/template-requests/{id}/branding', [WcTemplateRequestController::class, 'updateBranding'])->whereNumber('id');
                 Route::post('/template-requests/{id}/reject', [WcTemplateRequestController::class, 'reject'])->whereNumber('id');
             });
-            Route::middleware('hub_can:wc_manage_templates')->group(function () {
+            Route::middleware('hub_can:wc_manage_templates,wc_request_deployments,wc_assign_website_templates,wc_view_all_deployments')->group(function () {
                 Route::get('/templates', [WcTemplateController::class, 'index']);
+            });
+            Route::middleware('hub_can:wc_manage_templates')->group(function () {
                 Route::post('/templates', [WcTemplateController::class, 'store']);
                 Route::put('/templates/{id}', [WcTemplateController::class, 'update'])->whereNumber('id');
                 Route::delete('/templates/{id}', [WcTemplateController::class, 'destroy'])->whereNumber('id');
@@ -1052,7 +1055,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::middleware('hub_can:wc_assign_change_requests')->group(function () {
                 Route::post('/change-requests/{id}/assign-to-approver', [WcChangeRequestController::class, 'assignToApprover'])->whereNumber('id');
             });
-            Route::middleware('hub_can:wc_view_all_deployments,wc_request_deployments,wc_deploy_websites')->group(function () {
+            Route::middleware('hub_can:wc_view_all_deployments,wc_request_deployments,wc_assign_website_templates,wc_deploy_websites')->group(function () {
                 Route::get('/template-requests', [WcTemplateRequestController::class, 'index']);
             });
             Route::middleware('hub_can:wc_request_deployments,wc_assign_website_templates')->group(function () {
@@ -1064,8 +1067,10 @@ Route::middleware('auth:sanctum')->group(function () {
                 Route::put('/template-requests/{id}/branding', [WcTemplateRequestController::class, 'updateBranding'])->whereNumber('id');
                 Route::post('/template-requests/{id}/reject', [WcTemplateRequestController::class, 'reject'])->whereNumber('id');
             });
-            Route::middleware('hub_can:wc_manage_templates')->group(function () {
+            Route::middleware('hub_can:wc_manage_templates,wc_request_deployments,wc_assign_website_templates,wc_view_all_deployments')->group(function () {
                 Route::get('/templates', [WcTemplateController::class, 'index']);
+            });
+            Route::middleware('hub_can:wc_manage_templates')->group(function () {
                 Route::post('/templates', [WcTemplateController::class, 'store']);
                 Route::put('/templates/{id}', [WcTemplateController::class, 'update'])->whereNumber('id');
                 Route::delete('/templates/{id}', [WcTemplateController::class, 'destroy'])->whereNumber('id');

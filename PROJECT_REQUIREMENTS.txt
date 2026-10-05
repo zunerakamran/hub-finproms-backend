@@ -428,12 +428,13 @@ Notes:
        (`primary_color` / `secondary_color`).
        The request form also collects optional website content extras stored on
        `wc_template_requests`:
-         • `services` — name + description list
+         • `services` — name + attached document (PDF/Office) list
          • `images` — uploaded image URL + optional label list
          • `contact_details` — phone, email, address, website
-         • `policies` — name + content list
+         • `policies` — name + attached document (PDF/Office) list
          • `selected_pages` — slugs chosen from the template’s `available_pages`
-         • `page_contents` — content text keyed by selected page slug
+         • `page_contents` — document attachment (`url` + `name`) keyed by selected page slug
+           (typed textareas are not used; attach a file for each page/service/policy)
      - Optional staff path: request on behalf of / assign to an advisor
        (`wc_assign_website_templates`).
      - Power Admin (if `wc_deploy_websites`) manually deploys the pending
@@ -1374,7 +1375,8 @@ STEP 1 — Shared hub core (content hub)
     scheme picker + optional custom colours (`wc_templates.color_schemes`)
 [x] Website templates: Power Admin available pages on register/edit
     (`wc_templates.available_pages`); request form collects services, images,
-    contact details, policies, selected pages + page contents
+    contact details, policies, selected pages + page content **document
+    attachments** (no textareas for services / policies / page content)
     (`wc_template_requests` JSON fields)
 [x] Website Content Pre Approval Workflow module + APIs (sections, change requests, supporting files; depends on WTL)
 [x] Frontend: separate nav sections for Website Template Library vs Content Pre Approval

@@ -123,7 +123,8 @@ class TemplateRequestController extends Controller
             'secondary_color' => 'nullable|string|max:50',
             'services' => 'nullable|array|max:40',
             'services.*.name' => 'nullable|string|max:150',
-            'services.*.description' => 'nullable|string|max:2000',
+            'services.*.attachment_url' => 'nullable|string|max:1000',
+            'services.*.attachment_name' => 'nullable|string|max:255',
             'images' => 'nullable|array|max:40',
             'images.*.url' => 'nullable|string|max:1000',
             'images.*.label' => 'nullable|string|max:150',
@@ -134,10 +135,13 @@ class TemplateRequestController extends Controller
             'contact_details.website' => 'nullable|string|max:255',
             'policies' => 'nullable|array|max:20',
             'policies.*.name' => 'nullable|string|max:150',
-            'policies.*.content' => 'nullable|string|max:20000',
+            'policies.*.attachment_url' => 'nullable|string|max:1000',
+            'policies.*.attachment_name' => 'nullable|string|max:255',
             'selected_pages' => 'nullable|array|max:40',
             'selected_pages.*' => 'nullable|string|max:150',
             'page_contents' => 'nullable|array',
+            'page_contents.*.url' => 'nullable|string|max:1000',
+            'page_contents.*.name' => 'nullable|string|max:255',
             'assigned_advisor_id' => [
                 $mustAssignAdvisor ? 'required' : 'nullable',
                 Rule::exists(User::class, 'id'),
@@ -1036,7 +1040,7 @@ class TemplateRequestController extends Controller
 
     /**
      * @param  mixed  $raw
-     * @return list<array{name: string, description: string}>
+     * @return list<array{name: string, attachment_url: string, attachment_name: string}>
      */
     private function normalizeServices(mixed $raw): array
     {
@@ -1051,18 +1055,17 @@ class TemplateRequestController extends Controller
             }
 
             $name = trim((string) ($row['name'] ?? ''));
-            $description = trim((string) ($row['description'] ?? ''));
-            if ($name === '' && $description === '') {
+            $attachment = $this->normalizeAttachmentFields($row);
+            if ($name === '' && $attachment['attachment_url'] === '') {
                 continue;
             }
             if ($name === '') {
                 $name = 'Service '.((int) $index + 1);
             }
 
-            $services[] = [
+            $services[] = array_merge([
                 'name' => Str::limit($name, 150, ''),
-                'description' => Str::limit($description, 2000, ''),
-            ];
+            ], $attachment);
         }
 
         return array_values($services);
@@ -1128,7 +1131,7 @@ class TemplateRequestController extends Controller
 
     /**
      * @param  mixed  $raw
-     * @return list<array{name: string, content: string}>
+     * @return list<array{name: string, attachment_url: string, attachment_name: string}>
      */
     private function normalizePolicies(mixed $raw): array
     {
@@ -1143,21 +1146,40 @@ class TemplateRequestController extends Controller
             }
 
             $name = trim((string) ($row['name'] ?? ''));
-            $content = trim((string) ($row['content'] ?? ''));
-            if ($name === '' && $content === '') {
+            $attachment = $this->normalizeAttachmentFields($row);
+            if ($name === '' && $attachment['attachment_url'] === '') {
                 continue;
             }
             if ($name === '') {
                 $name = 'Policy '.((int) $index + 1);
             }
 
-            $policies[] = [
+            $policies[] = array_merge([
                 'name' => Str::limit($name, 150, ''),
-                'content' => Str::limit($content, 20000, ''),
-            ];
+            ], $attachment);
         }
 
         return array_values($policies);
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     * @return array{attachment_url: string, attachment_name: string}
+     */
+    private function normalizeAttachmentFields(array $row): array
+    {
+        $url = trim((string) ($row['attachment_url'] ?? $row['url'] ?? ''));
+        $name = trim((string) ($row['attachment_name'] ?? $row['original_name'] ?? $row['filename'] ?? ''));
+        if ($url === '') {
+            return ['attachment_url' => '', 'attachment_name' => ''];
+        }
+
+        $absolute = CpanelSyncService::absoluteAssetUrl($url) ?: $url;
+
+        return [
+            'attachment_url' => Str::limit((string) $absolute, 1000, ''),
+            'attachment_name' => Str::limit($name !== '' ? $name : basename(parse_url($url, PHP_URL_PATH) ?: $url), 255, ''),
+        ];
     }
 
     /**
@@ -1185,8 +1207,10 @@ class TemplateRequestController extends Controller
     }
 
     /**
+     * Page content is supplied as document attachments keyed by page slug.
+     *
      * @param  mixed  $raw
-     * @return array<string, string>
+     * @return array<string, array{url: string, name: string}>
      */
     private function normalizePageContents(mixed $raw): array
     {
@@ -1198,17 +1222,26 @@ class TemplateRequestController extends Controller
         foreach ($raw as $key => $value) {
             if (is_array($value)) {
                 $slug = Str::slug(trim((string) ($value['slug'] ?? $key)));
-                $content = trim((string) ($value['content'] ?? ''));
+                $url = trim((string) ($value['url'] ?? $value['attachment_url'] ?? ''));
+                $name = trim((string) ($value['name'] ?? $value['attachment_name'] ?? $value['original_name'] ?? ''));
             } else {
-                $slug = Str::slug(trim((string) $key));
-                $content = trim((string) $value);
-            }
-
-            if ($slug === '' || $content === '') {
+                // Legacy plain-text entries are ignored — content is document-only now.
                 continue;
             }
 
-            $contents[$slug] = Str::limit($content, 50000, '');
+            if ($slug === '' || $url === '') {
+                continue;
+            }
+
+            $absolute = CpanelSyncService::absoluteAssetUrl($url) ?: $url;
+            $contents[$slug] = [
+                'url' => Str::limit((string) $absolute, 1000, ''),
+                'name' => Str::limit(
+                    $name !== '' ? $name : basename(parse_url($url, PHP_URL_PATH) ?: $url),
+                    255,
+                    ''
+                ),
+            ];
         }
 
         return $contents;
