@@ -90,6 +90,7 @@ class AdvisorController extends Controller
             'capabilities' => [
                 'can_import' => $this->roleCan($request, $hub, 'advisor_excel_import'),
                 'can_download_template' => $this->canDownloadTemplate($request, $hub),
+                'can_submit' => $this->roleCan($request, $hub, 'advisor_excel_submit'),
             ],
         ]);
     }
@@ -233,6 +234,150 @@ class AdvisorController extends Controller
         ]);
     }
 
+    /**
+     * Staff with submit capability send a filled sheet for an importer to process later.
+     */
+    public function submit(Request $request): JsonResponse
+    {
+        $hub = $this->assertSubmitEnabled($request);
+
+        $validated = $request->validate([
+            'file' => ['required', 'file', 'max:5120'],
+        ]);
+
+        /** @var \Illuminate\Http\UploadedFile $file */
+        $file = $validated['file'];
+        $extension = strtolower($file->getClientOriginalExtension() ?: '');
+
+        if (! in_array($extension, ['xlsx', 'xls'], true)) {
+            return response()->json([
+                'message' => 'Please upload an Excel file (.xlsx).',
+            ], 422);
+        }
+
+        try {
+            if ($this->shouldUseRemote($request, $hub)) {
+                $plan = $this->remoteDb->run($hub, function (string $connection) use ($file, $hub) {
+                    return $this->importService->buildPlan($file, $hub, $connection);
+                });
+            } else {
+                $plan = $this->importService->buildPlan($file, $hub);
+            }
+        } catch (InvalidArgumentException|\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $userCount = (int) ($plan['summary']['created'] ?? 0)
+            + (int) ($plan['summary']['updated'] ?? 0)
+            + (int) ($plan['summary']['reactivated'] ?? 0);
+
+        if ($userCount < 1) {
+            return response()->json([
+                'message' => 'No valid users were found in this sheet. Fix the rows and try again.',
+                'skipped' => $plan['skipped'] ?? [],
+            ], 422);
+        }
+
+        $storedPath = $file->storeAs(
+            'advisor-imports/submissions',
+            (string) Str::uuid().'.'.$extension,
+            'local'
+        );
+
+        $batch = $this->importHistory->recordSubmission(
+            $hub,
+            $request->user(),
+            $plan,
+            $file,
+            $storedPath
+        );
+
+        return response()->json([
+            'message' => sprintf(
+                'Excel sheet sent for import. %d user%s pending — waiting for someone with Import advisors.',
+                $userCount,
+                $userCount === 1 ? '' : 's'
+            ),
+            'batch' => $batch->toApiArray(),
+            'target_hub' => $this->hubPayload($hub),
+        ], 201);
+    }
+
+    /**
+     * Importer processes a previously submitted (pending) Excel sheet.
+     */
+    public function importSubmission(Request $request, int $batch): JsonResponse
+    {
+        $hub = $this->assertImportEnabled($request);
+
+        $model = AdvisorImportBatch::query()
+            ->where('hub_id', $hub->id)
+            ->where('id', $batch)
+            ->first();
+
+        if (! $model) {
+            return response()->json(['message' => 'Import submission not found.'], 404);
+        }
+
+        if (! $model->isPendingSubmission() || ! filled($model->stored_path)) {
+            return response()->json([
+                'message' => 'This submission is not pending or the Excel file is no longer available.',
+            ], 422);
+        }
+
+        if (! \Illuminate\Support\Facades\Storage::disk('local')->exists($model->stored_path)) {
+            return response()->json([
+                'message' => 'The submitted Excel file is missing from storage. Ask the sender to submit again.',
+            ], 422);
+        }
+
+        $useRemote = $this->shouldUseRemote($request, $hub);
+        $jobId = (string) Str::uuid();
+        $extension = pathinfo($model->stored_path, PATHINFO_EXTENSION) ?: 'xlsx';
+        $jobPath = 'advisor-imports/tmp/'.$jobId.'.'.$extension;
+
+        \Illuminate\Support\Facades\Storage::disk('local')->copy($model->stored_path, $jobPath);
+
+        Cache::put(ProcessAdvisorImportJob::cacheKey($jobId), [
+            'status' => 'queued',
+            'user_id' => (int) $request->user()->id,
+            'message' => 'Import queued from submitted sheet. Waiting for a worker…',
+            'submission_batch_id' => $model->id,
+        ], now()->addHour());
+
+        ProcessAdvisorImportJob::dispatch(
+            $jobId,
+            $jobPath,
+            $model->original_filename ?: ('submission.'.$extension),
+            (int) $request->user()->id,
+            (int) $hub->id,
+            $useRemote,
+        );
+
+        // Mark submission as processing / leave pending until job completes.
+        // Job will create a completed import batch; clear the pending one after queue.
+        $model->message = sprintf(
+            'Import started by %s (%s). Processing…',
+            $request->user()->name,
+            $request->user()->email
+        );
+        $model->save();
+
+        // Attach submission id so the job can finalize the pending row.
+        Cache::put(ProcessAdvisorImportJob::cacheKey($jobId), array_merge(
+            Cache::get(ProcessAdvisorImportJob::cacheKey($jobId), []),
+            ['submission_batch_id' => $model->id]
+        ), now()->addHour());
+
+        return response()->json([
+            'queued' => true,
+            'job_id' => $jobId,
+            'message' => 'Import queued from the submitted Excel sheet.',
+            'submission_batch_id' => $model->id,
+            'target_hub' => $this->hubPayload($hub),
+        ], 202);
+    }
+
     private function assertImportEnabled(Request $request): Hub
     {
         $hub = $this->assertPrivateHub($request);
@@ -246,13 +391,26 @@ class AdvisorController extends Controller
         return $hub;
     }
 
+    private function assertSubmitEnabled(Request $request): Hub
+    {
+        $hub = $this->assertPrivateHub($request);
+        $this->assertRoleCapability(
+            $request,
+            $hub,
+            'advisor_excel_submit',
+            'Submitting filled Excel sheets is disabled for your role on this hub. Enable “Submit filled Excel for import” under Power Admin → Capabilities.'
+        );
+
+        return $hub;
+    }
+
     private function assertTemplateEnabled(Request $request): Hub
     {
         $hub = $this->assertPrivateHub($request);
 
         if (! $this->canDownloadTemplate($request, $hub)) {
             abort(response()->json([
-                'message' => 'Downloading the advisor import template is disabled for your role on this hub. Enable “Download import Excel template” or “Import advisors” under Power Admin → Capabilities.',
+                'message' => 'Downloading the advisor import template is disabled for your role on this hub. Enable “Download import Excel template”, “Submit filled Excel for import”, or “Import advisors” under Power Admin → Capabilities.',
                 'capability' => 'advisor_excel_template',
             ], 403));
         }
@@ -279,9 +437,10 @@ class AdvisorController extends Controller
 
         if (! $this->roleCan($request, $hub, 'advisor_excel_import')
             && ! $this->roleCan($request, $hub, 'advisor_excel_template')
+            && ! $this->roleCan($request, $hub, 'advisor_excel_submit')
         ) {
             abort(response()->json([
-                'message' => 'Advisor import tools are disabled for your role on this hub. Enable Import advisors and/or Download import Excel template under Power Admin → Capabilities.',
+                'message' => 'Advisor import tools are disabled for your role on this hub. Enable Import advisors, Download import Excel template, and/or Submit filled Excel for import under Power Admin → Capabilities.',
             ], 403));
         }
 
@@ -323,6 +482,7 @@ class AdvisorController extends Controller
     private function canDownloadTemplate(Request $request, Hub $hub): bool
     {
         return $this->roleCan($request, $hub, 'advisor_excel_template')
+            || $this->roleCan($request, $hub, 'advisor_excel_submit')
             || $this->roleCan($request, $hub, 'advisor_excel_import');
     }
 

@@ -465,13 +465,20 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/advisors', [AdvisorController::class, 'index']);
         Route::get('/advisors/import-history', [AdvisorController::class, 'importHistory']);
 
-        Route::middleware('hub_can:advisor_excel_template,advisor_excel_import')->group(function () {
+        Route::middleware('hub_can:advisor_excel_template,advisor_excel_import,advisor_excel_submit')->group(function () {
             Route::get('/advisors/template', [AdvisorController::class, 'template']);
+        });
+
+        Route::middleware('hub_can:advisor_excel_submit')->group(function () {
+            Route::post('/advisors/submit', [AdvisorController::class, 'submit'])->middleware('throttle:imports');
         });
 
         Route::middleware('hub_can:advisor_excel_import')->group(function () {
             Route::post('/advisors/import', [AdvisorController::class, 'import'])->middleware('throttle:imports');
             Route::get('/advisors/import/{jobId}', [AdvisorController::class, 'importStatus'])->whereUuid('jobId');
+            Route::post('/advisors/import-submissions/{batch}/import', [AdvisorController::class, 'importSubmission'])
+                ->whereNumber('batch')
+                ->middleware('throttle:imports');
             Route::get('/advisor-billings/{billing}', [AdvisorBillingController::class, 'show']);
             Route::post('/advisor-billings/{billing}/checkout', [AdvisorBillingController::class, 'checkout']);
             Route::post('/advisor-billings/confirm', [AdvisorBillingController::class, 'confirm']);
@@ -753,13 +760,20 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/advisors', [AdvisorController::class, 'index']);
         Route::get('/advisors/import-history', [AdvisorController::class, 'importHistory']);
 
-        Route::middleware('hub_can:advisor_excel_template,advisor_excel_import')->group(function () {
+        Route::middleware('hub_can:advisor_excel_template,advisor_excel_import,advisor_excel_submit')->group(function () {
             Route::get('/advisors/template', [AdvisorController::class, 'template']);
+        });
+
+        Route::middleware('hub_can:advisor_excel_submit')->group(function () {
+            Route::post('/advisors/submit', [AdvisorController::class, 'submit'])->middleware('throttle:imports');
         });
 
         Route::middleware('hub_can:advisor_excel_import')->group(function () {
             Route::post('/advisors/import', [AdvisorController::class, 'import'])->middleware('throttle:imports');
             Route::get('/advisors/import/{jobId}', [AdvisorController::class, 'importStatus'])->whereUuid('jobId');
+            Route::post('/advisors/import-submissions/{batch}/import', [AdvisorController::class, 'importSubmission'])
+                ->whereNumber('batch')
+                ->middleware('throttle:imports');
             Route::get('/advisor-billings/{billing}', [AdvisorBillingController::class, 'show']);
             Route::post('/advisor-billings/{billing}/checkout', [AdvisorBillingController::class, 'checkout']);
             Route::post('/advisor-billings/confirm', [AdvisorBillingController::class, 'confirm']);

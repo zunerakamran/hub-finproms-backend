@@ -623,12 +623,14 @@ Notes:
   Discontinue is shown on Hub → Users (`/my-dashboard/hub-users`), not on
   Import Users.
 - Import Users page (`/my-dashboard/advisors`):
-  - Users with `advisor_excel_template` (or Import) can download the blank
-    Excel template, fill it offline, and send it to someone with
-    `advisor_excel_import`.
-  - Users with `advisor_excel_import` can upload the filled sheet.
-  - The page shows history of previous import batches (who imported, when,
-    created / updated / reactivated / skipped rows).
+  - Users with `advisor_excel_template` (or Import / Submit) can download the blank
+    Excel template, fill it offline.
+  - Users with `advisor_excel_submit` upload the filled sheet; it is stored as
+    Pending in import history with the user count, waiting for an importer.
+  - Users with `advisor_excel_import` can import immediately or process a Pending
+    submission from history.
+  - History lists prior imports and pending submissions (who sent, when, file,
+    user count / created / updated / skipped).
 - When Power Admin switches a hub from private → public (Functionalities):
   - All Excel-imported advisors are SUSPENDED (not deleted): cannot log in,
     lose unlimited/subscription access, excluded from advisor billing counts.
@@ -902,8 +904,9 @@ Notes:
   - Confirm bank transfers — same roles
   - Import advisors (Excel/CSV) — same roles
   - Download import Excel template (`advisor_excel_template`) — download the
-    blank sheet (role / firm / modules dropdowns) so staff can fill it and
-    hand it to someone with Import advisors; does not allow upload
+    blank sheet (role / firm / modules dropdowns) so staff can fill it
+  - Submit filled Excel for import (`advisor_excel_submit`) — upload a filled
+    sheet to queue it as Pending for an importer (does not create users)
   - Discontinue users — separate capability; permanently end a hub user’s
     access — action lives on Hub → Users (`/my-dashboard/hub-users`), not on
     Import Users
@@ -1280,7 +1283,8 @@ STEP 1 — Shared hub core (content hub)
 [x] Capability: advisor_discontinue — who can end imported advisors (Capabilities matrix)
 [x] Discontinue action on Hub → Users (not Import Users); gated by advisor_discontinue
 [x] Capability: advisor_excel_template — download blank import Excel without upload rights
-[x] Import Users page: template download for fillers + import history of past batches
+[x] Capability: advisor_excel_submit — send filled Excel for import (Pending + user count in history)
+[x] Import Users page: template download, submit-for-import form, import history of past batches
 [x] Activity logs — audit trail of user changes/activity (auth + mutating API)
 [x] Activity logs report — aggregates by action / user / day; filterable
 [x] Capability: dashboard_view_activity_logs — who can view logs & report

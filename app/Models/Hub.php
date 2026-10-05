@@ -715,6 +715,7 @@ class Hub extends Model
     public const PRIVATE_CAPABILITY_KEYS = [
         'advisor_excel_import',
         'advisor_excel_template',
+        'advisor_excel_submit',
         'advisor_discontinue',
         'dashboard_view_advisor_invoices',
         'dashboard_manage_advisor_pricing',
@@ -1100,7 +1101,14 @@ class Hub extends Model
         ],
         'advisor_excel_template' => [
             'label' => 'Download import Excel template',
-            'description' => 'Download the blank advisor import Excel template (with role / firm / modules dropdowns) so staff can fill it and send it to someone who can Import advisors. Does not allow uploading the sheet.',
+            'description' => 'Download the blank advisor import Excel template (with role / firm / modules dropdowns) so staff can fill it. Pair with “Submit filled Excel for import” to send the completed sheet to an importer.',
+            'group' => self::GROUP_DASHBOARD_ADVISORS,
+            'default_shared' => false,
+            'default_white_label' => true,
+        ],
+        'advisor_excel_submit' => [
+            'label' => 'Submit filled Excel for import',
+            'description' => 'Upload a filled Excel sheet so it is queued for someone with “Import advisors”. Does not create users — status stays Pending until an importer processes it.',
             'group' => self::GROUP_DASHBOARD_ADVISORS,
             'default_shared' => false,
             'default_white_label' => true,
