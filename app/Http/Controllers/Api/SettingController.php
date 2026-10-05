@@ -8,6 +8,7 @@ use App\Models\Setting;
 use App\Services\ActingHubService;
 use App\Services\HubService;
 use App\Services\WhiteLabelHubSyncService;
+use App\Support\PageContentDefaults;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -59,6 +60,7 @@ class SettingController extends Controller
             'primary_color' => ['nullable', 'string', 'max:32'],
             'secondary_color' => ['nullable', 'string', 'max:32'],
             'accent_color' => ['nullable', 'string', 'max:32'],
+            'page_content' => ['sometimes'],
         ]);
 
         if (array_key_exists('new_banner_days', $validated)) {
@@ -164,6 +166,39 @@ class SettingController extends Controller
             $hubDirty = true;
         }
 
+        if ($request->exists('page_content')) {
+            $raw = $request->input('page_content');
+            if (is_string($raw)) {
+                $decoded = json_decode($raw, true);
+                $raw = is_array($decoded) ? $decoded : [];
+            }
+            if (! is_array($raw)) {
+                $raw = [];
+            }
+
+            $incoming = PageContentDefaults::sanitize($raw);
+            $defaults = PageContentDefaults::all();
+            $merged = [];
+
+            foreach ($defaults as $section => $fields) {
+                $sectionIncoming = $incoming[$section] ?? [];
+                foreach (array_keys($fields) as $key) {
+                    if (! array_key_exists($key, $sectionIncoming)) {
+                        continue;
+                    }
+                    $value = $sectionIncoming[$key];
+                    // Empty or equal to default → no override stored.
+                    if ($value === '' || $value === $fields[$key]) {
+                        continue;
+                    }
+                    $merged[$section][$key] = $value;
+                }
+            }
+
+            $hub->page_content = $merged === [] ? null : $merged;
+            $hubDirty = true;
+        }
+
         if ($hubDirty) {
             $hub->save();
             $this->hubs->forgetCurrentCache();
@@ -203,6 +238,8 @@ class SettingController extends Controller
                 'secondary' => $hub->secondary_color,
                 'accent' => $hub->accent_color,
             ],
+            // Resolved (defaults + overrides) so the settings form shows effective copy.
+            'page_content' => $hub->resolvedPageContent(),
         ];
     }
 

@@ -1563,6 +1563,7 @@ class Hub extends Model
         'compliance_status_display_names',
         'email_templates',
         'terms_and_conditions',
+        'page_content',
         'advisor_billing_renew_day',
         'billing_grace_day',
         'subscriber_credits',
@@ -1599,6 +1600,7 @@ class Hub extends Model
             'compliance_status_display_names' => 'array',
             'email_templates' => 'array',
             'terms_and_conditions' => 'array',
+            'page_content' => 'array',
             'advisor_billing_renew_day' => 'integer',
             'billing_grace_day' => 'integer',
             'subscriber_credits' => 'integer',
@@ -2525,6 +2527,7 @@ class Hub extends Model
             // Public site root for WC previews / placeholders (hub deploy wiring).
             'frontend_url' => $this->frontendBaseUrl(),
             'branding' => $this->brandingPayload(),
+            'page_content' => $this->resolvedPageContent(),
             'checklist' => $checklist,
             // Frontend should use these labels wherever roles are shown (falls back to defaults).
             'role_labels' => $this->resolvedRoleLabels(),
@@ -2540,6 +2543,22 @@ class Hub extends Model
                 'terms' => $this->termsPublicPayload(),
             ],
         ];
+    }
+
+    /**
+     * Public-site page copy (Home / Posts·Reels / post detail), defaults merged in.
+     *
+     * @return array{
+     *   home: array<string, string>,
+     *   catalog: array<string, string>,
+     *   post_detail: array<string, string>
+     * }
+     */
+    public function resolvedPageContent(): array
+    {
+        return \App\Support\PageContentDefaults::resolve(
+            is_array($this->page_content) ? $this->page_content : null
+        );
     }
 
     /**

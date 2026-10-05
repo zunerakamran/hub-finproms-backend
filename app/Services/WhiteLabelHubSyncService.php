@@ -56,6 +56,7 @@ class WhiteLabelHubSyncService
                     'primary_color' => $hub->primary_color,
                     'secondary_color' => $hub->secondary_color,
                     'accent_color' => $hub->accent_color,
+                    'page_content' => json_encode(is_array($hub->page_content) ? $hub->page_content : null),
                     'logo_url' => $hub->logoAbsoluteUrl(),
                     'white_logo_url' => $hub->whiteLogoAbsoluteUrl(),
                     'favicon_url' => $hub->faviconAbsoluteUrl(),
