@@ -672,7 +672,7 @@ class CapabilitiesMatrixService
                 $inputForRole = (isset($matrixInput[$role]) && is_array($matrixInput[$role]))
                     ? $matrixInput[$role]
                     : [];
-                foreach (['member_browse_catalog', 'member_view_plans'] as $companion) {
+                foreach (['member_browse_catalog', 'member_browse_bundles', 'member_view_plans'] as $companion) {
                     if (array_key_exists($companion, $inputForRole)
                         && ! filter_var($inputForRole[$companion], FILTER_VALIDATE_BOOLEAN)
                     ) {
@@ -758,16 +758,18 @@ class CapabilitiesMatrixService
             if (
                 str_starts_with($key, 'member_')
                 && $key !== 'member_browse_catalog'
+                && $key !== 'member_browse_bundles'
                 && $key !== 'member_view_site_pages'
             ) {
                 $matrix[User::ROLE_APPROVER][$key] = false;
             }
         }
 
-        // Catalog browse is on for every role by default (staff + users) on content hubs.
+        // Catalog / bundles browse is on for every role by default (staff + users) on content hubs.
         foreach ($this->allMatrixRoles() as $role) {
             if (isset($matrix[$role])) {
                 $matrix[$role]['member_browse_catalog'] = true;
+                $matrix[$role]['member_browse_bundles'] = true;
                 $matrix[$role]['member_view_site_pages'] = true;
             }
         }
@@ -780,6 +782,7 @@ class CapabilitiesMatrixService
                 }
                 $matrix[$role]['member_view_site_pages'] = false;
                 $matrix[$role]['member_browse_catalog'] = false;
+                $matrix[$role]['member_browse_bundles'] = false;
                 $matrix[$role]['member_view_plans'] = false;
                 $matrix[$role]['member_purchase_content'] = false;
                 $matrix[$role]['member_download_content'] = false;

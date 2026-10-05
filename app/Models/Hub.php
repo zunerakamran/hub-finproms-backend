@@ -565,6 +565,7 @@ class Hub extends Model
      */
     public const SOCIAL_MEDIA_TEMPLATE_LIBRARY_CAPABILITY_KEYS = [
         'member_browse_catalog',
+        'member_browse_bundles',
         'member_purchase_content',
         'member_download_content',
         'member_in_app_edit',
@@ -902,6 +903,13 @@ class Hub extends Model
         'member_browse_catalog' => [
             'label' => 'Browse catalog (posts / reels)',
             'description' => 'Can browse the content catalog. Configurable per role in the Capabilities matrix (all roles).',
+            'group' => self::GROUP_MEMBER,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'member_browse_bundles' => [
+            'label' => 'Browse bundles',
+            'description' => 'Show Bundles on the public website (nav + pages). When off for a role, that role cannot open /bundles. Turn off for every role to hide bundles for the whole hub.',
             'group' => self::GROUP_MEMBER,
             'default_shared' => true,
             'default_white_label' => true,
@@ -1958,6 +1966,7 @@ class Hub extends Model
             // Central is not a member catalog — keep member website / purchase flags off.
             $defaults['member_view_site_pages'] = false;
             $defaults['member_browse_catalog'] = false;
+            $defaults['member_browse_bundles'] = false;
             $defaults['member_view_plans'] = false;
             $defaults['member_purchase_content'] = false;
             $defaults['member_download_content'] = false;

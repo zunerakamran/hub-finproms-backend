@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-05 (editable Home / Posts / detail page content from Settings)
+Last updated: 2026-10-05 (member_browse_bundles — show/hide bundles on website)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -198,11 +198,15 @@ Deploy rule:
 2.4a Post bundles
 - Capability-gated (Capabilities matrix: dashboard_manage_bundles) — roles that
   Power Admin enables can create/edit bundles in the hub-admin dashboard.
+- Website visibility is gated separately by `member_browse_bundles` (Member
+  catalog group on the Capabilities matrix). When off for a role, Bundles nav
+  and /bundles pages are hidden for that role; turn off for every role to hide
+  bundles for the whole hub. Defaults ON for Shared / White-label, OFF on Central.
 - A bundle has a title, description, and total credits_cost (bundle price).
 - Creators can include existing posts/reels and/or create new posts/reels and
   attach them in the same flow.
-- Members browse bundles with the catalog; purchasing a bundle spends the
-  bundle’s total credits and unlocks every post in the bundle.
+- Members browse bundles when `member_browse_bundles` is on; purchasing a
+  bundle spends the bundle’s total credits and unlocks every post in the bundle.
 - Invoices are generated for bundle purchases (type bundle_purchase).
 
 2.5 One-off / Non-subscriber Purchases
@@ -844,6 +848,8 @@ Notes:
   Member-facing (end users / advisors / staff columns):
   - Browse catalog / posts / reels — available for ALL roles in the matrix
     (Power Admin, FinProms admin, client admin, manager, approver, advisor, user)
+  - Browse bundles — show/hide Bundles on the public website (nav + pages);
+    turn off for every role to hide bundles for the whole hub
   - View plans / self-serve subscribe
   - One-off purchase / spend credits
   - Download purchased content
@@ -1149,6 +1155,8 @@ STEP 1 — Shared hub core (content hub)
 [x] Non-subscriber one-off purchase (1 credit = £1)
 [x] Post bundles — create with existing/new posts, description + total credits
 [x] Capability: dashboard_manage_bundles — who can create/manage bundles
+[x] Capability: member_browse_bundles — show/hide Bundles on the public website
+    (nav + pages + public API); defaults on for Shared / White-label
 [x] Bundle browse + purchase (unlocks all posts in the bundle; invoice)
 [x] power_admin can manage payment methods (Stripe / bank transfer)
 [x] Hub model + rights/permissions checklist (DB-driven)

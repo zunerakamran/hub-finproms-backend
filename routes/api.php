@@ -132,6 +132,9 @@ Route::middleware('hub_can:member_browse_catalog,dashboard_view_posts,dashboard_
 
 Route::middleware('hub_can:member_browse_catalog')->group(function () {
     Route::post('/posts/reach', [PostController::class, 'recordReach']);
+});
+
+Route::middleware('hub_can:member_browse_bundles')->group(function () {
     Route::get('/bundles', [BundleController::class, 'index']);
     Route::get('/bundles/{bundle}', [BundleController::class, 'show']);
 });

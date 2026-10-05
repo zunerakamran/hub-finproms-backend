@@ -760,6 +760,7 @@ class HubRolesService
             if ($hub->isCentral()) {
                 $seed['member_view_site_pages'] = false;
                 $seed['member_browse_catalog'] = false;
+                $seed['member_browse_bundles'] = false;
                 $seed['member_view_plans'] = false;
                 $seed['member_purchase_content'] = false;
                 $seed['member_download_content'] = false;
