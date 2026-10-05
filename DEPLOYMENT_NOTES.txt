@@ -433,12 +433,25 @@ If it says sync failed: check shared laravel.log and that
 
 
 ================================================================================
-9. OPTIONAL â€” SCHEDULER (Website Compliance scheduled publish)
+9. SCHEDULER (WC publish + hub backups)
 ================================================================================
-cPanel Cron (every minute), per hub:
+cPanel Cron (every minute), on EVERY hub (Central + Shared + White-label):
   cd /home/<cpanel_user>/public_html/api && php artisan schedule:run >> /dev/null 2>&1
 
-Or HTTP:
+This runs:
+  - wc:publish-scheduled (Website Compliance)
+  - hubs:run-due-backups (per-hub backup schedule from Central Power Admin)
+
+Hub backups (dual store):
+  - Enable schedule per hub on Central -> Hub detail -> Backups
+  - Content hubs: set api_url in deploy wiring (.../api) so Central can trigger
+    backup/restore callbacks; optional CENTRAL_API_URL on content hubs for
+    independent upload when their own cron runs
+  - Archives: storage/app/backups/{slug}/ (local) and on Central
+    storage/app/backups/central/{slug}/
+  - After deploy on all hubs: php artisan migrate
+
+Or HTTP (WC only):
   GET https://<domain>/api/website-compliance/scheduler/publish-scheduled?key=<SCHEDULER_SECRET>
 
 

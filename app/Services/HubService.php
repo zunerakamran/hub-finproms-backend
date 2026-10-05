@@ -97,6 +97,7 @@ class HubService
                 'is_active' => true,
                 'primary_color' => null,
                 'secondary_color' => null,
+                'accent_color' => null,
                 'logo_url' => null,
                 'white_logo_url' => null,
                 'favicon_url' => null,

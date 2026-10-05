@@ -55,8 +55,10 @@ class SettingController extends Controller
             'color_scheme' => ['sometimes', 'array'],
             'color_scheme.primary' => ['nullable', 'string', 'max:32'],
             'color_scheme.secondary' => ['nullable', 'string', 'max:32'],
+            'color_scheme.accent' => ['nullable', 'string', 'max:32'],
             'primary_color' => ['nullable', 'string', 'max:32'],
             'secondary_color' => ['nullable', 'string', 'max:32'],
+            'accent_color' => ['nullable', 'string', 'max:32'],
         ]);
 
         if (array_key_exists('new_banner_days', $validated)) {
@@ -141,6 +143,10 @@ class SettingController extends Controller
                 $hub->secondary_color = $validated['color_scheme']['secondary'];
                 $hubDirty = true;
             }
+            if (array_key_exists('accent', $validated['color_scheme'])) {
+                $hub->accent_color = $validated['color_scheme']['accent'];
+                $hubDirty = true;
+            }
         }
 
         if (array_key_exists('primary_color', $validated)) {
@@ -150,6 +156,11 @@ class SettingController extends Controller
 
         if (array_key_exists('secondary_color', $validated)) {
             $hub->secondary_color = $validated['secondary_color'];
+            $hubDirty = true;
+        }
+
+        if (array_key_exists('accent_color', $validated)) {
+            $hub->accent_color = $validated['accent_color'];
             $hubDirty = true;
         }
 
@@ -190,6 +201,7 @@ class SettingController extends Controller
             'color_scheme' => [
                 'primary' => $hub->primary_color,
                 'secondary' => $hub->secondary_color,
+                'accent' => $hub->accent_color,
             ],
         ];
     }

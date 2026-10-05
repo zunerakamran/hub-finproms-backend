@@ -65,4 +65,16 @@ return [
         'showcase_templates' => env('WC_SHOWCASE_TEMPLATES'),
     ],
 
+    /*
+    | Hub backup / restore (dual store: local hub + Central).
+    | CENTRAL_API_URL = https://central.example.com/api  (content hubs; optional if
+    | Central always triggers backups and passes X-Central-Receive-Url).
+    | HUB_BACKUP_SECRET = shared fallback key when per-hub backup_token is empty.
+    */
+    'hub_backup' => [
+        'central_api_url' => env('CENTRAL_API_URL'),
+        'secret' => env('HUB_BACKUP_SECRET'),
+        'upload_timeout' => (int) env('HUB_BACKUP_UPLOAD_TIMEOUT', 600),
+    ],
+
 ];

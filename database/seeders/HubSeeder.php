@@ -28,6 +28,7 @@ class HubSeeder extends Seeder
                 'is_active' => true,
                 'primary_color' => null,
                 'secondary_color' => null,
+                'accent_color' => null,
                 'logo_url' => null,
                 'favicon_url' => null,
                 'checklist' => Hub::defaultChecklist($type),

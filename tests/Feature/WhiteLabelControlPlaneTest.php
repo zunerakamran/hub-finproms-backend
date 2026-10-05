@@ -769,6 +769,7 @@ class WhiteLabelControlPlaneTest extends TestCase
             $table->boolean('is_active')->default(true);
             $table->string('primary_color')->nullable();
             $table->string('secondary_color')->nullable();
+            $table->string('accent_color')->nullable();
             $table->string('logo_url')->nullable();
             $table->string('white_logo_url')->nullable();
             $table->string('favicon_url')->nullable();

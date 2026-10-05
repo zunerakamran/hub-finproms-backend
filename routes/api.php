@@ -40,9 +40,11 @@ use App\Http\Controllers\Api\PostController;
 use App\Http\Controllers\Api\PowerAdminAdvisorPricingController;
 use App\Http\Controllers\Api\PowerAdminCapabilityController;
 use App\Http\Controllers\Api\PowerAdminHubController;
+use App\Http\Controllers\Api\PowerAdminHubBackupController;
 use App\Http\Controllers\Api\PowerAdminModulePricingController;
 use App\Http\Controllers\Api\PowerAdminPaymentMethodController;
 use App\Http\Controllers\Api\PowerAdminUserController;
+use App\Http\Controllers\Api\InternalHubBackupController;
 use App\Http\Controllers\Api\PurchaseController;
 use App\Http\Controllers\Api\SettingController;
 use App\Http\Controllers\Api\RoleDisplayNameController;
@@ -96,6 +98,11 @@ Route::get('/website-compliance/pages/home', [WcPublicController::class, 'getHom
 Route::get('/website-compliance/uploaded-images/{filename}', [WcUploadController::class, 'show'])
     ->where('filename', '[A-Za-z0-9._-]+');
 Route::get('/website-compliance/scheduler/publish-scheduled', [WcSchedulerController::class, 'publishScheduled']);
+
+// Hub backup callbacks (shared secret / per-hub backup_token — no Sanctum)
+Route::post('/internal/hub-backups/run', [InternalHubBackupController::class, 'run']);
+Route::post('/internal/hub-backups/receive', [InternalHubBackupController::class, 'receive']);
+Route::post('/internal/hub-backups/restore', [InternalHubBackupController::class, 'restore']);
 
 // Hub iframe preview of live advisor sites (bypasses X-Frame-Options on cPanel).
 // Optional /h/{hubId}/ prefix: Central Hub remotes into a content-hub deployment DB.
@@ -708,6 +715,15 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::middleware('pa_can:pa_manage_hub_checklists')->group(function () {
             Route::put('/hubs/{hub}/checklist', [PowerAdminHubController::class, 'updateChecklist']);
+        });
+
+        Route::middleware('pa_can:pa_manage_hub_backups')->group(function () {
+            Route::get('/hubs/{hub}/backups', [PowerAdminHubBackupController::class, 'index']);
+            Route::put('/hubs/{hub}/backups/schedule', [PowerAdminHubBackupController::class, 'updateSchedule']);
+            Route::post('/hubs/{hub}/backups', [PowerAdminHubBackupController::class, 'store']);
+            Route::get('/hubs/{hub}/backups/{backup}/download', [PowerAdminHubBackupController::class, 'download']);
+            Route::post('/hubs/{hub}/backups/{backup}/restore', [PowerAdminHubBackupController::class, 'restore']);
+            Route::delete('/hubs/{hub}/backups/{backup}', [PowerAdminHubBackupController::class, 'destroy']);
         });
 
         // Advisor import / billing when enabled for power_admin on the current hub

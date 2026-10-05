@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-04 (security hardening phase 2 — cookies + DB TLS)
+Last updated: 2026-10-05 (hub accent colour + website filter / selection branding)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -547,7 +547,7 @@ Notes:
   content hub live in that hub's database only.
 - Everything that differs per hub (especially branding) must be driven by DB:
   - Application name
-  - Colour scheme (primary / secondary)
+  - Colour scheme (primary / secondary / accent)
   - Logo
   - Other tenant-specific settings as needed
 - Hub admins with `dashboard_manage_settings` can edit these branding fields
@@ -951,6 +951,7 @@ Notes:
   - Manage payment methods
   - Manage Power Admin / user capabilities matrix (this list + 5.2)
   - Manage users / roles (create, update, delete, assign roles)
+  - Manage hub backups (schedules, run/download/restore from Central)
   - Remotely control content hubs (hub switcher / acting hub)
 - Stored as platform settings on Central Hub (not per content hub).
 - Edited from Power Admin → Capabilities (Power Admin column).
@@ -974,12 +975,34 @@ Notes:
   5) Platform payment methods (Stripe / bank transfer), and other platform
      settings as needed
   6) Remote hub switcher — act on Shared / White-label DBs when wired
+  7) Hub backups — per-hub schedule (time/timezone/frequency), Backup now,
+     list/download Central copies, restore hub from Central
 - Functionalities and Capabilities must NOT duplicate each other in the UI.
 - This is the central control plane for ALL tenant behaviour and UI capabilities.
 - Power Admin does NOT replace FinProms admin day-to-day content work on Shared
   hubs, or client_admin work on White-labels; they configure rights and can
   remotely assist within bounds.
 - Shared Hub is no longer the Power Admin control plane.
+
+
+--------------------------------------------------------------------------------
+6B. HUB BACKUP & RESTORE
+--------------------------------------------------------------------------------
+- Dual storage: each scheduled/manual backup is saved on the hub's own server
+  (storage/app/backups/{slug}/) AND a copy is stored on Central
+  (storage/app/backups/central/{slug}/).
+- Central Hub also backs itself up (local + Central store on the same server);
+  Power Admin can download Central archives. Prefer off-server copies for DR.
+- Schedule is per hub, set from Central (Power Admin + pa_manage_hub_backups):
+  enabled, time (HH:MM), timezone, daily|weekly (+ weekday), retention local /
+  Central. Settings sync to content hubs via remote DB push when wired.
+- Scheduler: `hubs:run-due-backups` every minute (requires schedule:run cron on
+  each deploy). Central also triggers due remotes via hub api_url when set.
+- Restore from Central uses the Central-stored zip; content hubs receive the
+  archive on POST /api/internal/hub-backups/restore (X-Hub-Backup-Key).
+- Env (optional): CENTRAL_API_URL on content hubs for independent upload;
+  HUB_BACKUP_SECRET shared fallback; per-hub backup_token auto-generated.
+- Capability: pa_manage_hub_backups (Power Admin platform checklist).
 
 
 --------------------------------------------------------------------------------
@@ -1308,6 +1331,8 @@ SECURITY HARDENING (phase 2 — 2026-10-04)
 [x] CORS supports_credentials=true with explicit FRONTEND_URL allowlist
 [x] Hub remote DB TLS wiring: db_ssl_mode + db_ssl_ca (Power Admin UI +
     WhiteLabelDatabaseService PDO/pgsql ssl options)
+[x] Hub backup & restore (section 6B): per-hub schedule from Central, dual store
+    (hub local + Central), Backup now / download / restore, pa_manage_hub_backups
 [ ] Future: TOTP authenticator 2FA for Power Admin (in addition to email OTP)
 [ ] Future: mime allowlists on all uploads; disallow/sanitize SVG
 

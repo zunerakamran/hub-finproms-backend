@@ -55,6 +55,7 @@ class WhiteLabelHubSyncService
                     'is_active' => $hub->is_active ? 1 : 0,
                     'primary_color' => $hub->primary_color,
                     'secondary_color' => $hub->secondary_color,
+                    'accent_color' => $hub->accent_color,
                     'logo_url' => $hub->logoAbsoluteUrl(),
                     'white_logo_url' => $hub->whiteLogoAbsoluteUrl(),
                     'favicon_url' => $hub->faviconAbsoluteUrl(),
@@ -69,6 +70,14 @@ class WhiteLabelHubSyncService
                     'subscriber_credits' => $hub->subscriber_credits,
                     'advisor_billing_renew_day' => $hub->advisor_billing_renew_day,
                     'billing_grace_day' => $hub->billing_grace_day,
+                    'backup_enabled' => $hub->backup_enabled ? 1 : 0,
+                    'backup_time' => $hub->backup_time ?: '02:00',
+                    'backup_timezone' => $hub->backup_timezone ?: 'UTC',
+                    'backup_frequency' => $hub->backup_frequency ?: 'daily',
+                    'backup_weekday' => $hub->backup_weekday,
+                    'backup_retention_local' => $hub->backup_retention_local ?: 3,
+                    'backup_retention_central' => $hub->backup_retention_central ?: 14,
+                    'backup_token' => $hub->backup_token,
                     'updated_at' => $now,
                 ];
 

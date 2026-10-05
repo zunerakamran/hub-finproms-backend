@@ -42,6 +42,11 @@ class PowerAdminCapabilitiesService
             'description' => 'Create, update, and delete users; assign roles from the Power Admin dashboard.',
             'default' => true,
         ],
+        'pa_manage_hub_backups' => [
+            'label' => 'Manage hub backups',
+            'description' => 'Configure per-hub backup schedules, run backups, download archives, and restore hubs from Central.',
+            'default' => true,
+        ],
     ];
 
     /**

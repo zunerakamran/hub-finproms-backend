@@ -1540,6 +1540,7 @@ class Hub extends Model
         'is_active',
         'primary_color',
         'secondary_color',
+        'accent_color',
         'logo_url',
         'white_logo_url',
         'favicon_url',
@@ -1570,12 +1571,22 @@ class Hub extends Model
         'stripe_secret',
         'stripe_webhook_secret',
         'stripe_currency',
+        'backup_enabled',
+        'backup_time',
+        'backup_timezone',
+        'backup_frequency',
+        'backup_weekday',
+        'backup_retention_local',
+        'backup_retention_central',
+        'backup_last_run_at',
+        'backup_token',
     ];
 
     protected $hidden = [
         'stripe_secret',
         'stripe_webhook_secret',
         'db_password',
+        'backup_token',
     ];
 
     protected function casts(): array
@@ -1592,6 +1603,11 @@ class Hub extends Model
             'billing_grace_day' => 'integer',
             'subscriber_credits' => 'integer',
             'db_port' => 'integer',
+            'backup_enabled' => 'boolean',
+            'backup_weekday' => 'integer',
+            'backup_retention_local' => 'integer',
+            'backup_retention_central' => 'integer',
+            'backup_last_run_at' => 'datetime',
             'stripe_secret' => \App\Casts\SafeEncrypted::class,
             'stripe_webhook_secret' => \App\Casts\SafeEncrypted::class,
             'db_password' => \App\Casts\SafeEncrypted::class,
@@ -2323,7 +2339,7 @@ class Hub extends Model
             ],
             [
                 'key' => 'api_url',
-                'label' => 'API URL recorded (optional)',
+                'label' => 'API URL recorded (needed for remote backup/restore callbacks)',
                 'done' => $hasApi,
                 'required' => false,
             ],
@@ -2463,7 +2479,8 @@ class Hub extends Model
      *   from_email: ?string,
      *   primary_color: ?string,
      *   secondary_color: ?string,
-     *   color_scheme: array{primary: ?string, secondary: ?string}
+     *   accent_color: ?string,
+     *   color_scheme: array{primary: ?string, secondary: ?string, accent: ?string}
      * }
      */
     public function brandingPayload(): array
@@ -2479,9 +2496,11 @@ class Hub extends Model
             'from_email' => $this->from_email,
             'primary_color' => $this->primary_color,
             'secondary_color' => $this->secondary_color,
+            'accent_color' => $this->accent_color,
             'color_scheme' => [
                 'primary' => $this->primary_color,
                 'secondary' => $this->secondary_color,
+                'accent' => $this->accent_color,
             ],
         ];
     }
@@ -2680,6 +2699,17 @@ class Hub extends Model
                 self::CHECKLIST_GROUPS,
                 array_flip(self::FUNCTIONALITY_GROUPS)
             ),
+            'backup' => [
+                'enabled' => (bool) ($this->backup_enabled ?? false),
+                'time' => (string) ($this->backup_time ?: '02:00'),
+                'timezone' => (string) ($this->backup_timezone ?: 'UTC'),
+                'frequency' => (string) ($this->backup_frequency ?: 'daily'),
+                'weekday' => $this->backup_weekday !== null ? (int) $this->backup_weekday : null,
+                'retention_local' => (int) ($this->backup_retention_local ?: 3),
+                'retention_central' => (int) ($this->backup_retention_central ?: 14),
+                'last_run_at' => $this->backup_last_run_at?->toIso8601String(),
+                'token_set' => filled($this->backup_token),
+            ],
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
         ];
