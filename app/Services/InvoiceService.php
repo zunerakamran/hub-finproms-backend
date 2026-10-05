@@ -229,7 +229,7 @@ class InvoiceService
         $purchase->loadMissing(['post', 'user']);
         $user = $purchase->user ?? User::findOrFail($purchase->user_id);
         $credits = (int) $purchase->credits_spent;
-        // 1 credit = £1 for one-off / credit-spend purchases
+        // Credit-spend purchases bill 1 currency unit per credit spent.
         $amount = (float) $credits;
         $title = $purchase->post?->title ?? 'Post';
 
@@ -250,7 +250,7 @@ class InvoiceService
                 'quantity' => $credits,
                 'unit_amount' => 1.00,
                 'total' => $amount,
-                'note' => '1 credit = £1',
+                'note' => 'Credit spend',
             ]],
         ]);
     }
@@ -289,7 +289,7 @@ class InvoiceService
                 'quantity' => $credits,
                 'unit_amount' => 1.00,
                 'total' => $amount,
-                'note' => '1 credit = £1',
+                'note' => 'Credit spend',
             ]],
         ]);
     }

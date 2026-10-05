@@ -229,6 +229,29 @@ class SettingController extends Controller
                 }
             }
 
+            if (($incoming['section_order'] ?? []) !== []
+                && ($incoming['section_order'] ?? null) !== ($defaults['section_order'] ?? null)) {
+                $merged['section_order'] = $incoming['section_order'];
+            }
+
+            if (($incoming['item_groups'] ?? []) !== []) {
+                $groupDiff = [];
+                foreach ($defaults['item_groups'] as $path => $defaultGroup) {
+                    $value = $incoming['item_groups'][$path] ?? null;
+                    if ($value !== null && $value !== '' && $value !== $defaultGroup) {
+                        $groupDiff[$path] = $value;
+                    }
+                }
+                if ($groupDiff !== []) {
+                    $merged['item_groups'] = $groupDiff;
+                }
+            }
+
+            if (($incoming['item_order'] ?? []) !== []
+                && ($incoming['item_order'] ?? null) !== ($defaults['item_order'] ?? null)) {
+                $merged['item_order'] = $incoming['item_order'];
+            }
+
             $hub->dashboard_nav = $merged === [] ? null : $merged;
             $hubDirty = true;
         }

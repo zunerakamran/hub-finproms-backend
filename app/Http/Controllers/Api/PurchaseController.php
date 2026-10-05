@@ -64,7 +64,7 @@ class PurchaseController extends Controller
 
             return response()->json([
                 'message' => $cashAllowed
-                    ? 'Insufficient credits. Pay with an enabled payment method, or buy a plan — 1 credit = £1.'
+                    ? 'Insufficient credits. Pay with an enabled payment method, or buy a plan.'
                     : 'Insufficient credits.',
                 'credits' => $user->credits,
                 'required' => $post->credits_cost,
@@ -160,7 +160,7 @@ class PurchaseController extends Controller
 
             return response()->json([
                 'message' => $cashAllowed
-                    ? 'Insufficient credits. Pay with an enabled payment method, or buy a plan — 1 credit = £1.'
+                    ? 'Insufficient credits. Pay with an enabled payment method, or buy a plan.'
                     : 'Insufficient credits.',
                 'credits' => $user->credits,
                 'required' => $bundle->credits_cost,

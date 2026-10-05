@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-05 (purchased content Preview replaces Download)
+Last updated: 2026-10-05 (dashboard nav separator order + item grouping in Settings)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -211,7 +211,7 @@ Deploy rule:
 
 2.5 One-off / Non-subscriber Purchases
 - Users who are NOT subscribed can still buy individual posts/reels.
-- Pricing rule: 1 credit = 1 pound (£1).
+- Pricing rule: content is priced in credits (no pound display in catalog copy).
 
 2.6 Invoices
 - Invoices are generated for:
@@ -568,6 +568,8 @@ Notes:
 - Dashboard menu labels are stored on `hubs.dashboard_nav` (JSON). Defaults live
   in `App\Support\DashboardNavDefaults`. Separators include context-specific
   Hub labels (Central / Shared / White-labelled). Menu items are keyed by path.
+  Settings also control separator order (`section_order`), which separator each
+  item sits under (`item_groups`), and item order (`item_order`).
 - Power Admin on CENTRAL HUB CONTROLLER is the control plane. The Central Hub
   DB stores a hub registry for every Shared and White-label hub, including
   deploy wiring so Central can reach that hub for management / content push:
@@ -1157,7 +1159,7 @@ STEP 1 — Shared hub core (content hub)
 [x] Plan subscribe / private Excel import keep role=user (advisor via is_advisor flag only)
 [x] Seeded finproms_admin user (finproms@hubfinproms.com)
 [x] Credit spend + download (basic exists)
-[x] Non-subscriber one-off purchase (1 credit = £1)
+[x] Non-subscriber one-off purchase (credits)
 [x] Post bundles — create with existing/new posts, description + total credits
 [x] Capability: dashboard_manage_bundles — who can create/manage bundles
 [x] Capability: member_browse_bundles — show/hide Bundles on the public website

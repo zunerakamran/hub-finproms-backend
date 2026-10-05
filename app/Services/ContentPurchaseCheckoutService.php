@@ -230,7 +230,7 @@ class ContentPurchaseCheckoutService
                     'currency' => $this->paymentSettings->stripeCurrency(),
                     'product_data' => [
                         'name' => "{$kindLabel}: {$title}",
-                        'description' => "One-off purchase — {$creditsCost} credits (£{$creditsCost})",
+                        'description' => "One-off purchase — {$creditsCost} credits",
                     ],
                     'unit_amount' => $amountPence,
                 ],

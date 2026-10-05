@@ -3,13 +3,121 @@
 namespace App\Support;
 
 /**
- * Editable dashboard sidebar separators + menu labels.
+ * Editable dashboard sidebar separators + menu labels + layout.
  * Stored on hubs.dashboard_nav (JSON); missing keys fall back to these defaults.
  */
 class DashboardNavDefaults
 {
     /**
-     * @return array{sections: array<string, string>, items: array<string, string>}
+     * Section ids that appear as sidebar separators (reorderable).
+     * hub_central / hub_shared / hub_white_label are label variants of "hub" only.
+     *
+     * @return list<string>
+     */
+    public static function defaultSectionOrder(): array
+    {
+        return [
+            'account',
+            'content',
+            'hub',
+            'modules',
+            'advisors',
+            'smc',
+            'gc',
+            'st',
+            'wtl',
+            'wc',
+            'platform',
+        ];
+    }
+
+    /**
+     * Default path → section id mapping (mirrors frontend DASHBOARD_LINKS).
+     *
+     * @return array<string, string>
+     */
+    public static function defaultItemGroups(): array
+    {
+        return [
+            '/my-dashboard/profile' => 'account',
+            '/my-dashboard/subscription' => 'account',
+            '/my-dashboard/credits' => 'account',
+            '/my-dashboard/invoices' => 'account',
+            '/my-dashboard/purchases' => 'account',
+            '/my-dashboard/posts' => 'content',
+            '/my-dashboard/central-library' => 'content',
+            '/my-dashboard/bundles' => 'content',
+            '/my-dashboard/types' => 'content',
+            '/my-dashboard/categories' => 'content',
+            '/my-dashboard/tags' => 'content',
+            '/my-dashboard/firms' => 'hub',
+            '/my-dashboard/firm-documents' => 'hub',
+            '/my-dashboard/plans' => 'hub',
+            '/my-dashboard/settings' => 'hub',
+            '/my-dashboard/terms' => 'hub',
+            '/my-dashboard/role-display-names' => 'hub',
+            '/my-dashboard/compliance-status-display-names' => 'hub',
+            '/my-dashboard/email-templates' => 'hub',
+            '/my-dashboard/bank-transfers' => 'hub',
+            '/my-dashboard/activity-logs' => 'hub',
+            '/my-dashboard/active-sessions' => 'hub',
+            '/my-dashboard/modules' => 'modules',
+            '/my-dashboard/module-pricing' => 'modules',
+            '/my-dashboard/module-invoices' => 'modules',
+            '/my-dashboard/advisors' => 'advisors',
+            '/my-dashboard/payment-card' => 'advisors',
+            '/my-dashboard/advisor-renewal' => 'advisors',
+            '/my-dashboard/subscriber-credits' => 'advisors',
+            '/my-dashboard/advisor-invoices' => 'advisors',
+            '/my-dashboard/social-media-compliance' => 'smc',
+            '/my-dashboard/social-media-compliance/new' => 'smc',
+            '/my-dashboard/social-media-compliance/queue' => 'smc',
+            '/my-dashboard/social-media-compliance/reports' => 'smc',
+            '/my-dashboard/general-compliance' => 'gc',
+            '/my-dashboard/general-compliance/new' => 'gc',
+            '/my-dashboard/general-compliance/content-types' => 'gc',
+            '/my-dashboard/general-compliance/queue' => 'gc',
+            '/my-dashboard/general-compliance/reports' => 'gc',
+            '/my-dashboard/support-tickets' => 'st',
+            '/my-dashboard/support-tickets/new' => 'st',
+            '/my-dashboard/support-tickets/queue' => 'st',
+            '/my-dashboard/website-compliance/request-site' => 'wtl',
+            '/my-dashboard/website-compliance/my-sites' => 'wtl',
+            '/my-dashboard/website-compliance/go-live' => 'wtl',
+            '/my-dashboard/website-compliance/deployments' => 'wtl',
+            '/my-dashboard/website-compliance/content-editor' => 'wc',
+            '/my-dashboard/website-compliance/my-requests' => 'wc',
+            '/my-dashboard/website-compliance/publish-live' => 'wc',
+            '/my-dashboard/website-compliance/assign' => 'wc',
+            '/my-dashboard/website-compliance/review' => 'wc',
+            '/my-dashboard/website-compliance/history' => 'wc',
+            '/my-dashboard/website-compliance/reports' => 'wc',
+            '/my-dashboard/payment-methods' => 'platform',
+            '/my-dashboard/users' => 'platform',
+            '/my-dashboard/hubs' => 'platform',
+            '/my-dashboard/checklist' => 'platform',
+            '/my-dashboard/capabilities' => 'platform',
+        ];
+    }
+
+    /**
+     * Default menu item order (paths).
+     *
+     * @return list<string>
+     */
+    public static function defaultItemOrder(): array
+    {
+        return array_keys(self::defaultItemGroups());
+    }
+
+    /**
+     * @return array{
+     *   sections: array<string, string>,
+     *   items: array<string, string>,
+     *   section_order: list<string>,
+     *   item_groups: array<string, string>,
+     *   item_order: list<string>
+     * }
      */
     public static function all(): array
     {
@@ -92,17 +200,32 @@ class DashboardNavDefaults
                 '/my-dashboard/checklist' => 'Functionalities',
                 '/my-dashboard/capabilities' => 'Capabilities',
             ],
+            'section_order' => self::defaultSectionOrder(),
+            'item_groups' => self::defaultItemGroups(),
+            'item_order' => self::defaultItemOrder(),
         ];
     }
 
     /**
      * @param  array<string, mixed>|null  $stored
-     * @return array{sections: array<string, string>, items: array<string, string>}
+     * @return array{
+     *   sections: array<string, string>,
+     *   items: array<string, string>,
+     *   section_order: list<string>,
+     *   item_groups: array<string, string>,
+     *   item_order: list<string>
+     * }
      */
     public static function resolve(?array $stored): array
     {
         $defaults = self::all();
-        $resolved = ['sections' => [], 'items' => []];
+        $resolved = [
+            'sections' => [],
+            'items' => [],
+            'section_order' => [],
+            'item_groups' => [],
+            'item_order' => [],
+        ];
 
         foreach (['sections', 'items'] as $bucket) {
             $sectionStored = is_array($stored[$bucket] ?? null) ? $stored[$bucket] : [];
@@ -116,17 +239,40 @@ class DashboardNavDefaults
             }
         }
 
+        $resolved['section_order'] = self::normalizeSectionOrder(
+            is_array($stored['section_order'] ?? null) ? $stored['section_order'] : null
+        );
+        $resolved['item_groups'] = self::normalizeItemGroups(
+            is_array($stored['item_groups'] ?? null) ? $stored['item_groups'] : null
+        );
+        $resolved['item_order'] = self::normalizeItemOrder(
+            is_array($stored['item_order'] ?? null) ? $stored['item_order'] : null,
+            $resolved['item_groups']
+        );
+
         return $resolved;
     }
 
     /**
      * @param  array<string, mixed>  $input
-     * @return array{sections: array<string, string>, items: array<string, string>}
+     * @return array{
+     *   sections: array<string, string>,
+     *   items: array<string, string>,
+     *   section_order: list<string>,
+     *   item_groups: array<string, string>,
+     *   item_order: list<string>
+     * }
      */
     public static function sanitize(array $input): array
     {
         $defaults = self::all();
-        $clean = ['sections' => [], 'items' => []];
+        $clean = [
+            'sections' => [],
+            'items' => [],
+            'section_order' => [],
+            'item_groups' => [],
+            'item_order' => [],
+        ];
 
         foreach (['sections', 'items'] as $bucket) {
             $bucketInput = is_array($input[$bucket] ?? null) ? $input[$bucket] : [];
@@ -138,6 +284,102 @@ class DashboardNavDefaults
             }
         }
 
+        if (array_key_exists('section_order', $input) && is_array($input['section_order'])) {
+            $clean['section_order'] = self::normalizeSectionOrder($input['section_order']);
+        }
+        if (array_key_exists('item_groups', $input) && is_array($input['item_groups'])) {
+            $clean['item_groups'] = self::normalizeItemGroups($input['item_groups']);
+        }
+        if (array_key_exists('item_order', $input) && is_array($input['item_order'])) {
+            $groups = $clean['item_groups'] !== []
+                ? $clean['item_groups']
+                : self::defaultItemGroups();
+            $clean['item_order'] = self::normalizeItemOrder($input['item_order'], $groups);
+        }
+
         return $clean;
+    }
+
+    /**
+     * @param  list<mixed>|null  $incoming
+     * @return list<string>
+     */
+    public static function normalizeSectionOrder(?array $incoming): array
+    {
+        $defaults = self::defaultSectionOrder();
+        if ($incoming === null || $incoming === []) {
+            return $defaults;
+        }
+
+        $allowed = array_fill_keys($defaults, true);
+        $order = [];
+        foreach ($incoming as $id) {
+            $id = is_string($id) ? trim($id) : '';
+            if ($id === '' || ! isset($allowed[$id]) || in_array($id, $order, true)) {
+                continue;
+            }
+            $order[] = $id;
+        }
+        foreach ($defaults as $id) {
+            if (! in_array($id, $order, true)) {
+                $order[] = $id;
+            }
+        }
+
+        return $order;
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $incoming
+     * @return array<string, string>
+     */
+    public static function normalizeItemGroups(?array $incoming): array
+    {
+        $defaults = self::defaultItemGroups();
+        $allowedSections = array_fill_keys(self::defaultSectionOrder(), true);
+        $resolved = [];
+
+        foreach ($defaults as $path => $defaultGroup) {
+            $value = is_array($incoming) && array_key_exists($path, $incoming)
+                ? trim((string) $incoming[$path])
+                : '';
+            if ($value !== '' && isset($allowedSections[$value])) {
+                $resolved[$path] = $value;
+            } else {
+                $resolved[$path] = $defaultGroup;
+            }
+        }
+
+        return $resolved;
+    }
+
+    /**
+     * @param  list<mixed>|null  $incoming
+     * @param  array<string, string>  $groups
+     * @return list<string>
+     */
+    public static function normalizeItemOrder(?array $incoming, array $groups): array
+    {
+        $defaults = array_keys($groups);
+        if ($incoming === null || $incoming === []) {
+            return $defaults;
+        }
+
+        $allowed = array_fill_keys($defaults, true);
+        $order = [];
+        foreach ($incoming as $path) {
+            $path = is_string($path) ? trim($path) : '';
+            if ($path === '' || ! isset($allowed[$path]) || in_array($path, $order, true)) {
+                continue;
+            }
+            $order[] = $path;
+        }
+        foreach ($defaults as $path) {
+            if (! in_array($path, $order, true)) {
+                $order[] = $path;
+            }
+        }
+
+        return $order;
     }
 }
