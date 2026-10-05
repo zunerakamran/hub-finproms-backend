@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Jobs\ProcessAdvisorImportJob;
+use App\Models\AdvisorImportBatch;
 use App\Models\Hub;
 use App\Models\User;
 use App\Services\ActingHubService;
+use App\Services\AdvisorImportHistoryService;
 use App\Services\AdvisorImportService;
 use App\Services\CapabilitiesMatrixService;
 use App\Services\WhiteLabelDatabaseService;
@@ -22,6 +24,7 @@ class AdvisorController extends Controller
 {
     public function __construct(
         private readonly AdvisorImportService $importService,
+        private readonly AdvisorImportHistoryService $importHistory,
         private readonly ActingHubService $actingHubs,
         private readonly CapabilitiesMatrixService $matrix,
         private readonly WhiteLabelDatabaseService $remoteDb
@@ -58,6 +61,37 @@ class AdvisorController extends Controller
         }
 
         return response()->json($query->orderBy('name')->paginate($perPage));
+    }
+
+    public function importHistory(Request $request): JsonResponse
+    {
+        $hub = $this->assertCanAccessAdvisors($request);
+
+        $validated = $request->validate([
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+            'page' => ['sometimes', 'integer', 'min:1'],
+        ]);
+
+        $perPage = (int) ($validated['per_page'] ?? 20);
+        $page = max(1, (int) ($validated['page'] ?? 1));
+        $paginator = $this->importHistory->paginate($hub, $perPage, $page);
+
+        return response()->json([
+            'batches' => $paginator->getCollection()
+                ->map(fn (AdvisorImportBatch $batch) => $batch->toApiArray())
+                ->values(),
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+            ],
+            'target_hub' => $this->hubPayload($hub),
+            'capabilities' => [
+                'can_import' => $this->roleCan($request, $hub, 'advisor_excel_import'),
+                'can_download_template' => $this->canDownloadTemplate($request, $hub),
+            ],
+        ]);
     }
 
     public function discontinue(Request $request, int $advisor): JsonResponse
@@ -178,7 +212,7 @@ class AdvisorController extends Controller
 
     public function template(Request $request): StreamedResponse
     {
-        $hub = $this->assertImportEnabled($request);
+        $hub = $this->assertTemplateEnabled($request);
 
         try {
             if ($this->shouldUseRemote($request, $hub)) {
@@ -212,6 +246,20 @@ class AdvisorController extends Controller
         return $hub;
     }
 
+    private function assertTemplateEnabled(Request $request): Hub
+    {
+        $hub = $this->assertPrivateHub($request);
+
+        if (! $this->canDownloadTemplate($request, $hub)) {
+            abort(response()->json([
+                'message' => 'Downloading the advisor import template is disabled for your role on this hub. Enable “Download import Excel template” or “Import advisors” under Power Admin → Capabilities.',
+                'capability' => 'advisor_excel_template',
+            ], 403));
+        }
+
+        return $hub;
+    }
+
     private function assertCanDiscontinue(Request $request): Hub
     {
         $hub = $this->assertPrivateHub($request);
@@ -219,7 +267,7 @@ class AdvisorController extends Controller
             $request,
             $hub,
             'advisor_discontinue',
-            'Discontinuing advisors is disabled for your role on this hub. Enable it in Power Admin → Capabilities.'
+            'Discontinuing users is disabled for your role on this hub. Enable it in Power Admin → Capabilities.'
         );
 
         return $hub;
@@ -228,18 +276,12 @@ class AdvisorController extends Controller
     private function assertCanAccessAdvisors(Request $request): Hub
     {
         $hub = $this->assertPrivateHub($request);
-        $user = $request->user();
 
-        $canImport = $user
-            ? $this->matrix->roleCan($hub, (string) $user->role, 'advisor_excel_import')
-            : $hub->can('advisor_excel_import');
-        $canDiscontinue = $user
-            ? $this->matrix->roleCan($hub, (string) $user->role, 'advisor_discontinue')
-            : $hub->can('advisor_discontinue');
-
-        if (! $canImport && ! $canDiscontinue) {
+        if (! $this->roleCan($request, $hub, 'advisor_excel_import')
+            && ! $this->roleCan($request, $hub, 'advisor_excel_template')
+        ) {
             abort(response()->json([
-                'message' => 'Advisor management is disabled for your role on this hub. Enable Import or Discontinue under Power Admin → Capabilities.',
+                'message' => 'Advisor import tools are disabled for your role on this hub. Enable Import advisors and/or Download import Excel template under Power Admin → Capabilities.',
             ], 403));
         }
 
@@ -261,18 +303,27 @@ class AdvisorController extends Controller
 
     private function assertRoleCapability(Request $request, Hub $hub, string $capability, string $message): void
     {
-        $user = $request->user();
-
-        $allowed = $user
-            ? $this->matrix->roleCan($hub, (string) $user->role, $capability)
-            : $hub->can($capability);
-
-        if (! $allowed) {
+        if (! $this->roleCan($request, $hub, $capability)) {
             abort(response()->json([
                 'message' => $message,
                 'capability' => $capability,
             ], 403));
         }
+    }
+
+    private function roleCan(Request $request, Hub $hub, string $capability): bool
+    {
+        $user = $request->user();
+
+        return $user
+            ? $this->matrix->roleCan($hub, (string) $user->role, $capability)
+            : $hub->can($capability);
+    }
+
+    private function canDownloadTemplate(Request $request, Hub $hub): bool
+    {
+        return $this->roleCan($request, $hub, 'advisor_excel_template')
+            || $this->roleCan($request, $hub, 'advisor_excel_import');
     }
 
     private function targetHub(Request $request): Hub

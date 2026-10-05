@@ -2,8 +2,10 @@
 
 namespace App\Jobs;
 
+use App\Models\AdvisorImportBatch;
 use App\Models\Hub;
 use App\Models\User;
+use App\Services\AdvisorImportHistoryService;
 use App\Services\AdvisorImportOrchestrator;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -32,8 +34,10 @@ class ProcessAdvisorImportJob implements ShouldQueue
         public readonly bool $useRemote,
     ) {}
 
-    public function handle(AdvisorImportOrchestrator $orchestrator): void
-    {
+    public function handle(
+        AdvisorImportOrchestrator $orchestrator,
+        AdvisorImportHistoryService $history
+    ): void {
         $cacheKey = self::cacheKey($this->jobId);
 
         try {
@@ -76,6 +80,21 @@ class ProcessAdvisorImportJob implements ShouldQueue
             ], now()->addHour());
 
             $payload = $orchestrator->run($file, $hub, $actor, $this->useRemote);
+
+            if (empty($payload['awaiting_payment'])) {
+                try {
+                    $batch = $history->record(
+                        $hub,
+                        $actor,
+                        $payload,
+                        $this->originalName,
+                        AdvisorImportBatch::STATUS_COMPLETED
+                    );
+                    $payload['import_batch_id'] = $batch->id;
+                } catch (Throwable $e) {
+                    report($e);
+                }
+            }
 
             Cache::put($cacheKey, [
                 'status' => 'completed',

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\AdvisorImportBatch;
 use App\Models\Hub;
 use App\Models\HubAdvisorBilling;
 use App\Models\User;
@@ -28,7 +29,8 @@ class AdvisorBillingService
         private readonly HubService $hubs,
         private readonly SubscriberCreditsService $subscriberCredits,
         private readonly AdvisorImportService $imports,
-        private readonly WhiteLabelDatabaseService $remoteDb
+        private readonly WhiteLabelDatabaseService $remoteDb,
+        private readonly AdvisorImportHistoryService $importHistory
     ) {}
 
     public function billingEnabled(?Hub $hub = null): bool
@@ -390,6 +392,31 @@ class AdvisorBillingService
         unset($meta['pending_import']);
         $billing->meta = $meta;
         $billing->save();
+
+        try {
+            $actor = $billing->billed_user_id
+                ? User::query()->find($billing->billed_user_id)
+                : null;
+            if ($actor && $hub) {
+                $this->importHistory->record(
+                    $hub,
+                    $actor,
+                    [
+                        'message' => sprintf(
+                            'Import finished after payment: %d created, %d updated, %d skipped.',
+                            (int) ($result['summary']['created'] ?? 0),
+                            (int) ($result['summary']['updated'] ?? 0),
+                            (int) ($result['summary']['skipped'] ?? 0)
+                        ),
+                        ...$meta['import_result'],
+                    ],
+                    is_string($meta['original_filename'] ?? null) ? $meta['original_filename'] : null,
+                    AdvisorImportBatch::STATUS_COMPLETED
+                );
+            }
+        } catch (\Throwable $e) {
+            report($e);
+        }
 
         return $meta['import_result'];
     }

@@ -714,6 +714,7 @@ class Hub extends Model
      */
     public const PRIVATE_CAPABILITY_KEYS = [
         'advisor_excel_import',
+        'advisor_excel_template',
         'advisor_discontinue',
         'dashboard_view_advisor_invoices',
         'dashboard_manage_advisor_pricing',
@@ -1092,14 +1093,21 @@ class Hub extends Model
         // --- 5. Advisors & private billing ---
         'advisor_excel_import' => [
             'label' => 'Import advisors (Excel)',
-            'description' => 'Hub admin and Power Admin (when enabled) can import advisors from an Excel sheet.',
+            'description' => 'Upload a filled Excel sheet to create / update advisors on this white-labelled hub. Does not include downloading the blank template (see “Download import Excel template”).',
+            'group' => self::GROUP_DASHBOARD_ADVISORS,
+            'default_shared' => false,
+            'default_white_label' => true,
+        ],
+        'advisor_excel_template' => [
+            'label' => 'Download import Excel template',
+            'description' => 'Download the blank advisor import Excel template (with role / firm / modules dropdowns) so staff can fill it and send it to someone who can Import advisors. Does not allow uploading the sheet.',
             'group' => self::GROUP_DASHBOARD_ADVISORS,
             'default_shared' => false,
             'default_white_label' => true,
         ],
         'advisor_discontinue' => [
             'label' => 'Discontinue users',
-            'description' => 'Permanently end a user’s access on this hub (any role, until re-imported). Discontinued users are excluded from recurring seat counts. Separate from Excel import.',
+            'description' => 'Permanently end a user’s access on this hub (any role, until re-imported). Shown on Hub → Users. Discontinued users are excluded from recurring seat counts. Separate from Excel import.',
             'group' => self::GROUP_DASHBOARD_ADVISORS,
             'default_shared' => false,
             'default_white_label' => true,

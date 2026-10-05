@@ -620,6 +620,15 @@ Notes:
   Discontinued advisors cannot log in, drop out of billing counts, and are
   not restored when the hub flips private again. Re-importing the same email
   restores them. Gated by Capabilities matrix key `advisor_discontinue`.
+  Discontinue is shown on Hub → Users (`/my-dashboard/hub-users`), not on
+  Import Users.
+- Import Users page (`/my-dashboard/advisors`):
+  - Users with `advisor_excel_template` (or Import) can download the blank
+    Excel template, fill it offline, and send it to someone with
+    `advisor_excel_import`.
+  - Users with `advisor_excel_import` can upload the filled sheet.
+  - The page shows history of previous import batches (who imported, when,
+    created / updated / reactivated / skipped rows).
 - When Power Admin switches a hub from private → public (Functionalities):
   - All Excel-imported advisors are SUSPENDED (not deleted): cannot log in,
     lose unlimited/subscription access, excluded from advisor billing counts.
@@ -892,8 +901,12 @@ Notes:
     Home/Posts/detail page content) — same roles
   - Confirm bank transfers — same roles
   - Import advisors (Excel/CSV) — same roles
-  - Discontinue advisors — separate capability; who can permanently end an
-    imported advisor’s access — same roles
+  - Download import Excel template (`advisor_excel_template`) — download the
+    blank sheet (role / firm / modules dropdowns) so staff can fill it and
+    hand it to someone with Import advisors; does not allow upload
+  - Discontinue users — separate capability; permanently end a hub user’s
+    access — action lives on Hub → Users (`/my-dashboard/hub-users`), not on
+    Import Users
   - View activity logs / report — who can open the audit trail and activity
     report for the hub — same roles
   - Manage active sessions — see currently logged-in users and force-logout
@@ -1265,6 +1278,9 @@ STEP 1 — Shared hub core (content hub)
 [x] Private↔public hub transition: suspend/reactivate Excel advisors + stop auto-renew
 [x] Discontinue individual advisor (client/power admin; permanent end until re-import)
 [x] Capability: advisor_discontinue — who can end imported advisors (Capabilities matrix)
+[x] Discontinue action on Hub → Users (not Import Users); gated by advisor_discontinue
+[x] Capability: advisor_excel_template — download blank import Excel without upload rights
+[x] Import Users page: template download for fillers + import history of past batches
 [x] Activity logs — audit trail of user changes/activity (auth + mutating API)
 [x] Activity logs report — aggregates by action / user / day; filterable
 [x] Capability: dashboard_view_activity_logs — who can view logs & report
