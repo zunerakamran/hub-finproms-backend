@@ -684,7 +684,14 @@ class TemplateRequestController extends Controller
         );
 
         if (! $isPowerAdminAccess && ! $isOwnerAdvisor) {
-            return response()->json(['message' => 'Unauthorized'], 403);
+            // Staff who assign / view deployments may read section metadata (not edit).
+            $isStaffViewer = $this->gate->can($user, 'wc_assign_website_templates')
+                || $this->gate->can($user, 'wc_view_all_deployments')
+                || $this->gate->can($user, 'wc_request_deployments');
+
+            if (! $isStaffViewer) {
+                return response()->json(['message' => 'Unauthorized'], 403);
+            }
         }
 
         $advisorId = $templateRequest->assigned_advisor_id ?? $templateRequest->advisor_id;
