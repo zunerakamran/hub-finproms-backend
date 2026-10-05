@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-05 (editable dashboard menu + separator labels from Settings)
+Last updated: 2026-10-05 (purchased content Preview replaces Download)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -193,7 +193,7 @@ Deploy rule:
 2.4 Subscriptions & Credits
 - Users subscribe and receive credits.
 - Credits are spent when buying posts/reels or post bundles.
-- After purchase, users can download the content.
+- After purchase, users can preview the content in-app (no file download).
 
 2.4a Post bundles
 - Capability-gated (Capabilities matrix: dashboard_manage_bundles) — roles that
@@ -856,7 +856,8 @@ Notes:
     turn off for every role to hide bundles for the whole hub
   - View plans / self-serve subscribe
   - One-off purchase / spend credits
-  - Download purchased content
+  - Preview purchased content (in-app Preview / Canva only after a real purchase —
+    hub-admin roles are not treated as already owning catalog items)
   - In-app post editing (when built)
   - Other member features as they are added
 

@@ -104,10 +104,11 @@ class BundleController extends Controller
         $isPurchased = $billingUser ? $billingUser->hasPurchasedBundle($bundle) : false;
         $bundle->setAttribute('is_purchased', $isPurchased);
 
-        $bundle->posts->each(function (Post $post) use ($billingUser, $isPurchased, $isAdmin, $metricVisibility) {
+        $bundle->posts->each(function (Post $post) use ($billingUser, $isPurchased, $metricVisibility) {
             $postPurchased = $isPurchased || ($billingUser?->hasPurchased($post) ?? false);
             $post->setAttribute('is_purchased', $postPurchased);
-            if (! $postPurchased && ! $isAdmin) {
+            // Attachments / Canva require a real purchase — hub admin role must not fake ownership.
+            if (! $postPurchased) {
                 $post->makeHidden(['attachment_path', 'attachment_url', 'attachment_name', 'attachment_mime', 'canva_link']);
             }
             $this->applyPostMetricVisibility($post, $metricVisibility);

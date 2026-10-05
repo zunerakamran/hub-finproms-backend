@@ -929,8 +929,8 @@ class Hub extends Model
             'default_white_label' => true,
         ],
         'member_download_content' => [
-            'label' => 'Download purchased content',
-            'description' => 'Members can download content they have purchased.',
+            'label' => 'Preview purchased content',
+            'description' => 'Members can preview content they have purchased (in-app preview; no file download).',
             'group' => self::GROUP_MEMBER,
             'default_shared' => true,
             'default_white_label' => true,

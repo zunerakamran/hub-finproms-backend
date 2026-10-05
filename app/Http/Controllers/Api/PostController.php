@@ -652,8 +652,9 @@ class PostController extends Controller
         bool $isAuthenticated
     ): Post {
         // Locked only for guests. Logged-in users (subscribed or not) can browse and buy.
+        // Attachments / Canva require a real purchase — hub admin role must not fake ownership.
         $contentVisible = $purchased || $isClientAdmin || $isAuthenticated;
-        $canAccessAttachment = $purchased || $isClientAdmin;
+        $canAccessAttachment = $purchased;
 
         $post->setAttribute('is_purchased', $purchased);
         $post->setAttribute('is_locked', ! $isAuthenticated && ! $isClientAdmin);
@@ -665,7 +666,7 @@ class PostController extends Controller
 
         if (! $contentVisible) {
             // Guests may see cover/video previews (home gallery / locked catalog tiles)
-            // but not copy, tags, or downloadable attachments.
+            // but not copy, tags, or purchased attachments.
             $post->makeHidden([
                 'description',
                 'tags',
@@ -679,7 +680,7 @@ class PostController extends Controller
             $post->setAttribute('tags', []);
             $post->makeVisible(['cover_url', 'video_url']);
         } else {
-            // Browse preview: image cover and reel video (download still gated above).
+            // Browse preview: image cover and reel video (full attachment still gated above).
             $post->makeVisible(['cover_url', 'video_url']);
         }
 

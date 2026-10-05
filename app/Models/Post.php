@@ -163,7 +163,7 @@ class Post extends Model
 
     /**
      * Preview URL for video attachments (reels). Visible when browsing,
-     * same gating as cover_url — full download stays on attachment_url.
+     * same gating as cover_url — full asset preview stays on attachment_url.
      */
     public function getVideoUrlAttribute(): ?string
     {
