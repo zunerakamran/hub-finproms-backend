@@ -39,29 +39,44 @@ class CpanelSyncService
     /**
      * Push logo / white logo / favicon / colour scheme only — no DB rewrite.
      * Used after deployment when Power Admin updates branding.
+     *
+     * Sets write_config so the advisor api.php persists colours/logos into
+     * cpanel-config.php, but omits DB credentials so we do not overwrite a
+     * working local MySQL setup with stale hub fields.
+     *
+     * @return array{ok: bool, endpoint: ?string, message: ?string, http_status: ?int, body: mixed}
      */
-    public static function pushBrandingToCpanel(TemplateRequest $templateRequest, mixed $advisorId = null): bool
+    public static function pushBrandingToCpanel(TemplateRequest $templateRequest, mixed $advisorId = null): array
     {
         if (! $templateRequest->cpanel_domain) {
             Log::info('pushBrandingToCpanel: no cpanel_domain on template request #'.$templateRequest->id);
 
-            return false;
+            return [
+                'ok' => false,
+                'endpoint' => null,
+                'message' => 'No cpanel_domain configured on this deployment.',
+                'http_status' => null,
+                'body' => null,
+            ];
+        }
+
+        if (! filled($templateRequest->cpanel_api_key)) {
+            return [
+                'ok' => false,
+                'endpoint' => self::normalizeAdvisorSiteUrl($templateRequest->cpanel_domain).'/api.php',
+                'message' => 'No cpanel_api_key saved on this deployment. Set the same SECRET_API_KEY used in the advisor site cpanel-config.php (Update deployment).',
+                'http_status' => null,
+                'body' => null,
+            ];
         }
 
         $advisorId = $advisorId ?? $templateRequest->advisor_id ?? $templateRequest->assigned_advisor_id;
 
-        $payload = [
-            'api_key' => $templateRequest->cpanel_api_key,
-            'advisor_id' => $advisorId,
-            'deployment_mode' => 'advisor',
-            'primary_color' => BrandColor::toHex($templateRequest->primary_color, '#0B1B3D'),
-            'secondary_color' => BrandColor::toHex($templateRequest->secondary_color, '#C8102E'),
-            'logo_url' => self::brandingAssetForCpanel($templateRequest->logo_url, 'logo'),
-            'white_logo_url' => self::brandingAssetForCpanel($templateRequest->white_logo_url, 'white_logo'),
-            'favicon_url' => self::brandingAssetForCpanel($templateRequest->favicon_url, 'favicon'),
-        ];
+        // Branding fields + site URLs; do not include DB credentials.
+        $payload = self::buildBasePayload($templateRequest, $advisorId, false);
+        $payload['write_config'] = true;
 
-        return self::postToCpanel($templateRequest, $payload, 'branding');
+        return self::postToCpanelWithDetails($templateRequest, $payload, 'branding');
     }
 
     /**

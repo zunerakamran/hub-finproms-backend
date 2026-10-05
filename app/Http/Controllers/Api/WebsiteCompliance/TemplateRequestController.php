@@ -946,16 +946,20 @@ class TemplateRequestController extends Controller
         $templateRequest->refresh();
 
         $configSynced = false;
+        $syncDetail = null;
         $targetAdvisorId = $templateRequest->assigned_advisor_id ?? $templateRequest->advisor_id;
 
         if ($templateRequest->isOnSite() && filled($templateRequest->cpanel_domain)) {
-            $configSynced = CpanelSyncService::pushBrandingToCpanel($templateRequest, $targetAdvisorId);
+            $syncDetail = CpanelSyncService::pushBrandingToCpanel($templateRequest, $targetAdvisorId);
+            $configSynced = (bool) ($syncDetail['ok'] ?? false);
         }
 
         $this->activityLogs->log([
             'action' => 'wc.template_request.update_branding',
             'description' => 'Updated branding for domain: '.($templateRequest->domain_name ?: $templateRequest->cpanel_domain)
-                .($configSynced ? ' (remote config written)' : ''),
+                .($configSynced
+                    ? ' (remote config written)'
+                    : ' (remote sync failed: '.($syncDetail['message'] ?? 'unknown').')'),
             'user' => $user,
             'subject' => $templateRequest,
             'request' => $request,
@@ -963,14 +967,20 @@ class TemplateRequestController extends Controller
 
         $message = 'Branding updated successfully.';
         if ($templateRequest->isOnSite()) {
-            $message = $configSynced
-                ? 'Branding updated and pushed to the deployed site.'
-                : 'Branding saved on the hub, but the site sync could not be verified. Check Laravel logs and cPanel configuration.';
+            if ($configSynced) {
+                $message = 'Branding updated and pushed to the deployed site.';
+            } else {
+                $reason = is_array($syncDetail) && filled($syncDetail['message'] ?? null)
+                    ? (string) $syncDetail['message']
+                    : 'Check Laravel logs and cPanel configuration.';
+                $message = 'Branding saved on the hub, but the site sync could not be verified. '.$reason;
+            }
         }
 
         return response()->json([
             'message' => $message,
             'config_synced' => $configSynced,
+            'sync' => $syncDetail,
             'template_request' => $templateRequest->load($this->requestRelations()),
         ]);
     }
