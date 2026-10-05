@@ -8,6 +8,7 @@ use App\Models\Setting;
 use App\Services\ActingHubService;
 use App\Services\HubService;
 use App\Services\WhiteLabelHubSyncService;
+use App\Support\DashboardNavDefaults;
 use App\Support\PageContentDefaults;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -61,6 +62,7 @@ class SettingController extends Controller
             'secondary_color' => ['nullable', 'string', 'max:32'],
             'accent_color' => ['nullable', 'string', 'max:32'],
             'page_content' => ['sometimes'],
+            'dashboard_nav' => ['sometimes'],
         ]);
 
         if (array_key_exists('new_banner_days', $validated)) {
@@ -199,6 +201,38 @@ class SettingController extends Controller
             $hubDirty = true;
         }
 
+        if ($request->exists('dashboard_nav')) {
+            $raw = $request->input('dashboard_nav');
+            if (is_string($raw)) {
+                $decoded = json_decode($raw, true);
+                $raw = is_array($decoded) ? $decoded : [];
+            }
+            if (! is_array($raw)) {
+                $raw = [];
+            }
+
+            $incoming = DashboardNavDefaults::sanitize($raw);
+            $defaults = DashboardNavDefaults::all();
+            $merged = [];
+
+            foreach (['sections', 'items'] as $bucket) {
+                $bucketIncoming = $incoming[$bucket] ?? [];
+                foreach (array_keys($defaults[$bucket]) as $key) {
+                    if (! array_key_exists($key, $bucketIncoming)) {
+                        continue;
+                    }
+                    $value = $bucketIncoming[$key];
+                    if ($value === '' || $value === $defaults[$bucket][$key]) {
+                        continue;
+                    }
+                    $merged[$bucket][$key] = $value;
+                }
+            }
+
+            $hub->dashboard_nav = $merged === [] ? null : $merged;
+            $hubDirty = true;
+        }
+
         if ($hubDirty) {
             $hub->save();
             $this->hubs->forgetCurrentCache();
@@ -240,6 +274,7 @@ class SettingController extends Controller
             ],
             // Resolved (defaults + overrides) so the settings form shows effective copy.
             'page_content' => $hub->resolvedPageContent(),
+            'dashboard_nav' => $hub->resolvedDashboardNav(),
         ];
     }
 

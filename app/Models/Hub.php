@@ -1572,6 +1572,7 @@ class Hub extends Model
         'email_templates',
         'terms_and_conditions',
         'page_content',
+        'dashboard_nav',
         'advisor_billing_renew_day',
         'billing_grace_day',
         'subscriber_credits',
@@ -1609,6 +1610,7 @@ class Hub extends Model
             'email_templates' => 'array',
             'terms_and_conditions' => 'array',
             'page_content' => 'array',
+            'dashboard_nav' => 'array',
             'advisor_billing_renew_day' => 'integer',
             'billing_grace_day' => 'integer',
             'subscriber_credits' => 'integer',
@@ -2537,6 +2539,7 @@ class Hub extends Model
             'frontend_url' => $this->frontendBaseUrl(),
             'branding' => $this->brandingPayload(),
             'page_content' => $this->resolvedPageContent(),
+            'dashboard_nav' => $this->resolvedDashboardNav(),
             'checklist' => $checklist,
             // Frontend should use these labels wherever roles are shown (falls back to defaults).
             'role_labels' => $this->resolvedRoleLabels(),
@@ -2567,6 +2570,18 @@ class Hub extends Model
     {
         return \App\Support\PageContentDefaults::resolve(
             is_array($this->page_content) ? $this->page_content : null
+        );
+    }
+
+    /**
+     * Dashboard sidebar separators + menu labels (defaults merged in).
+     *
+     * @return array{sections: array<string, string>, items: array<string, string>}
+     */
+    public function resolvedDashboardNav(): array
+    {
+        return \App\Support\DashboardNavDefaults::resolve(
+            is_array($this->dashboard_nav) ? $this->dashboard_nav : null
         );
     }
 
