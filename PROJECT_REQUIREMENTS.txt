@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-05 (dashboard nav separator order + item grouping in Settings)
+Last updated: 2026-10-05 (hub one-time invoices page + dashboard_view_one_time_invoices)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -867,7 +867,9 @@ Notes:
   General options (dashboard) — member personal dashboard sections, ALL roles:
   - Show subscription (active plan + recent subscriptions)
   - Show remaining credits
-  - Show invoices (summary on /my-dashboard)
+  - Show invoices (personal receipts at `/my-dashboard/my-invoices` —
+    subscriptions / post / bundle purchases only; module & advisor bills stay
+    on their own pages)
   - Show purchases (summary on /my-dashboard)
   - Members with any of these enabled see Dashboard in the member nav and can
     open /my-dashboard (role=user lands here after login when enabled)
@@ -896,6 +898,19 @@ Notes:
     report for the hub — same roles
   - Manage active sessions — see currently logged-in users and force-logout
     any user (ends all of their API sessions on this hub) — same roles
+  - View hub users (`dashboard_view_hub_users`) — list all users on the current
+    hub with full details (role, firm, credits, modules, status, timestamps);
+    sidebar label “Users” at `/my-dashboard/hub-users` (distinct from Platform
+    “Users & roles”) — same roles
+  - View compliance audit trail (`dashboard_view_compliance_audit_trail`) —
+    hub-wide compliance lifecycle history with top tabs for Social Media
+    Compliance (SMC), General Compliance (GC), and Website Content Pre
+    Approval (WC); sidebar “Audit trail” at `/my-dashboard/compliance-audit-trail`
+    (distinct from Activity logs) — same roles
+  - View one-time invoices (`dashboard_view_one_time_invoices`) — list all
+    one-time invoices for the current hub (content purchases + one-time module
+    charges); sidebar “One-time invoices” at `/my-dashboard/one-time-invoices`
+    (distinct from My invoices / Module invoices / Advisor invoices) — same roles
   - Manage firms — create/edit firms, assign users’ firm membership context,
     and set compliance visibility between firms — same roles
   - Assign Head of Firm (`dashboard_assign_firm_head`) — appoint / replace /
@@ -1079,6 +1094,45 @@ Notes:
 
 
 --------------------------------------------------------------------------------
+6C. COMPLIANCE AUDIT TRAIL (UNIFIED)
+--------------------------------------------------------------------------------
+- Capability: `dashboard_view_compliance_audit_trail` (Hub operations group on
+  the Capabilities matrix). Applicable roles: all matrix roles; defaults follow
+  hub checklist (`default_shared` / `default_white_label` ON for hub-admin style
+  roles; OFF for approver / advisor / admin-staff / user until Power Admin
+  enables them).
+- Users with this capability can open `/my-dashboard/compliance-audit-trail` and
+  switch top tabs between:
+  - SMC — Social Media Compliance (`module_social_media_compliance`)
+  - GC — General Compliance (`module_general_compliance`)
+  - WC — Website Content Pre Approval (`module_website_compliance`)
+- Tabs for modules that are off on the hub are hidden. Events come from
+  `compliance_audit_events` (same trail as per-module Reports → Audit trail).
+- Distinct from Activity logs (`dashboard_view_activity_logs` / generic
+  `activity_logs` feed).
+- APIs (hub_can:dashboard_view_compliance_audit_trail + acting_wl_wc_db):
+  - GET /api/client-admin/compliance-audit-events?module=smc|gc|wc
+    (+ /power-admin/…) — paginated newest-first feed with optional q / from / to
+- Frontend: Audit trail page under Hub nav, Capabilities-gated.
+
+
+--------------------------------------------------------------------------------
+6D. ONE-TIME INVOICES (HUB-WIDE)
+--------------------------------------------------------------------------------
+- Capability: `dashboard_view_one_time_invoices` (Hub operations group).
+- Lists all invoices with Types = One time for the current hub: post purchases,
+  bundle purchases, and one-time module charges (`module_billing`).
+- Distinct from:
+  - My invoices (`general_show_invoices` / personal receipts only)
+  - Module invoices (`dashboard_view_module_invoices` — one-time + recurring modules)
+  - Advisor invoices (`dashboard_view_advisor_invoices`)
+- APIs (hub_can:dashboard_view_one_time_invoices):
+  - GET /api/client-admin/one-time-invoices (+ /power-admin/…)
+  - GET /api/client-admin/one-time-invoices/{id} (+ /power-admin/…)
+- Frontend: `/my-dashboard/one-time-invoices` (+ detail).
+
+
+--------------------------------------------------------------------------------
 7. ARCHITECTURE PRINCIPLES (DERIVED FROM REQUIREMENTS)
 --------------------------------------------------------------------------------
 - Single codebase for Central Hub Controller + Shared hub(s) + all White-labels.
@@ -1217,6 +1271,12 @@ STEP 1 — Shared hub core (content hub)
 [x] Active sessions — list logged-in users + force-logout (Sanctum tokens)
 [x] Capability: dashboard_manage_active_sessions — who can manage sessions
 [x] Frontend: Active sessions page under /my-dashboard (Capabilities-gated)
+[x] Compliance audit trail — unified SMC / GC / WC history with top tabs
+[x] Capability: dashboard_view_compliance_audit_trail — who can open Audit trail
+[x] Frontend: Audit trail page at /my-dashboard/compliance-audit-trail
+[x] One-time invoices — hub-wide list of Types = One time
+[x] Capability: dashboard_view_one_time_invoices — who can open One-time invoices
+[x] Frontend: One-time invoices page at /my-dashboard/one-time-invoices
 [x] Private-only capabilities blurred/inactive on Capabilities matrix when hub is public
     (incl. dashboard_manage_subscriber_credits)
 [x] Public-only capabilities blurred/inactive on Capabilities matrix when hub is private

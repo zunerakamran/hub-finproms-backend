@@ -960,7 +960,7 @@ class Hub extends Model
         ],
         'general_show_invoices' => [
             'label' => 'Show invoices',
-            'description' => 'Show recent personal invoices on the member dashboard.',
+            'description' => 'Show personal invoices (subscriptions and content purchases) on My invoices — not hub module or advisor bills.',
             'group' => self::GROUP_GENERAL,
             'default_shared' => true,
             'default_white_label' => true,
@@ -1186,6 +1186,27 @@ class Hub extends Model
         'dashboard_manage_active_sessions' => [
             'label' => 'Manage active sessions',
             'description' => 'See which users are currently logged in and force-logout any user (ends all of their sessions on this hub).',
+            'group' => self::GROUP_DASHBOARD_HUB,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'dashboard_view_hub_users' => [
+            'label' => 'View hub users',
+            'description' => 'List all users on this hub with full details (role, firm, credits, modules, status, and timestamps).',
+            'group' => self::GROUP_DASHBOARD_HUB,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'dashboard_view_compliance_audit_trail' => [
+            'label' => 'View compliance audit trail',
+            'description' => 'Open the hub-wide compliance audit trail page and switch between Social Media, General, and Website Content Pre Approval history.',
+            'group' => self::GROUP_DASHBOARD_HUB,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'dashboard_view_one_time_invoices' => [
+            'label' => 'View one-time invoices',
+            'description' => 'List all one-time invoices for this hub (content purchases and one-time module charges).',
             'group' => self::GROUP_DASHBOARD_HUB,
             'default_shared' => true,
             'default_white_label' => true,

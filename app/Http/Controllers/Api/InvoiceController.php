@@ -29,6 +29,7 @@ class InvoiceController extends Controller
 
         $invoices = $user
             ->invoices()
+            ->whereIn('type', Invoice::PERSONAL_TYPES)
             ->with([
                 'subscription.plan:id,name,credits,price',
                 'postPurchase.post:id,title,type,categories,credits_cost',
@@ -61,14 +62,16 @@ class InvoiceController extends Controller
             $billingHubId = (int) ($invoice->advisorBilling?->hub_id ?? 0);
             $belongsToTargetHub = $billingHubId === 0 || $billingHubId === (int) $hub->id;
             $allowed = $isOwner || ($canAdvisorInvoices && $belongsToTargetHub);
-        } elseif ($invoice->type === Invoice::TYPE_MODULE_BILLING) {
+        } elseif (in_array($invoice->type, [Invoice::TYPE_MODULE_BILLING, Invoice::TYPE_MODULE_RECURRING], true)) {
             $invoice->loadMissing('moduleBilling');
             $billingHubId = (int) ($invoice->moduleBilling?->hub_id ?? 0);
             $belongsToTargetHub = $billingHubId === 0 || $billingHubId === (int) $hub->id;
-            $allowed = $isOwner || ($canModuleInvoices && $belongsToTargetHub);
-        } else {
+            $allowed = $canModuleInvoices && $belongsToTargetHub;
+        } elseif (in_array($invoice->type, Invoice::PERSONAL_TYPES, true)) {
             // Personal invoices: owner (or acting subject) + general invoices capability.
             $allowed = $isOwner && $canGeneralInvoices;
+        } else {
+            $allowed = false;
         }
 
         if (! $allowed) {

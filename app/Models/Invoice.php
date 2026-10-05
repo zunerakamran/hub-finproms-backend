@@ -19,6 +19,13 @@ class Invoice extends Model
 
     public const TYPE_MODULE_RECURRING = 'module_recurring';
 
+    /** Personal receipts: subscriptions and content purchases (not hub module/advisor bills). */
+    public const PERSONAL_TYPES = [
+        self::TYPE_SUBSCRIPTION,
+        self::TYPE_POST_PURCHASE,
+        self::TYPE_BUNDLE_PURCHASE,
+    ];
+
     /** Billing cadence shown as "Types" in the UI. */
     public const TYPES_ONE_TIME = 'one_time';
 

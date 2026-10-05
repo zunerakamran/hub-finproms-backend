@@ -42,7 +42,7 @@ class DashboardNavDefaults
             '/my-dashboard/profile' => 'account',
             '/my-dashboard/subscription' => 'account',
             '/my-dashboard/credits' => 'account',
-            '/my-dashboard/invoices' => 'account',
+            '/my-dashboard/my-invoices' => 'account',
             '/my-dashboard/purchases' => 'account',
             '/my-dashboard/posts' => 'content',
             '/my-dashboard/central-library' => 'content',
@@ -61,6 +61,9 @@ class DashboardNavDefaults
             '/my-dashboard/bank-transfers' => 'hub',
             '/my-dashboard/activity-logs' => 'hub',
             '/my-dashboard/active-sessions' => 'hub',
+            '/my-dashboard/hub-users' => 'hub',
+            '/my-dashboard/compliance-audit-trail' => 'hub',
+            '/my-dashboard/one-time-invoices' => 'hub',
             '/my-dashboard/modules' => 'modules',
             '/my-dashboard/module-pricing' => 'modules',
             '/my-dashboard/module-invoices' => 'modules',
@@ -144,7 +147,7 @@ class DashboardNavDefaults
                 '/my-dashboard/profile' => 'Update profile',
                 '/my-dashboard/subscription' => 'Subscription',
                 '/my-dashboard/credits' => 'Credits',
-                '/my-dashboard/invoices' => 'Invoices',
+                '/my-dashboard/my-invoices' => 'My invoices',
                 '/my-dashboard/purchases' => 'Purchases',
                 '/my-dashboard/posts' => 'Posts / reels',
                 '/my-dashboard/central-library' => 'Central library',
@@ -163,6 +166,9 @@ class DashboardNavDefaults
                 '/my-dashboard/bank-transfers' => 'Bank transfers',
                 '/my-dashboard/activity-logs' => 'Activity logs',
                 '/my-dashboard/active-sessions' => 'Active sessions',
+                '/my-dashboard/hub-users' => 'Users',
+                '/my-dashboard/compliance-audit-trail' => 'Audit trail',
+                '/my-dashboard/one-time-invoices' => 'One-time invoices',
                 '/my-dashboard/modules' => 'Modules',
                 '/my-dashboard/module-pricing' => 'Module prices',
                 '/my-dashboard/module-invoices' => 'Module invoices',
@@ -218,6 +224,7 @@ class DashboardNavDefaults
      */
     public static function resolve(?array $stored): array
     {
+        $stored = self::remapLegacyPaths($stored);
         $defaults = self::all();
         $resolved = [
             'sections' => [],
@@ -275,6 +282,7 @@ class DashboardNavDefaults
      */
     public static function sanitize(array $input): array
     {
+        $input = self::remapLegacyPaths($input) ?? [];
         $defaults = self::all();
         $clean = [
             'sections' => [],
@@ -359,6 +367,44 @@ class DashboardNavDefaults
         }
 
         return false;
+    }
+
+    /**
+     * Rename legacy nav paths so stored hub settings keep custom labels/order.
+     *
+     * @param  array<string, mixed>|null  $nav
+     * @return array<string, mixed>|null
+     */
+    public static function remapLegacyPaths(?array $nav): ?array
+    {
+        if ($nav === null) {
+            return null;
+        }
+
+        $map = [
+            '/my-dashboard/invoices' => '/my-dashboard/my-invoices',
+        ];
+
+        foreach (['items', 'item_groups'] as $bucket) {
+            if (! is_array($nav[$bucket] ?? null)) {
+                continue;
+            }
+            $next = [];
+            foreach ($nav[$bucket] as $path => $value) {
+                $path = is_string($path) ? ($map[$path] ?? $path) : $path;
+                $next[$path] = $value;
+            }
+            $nav[$bucket] = $next;
+        }
+
+        if (is_array($nav['item_order'] ?? null)) {
+            $nav['item_order'] = array_values(array_map(
+                fn ($path) => is_string($path) ? ($map[$path] ?? $path) : $path,
+                $nav['item_order']
+            ));
+        }
+
+        return $nav;
     }
 
     /**

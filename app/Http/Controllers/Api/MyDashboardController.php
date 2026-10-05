@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Hub;
+use App\Models\Invoice;
 use App\Models\UserSubscription;
 use App\Services\ActingAdvisorService;
 use App\Services\CapabilitiesMatrixService;
@@ -142,6 +143,7 @@ class MyDashboardController extends Controller
 
         if ($sections['general_show_invoices']) {
             $payload['invoices'] = $subject->invoices()
+                ->whereIn('type', Invoice::PERSONAL_TYPES)
                 ->latest('issued_at')
                 ->limit(8)
                 ->get([

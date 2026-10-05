@@ -2,6 +2,9 @@
 
 use App\Http\Controllers\Api\ActivityLogController;
 use App\Http\Controllers\Api\ActiveSessionController;
+use App\Http\Controllers\Api\HubUsersController;
+use App\Http\Controllers\Api\ComplianceAuditEventController;
+use App\Http\Controllers\Api\OneTimeInvoicesController;
 use App\Http\Controllers\Api\ActingAdvisorController;
 use App\Http\Controllers\Api\ActingHubController;
 use App\Http\Controllers\Api\AdvisorBillingController;
@@ -528,6 +531,19 @@ Route::middleware('auth:sanctum')->group(function () {
                 ->whereNumber('userId');
         });
 
+        Route::middleware('hub_can:dashboard_view_hub_users')->group(function () {
+            Route::get('/hub-users', [HubUsersController::class, 'index']);
+        });
+
+        Route::middleware(['hub_can:dashboard_view_compliance_audit_trail', 'acting_wl_wc_db'])->group(function () {
+            Route::get('/compliance-audit-events', [ComplianceAuditEventController::class, 'index']);
+        });
+
+        Route::middleware('hub_can:dashboard_view_one_time_invoices')->group(function () {
+            Route::get('/one-time-invoices', [OneTimeInvoicesController::class, 'index']);
+            Route::get('/one-time-invoices/{invoice}', [OneTimeInvoicesController::class, 'show']);
+        });
+
         Route::middleware('hub_can:dashboard_manage_modules')->group(function () {
             Route::get('/modules', [HubModulesController::class, 'show']);
             Route::put('/modules', [HubModulesController::class, 'update']);
@@ -897,6 +913,19 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/active-sessions', [ActiveSessionController::class, 'index']);
             Route::post('/active-sessions/{userId}/force-logout', [ActiveSessionController::class, 'forceLogout'])
                 ->whereNumber('userId');
+        });
+
+        Route::middleware('hub_can:dashboard_view_hub_users')->group(function () {
+            Route::get('/hub-users', [HubUsersController::class, 'index']);
+        });
+
+        Route::middleware(['hub_can:dashboard_view_compliance_audit_trail', 'acting_wl_wc_db'])->group(function () {
+            Route::get('/compliance-audit-events', [ComplianceAuditEventController::class, 'index']);
+        });
+
+        Route::middleware('hub_can:dashboard_view_one_time_invoices')->group(function () {
+            Route::get('/one-time-invoices', [OneTimeInvoicesController::class, 'index']);
+            Route::get('/one-time-invoices/{invoice}', [OneTimeInvoicesController::class, 'show']);
         });
 
         // Capability is checked in the controller against hub_id (may differ from current hub).

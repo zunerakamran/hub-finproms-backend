@@ -137,32 +137,92 @@ class ComplianceAuditTrailService
     {
         $ids = array_values(array_unique(array_map('intval', $subjectIds)));
 
-        $query = ComplianceAuditEvent::query()
-            ->where('module', $module)
-            ->orderBy('id');
+        $query = $this->hubQuery($module, $hub, $ids)->orderBy('id');
+
+        return $query
+            ->get()
+            ->map(fn (ComplianceAuditEvent $event) => $event->toApiArray())
+            ->all();
+    }
+
+    /**
+     * Paginated hub-scoped audit events (newest first) for the unified Audit trail page.
+     *
+     * @param  array{page?: int, per_page?: int, q?: string|null, event_type?: string|null, from?: string|null, to?: string|null}  $filters
+     * @return array{events: list<array<string, mixed>>, meta: array{current_page: int, last_page: int, per_page: int, total: int}}
+     */
+    public function paginateForHub(string $module, Hub $hub, array $filters = []): array
+    {
+        $perPage = max(1, min(200, (int) ($filters['per_page'] ?? 50)));
+        $page = max(1, (int) ($filters['page'] ?? 1));
+
+        $query = $this->hubQuery($module, $hub)->orderByDesc('id');
+
+        if (! empty($filters['event_type'])) {
+            $query->where('event_type', (string) $filters['event_type']);
+        }
+
+        if (! empty($filters['q'])) {
+            $term = '%'.(string) $filters['q'].'%';
+            $query->where(function ($inner) use ($term) {
+                $inner->where('description', 'like', $term)
+                    ->orWhere('actor_name', 'like', $term)
+                    ->orWhere('actor_email', 'like', $term)
+                    ->orWhere('related_user_name', 'like', $term)
+                    ->orWhere('related_user_email', 'like', $term)
+                    ->orWhere('event_type', 'like', $term)
+                    ->orWhere('from_status', 'like', $term)
+                    ->orWhere('to_status', 'like', $term);
+            });
+        }
+
+        if (! empty($filters['from'])) {
+            $query->whereDate('created_at', '>=', $filters['from']);
+        }
+
+        if (! empty($filters['to'])) {
+            $query->whereDate('created_at', '<=', $filters['to']);
+        }
+
+        $paginator = $query->paginate($perPage, ['*'], 'page', $page);
+
+        return [
+            'events' => $paginator->getCollection()
+                ->map(fn (ComplianceAuditEvent $event) => $event->toApiArray())
+                ->values()
+                ->all(),
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+            ],
+        ];
+    }
+
+    /**
+     * @param  list<int>  $subjectIds
+     * @return \Illuminate\Database\Eloquent\Builder<\App\Models\ComplianceAuditEvent>
+     */
+    private function hubQuery(string $module, Hub $hub, array $subjectIds = [])
+    {
+        $ids = array_values(array_unique(array_map('intval', $subjectIds)));
+
+        $query = ComplianceAuditEvent::query()->where('module', $module);
 
         // Content hub (local deploy or remounted from Central): all module events
         // on this connection belong to the acting content hub.
         if ($hub->isContentHub()) {
-            return $query
-                ->get()
-                ->map(fn (ComplianceAuditEvent $event) => $event->toApiArray())
-                ->all();
+            return $query;
         }
 
         // Control-plane / Central local DB: filter by registry hub id + subjects.
-        $events = $query
-            ->where(function ($inner) use ($hub, $ids) {
-                $inner->where('hub_id', $hub->id);
-                if ($ids !== []) {
-                    $inner->orWhereIn('subject_id', $ids);
-                }
-            })
-            ->get()
-            ->map(fn (ComplianceAuditEvent $event) => $event->toApiArray())
-            ->all();
-
-        return $events;
+        return $query->where(function ($inner) use ($hub, $ids) {
+            $inner->where('hub_id', $hub->id);
+            if ($ids !== []) {
+                $inner->orWhereIn('subject_id', $ids);
+            }
+        });
     }
 
     /**
