@@ -569,7 +569,8 @@ Notes:
   in `App\Support\DashboardNavDefaults`. Separators include context-specific
   Hub labels (Central / Shared / White-labelled). Menu items are keyed by path.
   Settings also control separator order (`section_order`), which separator each
-  item sits under (`item_groups`), and item order (`item_order`).
+  item sits under (`item_groups`), item order (`item_order`), and custom
+  separators (`custom_*` keys in `sections` / `section_order`).
 - Power Admin on CENTRAL HUB CONTROLLER is the control plane. The Central Hub
   DB stores a hub registry for every Shared and White-label hub, including
   deploy wiring so Central can reach that hub for management / content push:

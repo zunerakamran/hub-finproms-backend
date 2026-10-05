@@ -229,8 +229,21 @@ class SettingController extends Controller
                 }
             }
 
+            // Always persist custom separator labels.
+            foreach (($incoming['sections'] ?? []) as $key => $value) {
+                if (! DashboardNavDefaults::isCustomSectionId((string) $key)) {
+                    continue;
+                }
+                $label = trim((string) $value);
+                $merged['sections'][$key] = $label !== '' ? $label : 'Custom section';
+            }
+
+            $customIds = DashboardNavDefaults::extractCustomSectionIds(
+                $incoming['sections'] ?? null,
+                $incoming['section_order'] ?? null
+            );
             if (($incoming['section_order'] ?? []) !== []
-                && ($incoming['section_order'] ?? null) !== ($defaults['section_order'] ?? null)) {
+                && (($incoming['section_order'] ?? null) !== ($defaults['section_order'] ?? null) || $customIds !== [])) {
                 $merged['section_order'] = $incoming['section_order'];
             }
 

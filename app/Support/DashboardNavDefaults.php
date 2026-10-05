@@ -227,6 +227,10 @@ class DashboardNavDefaults
             'item_order' => [],
         ];
 
+        $storedSections = is_array($stored['sections'] ?? null) ? $stored['sections'] : [];
+        $storedOrder = is_array($stored['section_order'] ?? null) ? $stored['section_order'] : null;
+        $customIds = self::extractCustomSectionIds($storedSections, $storedOrder);
+
         foreach (['sections', 'items'] as $bucket) {
             $sectionStored = is_array($stored[$bucket] ?? null) ? $stored[$bucket] : [];
             foreach ($defaults[$bucket] as $key => $default) {
@@ -239,11 +243,17 @@ class DashboardNavDefaults
             }
         }
 
-        $resolved['section_order'] = self::normalizeSectionOrder(
-            is_array($stored['section_order'] ?? null) ? $stored['section_order'] : null
-        );
+        foreach ($customIds as $customId) {
+            $label = trim((string) ($storedSections[$customId] ?? ''));
+            $resolved['sections'][$customId] = $label !== ''
+                ? mb_substr($label, 0, 120)
+                : 'Custom section';
+        }
+
+        $resolved['section_order'] = self::normalizeSectionOrder($storedOrder, $customIds);
         $resolved['item_groups'] = self::normalizeItemGroups(
-            is_array($stored['item_groups'] ?? null) ? $stored['item_groups'] : null
+            is_array($stored['item_groups'] ?? null) ? $stored['item_groups'] : null,
+            $customIds
         );
         $resolved['item_order'] = self::normalizeItemOrder(
             is_array($stored['item_order'] ?? null) ? $stored['item_order'] : null,
@@ -274,6 +284,10 @@ class DashboardNavDefaults
             'item_order' => [],
         ];
 
+        $inputSections = is_array($input['sections'] ?? null) ? $input['sections'] : [];
+        $inputOrder = is_array($input['section_order'] ?? null) ? $input['section_order'] : null;
+        $customIds = self::extractCustomSectionIds($inputSections, $inputOrder);
+
         foreach (['sections', 'items'] as $bucket) {
             $bucketInput = is_array($input[$bucket] ?? null) ? $input[$bucket] : [];
             foreach (array_keys($defaults[$bucket]) as $key) {
@@ -284,11 +298,18 @@ class DashboardNavDefaults
             }
         }
 
+        foreach ($customIds as $customId) {
+            $label = trim((string) ($inputSections[$customId] ?? ''));
+            $clean['sections'][$customId] = $label !== ''
+                ? mb_substr($label, 0, 120)
+                : 'Custom section';
+        }
+
         if (array_key_exists('section_order', $input) && is_array($input['section_order'])) {
-            $clean['section_order'] = self::normalizeSectionOrder($input['section_order']);
+            $clean['section_order'] = self::normalizeSectionOrder($input['section_order'], $customIds);
         }
         if (array_key_exists('item_groups', $input) && is_array($input['item_groups'])) {
-            $clean['item_groups'] = self::normalizeItemGroups($input['item_groups']);
+            $clean['item_groups'] = self::normalizeItemGroups($input['item_groups'], $customIds);
         }
         if (array_key_exists('item_order', $input) && is_array($input['item_order'])) {
             $groups = $clean['item_groups'] !== []
@@ -301,17 +322,82 @@ class DashboardNavDefaults
     }
 
     /**
-     * @param  list<mixed>|null  $incoming
+     * Built-in separator ids that always appear in section_order.
+     *
      * @return list<string>
      */
-    public static function normalizeSectionOrder(?array $incoming): array
+    public static function builtInSectionIds(): array
     {
-        $defaults = self::defaultSectionOrder();
-        if ($incoming === null || $incoming === []) {
-            return $defaults;
+        return self::defaultSectionOrder();
+    }
+
+    /**
+     * Label-only keys that are not independent separators.
+     *
+     * @return list<string>
+     */
+    public static function labelOnlySectionIds(): array
+    {
+        return ['dashboard', 'hub_central', 'hub_shared', 'hub_white_label'];
+    }
+
+    public static function isCustomSectionId(string $id): bool
+    {
+        return (bool) preg_match('/^custom_[a-z0-9_]{1,40}$/', $id);
+    }
+
+    public static function isAssignableSectionId(string $id, ?array $extraCustom = null): bool
+    {
+        if (in_array($id, self::builtInSectionIds(), true)) {
+            return true;
+        }
+        if (self::isCustomSectionId($id)) {
+            return true;
+        }
+        if (is_array($extraCustom) && in_array($id, $extraCustom, true) && self::isCustomSectionId($id)) {
+            return true;
         }
 
-        $allowed = array_fill_keys($defaults, true);
+        return false;
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $sections
+     * @param  list<mixed>|null  $sectionOrder
+     * @return list<string>
+     */
+    public static function extractCustomSectionIds(?array $sections, ?array $sectionOrder): array
+    {
+        $ids = [];
+        foreach (is_array($sectionOrder) ? $sectionOrder : [] as $id) {
+            $id = is_string($id) ? trim($id) : '';
+            if (self::isCustomSectionId($id) && ! in_array($id, $ids, true)) {
+                $ids[] = $id;
+            }
+        }
+        foreach (is_array($sections) ? array_keys($sections) : [] as $id) {
+            $id = is_string($id) ? trim($id) : '';
+            if (self::isCustomSectionId($id) && ! in_array($id, $ids, true)) {
+                $ids[] = $id;
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
+     * @param  list<mixed>|null  $incoming
+     * @param  list<string>  $customIds
+     * @return list<string>
+     */
+    public static function normalizeSectionOrder(?array $incoming, array $customIds = []): array
+    {
+        $defaults = self::defaultSectionOrder();
+        $allowed = array_fill_keys(array_merge($defaults, $customIds), true);
+        if ($incoming === null || $incoming === []) {
+            return array_values(array_unique([...$defaults, ...$customIds]));
+        }
+
         $order = [];
         foreach ($incoming as $id) {
             $id = is_string($id) ? trim($id) : '';
@@ -325,18 +411,24 @@ class DashboardNavDefaults
                 $order[] = $id;
             }
         }
+        foreach ($customIds as $id) {
+            if (! in_array($id, $order, true)) {
+                $order[] = $id;
+            }
+        }
 
         return $order;
     }
 
     /**
      * @param  array<string, mixed>|null  $incoming
+     * @param  list<string>  $customIds
      * @return array<string, string>
      */
-    public static function normalizeItemGroups(?array $incoming): array
+    public static function normalizeItemGroups(?array $incoming, array $customIds = []): array
     {
         $defaults = self::defaultItemGroups();
-        $allowedSections = array_fill_keys(self::defaultSectionOrder(), true);
+        $allowedSections = array_fill_keys(array_merge(self::defaultSectionOrder(), $customIds), true);
         $resolved = [];
 
         foreach ($defaults as $path => $defaultGroup) {
