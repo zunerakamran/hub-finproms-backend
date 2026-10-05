@@ -31,20 +31,42 @@ class TemplateController extends Controller
         $user = $request->user();
         $this->gate->assertModuleEnabled($user);
 
-        if (Template::count() === 0) {
+        $allowed = HubTemplateCatalog::allowedSlugs();
+        // ?all=1 (manage UI) may include inactive; requesters always get active only.
+        // Capability alone must NOT bypass the hub showcase filter — that was showing
+        // leftover/random slugs (template1–3) on the manager request form.
+        $includeInactive = $request->boolean('all')
+            && $this->gate->can($user, 'wc_manage_templates');
+
+        // Ensure this hub's configured showcase template(s) exist in wc_templates.
+        if ($allowed !== []) {
+            $existing = Template::query()->whereIn('slug', $allowed)->pluck('slug')->all();
+            foreach ($allowed as $slug) {
+                if (! in_array($slug, $existing, true)) {
+                    ShowcaseSectionService::syncFromDefaults($slug, true);
+                }
+            }
+        } elseif (Template::count() === 0) {
             $defaultSlug = HubTemplateCatalog::defaultSlug();
             if ($defaultSlug) {
                 ShowcaseSectionService::syncFromDefaults($defaultSlug, true);
             }
         }
 
-        if ($request->query('all') || $this->gate->can($user, 'wc_manage_templates')) {
-            $templates = Template::latest()->get();
-        } else {
-            $templates = Template::where('is_active', true)->latest()->get();
+        $query = Template::query()->orderBy('name')->orderBy('id');
+
+        if (! $includeInactive) {
+            $query->where('is_active', true);
         }
 
-        return response()->json($templates);
+        // Always scope to hub-owned showcase slugs when the catalog is configured.
+        if ($allowed !== []) {
+            $query->whereIn('slug', $allowed);
+        }
+
+        return response()->json(
+            $includeInactive ? $query->latest('id')->get() : $query->get()
+        );
     }
 
     public function show(Request $request, int $id): JsonResponse
