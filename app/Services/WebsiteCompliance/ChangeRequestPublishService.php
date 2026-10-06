@@ -7,10 +7,12 @@ use App\Jobs\WebsiteCompliance\SyncTemplateRequestCpanelJob;
 use App\Models\ComplianceAuditEvent;
 use App\Models\WebsiteCompliance\ChangeRequest;
 use App\Models\WebsiteCompliance\Section;
+use App\Models\WebsiteCompliance\TemplateRequest;
 use App\Services\ActivityLogService;
 use App\Services\ComplianceAuditTrailService;
 use App\Support\WebsiteCompliance\WcDatabaseContext;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class ChangeRequestPublishService
 {
@@ -18,7 +20,7 @@ class ChangeRequestPublishService
      * Atomically claim a due scheduled request and apply its content.
      * Holds a row lock through the DB write so job + catch-up cron cannot double-publish.
      * Status stays `scheduled` until content is written — if this fails, retries can still pick it up.
-     * cPanel sync runs after commit (outside the lock).
+     * cPanel sync is queued after commit (outside the lock) with the section payload.
      *
      * @return array{success: bool, cpanel_synced: bool, cpanel_sync_queued: bool, sections: array}|null
      */
@@ -49,11 +51,12 @@ class ChangeRequestPublishService
             return null;
         }
 
-        // cPanel HTTP can take 25s+ — queue so PHP workers stay free for other users.
-        // Pass [] so the job rebuilds a full keyed payload from hub DB (content already written).
+        // Scheduled publish runs from cron/queue — keep cPanel off the lock, but pass
+        // the section payload (same as Power Admin publishContent) so rebuild-by-TR is not required.
         self::queueLiveSiteSync(
             $applied['template_request_id'],
-            $applied['publish_advisor_id']
+            $applied['publish_advisor_id'],
+            $applied['sections']
         );
 
         self::logPublishActivity(
@@ -73,9 +76,11 @@ class ChangeRequestPublishService
     }
 
     /**
-     * Apply proposed content to hub sections and queue a live advisor site push.
+     * Apply proposed content to hub sections and push to the live advisor site.
+     * Immediate approve/publish matches Power Admin `publishContent`: sync cPanel inline
+     * with the edited section payload (queue-only was silently failing when rebuild was empty).
      *
-     * @return array{success: bool, cpanel_synced: bool, cpanel_sync_queued: bool, sections: array}
+     * @return array{success: bool, cpanel_synced: bool, cpanel_sync_queued: bool, sections: array, cpanel_message?: string|null}
      */
     public static function publish(ChangeRequest $changeRequest, ?int $actorUserId = null): array
     {
@@ -83,40 +88,108 @@ class ChangeRequestPublishService
 
         $applied = self::applyPublishedContent($changeRequest, $actorUserId);
 
-        // Pass [] so the job rebuilds a full keyed payload from hub DB (content already written).
-        self::queueLiveSiteSync(
+        $sync = self::syncLiveSiteNow(
             $applied['template_request_id'],
-            $applied['publish_advisor_id']
+            $applied['publish_advisor_id'],
+            $applied['sections']
         );
+
+        // If inline push failed, queue a retry with the same payload.
+        $queued = false;
+        if (! ($sync['ok'] ?? false)) {
+            self::queueLiveSiteSync(
+                $applied['template_request_id'],
+                $applied['publish_advisor_id'],
+                $applied['sections']
+            );
+            $queued = true;
+
+            Log::warning('wc publish: inline cPanel sync failed; queued retry', [
+                'change_request_id' => $changeRequest->id,
+                'template_request_id' => $applied['template_request_id'],
+                'advisor_id' => $applied['publish_advisor_id'],
+                'sections' => count($applied['sections']),
+                'message' => $sync['message'] ?? null,
+                'endpoint' => $sync['endpoint'] ?? null,
+                'http_status' => $sync['http_status'] ?? null,
+            ]);
+        }
 
         self::logPublishActivity(
             $applied['change_request'],
             $actorUserId,
-            cpanelSynced: false,
+            cpanelSynced: (bool) ($sync['ok'] ?? false),
             scheduled: false,
-            cpanelQueued: true
+            cpanelQueued: $queued
         );
 
         return [
             'success' => true,
-            'cpanel_synced' => false,
-            'cpanel_sync_queued' => true,
+            'cpanel_synced' => (bool) ($sync['ok'] ?? false),
+            'cpanel_sync_queued' => $queued,
             'sections' => $applied['sections'],
+            'cpanel_message' => $sync['message'] ?? null,
         ];
     }
 
     /**
-     * Queue live-site push. Prefer the deployment tied to the edited sections
-     * (same as SectionController visibility sync) over advisor-scoped lookup.
+     * Push live now — same path Power Admin uses for publish-without-approval.
+     *
+     * @param  list<array<string, mixed>>  $sections
+     * @return array{ok: bool, endpoint: ?string, message: ?string, http_status: ?int, body: mixed}
      */
-    private static function queueLiveSiteSync(mixed $templateRequestId, mixed $publishAdvisorId): void
+    private static function syncLiveSiteNow(mixed $templateRequestId, mixed $publishAdvisorId, array $sections): array
+    {
+        if ($templateRequestId) {
+            $templateRequest = TemplateRequest::query()->find((int) $templateRequestId);
+            if ($templateRequest) {
+                return CpanelSyncService::pushToTemplateRequestCpanelWithDetails(
+                    $templateRequest,
+                    $sections
+                );
+            }
+
+            Log::warning('wc publish: template request missing for live sync', [
+                'template_request_id' => $templateRequestId,
+            ]);
+        }
+
+        if ($publishAdvisorId) {
+            $ok = CpanelSyncService::pushToAdvisorCpanel($publishAdvisorId, $sections);
+
+            return [
+                'ok' => $ok,
+                'endpoint' => null,
+                'message' => $ok
+                    ? 'Synced via advisor deployment lookup.'
+                    : 'Advisor cPanel push failed (no domain, empty sections, or site rejected sync).',
+                'http_status' => null,
+                'body' => null,
+            ];
+        }
+
+        return [
+            'ok' => false,
+            'endpoint' => null,
+            'message' => 'No template request or advisor deployment found to sync.',
+            'http_status' => null,
+            'body' => null,
+        ];
+    }
+
+    /**
+     * Queue live-site push with the edited section payload (do not rebuild empty).
+     *
+     * @param  list<array<string, mixed>>  $sections
+     */
+    private static function queueLiveSiteSync(mixed $templateRequestId, mixed $publishAdvisorId, array $sections = []): void
     {
         $hubId = WcDatabaseContext::hubId();
 
         if ($templateRequestId) {
             SyncTemplateRequestCpanelJob::dispatch(
                 (int) $templateRequestId,
-                [],
+                $sections,
                 $hubId
             );
 
@@ -125,7 +198,7 @@ class ChangeRequestPublishService
 
         SyncAdvisorCpanelJob::dispatch(
             $publishAdvisorId,
-            [],
+            $sections,
             $hubId
         );
     }
@@ -245,10 +318,14 @@ class ChangeRequestPublishService
                 $actor = \App\Models\User::find($actorUserId);
             }
 
-            if ($cpanelQueued) {
+            if ($cpanelQueued && ! $cpanelSynced) {
                 $eventDescription = $scheduled
                     ? 'Scheduled content published in hub DB for change request #'.$changeRequest->id.'; live site sync queued'
-                    : 'Content approved and published in hub DB for change request #'.$changeRequest->id.'; live site sync queued';
+                    : 'Content approved and published in hub DB for change request #'.$changeRequest->id.'; live site sync queued after inline push failed';
+            } elseif ($cpanelQueued && $cpanelSynced) {
+                $eventDescription = $scheduled
+                    ? 'Scheduled content published for change request #'.$changeRequest->id
+                    : 'Content approved and published for change request #'.$changeRequest->id;
             } else {
                 $eventDescription = $scheduled
                     ? ($cpanelSynced

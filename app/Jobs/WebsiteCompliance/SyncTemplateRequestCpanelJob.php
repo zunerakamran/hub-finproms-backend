@@ -42,11 +42,21 @@ class SyncTemplateRequestCpanelJob implements ShouldQueue
                 );
             }
 
-            $ok = CpanelSyncService::pushToTemplateRequestCpanel($templateRequest, $this->sectionsUpdated);
-            if (! $ok) {
+            $result = CpanelSyncService::pushToTemplateRequestCpanelWithDetails(
+                $templateRequest,
+                $this->sectionsUpdated
+            );
+
+            if (! ($result['ok'] ?? false)) {
+                $detail = trim((string) ($result['message'] ?? 'unknown error'));
+                $endpoint = $result['endpoint'] ?? null;
+                $httpStatus = $result['http_status'] ?? null;
+
                 throw new \RuntimeException(
                     'cPanel push failed for template request #'.$this->templateRequestId
-                    .' (no domain, empty sections, or advisor site rejected the sync).'
+                    .': '.$detail
+                    .($endpoint ? ' ['.$endpoint.($httpStatus ? ' HTTP '.$httpStatus : '').']' : '')
+                    .' (sections_in_payload='.count($this->sectionsUpdated).')'
                 );
             }
         };

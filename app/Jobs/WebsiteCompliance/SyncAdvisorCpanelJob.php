@@ -33,7 +33,8 @@ class SyncAdvisorCpanelJob implements ShouldQueue
             if (! $ok) {
                 throw new \RuntimeException(
                     'cPanel push failed for advisor '.$this->advisorId
-                    .' (no domain, empty sections, or advisor site rejected the sync).'
+                    .' (no domain, empty sections, or advisor site rejected the sync;'
+                    .' sections_in_payload='.count($this->sectionsUpdated).').'
                 );
             }
         };

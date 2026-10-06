@@ -609,16 +609,24 @@ class ChangeRequestController extends Controller
             );
 
             $queued = (bool) ($result['cpanel_sync_queued'] ?? false);
+            $cpanelMessage = trim((string) ($result['cpanel_message'] ?? ''));
+
+            $message = $result['cpanel_synced']
+                ? 'Approved and published to the live advisor site.'
+                : ($queued
+                    ? 'Approved and published in the hub database. Live site sync has been queued.'
+                    : 'Approved and published in the hub database, but the live site was not updated. Check Laravel logs and that cpanel_domain points to the live template URL (e.g. '.rtrim((string) config('app.url'), '/').'/template4)');
+
+            if (! $result['cpanel_synced'] && $cpanelMessage !== '') {
+                $message .= ' '.$cpanelMessage;
+            }
 
             return response()->json([
-                'message' => $result['cpanel_synced']
-                    ? 'Approved and published to the live advisor site.'
-                    : ($queued
-                        ? 'Approved and published in the hub database. Live site sync has been queued.'
-                        : 'Approved and published in the hub database, but the live site was not updated. Check Laravel logs and that cpanel_domain points to the live template URL (e.g. '.rtrim((string) config('app.url'), '/').'/template4)'),
+                'message' => $message,
                 'status' => ChangeRequest::STATUS_PUBLISHED,
                 'cpanel_synced' => $result['cpanel_synced'],
                 'cpanel_sync_queued' => $queued,
+                'cpanel_message' => $cpanelMessage !== '' ? $cpanelMessage : null,
                 'change_request' => $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow.supportingFiles', 'versions.supportingFiles'])->toApiArray(includeVersions: true),
             ]);
         }
@@ -796,16 +804,24 @@ class ChangeRequestController extends Controller
         );
 
         $queued = (bool) ($result['cpanel_sync_queued'] ?? false);
+        $cpanelMessage = trim((string) ($result['cpanel_message'] ?? ''));
+
+        $message = $result['cpanel_synced']
+            ? 'Feedback confirmed and published to the live advisor site.'
+            : ($queued
+                ? 'Feedback confirmed in the hub database. Live site sync has been queued.'
+                : 'Feedback confirmed in the hub database, but the live site was not updated.');
+
+        if (! $result['cpanel_synced'] && $cpanelMessage !== '') {
+            $message .= ' '.$cpanelMessage;
+        }
 
         return response()->json([
-            'message' => $result['cpanel_synced']
-                ? 'Feedback confirmed and published to the live advisor site.'
-                : ($queued
-                    ? 'Feedback confirmed in the hub database. Live site sync has been queued.'
-                    : 'Feedback confirmed in the hub database, but the live site was not updated.'),
+            'message' => $message,
             'status' => ChangeRequest::STATUS_PUBLISHED,
             'cpanel_synced' => $result['cpanel_synced'],
             'cpanel_sync_queued' => $queued,
+            'cpanel_message' => $cpanelMessage !== '' ? $cpanelMessage : null,
             'change_request' => $result['change_request']->toApiArray(true),
         ]);
     }
