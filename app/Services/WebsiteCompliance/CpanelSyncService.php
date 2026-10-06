@@ -127,20 +127,30 @@ class CpanelSyncService
     }
 
     /**
-     * Shape a hub section row for advisor cPanel api.php (name + section_key required to match).
+     * Shape a hub section for advisor cPanel api.php content pushes.
+     * Matches Power Admin publishContent (name-based match). Do not send a
+     * mismatched section_key — some advisor api.php builds require name AND
+     * section_key, which yields status=success with updated_count=0.
      *
-     * @return array{name: string, section_key: string, display_name: string, is_visible: int, content: mixed}
+     * @return array{name: string, display_name: string, is_visible: bool, content: string}
      */
     public static function formatSectionForCpanel(Section $sec, mixed $contentOverride = null): array
     {
         $name = (string) ($sec->name ?? '');
+        $content = $contentOverride ?? $sec->content;
+        if (is_array($content) || is_object($content)) {
+            $content = (string) json_encode(
+                $content,
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+            );
+        }
 
         return [
             'name' => $name,
-            'section_key' => $sec->section_key ?: strtolower((string) preg_replace('/[^a-z0-9]/i', '', $name)),
             'display_name' => $sec->display_name ?: $name,
-            'is_visible' => $sec->is_visible === false || $sec->is_visible === 0 || $sec->is_visible === '0' ? 0 : 1,
-            'content' => $contentOverride ?? $sec->content,
+            // Bool like Power Admin publishContent (not 0/1).
+            'is_visible' => ! ($sec->is_visible === false || $sec->is_visible === 0 || $sec->is_visible === '0'),
+            'content' => (string) $content,
         ];
     }
 
@@ -533,10 +543,29 @@ class CpanelSyncService
                     return $last;
                 }
 
-                // Treat JSON status=success as synced. Older success checks required
-                // db_active/updated_count and falsely failed when MySQL was down but
-                // content.json (visibility meta) was written, or when updated_count stayed 0.
+                // Content pushes must actually update MySQL rows. Older api.php builds
+                // still return status=success after writing content.json visibility only
+                // (updated_count=0) — hub used to treat that as "synced" while the site
+                // kept old section bodies.
+                $hasSections = ! empty($payload['sections']) && is_array($payload['sections']);
+                $reportsUpdatedCount = is_array($body) && array_key_exists('updated_count', $body);
+
                 if ($response->successful() && $statusOk) {
+                    if ($hasSections && $reportsUpdatedCount && $updatedCount === 0) {
+                        Log::warning("cPanel push ({$label}) success with updated_count=0 via {$endpoint}", [
+                            'db_active' => $dbActive,
+                            'config_written' => $configWritten,
+                            'sections_sent' => count($payload['sections']),
+                        ]);
+
+                        $last['message'] = 'Advisor site returned success but updated 0 section rows'
+                            .($dbActive ? '' : ' (MySQL not active)')
+                            .'. Section name mismatch or content was not written to the live DB.';
+                        $last['ok'] = false;
+                        // Try alternate api.php paths — wrong path can soft-succeed.
+                        continue;
+                    }
+
                     Log::info("cPanel sync ({$label}) OK via {$endpoint}", [
                         'db_active' => $dbActive,
                         'updated_count' => $updatedCount,
@@ -546,7 +575,8 @@ class CpanelSyncService
                     return [
                         'ok' => true,
                         'endpoint' => $endpoint,
-                        'message' => (string) ($body['message'] ?? 'Synced'),
+                        'message' => (string) ($body['message'] ?? 'Synced')
+                            .($reportsUpdatedCount ? " (updated_count={$updatedCount})" : ''),
                         'http_status' => $response->status(),
                         'body' => $body,
                     ];

@@ -140,12 +140,22 @@ class ChangeRequestPublishService
      */
     private static function syncLiveSiteNow(mixed $templateRequestId, mixed $publishAdvisorId, array $sections): array
     {
+        // Prefer full deployment payload from hub DB (content already written) so
+        // every section name matches the advisor site; fall back to edited rows only.
+        $sectionsToPush = $sections;
+        if ($templateRequestId) {
+            $full = CpanelSyncService::advisorSectionPayloadForTemplateRequest((int) $templateRequestId);
+            if (! empty($full)) {
+                $sectionsToPush = $full;
+            }
+        }
+
         if ($templateRequestId) {
             $templateRequest = TemplateRequest::query()->find((int) $templateRequestId);
             if ($templateRequest) {
                 return CpanelSyncService::pushToTemplateRequestCpanelWithDetails(
                     $templateRequest,
-                    $sections
+                    $sectionsToPush
                 );
             }
 
@@ -155,14 +165,18 @@ class ChangeRequestPublishService
         }
 
         if ($publishAdvisorId) {
-            $ok = CpanelSyncService::pushToAdvisorCpanel($publishAdvisorId, $sections);
+            if (empty($sectionsToPush)) {
+                $sectionsToPush = CpanelSyncService::advisorSectionPayload($publishAdvisorId);
+            }
+
+            $ok = CpanelSyncService::pushToAdvisorCpanel($publishAdvisorId, $sectionsToPush);
 
             return [
                 'ok' => $ok,
                 'endpoint' => null,
                 'message' => $ok
                     ? 'Synced via advisor deployment lookup.'
-                    : 'Advisor cPanel push failed (no domain, empty sections, or site rejected sync).',
+                    : 'Advisor cPanel push failed (no domain, empty sections, or site rejected sync / updated 0 rows).',
                 'http_status' => null,
                 'body' => null,
             ];

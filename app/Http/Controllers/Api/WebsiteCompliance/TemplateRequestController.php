@@ -897,12 +897,10 @@ class TemplateRequestController extends Controller
                 'locked_by' => null,
             ]);
 
-            $updatedSections[] = [
-                'name' => $section->name,
-                'display_name' => $section->display_name ?: $section->name,
-                'is_visible' => $section->is_visible !== false,
-                'content' => $edit['content'],
-            ];
+            $updatedSections[] = CpanelSyncService::formatSectionForCpanel(
+                $section,
+                $edit['content']
+            );
         }
 
         $cpanelSynced = CpanelSyncService::pushToTemplateRequestCpanel($templateRequest, $updatedSections);
