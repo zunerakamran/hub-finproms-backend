@@ -903,7 +903,11 @@ class TemplateRequestController extends Controller
             );
         }
 
-        $cpanelSynced = CpanelSyncService::pushToTemplateRequestCpanel($templateRequest, $updatedSections);
+        $syncDetails = CpanelSyncService::pushToTemplateRequestCpanelWithDetails(
+            $templateRequest,
+            $updatedSections
+        );
+        $cpanelSynced = (bool) ($syncDetails['ok'] ?? false);
         $targetLabel = $templateRequest->isLive() ? 'live' : 'staging';
 
         $this->activityLogs->log([
@@ -916,12 +920,17 @@ class TemplateRequestController extends Controller
             'request' => $request,
         ]);
 
+        $detail = trim((string) ($syncDetails['message'] ?? ''));
+
         return response()->json([
             'message' => $cpanelSynced
                 ? "Content published directly to the {$targetLabel} site."
-                : "Content saved in the hub database, but the {$targetLabel} site was not updated. Check Laravel logs and cPanel configuration.",
+                : ("Content saved in the hub database, but the {$targetLabel} site was not updated."
+                    .($detail !== '' ? ' '.$detail : ' Check Laravel logs and cPanel configuration.')),
             'cpanel_synced' => $cpanelSynced,
-        ]);
+            'cpanel_message' => $detail !== '' ? $detail : null,
+            'cpanel_endpoint' => $syncDetails['endpoint'] ?? null,
+        ], $cpanelSynced ? 200 : 502);
     }
 
     /**

@@ -128,30 +128,53 @@ class CpanelSyncService
 
     /**
      * Shape a hub section for advisor cPanel api.php content pushes.
-     * Matches Power Admin publishContent (name-based match). Do not send a
-     * mismatched section_key — some advisor api.php builds require name AND
-     * section_key, which yields status=success with updated_count=0.
+     * Content JSON strings are decoded to objects (same shape as api.php GET)
+     * so the advisor site writes structured content into MySQL / content.json.
      *
-     * @return array{name: string, display_name: string, is_visible: bool, content: string}
+     * @return array{name: string, section_key: string, display_name: string, is_visible: bool, content: mixed}
      */
     public static function formatSectionForCpanel(Section $sec, mixed $contentOverride = null): array
     {
         $name = (string) ($sec->name ?? '');
-        $content = $contentOverride ?? $sec->content;
-        if (is_array($content) || is_object($content)) {
-            $content = (string) json_encode(
-                $content,
-                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
-            );
-        }
+        $content = self::normalizeContentForCpanel($contentOverride ?? $sec->content);
+        $sectionKey = $sec->section_key
+            ?: strtolower((string) preg_replace('/[^a-z0-9]+/i', '', $name));
 
         return [
             'name' => $name,
+            'section_key' => $sectionKey,
             'display_name' => $sec->display_name ?: $name,
             // Bool like Power Admin publishContent (not 0/1).
             'is_visible' => ! ($sec->is_visible === false || $sec->is_visible === 0 || $sec->is_visible === '0'),
-            'content' => (string) $content,
+            'content' => $content,
         ];
+    }
+
+    /**
+     * Advisor api.php GET serves section bodies as objects. Push the same shape
+     * when hub content is a JSON string so we do not double-encode.
+     */
+    public static function normalizeContentForCpanel(mixed $content): mixed
+    {
+        if (is_array($content) || is_object($content)) {
+            return $content;
+        }
+
+        if (! is_string($content)) {
+            return $content;
+        }
+
+        $trimmed = trim($content);
+        if ($trimmed === '') {
+            return $content;
+        }
+
+        $decoded = json_decode($trimmed, true);
+        if (json_last_error() === JSON_ERROR_NONE && (is_array($decoded) || is_object($decoded))) {
+            return $decoded;
+        }
+
+        return $content;
     }
 
     public static function buildBasePayload(TemplateRequest $templateRequest, mixed $advisorId = null, bool $includeDbCredentials = true): array

@@ -610,25 +610,26 @@ class ChangeRequestController extends Controller
 
             $queued = (bool) ($result['cpanel_sync_queued'] ?? false);
             $cpanelMessage = trim((string) ($result['cpanel_message'] ?? ''));
+            $synced = (bool) ($result['cpanel_synced'] ?? false);
 
-            $message = $result['cpanel_synced']
+            $message = $synced
                 ? 'Approved and published to the live advisor site.'
                 : ($queued
-                    ? 'Approved and published in the hub database. Live site sync has been queued.'
-                    : 'Approved and published in the hub database, but the live site was not updated. Check Laravel logs and that cpanel_domain points to the live template URL (e.g. '.rtrim((string) config('app.url'), '/').'/template4)');
+                    ? 'Approved and published in the hub database. Live site sync has been queued — confirm the advisor site after the queue worker runs.'
+                    : 'Approved and saved in the hub database, but the live advisor site was not updated.');
 
-            if (! $result['cpanel_synced'] && $cpanelMessage !== '') {
+            if (! $synced && $cpanelMessage !== '') {
                 $message .= ' '.$cpanelMessage;
             }
 
             return response()->json([
                 'message' => $message,
                 'status' => ChangeRequest::STATUS_PUBLISHED,
-                'cpanel_synced' => $result['cpanel_synced'],
+                'cpanel_synced' => $synced,
                 'cpanel_sync_queued' => $queued,
                 'cpanel_message' => $cpanelMessage !== '' ? $cpanelMessage : null,
                 'change_request' => $changeRequest->fresh(['editor', 'approver', 'section', 'currentVersionRow.supportingFiles', 'versions.supportingFiles'])->toApiArray(includeVersions: true),
-            ]);
+            ], $synced || $queued ? 200 : 502);
         }
 
         // Approve only — content stays unpublished; scheduler UI becomes available.
@@ -805,25 +806,26 @@ class ChangeRequestController extends Controller
 
         $queued = (bool) ($result['cpanel_sync_queued'] ?? false);
         $cpanelMessage = trim((string) ($result['cpanel_message'] ?? ''));
+        $synced = (bool) ($result['cpanel_synced'] ?? false);
 
-        $message = $result['cpanel_synced']
+        $message = $synced
             ? 'Feedback confirmed and published to the live advisor site.'
             : ($queued
                 ? 'Feedback confirmed in the hub database. Live site sync has been queued.'
-                : 'Feedback confirmed in the hub database, but the live site was not updated.');
+                : 'Feedback confirmed in the hub database, but the live advisor site was not updated.');
 
-        if (! $result['cpanel_synced'] && $cpanelMessage !== '') {
+        if (! $synced && $cpanelMessage !== '') {
             $message .= ' '.$cpanelMessage;
         }
 
         return response()->json([
             'message' => $message,
             'status' => ChangeRequest::STATUS_PUBLISHED,
-            'cpanel_synced' => $result['cpanel_synced'],
+            'cpanel_synced' => $synced,
             'cpanel_sync_queued' => $queued,
             'cpanel_message' => $cpanelMessage !== '' ? $cpanelMessage : null,
             'change_request' => $result['change_request']->toApiArray(true),
-        ]);
+        ], $synced || $queued ? 200 : 502);
     }
 
     public function preview(Request $request, int $id): JsonResponse
