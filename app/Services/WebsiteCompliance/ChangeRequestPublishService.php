@@ -3,6 +3,7 @@
 namespace App\Services\WebsiteCompliance;
 
 use App\Jobs\WebsiteCompliance\SyncAdvisorCpanelJob;
+use App\Jobs\WebsiteCompliance\SyncTemplateRequestCpanelJob;
 use App\Models\ComplianceAuditEvent;
 use App\Models\WebsiteCompliance\ChangeRequest;
 use App\Models\WebsiteCompliance\Section;
@@ -49,10 +50,10 @@ class ChangeRequestPublishService
         }
 
         // cPanel HTTP can take 25s+ — queue so PHP workers stay free for other users.
-        SyncAdvisorCpanelJob::dispatch(
-            $applied['publish_advisor_id'],
-            $applied['sections'],
-            WcDatabaseContext::hubId()
+        // Pass [] so the job rebuilds a full keyed payload from hub DB (content already written).
+        self::queueLiveSiteSync(
+            $applied['template_request_id'],
+            $applied['publish_advisor_id']
         );
 
         self::logPublishActivity(
@@ -82,10 +83,10 @@ class ChangeRequestPublishService
 
         $applied = self::applyPublishedContent($changeRequest, $actorUserId);
 
-        SyncAdvisorCpanelJob::dispatch(
-            $applied['publish_advisor_id'],
-            $applied['sections'],
-            WcDatabaseContext::hubId()
+        // Pass [] so the job rebuilds a full keyed payload from hub DB (content already written).
+        self::queueLiveSiteSync(
+            $applied['template_request_id'],
+            $applied['publish_advisor_id']
         );
 
         self::logPublishActivity(
@@ -105,10 +106,35 @@ class ChangeRequestPublishService
     }
 
     /**
+     * Queue live-site push. Prefer the deployment tied to the edited sections
+     * (same as SectionController visibility sync) over advisor-scoped lookup.
+     */
+    private static function queueLiveSiteSync(mixed $templateRequestId, mixed $publishAdvisorId): void
+    {
+        $hubId = WcDatabaseContext::hubId();
+
+        if ($templateRequestId) {
+            SyncTemplateRequestCpanelJob::dispatch(
+                (int) $templateRequestId,
+                [],
+                $hubId
+            );
+
+            return;
+        }
+
+        SyncAdvisorCpanelJob::dispatch(
+            $publishAdvisorId,
+            [],
+            $hubId
+        );
+    }
+
+    /**
      * Write proposed content to sections and mark the change request published.
      * Does not push to cPanel (caller does that after any surrounding transaction commits).
      *
-     * @return array{change_request: ChangeRequest, sections: array, publish_advisor_id: int|string|null}
+     * @return array{change_request: ChangeRequest, sections: array, publish_advisor_id: int|string|null, template_request_id: int|null}
      */
     private static function applyPublishedContent(ChangeRequest $changeRequest, ?int $actorUserId = null): array
     {
@@ -120,6 +146,7 @@ class ChangeRequestPublishService
         $decoded = json_decode((string) $proposedContent, true);
         $updatedSections = [];
         $publishAdvisorId = $changeRequest->editor_id;
+        $templateRequestId = null;
 
         if (is_array($decoded)) {
             foreach ($decoded as $editItem) {
@@ -137,14 +164,14 @@ class ChangeRequestPublishService
                     'is_locked' => false,
                     'locked_by' => null,
                 ]);
+                $sec->refresh();
 
                 $publishAdvisorId = $sec->advisor_id ?: $publishAdvisorId;
-                $updatedSections[] = [
-                    'name' => $sec->name,
-                    'display_name' => $sec->display_name ?: $sec->name,
-                    'is_visible' => $sec->is_visible !== false,
-                    'content' => $editItem['proposed_content'],
-                ];
+                $templateRequestId = $sec->template_request_id ?: $templateRequestId;
+                $updatedSections[] = CpanelSyncService::formatSectionForCpanel(
+                    $sec,
+                    $editItem['proposed_content'] ?? null
+                );
             }
         } elseif ($changeRequest->section) {
             $changeRequest->section->update([
@@ -152,13 +179,19 @@ class ChangeRequestPublishService
                 'is_locked' => false,
                 'locked_by' => null,
             ]);
+            $changeRequest->section->refresh();
             $publishAdvisorId = $changeRequest->section->advisor_id ?: $publishAdvisorId;
-            $updatedSections[] = [
-                'name' => $changeRequest->section->name,
-                'display_name' => $changeRequest->section->display_name ?: $changeRequest->section->name,
-                'is_visible' => $changeRequest->section->is_visible !== false,
-                'content' => $proposedContent,
-            ];
+            $templateRequestId = $changeRequest->section->template_request_id ?: $templateRequestId;
+            $updatedSections[] = CpanelSyncService::formatSectionForCpanel(
+                $changeRequest->section,
+                $proposedContent
+            );
+        }
+
+        // Fallback: resolve deployment from advisor if sections lacked template_request_id.
+        if (! $templateRequestId && $publishAdvisorId) {
+            $deployed = CpanelSyncService::findDeployedRequest($publishAdvisorId);
+            $templateRequestId = $deployed?->id;
         }
 
         $changeRequest->update([
@@ -195,6 +228,7 @@ class ChangeRequestPublishService
             'change_request' => $changeRequest,
             'sections' => $updatedSections,
             'publish_advisor_id' => $publishAdvisorId,
+            'template_request_id' => $templateRequestId ? (int) $templateRequestId : null,
         ];
     }
 

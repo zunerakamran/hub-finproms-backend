@@ -29,7 +29,13 @@ class SyncAdvisorCpanelJob implements ShouldQueue
     public function handle(WhiteLabelDatabaseService $remoteDb): void
     {
         $run = function (): void {
-            CpanelSyncService::pushToAdvisorCpanel($this->advisorId, $this->sectionsUpdated);
+            $ok = CpanelSyncService::pushToAdvisorCpanel($this->advisorId, $this->sectionsUpdated);
+            if (! $ok) {
+                throw new \RuntimeException(
+                    'cPanel push failed for advisor '.$this->advisorId
+                    .' (no domain, empty sections, or advisor site rejected the sync).'
+                );
+            }
         };
 
         try {

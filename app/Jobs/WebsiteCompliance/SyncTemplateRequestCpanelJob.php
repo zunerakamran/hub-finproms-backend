@@ -37,10 +37,18 @@ class SyncTemplateRequestCpanelJob implements ShouldQueue
                     'hub_id' => $this->hubId,
                 ]);
 
-                return;
+                throw new \RuntimeException(
+                    'cPanel sync: template request #'.$this->templateRequestId.' not found.'
+                );
             }
 
-            CpanelSyncService::pushToTemplateRequestCpanel($templateRequest, $this->sectionsUpdated);
+            $ok = CpanelSyncService::pushToTemplateRequestCpanel($templateRequest, $this->sectionsUpdated);
+            if (! $ok) {
+                throw new \RuntimeException(
+                    'cPanel push failed for template request #'.$this->templateRequestId
+                    .' (no domain, empty sections, or advisor site rejected the sync).'
+                );
+            }
         };
 
         try {

@@ -110,13 +110,38 @@ class CpanelSyncService
 
     public static function findDeployedRequest(mixed $advisorId): ?TemplateRequest
     {
-        return TemplateRequest::where(function ($q) use ($advisorId) {
-            $q->where('advisor_id', $advisorId)
-                ->orWhere('assigned_advisor_id', $advisorId);
-        })
-            ->onSite()
-            ->latest()
-            ->first();
+        $forAdvisor = function () use ($advisorId) {
+            return TemplateRequest::where(function ($q) use ($advisorId) {
+                $q->where('advisor_id', $advisorId)
+                    ->orWhere('assigned_advisor_id', $advisorId);
+            });
+        };
+
+        // Prefer the live site when an advisor has both staging and live deployments.
+        $live = $forAdvisor()->live()->latest()->first();
+        if ($live) {
+            return $live;
+        }
+
+        return $forAdvisor()->onSite()->latest()->first();
+    }
+
+    /**
+     * Shape a hub section row for advisor cPanel api.php (name + section_key required to match).
+     *
+     * @return array{name: string, section_key: string, display_name: string, is_visible: int, content: mixed}
+     */
+    public static function formatSectionForCpanel(Section $sec, mixed $contentOverride = null): array
+    {
+        $name = (string) ($sec->name ?? '');
+
+        return [
+            'name' => $name,
+            'section_key' => $sec->section_key ?: strtolower((string) preg_replace('/[^a-z0-9]/i', '', $name)),
+            'display_name' => $sec->display_name ?: $name,
+            'is_visible' => $sec->is_visible === false || $sec->is_visible === 0 || $sec->is_visible === '0' ? 0 : 1,
+            'content' => $contentOverride ?? $sec->content,
+        ];
     }
 
     public static function buildBasePayload(TemplateRequest $templateRequest, mixed $advisorId = null, bool $includeDbCredentials = true): array
@@ -686,13 +711,7 @@ class CpanelSyncService
                 continue;
             }
             $seen[$name] = true;
-            $payload[] = [
-                'name' => $name,
-                'section_key' => $sec->section_key ?: strtolower((string) preg_replace('/[^a-z0-9]/i', '', $name)),
-                'display_name' => $sec->display_name ?: $name,
-                'is_visible' => $sec->is_visible === false || $sec->is_visible === 0 || $sec->is_visible === '0' ? 0 : 1,
-                'content' => $sec->content,
-            ];
+            $payload[] = self::formatSectionForCpanel($sec);
         }
 
         return $payload;
@@ -711,13 +730,7 @@ class CpanelSyncService
             }
             $seen[$name] = true;
 
-            $payload[] = [
-                'name' => $name,
-                'section_key' => $sec->section_key ?: strtolower((string) preg_replace('/[^a-z0-9]/i', '', $name)),
-                'display_name' => $sec->display_name ?: $name,
-                'is_visible' => $sec->is_visible === false || $sec->is_visible === 0 || $sec->is_visible === '0' ? 0 : 1,
-                'content' => $sec->content,
-            ];
+            $payload[] = self::formatSectionForCpanel($sec);
         }
 
         return $payload;
