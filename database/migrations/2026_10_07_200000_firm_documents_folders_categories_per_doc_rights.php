@@ -67,24 +67,27 @@ return new class extends Migration
             $addedDocumentId = true;
         }
 
+        // Must drop (firm_id, user_id) unique BEFORE inserting per-document rows,
+        // otherwise MySQL rejects a second row for the same firm+user.
+        $this->replaceFirmUserUniqueWithNonUniqueIndexes();
+
         // Expand legacy firm-wide grants onto every existing document for that firm.
-        // Only when we just added the column, or when firm-wide rows with view/delete/archive still exist.
-        if (Schema::hasTable('firm_document_member_rights') && Schema::hasTable('firm_documents')) {
-            $legacy = DB::table('firm_document_member_rights')
-                ->whereNull('firm_document_id')
-                ->where(function ($q) {
+        if (Schema::hasTable('firm_document_member_rights')
+            && Schema::hasTable('firm_documents')
+            && Schema::hasColumn('firm_document_member_rights', 'firm_document_id')) {
+            $legacyQuery = DB::table('firm_document_member_rights')
+                ->whereNull('firm_document_id');
+
+            if (! $addedDocumentId) {
+                // Re-run / resume: only expand rows that still carry view/delete/archive.
+                $legacyQuery->where(function ($q) {
                     $q->where('can_view', true)
                         ->orWhere('can_delete', true)
                         ->orWhere('can_archive', true);
-                })
-                ->get();
-
-            // Also expand freshly-migrated null rows once when column was just added.
-            if ($addedDocumentId && $legacy->isEmpty()) {
-                $legacy = DB::table('firm_document_member_rights')
-                    ->whereNull('firm_document_id')
-                    ->get();
+                });
             }
+
+            $legacy = $legacyQuery->get();
 
             foreach ($legacy as $row) {
                 $docIds = DB::table('firm_documents')
@@ -93,6 +96,7 @@ return new class extends Migration
 
                 foreach ($docIds as $docId) {
                     $exists = DB::table('firm_document_member_rights')
+                        ->where('firm_id', $row->firm_id)
                         ->where('firm_document_id', $docId)
                         ->where('user_id', $row->user_id)
                         ->exists();
@@ -125,13 +129,12 @@ return new class extends Migration
                 }
             }
         }
-
-        $this->replaceFirmUserUniqueWithNonUniqueIndexes();
     }
 
     /**
      * MySQL will not drop firm_document_member_rights_firm_id_user_id_unique while a
-     * foreign key still depends on it. Add dedicated firm_id / user_id indexes first.
+     * foreign key still depends on it. Add dedicated firm_id / user_id indexes first,
+     * then drop the unique so per-document rows can be inserted.
      */
     private function replaceFirmUserUniqueWithNonUniqueIndexes(): void
     {
@@ -139,30 +142,28 @@ return new class extends Migration
             return;
         }
 
-        $indexNames = collect(DB::select('SHOW INDEX FROM firm_document_member_rights'))
-            ->pluck('Key_name')
-            ->unique()
-            ->values()
-            ->all();
+        $indexes = collect(DB::select('SHOW INDEX FROM firm_document_member_rights'));
+        $indexNames = $indexes->pluck('Key_name')->unique()->values()->all();
+        $uniqueName = 'firm_document_member_rights_firm_id_user_id_unique';
 
-        if (! in_array('firm_doc_member_rights_firm_id_idx', $indexNames, true)) {
-            // Dedicated index so firm_id FK no longer depends on the composite unique.
+        $hasNonUniqueFirmIdLeadingIndex = $indexes->contains(
+            fn ($idx) => $idx->Column_name === 'firm_id'
+                && (int) $idx->Seq_in_index === 1
+                && $idx->Key_name !== $uniqueName
+        );
+        $hasUserIdLeadingIndex = $indexes->contains(
+            fn ($idx) => $idx->Column_name === 'user_id' && (int) $idx->Seq_in_index === 1
+        );
+
+        if (! $hasNonUniqueFirmIdLeadingIndex && ! in_array('firm_doc_member_rights_firm_id_idx', $indexNames, true)) {
             Schema::table('firm_document_member_rights', function (Blueprint $table) {
                 $table->index('firm_id', 'firm_doc_member_rights_firm_id_idx');
             });
-            $indexNames[] = 'firm_doc_member_rights_firm_id_idx';
         }
 
-        if (! in_array('firm_doc_member_rights_user_id_idx', $indexNames, true)) {
+        if (! $hasUserIdLeadingIndex && ! in_array('firm_doc_member_rights_user_id_idx', $indexNames, true)) {
             Schema::table('firm_document_member_rights', function (Blueprint $table) {
                 $table->index('user_id', 'firm_doc_member_rights_user_id_idx');
-            });
-            $indexNames[] = 'firm_doc_member_rights_user_id_idx';
-        }
-
-        if (in_array('firm_document_member_rights_firm_id_user_id_unique', $indexNames, true)) {
-            Schema::table('firm_document_member_rights', function (Blueprint $table) {
-                $table->dropUnique('firm_document_member_rights_firm_id_user_id_unique');
             });
         }
 
@@ -172,7 +173,20 @@ return new class extends Migration
             ->values()
             ->all();
 
-        if (! in_array('firm_doc_member_rights_doc_user_idx', $indexNames, true)) {
+        if (in_array($uniqueName, $indexNames, true)) {
+            Schema::table('firm_document_member_rights', function (Blueprint $table) use ($uniqueName) {
+                $table->dropUnique($uniqueName);
+            });
+        }
+
+        $indexNames = collect(DB::select('SHOW INDEX FROM firm_document_member_rights'))
+            ->pluck('Key_name')
+            ->unique()
+            ->values()
+            ->all();
+
+        if (! in_array('firm_doc_member_rights_doc_user_idx', $indexNames, true)
+            && Schema::hasColumn('firm_document_member_rights', 'firm_document_id')) {
             Schema::table('firm_document_member_rights', function (Blueprint $table) {
                 $table->index(['firm_document_id', 'user_id'], 'firm_doc_member_rights_doc_user_idx');
             });
