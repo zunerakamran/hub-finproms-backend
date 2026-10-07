@@ -2,9 +2,12 @@
 
 namespace App\Console\Commands\WebsiteCompliance;
 
+use App\Casts\SafeEncrypted;
 use App\Models\WebsiteCompliance\TemplateRequest;
 use App\Services\WebsiteCompliance\CpanelSyncService;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Crypt;
+use Throwable;
 
 class DiagnoseCpanelSync extends Command
 {
@@ -26,9 +29,11 @@ class DiagnoseCpanelSync extends Command
         $this->info("Template request #{$templateRequest->id}");
         $this->line('  status: '.$templateRequest->status);
         $this->line('  cpanel_domain: '.($templateRequest->cpanel_domain ?: '(empty)'));
-        $this->line('  api_key set: '.(filled($templateRequest->cpanel_api_key) ? 'yes' : 'NO'));
         $this->line('  advisor_id: '.($templateRequest->advisor_id ?? 'null'));
         $this->line('  assigned_advisor_id: '.($templateRequest->assigned_advisor_id ?? 'null'));
+
+        $this->describeSecret($templateRequest, 'cpanel_api_key', 'api_key');
+        $this->describeSecret($templateRequest, 'cpanel_db_password', 'db_password');
 
         $sections = CpanelSyncService::advisorSectionPayloadForTemplateRequest((int) $templateRequest->id);
         $this->line('  hub sections for TR: '.count($sections));
@@ -59,6 +64,43 @@ class DiagnoseCpanelSync extends Command
             $this->line('  body (raw): '.mb_substr($body, 0, 300));
         }
 
+        if ($templateRequest->cpanelSecretDecryptFailed('cpanel_api_key')) {
+            $this->newLine();
+            $this->error('FIX: cpanel_api_key is in the DB but cannot be decrypted with the current APP_KEY.');
+            $this->line('Open Website Compliance → this deployment → Update deployment, and re-enter');
+            $this->line('the same SECRET_API_KEY from the advisor site cpanel-config.php, then save.');
+            $this->line('Then re-run: php artisan wc:diagnose-cpanel '.$id);
+        }
+
         return ($result['ok'] ?? false) ? self::SUCCESS : self::FAILURE;
+    }
+
+    private function describeSecret(TemplateRequest $templateRequest, string $attribute, string $label): void
+    {
+        $raw = $templateRequest->getAttributes()[$attribute]
+            ?? $templateRequest->getRawOriginal($attribute)
+            ?? null;
+        $rawLen = is_string($raw) ? strlen($raw) : 0;
+        $looksEncrypted = is_string($raw) && $raw !== '' && SafeEncrypted::looksLikeLaravelCiphertext($raw);
+        $readable = filled($templateRequest->{$attribute});
+
+        $decryptNote = 'empty';
+        if ($rawLen > 0) {
+            if ($readable) {
+                $decryptNote = 'decrypt OK (usable)';
+            } elseif ($looksEncrypted) {
+                $decryptNote = 'CIPHERTEXT PRESENT but decrypt FAILED (APP_KEY mismatch)';
+                try {
+                    Crypt::decryptString((string) $raw);
+                } catch (Throwable $e) {
+                    $decryptNote .= ' — '.$e->getMessage();
+                }
+            } else {
+                $decryptNote = 'raw value present (legacy plaintext path)';
+            }
+        }
+
+        $this->line("  {$label} in DB: ".($rawLen > 0 ? "yes ({$rawLen} chars)" : 'NO'));
+        $this->line("  {$label} readable: ".($readable ? 'yes' : 'NO').' — '.$decryptNote);
     }
 }

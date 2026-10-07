@@ -61,10 +61,14 @@ class CpanelSyncService
         }
 
         if (! filled($templateRequest->cpanel_api_key)) {
+            $decryptFailed = $templateRequest->cpanelSecretDecryptFailed('cpanel_api_key');
+
             return [
                 'ok' => false,
                 'endpoint' => self::normalizeAdvisorSiteUrl($templateRequest->cpanel_domain).'/api.php',
-                'message' => 'No cpanel_api_key saved on this deployment. Set the same SECRET_API_KEY used in the advisor site cpanel-config.php (Update deployment).',
+                'message' => $decryptFailed
+                    ? 'cpanel_api_key is stored in the hub DB but cannot be decrypted with the current APP_KEY. Re-enter the SECRET_API_KEY on Update deployment (same value as advisor site cpanel-config.php).'
+                    : 'No cpanel_api_key saved on this deployment. Set the same SECRET_API_KEY used in the advisor site cpanel-config.php (Update deployment).',
                 'http_status' => null,
                 'body' => null,
             ];
@@ -725,10 +729,19 @@ class CpanelSyncService
         $payload['sections'] = $sectionsUpdated;
 
         if (! filled($payload['api_key'] ?? null)) {
+            $stored = $templateRequest->hasStoredCpanelSecret('cpanel_api_key');
+            $decryptFailed = $templateRequest->cpanelSecretDecryptFailed('cpanel_api_key');
+
+            $message = $decryptFailed
+                ? 'cpanel_api_key is stored in the hub DB but cannot be decrypted with the current APP_KEY. Re-enter the SECRET_API_KEY on Update deployment (same value as advisor site cpanel-config.php), then publish again.'
+                : ($stored
+                    ? 'cpanel_api_key could not be read from this deployment.'
+                    : 'No cpanel_api_key saved on this deployment. Set the same SECRET_API_KEY used in the advisor site cpanel-config.php.');
+
             return [
                 'ok' => false,
                 'endpoint' => self::normalizeAdvisorSiteUrl($templateRequest->cpanel_domain).'/api.php',
-                'message' => 'No cpanel_api_key saved on this deployment. Set the same SECRET_API_KEY used in the advisor site cpanel-config.php.',
+                'message' => $message,
                 'http_status' => null,
                 'body' => null,
             ];

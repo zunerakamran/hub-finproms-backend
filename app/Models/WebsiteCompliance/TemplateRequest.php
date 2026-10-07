@@ -97,12 +97,41 @@ class TemplateRequest extends Model
 
     public function getCpanelDbPasswordSetAttribute(): bool
     {
-        return filled($this->cpanel_db_password);
+        return $this->hasReadableCpanelSecret('cpanel_db_password');
     }
 
     public function getCpanelApiKeySetAttribute(): bool
     {
-        return filled($this->cpanel_api_key);
+        return $this->hasReadableCpanelSecret('cpanel_api_key');
+    }
+
+    /**
+     * True when the decrypted secret is usable (not merely that ciphertext exists in DB).
+     */
+    public function hasReadableCpanelSecret(string $attribute): bool
+    {
+        return filled($this->{$attribute});
+    }
+
+    /**
+     * True when the DB column has a non-empty value (plaintext or ciphertext),
+     * even if the current APP_KEY cannot decrypt it.
+     */
+    public function hasStoredCpanelSecret(string $attribute): bool
+    {
+        $raw = $this->getAttributes()[$attribute]
+            ?? $this->getRawOriginal($attribute)
+            ?? null;
+
+        return is_string($raw) ? trim($raw) !== '' : filled($raw);
+    }
+
+    /**
+     * Ciphertext is present but SafeEncrypted returned null (usually APP_KEY changed).
+     */
+    public function cpanelSecretDecryptFailed(string $attribute): bool
+    {
+        return $this->hasStoredCpanelSecret($attribute) && ! $this->hasReadableCpanelSecret($attribute);
     }
 
     public function advisor(): BelongsTo
