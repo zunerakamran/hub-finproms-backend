@@ -2,7 +2,7 @@
 
 namespace App\Models\WebsiteCompliance;
 
-use App\Casts\SafeEncrypted;
+use App\Casts\ContentHubSecretEncrypted;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -80,6 +80,8 @@ class TemplateRequest extends Model
     protected $appends = [
         'cpanel_db_password_set',
         'cpanel_api_key_set',
+        'cpanel_api_key_corrupt',
+        'cpanel_db_password_corrupt',
     ];
 
     protected $casts = [
@@ -91,8 +93,9 @@ class TemplateRequest extends Model
         'page_contents' => 'array',
         'go_live_requested_at' => 'datetime',
         'live_promoted_at' => 'datetime',
-        'cpanel_db_password' => SafeEncrypted::class,
-        'cpanel_api_key' => SafeEncrypted::class,
+        // Must use ContentHubSecretEncrypted: Central remote writes cannot use Central APP_KEY.
+        'cpanel_db_password' => ContentHubSecretEncrypted::class,
+        'cpanel_api_key' => ContentHubSecretEncrypted::class,
     ];
 
     public function getCpanelDbPasswordSetAttribute(): bool
@@ -103,6 +106,16 @@ class TemplateRequest extends Model
     public function getCpanelApiKeySetAttribute(): bool
     {
         return $this->hasReadableCpanelSecret('cpanel_api_key');
+    }
+
+    public function getCpanelApiKeyCorruptAttribute(): bool
+    {
+        return $this->cpanelSecretDecryptFailed('cpanel_api_key');
+    }
+
+    public function getCpanelDbPasswordCorruptAttribute(): bool
+    {
+        return $this->cpanelSecretDecryptFailed('cpanel_db_password');
     }
 
     /**
@@ -127,7 +140,7 @@ class TemplateRequest extends Model
     }
 
     /**
-     * Ciphertext is present but SafeEncrypted returned null (usually APP_KEY changed).
+     * Ciphertext/envelope is present but cannot be read (wrong APP_KEY from Central remote write, etc.).
      */
     public function cpanelSecretDecryptFailed(string $attribute): bool
     {
