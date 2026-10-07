@@ -522,6 +522,22 @@ Notes:
   categories”) — blurred while Functionalities → Firm documents is off.
   Same admin CRUD pattern as General Compliance content types.
 - Upload form category dropdown lists these options (optional).
+- Users without Manage can request a new category via `taxonomy_request_add`
+  (see 3.4.3c); approvers with Manage see the queue and approve/reject.
+
+3.4.3c Taxonomy add requests
+- Capability `taxonomy_request_add` (“Request new type / category / tag”) in
+  Content catalog capabilities. One request capability covers:
+  - Post/reel content type, category, tag (Central hub only)
+  - General Compliance content type (GC module must be on)
+  - Firm document category (Firm documents functionality must be on)
+- Submit: proposed name + remarks. Statuses: Pending / Approved / Rejected.
+- Review: users with the matching Manage capability for that target see the
+  queue. Approve auto-creates the taxonomy row (same validation as admin CRUD);
+  reject requires a review note.
+- APIs: `POST/GET /api/taxonomy-add-requests` (+ `/mine`, `/options`);
+  admin `GET .../taxonomy-add-requests` + `POST .../approve|reject`
+  under client-admin / power-admin / admin.
 
 3.4.4 Capabilities matrix — hub-wide (all firms)
 - When Firm documents functionality is ON, these Capabilities are editable:
@@ -939,6 +955,12 @@ Notes:
     not gated by Social Media Template Library
   - Manage types / categories / tags — Central only (library taxonomy); DISABLED
     on Shared / White-labelled hubs
+  - Request new type / category / tag (`taxonomy_request_add`) — submit a
+    request (proposed name + remarks) to add: Central post/reel type, category,
+    or tag; General Compliance content type; or firm document category.
+    Users with the matching Manage capability see the queue and can approve
+    (auto-creates the option) or reject (review note required). Post/reel
+    taxonomy requests are Central-only.
   - Manage subscription plans — same roles
   - Manage settings (NEW banner, logo upload, color scheme, application name,
     Home/Posts/detail page content) — same roles
@@ -1426,6 +1448,9 @@ STEP 1 — Shared hub core (content hub)
     and has all add/view/delete/archive rights (section 3.4.2–3.4.4)
 [x] Folders / subfolders + nested expand/collapse library; upload above table
 [x] Document categories (`firm_documents_manage_categories`, GC-style admin CRUD)
+[x] Taxonomy add requests (`taxonomy_request_add`) — request new post/reel
+    type/category/tag (Central), GC content type, or firm document category;
+    managers with matching Manage caps approve (auto-create) or reject
 [x] Head grants per-document member rights via key icon / access popup
 [x] Central / Network visible-firms allowlist + mixed access rights (`firm_documents_manage_firm_access`; own users + allowlisted firms; firm grants apply to all members)
 [x] Firm Head & Firm Documents activity logs (`firm.head.*`, `firm.documents.*`)

@@ -2,12 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\WebsiteCompliance\UsesWcDatabaseContext;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
 
 class FirmDocumentCategory extends Model
 {
+    use UsesWcDatabaseContext;
+
     protected $fillable = [
         'name',
         'slug',

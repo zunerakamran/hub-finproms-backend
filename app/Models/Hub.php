@@ -1048,6 +1048,13 @@ class Hub extends Model
             'default_shared' => true,
             'default_white_label' => true,
         ],
+        'taxonomy_request_add' => [
+            'label' => 'Request new type / category / tag',
+            'description' => 'Submit a request to add a post/reel type, category, or tag (Central only), a General Compliance content type, or a firm document category — with remarks. Users who already have the matching Manage capability see the queue and can approve (auto-creates the option) or reject.',
+            'group' => self::GROUP_DASHBOARD_CONTENT,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
 
         // --- 4. Firms ---
         'dashboard_manage_firms' => [

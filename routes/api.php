@@ -22,6 +22,7 @@ use App\Http\Controllers\Api\SocialMediaComplianceController;
 use App\Http\Controllers\Api\GeneralComplianceController;
 use App\Http\Controllers\Api\GeneralComplianceContentTypeController;
 use App\Http\Controllers\Api\SupportTicketController;
+use App\Http\Controllers\Api\TaxonomyAddRequestController;
 use App\Http\Controllers\Api\WebsiteCompliance\ChangeRequestController as WcChangeRequestController;
 use App\Http\Controllers\Api\WebsiteCompliance\PageController as WcPageController;
 use App\Http\Controllers\Api\WebsiteCompliance\PublicController as WcPublicController;
@@ -232,6 +233,19 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:st_comment_on_tickets')->group(function () {
             Route::post('/support-tickets/{supportTicket}/comments', [SupportTicketController::class, 'comment']);
         });
+    });
+
+    // Taxonomy add requests — request new types/categories/tags (gated by taxonomy_request_add / manage_*).
+    Route::middleware('acting_wl_wc_db')->group(function () {
+        Route::get('/taxonomy-add-requests/options', [TaxonomyAddRequestController::class, 'options']);
+
+        Route::middleware('hub_can:taxonomy_request_add')->group(function () {
+            Route::post('/taxonomy-add-requests', [TaxonomyAddRequestController::class, 'store']);
+            Route::get('/taxonomy-add-requests/mine', [TaxonomyAddRequestController::class, 'mine']);
+        });
+
+        Route::get('/taxonomy-add-requests/{taxonomyAddRequest}', [TaxonomyAddRequestController::class, 'show'])
+            ->whereNumber('taxonomyAddRequest');
     });
 
     // Website Compliance — authenticated domain (module + capability gated in controllers / hub_can)
@@ -653,6 +667,20 @@ Route::middleware('auth:sanctum')->group(function () {
             });
         });
 
+        // Taxonomy add requests — queue for users with matching Manage capabilities
+        Route::middleware('acting_wl_wc_db')->group(function () {
+            Route::middleware('hub_can:dashboard_manage_types,dashboard_manage_categories,dashboard_manage_tags,gc_manage_content_types,firm_documents_manage_categories')->group(function () {
+                Route::get('/taxonomy-add-requests', [TaxonomyAddRequestController::class, 'index']);
+                Route::get('/taxonomy-add-requests/options', [TaxonomyAddRequestController::class, 'options']);
+                Route::get('/taxonomy-add-requests/{taxonomyAddRequest}', [TaxonomyAddRequestController::class, 'show'])
+                    ->whereNumber('taxonomyAddRequest');
+                Route::post('/taxonomy-add-requests/{taxonomyAddRequest}/approve', [TaxonomyAddRequestController::class, 'approve'])
+                    ->whereNumber('taxonomyAddRequest');
+                Route::post('/taxonomy-add-requests/{taxonomyAddRequest}/reject', [TaxonomyAddRequestController::class, 'reject'])
+                    ->whereNumber('taxonomyAddRequest');
+            });
+        });
+
         // Website Compliance — queue / assign / review / reports / deployments
         Route::prefix('website-compliance')->middleware('acting_wl_wc_db')->group(function () {
             Route::middleware('hub_can:wc_view_all_change_requests,wc_assign_change_requests,wc_review_change_requests,wc_change_request_status')->group(function () {
@@ -1051,6 +1079,20 @@ Route::middleware('auth:sanctum')->group(function () {
             });
             Route::middleware('hub_can:st_comment_on_tickets')->group(function () {
                 Route::post('/support-tickets/{supportTicket}/comments', [SupportTicketController::class, 'comment']);
+            });
+        });
+
+        // Taxonomy add requests — queue for users with matching Manage capabilities
+        Route::middleware('acting_wl_wc_db')->group(function () {
+            Route::middleware('hub_can:dashboard_manage_types,dashboard_manage_categories,dashboard_manage_tags,gc_manage_content_types,firm_documents_manage_categories')->group(function () {
+                Route::get('/taxonomy-add-requests', [TaxonomyAddRequestController::class, 'index']);
+                Route::get('/taxonomy-add-requests/options', [TaxonomyAddRequestController::class, 'options']);
+                Route::get('/taxonomy-add-requests/{taxonomyAddRequest}', [TaxonomyAddRequestController::class, 'show'])
+                    ->whereNumber('taxonomyAddRequest');
+                Route::post('/taxonomy-add-requests/{taxonomyAddRequest}/approve', [TaxonomyAddRequestController::class, 'approve'])
+                    ->whereNumber('taxonomyAddRequest');
+                Route::post('/taxonomy-add-requests/{taxonomyAddRequest}/reject', [TaxonomyAddRequestController::class, 'reject'])
+                    ->whereNumber('taxonomyAddRequest');
             });
         });
 
