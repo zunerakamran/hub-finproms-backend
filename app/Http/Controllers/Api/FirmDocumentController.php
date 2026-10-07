@@ -65,6 +65,12 @@ class FirmDocumentController extends Controller
                 return $this->actingHubNotFoundOrValidation($e);
             }
 
+            try {
+                $payload['categories'] = $this->whiteLabelDocuments->listCategories($hub);
+            } catch (InvalidArgumentException) {
+                $payload['categories'] = [];
+            }
+
             return response()->json(array_merge($payload, [
                 'target_hub' => $this->targetHubPayload($hub),
                 'acting_on_white_label' => true,
@@ -83,6 +89,13 @@ class FirmDocumentController extends Controller
 
         $library = $this->documents->library($user, $firm, $scope, $hub);
 
+        $categories = \App\Models\FirmDocumentCategory::query()
+            ->orderBy('name')
+            ->get(['id', 'name', 'slug'])
+            ->map(fn (\App\Models\FirmDocumentCategory $category) => $category->toApiArray())
+            ->values()
+            ->all();
+
         return response()->json([
             'firm' => $firm->load('headUser:id,name,email')->toApiArray(),
             'rights' => [
@@ -98,6 +111,7 @@ class FirmDocumentController extends Controller
             'folders' => $library['folders'],
             'documents' => $library['documents'],
             'unfiled_documents' => $library['unfiled_documents'],
+            'categories' => $categories,
             'acting_on_white_label' => false,
         ]);
     }

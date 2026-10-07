@@ -469,6 +469,163 @@ class WhiteLabelFirmDocumentService
         ];
     }
 
+    /**
+     * @return list<array{id: int, name: string, slug: string, usage_count: int}>
+     */
+    public function listCategories(Hub $hub): array
+    {
+        $this->assertTarget($hub);
+
+        return $this->remoteDb->run($hub, function (string $connection) {
+            $schema = DB::connection($connection)->getSchemaBuilder();
+            if (! $schema->hasTable('firm_document_categories')) {
+                return [];
+            }
+
+            $rows = DB::connection($connection)->table('firm_document_categories')
+                ->orderBy('name')
+                ->get(['id', 'name', 'slug']);
+
+            $counts = [];
+            if ($schema->hasTable('firm_documents') && $schema->hasColumn('firm_documents', 'category_id')) {
+                $counts = DB::connection($connection)->table('firm_documents')
+                    ->whereNotNull('category_id')
+                    ->selectRaw('category_id, COUNT(*) as usage_count')
+                    ->groupBy('category_id')
+                    ->pluck('usage_count', 'category_id')
+                    ->all();
+            }
+
+            return $rows->map(fn ($row) => [
+                'id' => (int) $row->id,
+                'name' => (string) $row->name,
+                'slug' => (string) $row->slug,
+                'usage_count' => (int) ($counts[$row->id] ?? 0),
+            ])->values()->all();
+        });
+    }
+
+    /**
+     * @param  array{name: string, slug?: string|null}  $payload
+     * @return array{id: int, name: string, slug: string, usage_count: int}
+     */
+    public function createCategory(Hub $hub, array $payload): array
+    {
+        $this->assertTarget($hub);
+
+        $name = trim((string) ($payload['name'] ?? ''));
+        $slug = trim((string) ($payload['slug'] ?? '')) ?: \Illuminate\Support\Str::slug($name);
+
+        return $this->remoteDb->run($hub, function (string $connection) use ($name, $slug) {
+            $schema = DB::connection($connection)->getSchemaBuilder();
+            if (! $schema->hasTable('firm_document_categories')) {
+                throw new InvalidArgumentException(
+                    'This hub has not been migrated for Firm Document categories yet.'
+                );
+            }
+
+            if (DB::connection($connection)->table('firm_document_categories')->where('name', $name)->exists()) {
+                throw new InvalidArgumentException('That category name is already in use.');
+            }
+            if (DB::connection($connection)->table('firm_document_categories')->where('slug', $slug)->exists()) {
+                throw new InvalidArgumentException('That slug is already in use.');
+            }
+
+            $id = (int) DB::connection($connection)->table('firm_document_categories')->insertGetId([
+                'name' => $name,
+                'slug' => $slug,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            return [
+                'id' => $id,
+                'name' => $name,
+                'slug' => $slug,
+                'usage_count' => 0,
+            ];
+        });
+    }
+
+    /**
+     * @param  array{name: string, slug?: string|null}  $payload
+     * @return array{id: int, name: string, slug: string, usage_count: int}
+     */
+    public function updateCategory(Hub $hub, int $categoryId, array $payload): array
+    {
+        $this->assertTarget($hub);
+
+        $name = trim((string) ($payload['name'] ?? ''));
+        $slug = array_key_exists('slug', $payload) && filled($payload['slug'])
+            ? trim((string) $payload['slug'])
+            : \Illuminate\Support\Str::slug($name);
+
+        return $this->remoteDb->run($hub, function (string $connection) use ($categoryId, $name, $slug) {
+            $row = DB::connection($connection)->table('firm_document_categories')->where('id', $categoryId)->first();
+            if (! $row) {
+                throw new InvalidArgumentException('Category not found on this hub.');
+            }
+
+            if (DB::connection($connection)->table('firm_document_categories')
+                ->where('name', $name)
+                ->where('id', '!=', $categoryId)
+                ->exists()) {
+                throw new InvalidArgumentException('That category name is already in use.');
+            }
+            if (DB::connection($connection)->table('firm_document_categories')
+                ->where('slug', $slug)
+                ->where('id', '!=', $categoryId)
+                ->exists()) {
+                throw new InvalidArgumentException('That slug is already in use.');
+            }
+
+            DB::connection($connection)->table('firm_document_categories')->where('id', $categoryId)->update([
+                'name' => $name,
+                'slug' => $slug,
+                'updated_at' => now(),
+            ]);
+
+            $usage = 0;
+            $schema = DB::connection($connection)->getSchemaBuilder();
+            if ($schema->hasTable('firm_documents') && $schema->hasColumn('firm_documents', 'category_id')) {
+                $usage = (int) DB::connection($connection)->table('firm_documents')
+                    ->where('category_id', $categoryId)
+                    ->count();
+            }
+
+            return [
+                'id' => $categoryId,
+                'name' => $name,
+                'slug' => $slug,
+                'usage_count' => $usage,
+            ];
+        });
+    }
+
+    public function deleteCategory(Hub $hub, int $categoryId): void
+    {
+        $this->assertTarget($hub);
+
+        $this->remoteDb->run($hub, function (string $connection) use ($categoryId) {
+            $row = DB::connection($connection)->table('firm_document_categories')->where('id', $categoryId)->first();
+            if (! $row) {
+                throw new InvalidArgumentException('Category not found on this hub.');
+            }
+
+            $schema = DB::connection($connection)->getSchemaBuilder();
+            if ($schema->hasTable('firm_documents') && $schema->hasColumn('firm_documents', 'category_id')) {
+                $inUse = DB::connection($connection)->table('firm_documents')
+                    ->where('category_id', $categoryId)
+                    ->exists();
+                if ($inUse) {
+                    throw new InvalidArgumentException('Cannot delete a category that is used by firm documents.');
+                }
+            }
+
+            DB::connection($connection)->table('firm_document_categories')->where('id', $categoryId)->delete();
+        });
+    }
+
     public function actorCan(Hub $hub, User $actor, int $firmId, string $right): bool
     {
         if ($this->actorIsHead($hub, $actor, $firmId)) {

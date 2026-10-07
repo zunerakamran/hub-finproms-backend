@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\Concerns\CreatesOnActingWhiteLabelHub;
 use App\Models\FirmDocument;
 use App\Models\FirmDocumentCategory;
 use App\Models\Hub;
@@ -10,18 +11,23 @@ use App\Models\User;
 use App\Services\ActingHubService;
 use App\Services\FirmDocumentAccessService;
 use App\Services\HubService;
+use App\Services\WhiteLabelFirmDocumentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class FirmDocumentCategoryController extends Controller
 {
+    use CreatesOnActingWhiteLabelHub;
+
     public function __construct(
         private readonly HubService $hubs,
         private readonly ActingHubService $actingHubs,
         private readonly FirmDocumentAccessService $access,
+        private readonly WhiteLabelFirmDocumentService $whiteLabelDocuments,
     ) {}
 
     private function capabilityHub(?User $user): Hub
@@ -35,7 +41,7 @@ class FirmDocumentCategoryController extends Controller
 
     private function assertCanManage(User $user, Hub $hub): void
     {
-        if (! $this->access->functionalityEnabled($hub)) {
+        if (! $hub->hasFirmDocumentsFunctionality()) {
             throw new HttpException(403, 'Firm documents are disabled for this hub. Enable Functionalities → Firm documents first.');
         }
 
@@ -48,14 +54,22 @@ class FirmDocumentCategoryController extends Controller
     {
         /** @var User $user */
         $user = $request->user();
-        $hub = $this->capabilityHub($user);
 
-        // List is available to anyone who can use firm documents (upload dropdown).
-        $summary = $this->access->effectiveRightsSummary($user, $hub);
-        if (! $summary['can_view'] && ! $summary['can_add'] && ! $summary['can_manage_categories']) {
-            throw new HttpException(403, 'You do not have permission to view firm document categories.');
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            try {
+                $categories = $this->whiteLabelDocuments->listCategories($hub);
+            } catch (InvalidArgumentException $e) {
+                return $this->actingHubNotFoundOrValidation($e);
+            }
+
+            return response()->json([
+                'categories' => $categories,
+                'target_hub' => $this->targetHubPayload($hub),
+                'acting_on_white_label' => true,
+            ]);
         }
 
+        // Dropdown list: any authenticated user (same pattern as GC content types).
         $categories = FirmDocumentCategory::query()
             ->orderBy('name')
             ->get(['id', 'name', 'slug']);
@@ -70,6 +84,7 @@ class FirmDocumentCategoryController extends Controller
             'categories' => $categories->map(fn (FirmDocumentCategory $category) => $category->toApiArray(
                 (int) ($counts[$category->id] ?? 0)
             ))->values(),
+            'acting_on_white_label' => false,
         ]);
     }
 
@@ -84,6 +99,29 @@ class FirmDocumentCategoryController extends Controller
             'name' => ['required', 'string', 'max:100'],
             'slug' => ['nullable', 'string', 'max:100'],
         ]);
+
+        if ($remote = $this->actingWhiteLabelHub($request)) {
+            try {
+                $category = $this->whiteLabelDocuments->createCategory($remote, $validated);
+            } catch (InvalidArgumentException $e) {
+                $msg = $e->getMessage();
+                if (str_contains($msg, 'name is already')) {
+                    throw ValidationException::withMessages(['name' => $msg]);
+                }
+                if (str_contains($msg, 'slug is already')) {
+                    throw ValidationException::withMessages(['slug' => $msg]);
+                }
+
+                return $this->actingHubNotFoundOrValidation($e);
+            }
+
+            return response()->json([
+                'message' => 'Category created successfully.',
+                'category' => $category,
+                'target_hub' => $this->targetHubPayload($remote),
+                'acting_on_white_label' => true,
+            ], 201);
+        }
 
         $name = trim($validated['name']);
         $slug = trim((string) ($validated['slug'] ?? '')) ?: Str::slug($name);
@@ -107,6 +145,7 @@ class FirmDocumentCategoryController extends Controller
         return response()->json([
             'message' => 'Category created successfully.',
             'category' => $category->toApiArray(),
+            'acting_on_white_label' => false,
         ], 201);
     }
 
@@ -117,12 +156,35 @@ class FirmDocumentCategoryController extends Controller
         $hub = $this->capabilityHub($user);
         $this->assertCanManage($user, $hub);
 
-        $model = FirmDocumentCategory::query()->findOrFail($firmDocumentCategory);
-
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:100'],
             'slug' => ['nullable', 'string', 'max:100'],
         ]);
+
+        if ($remote = $this->actingWhiteLabelHub($request)) {
+            try {
+                $category = $this->whiteLabelDocuments->updateCategory($remote, $firmDocumentCategory, $validated);
+            } catch (InvalidArgumentException $e) {
+                $msg = $e->getMessage();
+                if (str_contains($msg, 'name is already')) {
+                    throw ValidationException::withMessages(['name' => $msg]);
+                }
+                if (str_contains($msg, 'slug is already')) {
+                    throw ValidationException::withMessages(['slug' => $msg]);
+                }
+
+                return $this->actingHubNotFoundOrValidation($e);
+            }
+
+            return response()->json([
+                'message' => 'Category updated successfully.',
+                'category' => $category,
+                'target_hub' => $this->targetHubPayload($remote),
+                'acting_on_white_label' => true,
+            ]);
+        }
+
+        $model = FirmDocumentCategory::query()->findOrFail($firmDocumentCategory);
 
         $newName = trim($validated['name']);
         $slug = array_key_exists('slug', $validated) && filled($validated['slug'])
@@ -154,6 +216,7 @@ class FirmDocumentCategoryController extends Controller
         return response()->json([
             'message' => 'Category updated successfully.',
             'category' => $model->fresh()->toApiArray(),
+            'acting_on_white_label' => false,
         ]);
     }
 
@@ -163,6 +226,24 @@ class FirmDocumentCategoryController extends Controller
         $user = $request->user();
         $hub = $this->capabilityHub($user);
         $this->assertCanManage($user, $hub);
+
+        if ($remote = $this->actingWhiteLabelHub($request)) {
+            try {
+                $this->whiteLabelDocuments->deleteCategory($remote, $firmDocumentCategory);
+            } catch (InvalidArgumentException $e) {
+                if (str_contains($e->getMessage(), 'Cannot delete')) {
+                    return response()->json(['message' => $e->getMessage()], 422);
+                }
+
+                return $this->actingHubNotFoundOrValidation($e);
+            }
+
+            return response()->json([
+                'message' => 'Category deleted successfully.',
+                'target_hub' => $this->targetHubPayload($remote),
+                'acting_on_white_label' => true,
+            ]);
+        }
 
         $model = FirmDocumentCategory::query()->findOrFail($firmDocumentCategory);
         $inUse = FirmDocument::query()->where('category_id', $model->id)->exists();
@@ -177,6 +258,7 @@ class FirmDocumentCategoryController extends Controller
 
         return response()->json([
             'message' => 'Category deleted successfully.',
+            'acting_on_white_label' => false,
         ]);
     }
 }
