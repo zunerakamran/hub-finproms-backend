@@ -70,8 +70,8 @@ return [
     |
     */
 
-    // Minutes until personal access tokens expire (null = never). Default 24h.
-    'expiration' => ($v = env('SANCTUM_EXPIRATION', 1440)) === '' || $v === null ? null : (int) $v,
+    // Minutes until personal access tokens expire (null = never). Default 7 days.
+    'expiration' => ($v = env('SANCTUM_EXPIRATION', 10080)) === '' || $v === null ? null : (int) $v,
 
     /*
     |--------------------------------------------------------------------------

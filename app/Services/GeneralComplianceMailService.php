@@ -95,13 +95,14 @@ class GeneralComplianceMailService
         User $subscriber,
         string $status,
         ?string $feedback,
-        string $reviewerName
+        string $reviewerName,
+        ?string $futureFeedback = null
     ): void {
         $hub = $this->hubs->current();
         $statusMessage = match ($status) {
             GeneralComplianceRequest::STATUS_APPROVED => 'Your submission has been reviewed and approved.',
-            GeneralComplianceRequest::STATUS_REJECTED => 'Your submission was not approved. Please review the feedback and resubmit if needed.',
-            GeneralComplianceRequest::STATUS_APPROVED_WITH_FEEDBACK => 'Your submission was approved subject to the feedback below. Please address the notes before publishing.',
+            GeneralComplianceRequest::STATUS_REJECTED => 'Your submission was not approved. Please review the remedial feedback and resubmit if needed.',
+            GeneralComplianceRequest::STATUS_APPROVED_WITH_FEEDBACK => 'Your submission was approved subject to the remedial feedback below. Please address the notes before publishing.',
             default => 'Your general compliance request status has been updated.',
         };
 
@@ -119,7 +120,10 @@ class GeneralComplianceMailService
             ['label' => 'Decision', 'value' => $status],
         ];
         if (filled($feedback)) {
-            $fields[] = ['label' => 'Feedback', 'value' => $feedback];
+            $fields[] = ['label' => 'Remedial Feedback/notes', 'value' => $feedback];
+        }
+        if (filled($futureFeedback)) {
+            $fields[] = ['label' => 'Future Feedback/notes', 'value' => $futureFeedback];
         }
 
         try {

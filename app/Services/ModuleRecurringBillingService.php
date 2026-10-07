@@ -537,33 +537,35 @@ class ModuleRecurringBillingService
         $hubs = Hub::query()->where('is_active', true)->get();
         foreach ($hubs as $hub) {
             $graceDay = $hub->billingGraceDay();
-            if ((int) $on->day < $graceDay) {
-                continue;
+            $renewDay = $hub->advisorBillingRenewDay();
+
+            // Seat suspensions: only on/after the hub's grace day of the month.
+            if ((int) $on->day >= $graceDay) {
+                $recurring = HubModuleRecurringBilling::query()
+                    ->where('hub_id', $hub->id)
+                    ->where('status', HubModuleRecurringBilling::STATUS_UNPAID)
+                    ->whereDate('due_on', '<=', $on->toDateString())
+                    ->whereIn('module_key', self::SEAT_MODULE_KEYS)
+                    ->get();
+
+                foreach ($recurring as $billing) {
+                    $userIds = ModuleBillingBatchUser::query()
+                        ->where('module_billing_batch_id', $billing->module_billing_batch_id)
+                        ->pluck('user_id');
+                    $count = (int) $this->oneTimeBilling->onHubDatabase($hub, function () use ($userIds) {
+                        return User::query()
+                            ->whereIn('id', $userIds)
+                            ->where('is_suspended', false)
+                            ->where('is_discontinued', false)
+                            ->update(['is_suspended' => true]);
+                    });
+                    $suspended += $count;
+                }
             }
 
-            // Unpaid recurring seat invoices due on/before today → suspend cohort users still unpaid.
-            $recurring = HubModuleRecurringBilling::query()
-                ->where('hub_id', $hub->id)
-                ->where('status', HubModuleRecurringBilling::STATUS_UNPAID)
-                ->whereDate('due_on', '<=', $on->toDateString())
-                ->whereIn('module_key', self::SEAT_MODULE_KEYS)
-                ->get();
-
-            foreach ($recurring as $billing) {
-                $userIds = ModuleBillingBatchUser::query()
-                    ->where('module_billing_batch_id', $billing->module_billing_batch_id)
-                    ->pluck('user_id');
-                $count = (int) $this->oneTimeBilling->onHubDatabase($hub, function () use ($userIds) {
-                    return User::query()
-                        ->whereIn('id', $userIds)
-                        ->where('is_suspended', false)
-                        ->where('is_discontinued', false)
-                        ->update(['is_suspended' => true]);
-                });
-                $suspended += $count;
-            }
-
-            // Unpaid one-time module invoices past grace → turn module off on checklist.
+            // Unpaid one-time module invoices past their due+grace window → turn module off.
+            // Grace is relative to each invoice's due date (renew-day due), NOT "calendar day
+            // of month >= grace day", so enabling a module mid-month does not immediately disable it.
             $oneTime = \App\Models\HubModuleBilling::query()
                 ->where('hub_id', $hub->id)
                 ->where('status', \App\Models\HubModuleBilling::STATUS_UNPAID)
@@ -577,10 +579,29 @@ class ModuleRecurringBillingService
             $checklist = $hub->resolvedChecklist();
             $changed = false;
             foreach ($oneTime as $billing) {
-                // Only enforce when invoice is due (issued before/on grace window).
                 $invoice = $billing->invoice;
-                $due = $invoice?->due_on ? Carbon::parse($invoice->due_on) : ($invoice?->issued_at ? Carbon::parse($invoice->issued_at) : null);
-                if ($due && $due->gt($on)) {
+                if (! $invoice) {
+                    continue;
+                }
+
+                // Older enables stored due_on = enable day. Move those onto the next renew day
+                // so grace cannot uncheck modules before the renew cycle they belong to.
+                if ($invoice->due_on) {
+                    $rawDue = Carbon::parse($invoice->due_on)->startOfDay();
+                    if ((int) $rawDue->day !== $renewDay) {
+                        $corrected = $hub->nextModuleInvoiceDueDate($on);
+                        $invoice->forceFill(['due_on' => $corrected->toDateString()])->save();
+                    }
+                }
+
+                $due = $invoice->due_on
+                    ? Carbon::parse($invoice->due_on)->startOfDay()
+                    : ($invoice->issued_at ? Carbon::parse($invoice->issued_at)->startOfDay() : null);
+                if (! $due || $due->gt($on)) {
+                    continue;
+                }
+                $graceDate = $this->graceDateForInvoiceDue($due, $renewDay, $graceDay);
+                if ($on->lt($graceDate)) {
                     continue;
                 }
                 if (! empty($checklist[$billing->module_key])) {
@@ -596,5 +617,20 @@ class ModuleRecurringBillingService
         }
 
         return ['suspended_users' => $suspended, 'disabled_modules' => $disabled];
+    }
+
+    /**
+     * Grace cutoff for a one-time invoice due date.
+     * Normal case (due on renew day): grace day in that same month.
+     * Mis-dated mid-month due: allow the renew→grace gap after the due date.
+     */
+    private function graceDateForInvoiceDue(Carbon $due, int $renewDay, int $graceDay): Carbon
+    {
+        $graceInDueMonth = $due->copy()->day(min($graceDay, $due->daysInMonth))->startOfDay();
+        if ($due->lte($graceInDueMonth)) {
+            return $graceInDueMonth;
+        }
+
+        return $due->copy()->addDays(max(0, $graceDay - $renewDay))->startOfDay();
     }
 }

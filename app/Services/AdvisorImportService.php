@@ -70,7 +70,7 @@ class AdvisorImportService
 
         if ($rows === []) {
             throw new RuntimeException(
-                'No user rows were found. Make sure the first non-empty row contains headers like name, email, password, role, firm, modules.'
+                'No user rows were found. Make sure the first non-empty row contains headers like name, email, role, firm, modules.'
             );
         }
 
@@ -752,7 +752,7 @@ class AdvisorImportService
 
         $sheetRows = $xlsx->rows();
         if ($sheetRows === []) {
-            throw new RuntimeException('Excel file is empty. Include a header row: name, email, password, role, firm, modules');
+            throw new RuntimeException('Excel file is empty. Include a header row: name, email, role, firm, modules');
         }
 
         $headerRow = null;
@@ -765,7 +765,7 @@ class AdvisorImportService
         }
 
         if ($headerRow === null) {
-            throw new RuntimeException('Excel file is empty. Include a header row: name, email, password, role, firm, modules');
+            throw new RuntimeException('Excel file is empty. Include a header row: name, email, role, firm, modules');
         }
 
         $header = array_map(
@@ -799,7 +799,7 @@ class AdvisorImportService
 
         if (! in_array('email', $header, true) && ! in_array('email_address', $header, true)) {
             if (count($rows) === 0) {
-                throw new RuntimeException('Excel sheet must include an email column. Expected headers: name, email, password, role, firm, modules');
+                throw new RuntimeException('Excel sheet must include an email column. Expected headers: name, email, role, firm, modules');
             }
         }
 

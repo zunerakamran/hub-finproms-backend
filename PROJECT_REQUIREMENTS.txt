@@ -956,7 +956,7 @@ Notes:
   - gc_submit_request — submit / resubmit / confirm-feedback (description + files)
   - gc_view_own_requests — own request history & detail
   - gc_assign_requests — assign / unassign reviewers
-  - gc_review_requests — set status + feedback
+  - gc_review_requests — set status + Remedial Feedback/notes + Future Feedback/notes
   - gc_view_all_requests — full hub queue
   - gc_view_reports — reports, CSV export, approver workload & advisor charts
   - All roles available in the matrix; defaults OFF until Power Admin enables
@@ -1415,7 +1415,7 @@ SECURITY HARDENING (phase 1 — 2026-10-04)
 [x] Encrypt platform Stripe secrets in settings (Setting::getSecret/setSecret)
 [x] Stripe webhooks fail closed when no webhook secret / missing signature
 [x] SecurityHeaders middleware (HSTS, nosniff, CSP for JSON APIs; embed exempt)
-[x] Sanctum token expiry default 24h (SANCTUM_EXPIRATION)
+[x] Sanctum token expiry default 7d (SANCTUM_EXPIRATION); session idle 7d (SESSION_LIFETIME)
 [x] Outbound TLS verify on by default (HTTP_TLS_VERIFY); cPanel + embed proxy
 [x] Scheduler auth: X-Scheduler-Key header + hash_equals (query key still works)
 [x] Activity log redacts api_key / cpanel_* / hub stripe secrets

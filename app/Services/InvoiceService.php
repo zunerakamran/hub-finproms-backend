@@ -148,7 +148,11 @@ class InvoiceService
             'billing_name' => $user->name,
             'billing_email' => $user->email,
             'status' => $billing->status === HubModuleBilling::STATUS_PAID ? 'paid' : 'unpaid',
-            'due_on' => now()->toDateString(),
+            // One-time module charges are collected on the hub renew day (not on enable day),
+            // so mid-month enables are not treated as overdue / grace-disabled immediately.
+            'due_on' => $billing->hub
+                ? $billing->hub->nextModuleInvoiceDueDate()->toDateString()
+                : now()->toDateString(),
             'line_items' => [[
                 'label' => $qty > 1
                     ? "{$moduleLabel} — {$qty} {$unitLabel} × £".number_format($lineUnit, 2)

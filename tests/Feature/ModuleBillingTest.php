@@ -123,6 +123,10 @@ class ModuleBillingTest extends TestCase
             'module_key' => 'module_social_media_compliance',
             'status' => 'unpaid',
         ]);
+        $this->assertSame(
+            $hub->nextModuleInvoiceDueDate()->toDateString(),
+            Invoice::query()->find($created->first()['id'])->due_on?->toDateString()
+        );
 
         // Idempotent — enabling again does not duplicate.
         $again = $this->putJson('/api/power-admin/modules?hub_id='.$hub->id, [
@@ -133,6 +137,66 @@ class ModuleBillingTest extends TestCase
         ]);
         $again->assertOk();
         $this->assertSame([], $again->json('module_invoices'));
+    }
+
+    public function test_grace_penalties_do_not_uncheck_modules_before_renew_due_date(): void
+    {
+        $hub = Hub::query()->create([
+            'name' => 'WL Hub',
+            'slug' => 'wl-grace-mid-month',
+            'type' => Hub::TYPE_WHITE_LABEL,
+            'is_active' => true,
+            'advisor_billing_renew_day' => 1,
+            'billing_grace_day' => 4,
+            'checklist' => array_merge(Hub::defaultChecklist(Hub::TYPE_WHITE_LABEL), [
+                'charge_amount_per_module' => true,
+                'charge_recurring_per_module' => true,
+                'module_social_media_template_library' => true,
+                'module_social_media_compliance' => true,
+            ]),
+        ]);
+
+        $admin = User::factory()->powerAdmin()->create();
+        app(ModulePricingService::class)->seedDefaultsIfEmpty();
+
+        // Simulate a mid-month enable (7 Oct) with a legacy due_on = today invoice.
+        $on = \Carbon\Carbon::parse('2026-10-07')->startOfDay();
+        $billing = \App\Models\HubModuleBilling::query()->create([
+            'hub_id' => $hub->id,
+            'module_key' => 'module_social_media_compliance',
+            'billed_user_id' => $admin->id,
+            'amount' => 5000,
+            'currency' => 'gbp',
+            'status' => \App\Models\HubModuleBilling::STATUS_UNPAID,
+            'payment_status' => \App\Models\HubModuleBilling::STATUS_UNPAID,
+            'meta' => ['module_enable_invoice' => true],
+        ]);
+        Invoice::query()->create([
+            'invoice_number' => 'INV-TEST-GRACE-001',
+            'user_id' => $admin->id,
+            'type' => Invoice::TYPE_MODULE_BILLING,
+            'types' => Invoice::TYPES_ONE_TIME,
+            'hub_module_billing_id' => $billing->id,
+            'description' => 'Module (one time) — SMC',
+            'amount' => 5000,
+            'credits' => 0,
+            'currency' => 'gbp',
+            'billing_name' => $admin->name,
+            'billing_email' => $admin->email,
+            'status' => 'unpaid',
+            'due_on' => $on->toDateString(),
+            'issued_at' => $on,
+        ]);
+
+        $result = app(\App\Services\ModuleRecurringBillingService::class)->enforceGracePenalties($on);
+
+        $this->assertSame(0, $result['disabled_modules']);
+        $hub->refresh();
+        $this->assertTrue((bool) $hub->resolvedChecklist()['module_social_media_compliance']);
+        $this->assertSame(
+            '2026-11-01',
+            Invoice::query()->where('hub_module_billing_id', $billing->id)->value('due_on')
+        );
     }
 
     public function test_zero_pound_module_still_creates_paid_invoice_on_enable(): void

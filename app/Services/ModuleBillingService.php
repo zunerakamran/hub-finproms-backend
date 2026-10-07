@@ -373,7 +373,8 @@ class ModuleBillingService
                     number_format($unitAmount, 2),
                     $hub->name
                 ),
-                'due_on' => now()->toDateString(),
+                // Keep renew-day due (createForModuleBilling already sets this; reaffirm after description rewrite).
+                'due_on' => $hub->nextModuleInvoiceDueDate()->toDateString(),
             ])->save();
 
             return $invoice->fresh();

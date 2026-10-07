@@ -168,7 +168,9 @@ class GeneralComplianceRequest extends Model
             // Supporting files live on versions[].supporting_files for version history UI —
             // do not render a separate request-level supporting-files box.
             'status' => $version?->status ?? self::STATUS_PENDING,
+            // `feedback` = Remedial Feedback/notes (legacy key kept for clients).
             'feedback' => $version?->feedback,
+            'future_feedback' => $version?->future_feedback,
             'reviewed_by' => $version?->reviewed_by,
             'reviewed_at' => optional($version?->reviewed_at)?->toIso8601String(),
             'created_at' => optional($this->created_at)?->toIso8601String(),

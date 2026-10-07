@@ -126,6 +126,7 @@ class GeneralComplianceService
                 'submitted_at' => now(),
                 'status' => GeneralComplianceRequest::STATUS_PENDING,
                 'feedback' => '',
+                'future_feedback' => '',
                 'on_behalf_by_user_id' => $onBehalfById,
             ]);
 
@@ -263,6 +264,7 @@ class GeneralComplianceService
                 'submitted_at' => now(),
                 'status' => GeneralComplianceRequest::STATUS_PENDING,
                 'feedback' => '',
+                'future_feedback' => '',
                 'on_behalf_by_user_id' => $onBehalfById,
             ]);
 
@@ -384,7 +386,8 @@ class GeneralComplianceService
         $hasNewFiles = $hasNewAttachments || $hasNewSupportingFiles;
 
         $newVersion = (int) $compliance->current_version + 1;
-        $feedback = $hasNewFiles ? $current->feedback : '';
+        $feedback = $hasNewFiles ? (string) ($current->feedback ?? '') : '';
+        $futureFeedback = $hasNewFiles ? (string) ($current->future_feedback ?? '') : '';
 
         DB::transaction(function () use (
             $compliance,
@@ -395,7 +398,8 @@ class GeneralComplianceService
             $supportingFiles,
             $hasNewAttachments,
             $hasNewSupportingFiles,
-            $feedback
+            $feedback,
+            $futureFeedback
         ) {
             $onBehalfById = $this->actingAdvisors->onBehalfById(
                 $user,
@@ -416,6 +420,7 @@ class GeneralComplianceService
                 'submitted_at' => now(),
                 'status' => GeneralComplianceRequest::STATUS_APPROVED,
                 'feedback' => $feedback,
+                'future_feedback' => $futureFeedback,
                 'reviewed_by' => $current->reviewed_by,
                 'reviewed_at' => $current->reviewed_at,
                 'on_behalf_by_user_id' => $onBehalfById,
@@ -649,7 +654,7 @@ class GeneralComplianceService
     }
 
     /**
-     * @param  array{status: string, feedback?: ?string, supporting_files?: list<UploadedFile>}  $data
+     * @param  array{status: string, feedback?: ?string, future_feedback?: ?string, supporting_files?: list<UploadedFile>}  $data
      */
     public function review(
         Hub $hub,
@@ -687,6 +692,7 @@ class GeneralComplianceService
         }
 
         $feedback = trim((string) ($data['feedback'] ?? ''));
+        $futureFeedback = trim((string) ($data['future_feedback'] ?? ''));
         $supportingFiles = $this->supportingFilesFromData($data);
         ComplianceSupportingFiles::assertWithinLimits($supportingFiles);
 
@@ -702,6 +708,7 @@ class GeneralComplianceService
         $version->update([
             'status' => $status,
             'feedback' => $feedback,
+            'future_feedback' => $futureFeedback,
             'reviewed_by' => $actor->name,
             'reviewed_at' => now(),
         ]);
@@ -734,7 +741,8 @@ class GeneralComplianceService
                 $compliance->user,
                 $status,
                 $feedback,
-                $actor->name
+                $actor->name,
+                $futureFeedback
             );
         }
 
@@ -752,6 +760,7 @@ class GeneralComplianceService
                 'status' => $status,
                 'version' => $compliance->current_version,
                 'has_feedback' => $feedback !== '',
+                'has_future_feedback' => $futureFeedback !== '',
                 'supporting_file_count' => count($supportingFiles),
             ],
         ]);
@@ -769,6 +778,8 @@ class GeneralComplianceService
             'metadata' => [
                 'has_feedback' => $feedback !== '',
                 'feedback' => $feedback !== '' ? $feedback : null,
+                'has_future_feedback' => $futureFeedback !== '',
+                'future_feedback' => $futureFeedback !== '' ? $futureFeedback : null,
                 'supporting_file_count' => count($supportingFiles),
             ],
         ]);
@@ -839,6 +850,7 @@ class GeneralComplianceService
                 'submitted_at' => $current->submitted_at ?? now(),
                 'status' => $status,
                 'feedback' => $comment,
+                'future_feedback' => (string) ($current->future_feedback ?? ''),
                 'reviewed_by' => $actor->name,
                 'reviewed_at' => now(),
             ]);
@@ -874,7 +886,8 @@ class GeneralComplianceService
                 $compliance->user,
                 $status,
                 $comment,
-                $actor->name
+                $actor->name,
+                $compliance->currentVersionRow?->future_feedback
             );
         }
 
@@ -1061,6 +1074,7 @@ class GeneralComplianceService
                 'assigned_date' => optional($row->assigned_date)?->toDateTimeString(),
                 'reviewed_by' => $row->currentVersionRow?->reviewed_by,
                 'feedback' => $row->currentVersionRow?->feedback,
+                'future_feedback' => $row->currentVersionRow?->future_feedback,
                 'submission_date' => optional($row->submission_date)?->toDateTimeString(),
                 'reviewed_at' => optional($row->currentVersionRow?->reviewed_at)?->toDateTimeString(),
                 'audit_trail' => $auditTrail,

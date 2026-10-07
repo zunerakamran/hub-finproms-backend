@@ -1683,6 +1683,24 @@ class Hub extends Model
     }
 
     /**
+     * Next renew-day date when one-time module invoices become due / collectible.
+     * Before this month's renew day → that date; on/after renew day → next month.
+     * (On the renew day itself, due is today so renew-day card collection can charge.)
+     */
+    public function nextModuleInvoiceDueDate(?\Carbon\Carbon $on = null): \Carbon\Carbon
+    {
+        $on = ($on ?? now())->copy()->startOfDay();
+        $day = $this->advisorBillingRenewDay();
+        $due = $on->copy();
+
+        if ($due->day > $day) {
+            $due->addMonthNoOverflow();
+        }
+
+        return $due->day(min($day, $due->daysInMonth))->startOfDay();
+    }
+
+    /**
      * White-labelled hub Excel subscribers: null subscriber_credits = unlimited.
      */
     public function givesUnlimitedSubscriberCredits(): bool

@@ -22,6 +22,7 @@ class GeneralComplianceRequestVersion extends Model
         'submitted_at',
         'status',
         'feedback',
+        'future_feedback',
         'reviewed_by',
         'reviewed_at',
         'on_behalf_by_user_id',
@@ -103,7 +104,9 @@ class GeneralComplianceRequestVersion extends Model
             'submitted_by' => $this->submitted_by,
             'submitted_at' => optional($this->submitted_at)?->toIso8601String(),
             'status' => $this->status,
+            // `feedback` = Remedial Feedback/notes (legacy key kept for clients).
             'feedback' => $this->feedback,
+            'future_feedback' => $this->future_feedback,
             'reviewed_by' => $this->reviewed_by,
             'reviewed_at' => optional($this->reviewed_at)?->toIso8601String(),
         ];

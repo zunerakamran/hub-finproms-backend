@@ -49,8 +49,8 @@ class AdvisorImportXlsxTemplate
         }
 
         $importRows = [
-            ['name', 'email', 'password', 'role', 'firm', 'modules'],
-            ['User', 'user@example.com', '', $sampleRole, $sampleFirm, $sampleModules],
+            ['name', 'email', 'role', 'firm', 'modules'],
+            ['User', 'user@example.com', $sampleRole, $sampleFirm, $sampleModules],
         ];
 
         $listRows = [['role', 'firm', 'modules_package']];
@@ -159,25 +159,27 @@ class AdvisorImportXlsxTemplate
         $sheetData = $this->sheetDataXml($rows, boldHeader: true);
 
         // showDropDown="0" means show the arrow (OOXML inverted flag).
+        // Columns: A=name, B=email, C=role, D=firm, E=modules (password is not in the template;
+        // import generates a temporary password when none is provided).
         // Modules: each list entry is a dependency-valid package (one or many modules).
         $validations = '<dataValidations count="3">'
             .'<dataValidation type="list" allowBlank="1" showDropDown="0" showErrorMessage="1"'
             .' errorStyle="stop" errorTitle="Invalid role"'
             .' error="Select a role from the list. Power Admin and FinProms Admin cannot be imported."'
-            .' sqref="D2:D1048576">'
+            .' sqref="C2:C1048576">'
             .'<formula1>'.$this->esc($roleFormula).'</formula1>'
             .'</dataValidation>'
             .'<dataValidation type="list" allowBlank="1" showDropDown="0" showErrorMessage="1"'
             .' errorStyle="stop" errorTitle="Invalid firm"'
             .' error="Select a firm that already exists on this hub."'
-            .' sqref="E2:E1048576">'
+            .' sqref="D2:D1048576">'
             .'<formula1>'.$this->esc($firmFormula).'</formula1>'
             .'</dataValidation>'
             .'<dataValidation type="list" allowBlank="1" showDropDown="0" showErrorMessage="0"'
             .' promptTitle="Modules (multi-select packages)"'
             .' prompt="Pick a package from the list (includes multi-module options that respect dependencies). Leave blank for base hub only. Shared / White Label Hub is always assigned."'
             .' showInputMessage="1"'
-            .' sqref="F2:F1048576">'
+            .' sqref="E2:E1048576">'
             .'<formula1>'.$this->esc($moduleFormula).'</formula1>'
             .'</dataValidation>'
             .'</dataValidations>';

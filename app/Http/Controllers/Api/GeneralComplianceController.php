@@ -285,6 +285,7 @@ class GeneralComplianceController extends Controller
         $validated = $request->validate(array_merge([
             'status' => ['required', 'string', 'in:'.implode(',', GeneralComplianceRequest::STATUSES)],
             'feedback' => ['nullable', 'string', 'max:10000'],
+            'future_feedback' => ['nullable', 'string', 'max:10000'],
         ], ComplianceSupportingFiles::optionalUploadRules()));
 
         $validated['supporting_files'] = ComplianceSupportingFiles::fromRequest($request);
@@ -381,7 +382,7 @@ class GeneralComplianceController extends Controller
             'Status',
             'Assigned To', 'Assigned To Email', 'Assigned To Role',
             'Assigned By', 'Assigned By Email', 'Assigned By Role', 'Assigned Date',
-            'Reviewed By', 'Feedback',
+            'Reviewed By', 'Remedial Feedback/notes', 'Future Feedback/notes',
             'Submission Date', 'Reviewed At',
             'Audit Trail',
         ];
@@ -414,6 +415,7 @@ class GeneralComplianceController extends Controller
                     DateFormat::dateTime($row['assigned_date'] ?? null),
                     $row['reviewed_by'],
                     $row['feedback'],
+                    $row['future_feedback'] ?? '',
                     DateFormat::dateTime($row['submission_date'] ?? null),
                     DateFormat::dateTime($row['reviewed_at'] ?? null),
                     $row['audit_trail_summary'] ?? '',
