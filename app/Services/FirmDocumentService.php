@@ -6,6 +6,7 @@ use App\Models\Firm;
 use App\Models\FirmDocument;
 use App\Models\FirmDocumentAttachment;
 use App\Models\FirmDocumentCategory;
+use App\Models\FirmDocumentFirmRight;
 use App\Models\FirmDocumentFolder;
 use App\Models\FirmDocumentMemberRight;
 use App\Models\Hub;
@@ -106,9 +107,54 @@ class FirmDocumentService
 
         $unfiled = ($docsByFolder->get('none') ?? collect())->values()->all();
 
+        // Non-central firms also see Central / Network documents shared to them.
+        $sharedFolder = null;
+        if (! $firm->isCentral()) {
+            $sharedIds = $this->access->sharedCentralDocumentIdsForFirm($firm);
+            if ($sharedIds !== []) {
+                $sharedQuery = FirmDocument::query()
+                    ->with(['attachments', 'uploader:id,name,email', 'folder:id,name,parent_id', 'category:id,name,slug', 'firm:id,name,is_central'])
+                    ->whereIn('id', $sharedIds)
+                    ->orderBy('title')
+                    ->orderBy('id');
+
+                if ($scope === 'archived') {
+                    $sharedQuery->whereNotNull('archived_at');
+                } elseif ($scope !== 'all') {
+                    $sharedQuery->whereNull('archived_at');
+                }
+
+                $sharedDocs = $sharedQuery->get()->map(function (FirmDocument $doc) use ($actor, $firm, $hub) {
+                    $payload = $doc->toApiArray($this->access->documentRightsFor($actor, $firm, $doc, $hub));
+                    $payload['shared_from'] = [
+                        'firm_id' => (int) $doc->firm_id,
+                        'firm_name' => $doc->firm?->name ?? Firm::CENTRAL_DEFAULT_NAME,
+                        'is_central' => true,
+                    ];
+
+                    return $payload;
+                })->values()->all();
+
+                if ($sharedDocs !== []) {
+                    $sharedFolder = [
+                        'id' => -1,
+                        'firm_id' => (int) $firm->id,
+                        'parent_id' => null,
+                        'name' => 'Shared from '.Firm::CENTRAL_DEFAULT_NAME,
+                        'is_shared_bucket' => true,
+                        'children' => [],
+                        'documents' => $sharedDocs,
+                        'document_count' => count($sharedDocs),
+                    ];
+                    $tree = array_merge([$sharedFolder], $tree);
+                    $serialized = $serialized->merge($sharedDocs);
+                }
+            }
+        }
+
         return [
             'folders' => $tree,
-            'documents' => $serialized->all(),
+            'documents' => $serialized->values()->all(),
             'unfiled_documents' => $unfiled,
         ];
     }
@@ -384,18 +430,53 @@ class FirmDocumentService
     }
 
     /**
-     * @return list<array<string, mixed>>
+     * Access-rights payload for the key-icon popup.
+     * Central / Network documents → firm rows; other firms → member rows.
+     *
+     * @return array{mode: string, members: list<array<string, mixed>>, firms: list<array<string, mixed>>}
      */
-    public function listDocumentMemberRights(User $actor, Firm $firm, FirmDocument $document, ?Hub $hub = null): array
+    public function listDocumentAccessRights(User $actor, Firm $firm, FirmDocument $document, ?Hub $hub = null): array
     {
-        $this->assertCan($actor, $firm, FirmDocumentAccessService::RIGHT_MANAGE_MEMBER_RIGHTS, $hub);
-
         if ((int) $document->firm_id !== (int) $firm->id) {
             throw ValidationException::withMessages([
                 'document_id' => 'Document does not belong to this firm.',
             ]);
         }
 
+        if ($firm->isCentral()) {
+            if (! $this->access->canManageFirmAccess($actor, $firm, $hub)) {
+                throw new HttpException(403, 'You do not have permission to manage firm access for Central / Network documents.');
+            }
+
+            return [
+                'mode' => 'firms',
+                'members' => [],
+                'firms' => $this->listDocumentFirmRights($document),
+            ];
+        }
+
+        $this->assertCan($actor, $firm, FirmDocumentAccessService::RIGHT_MANAGE_MEMBER_RIGHTS, $hub);
+
+        return [
+            'mode' => 'members',
+            'members' => $this->listDocumentMemberRightsRows($firm, $document),
+            'firms' => [],
+        ];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function listDocumentMemberRights(User $actor, Firm $firm, FirmDocument $document, ?Hub $hub = null): array
+    {
+        return $this->listDocumentAccessRights($actor, $firm, $document, $hub)['members'];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function listDocumentMemberRightsRows(Firm $firm, FirmDocument $document): array
+    {
         $rows = FirmDocumentMemberRight::query()
             ->with('user:id,name,email')
             ->where('firm_document_id', $document->id)
@@ -429,6 +510,150 @@ class FirmDocumentService
     }
 
     /**
+     * @return list<array<string, mixed>>
+     */
+    private function listDocumentFirmRights(FirmDocument $document): array
+    {
+        $grants = FirmDocumentFirmRight::query()
+            ->where('firm_document_id', $document->id)
+            ->get()
+            ->keyBy(fn (FirmDocumentFirmRight $r) => (int) $r->grantee_firm_id);
+
+        return Firm::query()
+            ->where('is_central', false)
+            ->orderBy('name')
+            ->orderBy('id')
+            ->get(['id', 'name', 'is_central'])
+            ->map(function (Firm $target) use ($grants) {
+                $grant = $grants->get((int) $target->id);
+
+                return [
+                    'id' => (int) $target->id,
+                    'name' => (string) $target->name,
+                    'is_central' => false,
+                    'can_add' => (bool) ($grant?->can_add),
+                    'can_view' => (bool) ($grant?->can_view),
+                    'can_delete' => (bool) ($grant?->can_delete),
+                    'can_archive' => (bool) ($grant?->can_archive),
+                ];
+            })->values()->all();
+    }
+
+    /**
+     * @param  array{can_add?: bool, can_view?: bool, can_delete?: bool, can_archive?: bool}  $rights
+     */
+    public function setDocumentFirmRights(
+        User $actor,
+        Firm $firm,
+        FirmDocument $document,
+        Firm $granteeFirm,
+        array $rights,
+        ?Request $request = null,
+        ?Hub $hub = null,
+    ): FirmDocumentFirmRight {
+        if ((int) $document->firm_id !== (int) $firm->id) {
+            throw ValidationException::withMessages([
+                'document_id' => 'Document does not belong to this firm.',
+            ]);
+        }
+
+        if (! $firm->isCentral()) {
+            throw ValidationException::withMessages([
+                'firm_id' => 'Firm-level access applies only to Central / Network documents.',
+            ]);
+        }
+
+        if (! $this->access->canManageFirmAccess($actor, $firm, $hub)) {
+            throw new HttpException(403, 'You do not have permission to manage firm access for Central / Network documents.');
+        }
+
+        if ($granteeFirm->isCentral() || (int) $granteeFirm->id === (int) $firm->id) {
+            throw ValidationException::withMessages([
+                'grantee_firm_id' => 'Choose a non-central firm to grant access.',
+            ]);
+        }
+
+        $canAdd = (bool) ($rights['can_add'] ?? false);
+        $canView = (bool) ($rights['can_view'] ?? false);
+        $canDelete = (bool) ($rights['can_delete'] ?? false);
+        $canArchive = (bool) ($rights['can_archive'] ?? false);
+
+        $existing = FirmDocumentFirmRight::query()
+            ->where('firm_document_id', $document->id)
+            ->where('grantee_firm_id', $granteeFirm->id)
+            ->first();
+
+        if (! $canAdd && ! $canView && ! $canDelete && ! $canArchive) {
+            if ($existing) {
+                $existing->delete();
+                $this->activityLogs->log([
+                    'action' => 'firm.documents.firm_rights.revoke',
+                    'description' => 'Revoked firm access for '.$granteeFirm->name.' on “'.$document->title.'”',
+                    'user' => $actor,
+                    'hub' => $this->hubs->current(),
+                    'subject' => $granteeFirm,
+                    'request' => $request,
+                    'status_code' => 200,
+                    'properties' => [
+                        'firm_id' => $firm->id,
+                        'firm_name' => $firm->name,
+                        'document_id' => $document->id,
+                        'document_title' => $document->title,
+                        'grantee_firm_id' => $granteeFirm->id,
+                        'grantee_firm_name' => $granteeFirm->name,
+                    ],
+                ]);
+            }
+
+            return new FirmDocumentFirmRight([
+                'firm_document_id' => $document->id,
+                'grantee_firm_id' => $granteeFirm->id,
+                'can_add' => false,
+                'can_view' => false,
+                'can_delete' => false,
+                'can_archive' => false,
+            ]);
+        }
+
+        $row = FirmDocumentFirmRight::query()->updateOrCreate(
+            [
+                'firm_document_id' => $document->id,
+                'grantee_firm_id' => $granteeFirm->id,
+            ],
+            [
+                'can_add' => $canAdd,
+                'can_view' => $canView,
+                'can_delete' => $canDelete,
+                'can_archive' => $canArchive,
+            ]
+        );
+
+        $this->activityLogs->log([
+            'action' => 'firm.documents.firm_rights.grant',
+            'description' => 'Updated firm access for '.$granteeFirm->name.' on “'.$document->title.'”',
+            'user' => $actor,
+            'hub' => $this->hubs->current(),
+            'subject' => $row,
+            'request' => $request,
+            'status_code' => 200,
+            'properties' => [
+                'firm_id' => $firm->id,
+                'firm_name' => $firm->name,
+                'document_id' => $document->id,
+                'document_title' => $document->title,
+                'grantee_firm_id' => $granteeFirm->id,
+                'grantee_firm_name' => $granteeFirm->name,
+                'can_add' => $canAdd,
+                'can_view' => $canView,
+                'can_delete' => $canDelete,
+                'can_archive' => $canArchive,
+            ],
+        ]);
+
+        return $row->load('granteeFirm:id,name,is_central');
+    }
+
+    /**
      * @param  array{can_add?: bool, can_view?: bool, can_delete?: bool, can_archive?: bool}  $rights
      */
     public function setDocumentMemberRights(
@@ -440,6 +665,12 @@ class FirmDocumentService
         ?Request $request = null,
         ?Hub $hub = null,
     ): FirmDocumentMemberRight {
+        if ($firm->isCentral()) {
+            throw ValidationException::withMessages([
+                'user_id' => 'Central / Network documents use firm-level access. Pass grantee_firm_id instead of user_id.',
+            ]);
+        }
+
         $this->assertCan($actor, $firm, FirmDocumentAccessService::RIGHT_MANAGE_MEMBER_RIGHTS, $hub);
 
         if ((int) $document->firm_id !== (int) $firm->id) {

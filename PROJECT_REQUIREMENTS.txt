@@ -530,7 +530,22 @@ Notes:
   - `firm_documents_delete` — delete documents for ANY firm on the hub
   - `firm_documents_archive` — archive documents for ANY firm on the hub
   - `firm_documents_manage_categories` — add/edit/delete category options
+  - `firm_documents_manage_firm_access` — decide which firms may access
+    Central / Network documents (and which rights). Blurred while Firm
+    documents functionality is off.
 - These are hub-wide admin tools, distinct from Head / member per-document grants.
+
+3.4.4a Central / Network documents — firm-level access
+- Documents owned by the Central / Network firm (`firms.is_central`) use
+  firm-level access (not per-member rows).
+- Who may set that access: Head of Central / Network, OR any role with
+  `firm_documents_manage_firm_access` on the Capabilities matrix.
+- Access rights popup for those documents lists Firm names (Firm 1, Firm 2, …)
+  with View / Add / Archive / Delete. Rights granted to a firm apply to
+  every current member of that firm for that document.
+- Recipient firm members see shared Central docs in their own library under
+  a “Shared from Central / Network” folder.
+- Non-central firm documents keep per-member access (3.4.3).
 
 3.4.5 Activity logs (required for the whole flow)
 - Every mutation in this flow is written to `activity_logs` (same hub audit
@@ -540,6 +555,8 @@ Notes:
   - `firm.head.clear` — Head of Firm cleared
   - `firm.documents.member_rights.grant` — member document rights granted/updated
   - `firm.documents.member_rights.revoke` — member document rights revoked
+  - `firm.documents.firm_rights.grant` — firm-level Central doc access granted/updated
+  - `firm.documents.firm_rights.revoke` — firm-level Central doc access revoked
   - `firm.documents.add` — document uploaded / created
   - `firm.documents.folder.create` — folder created
   - `firm.documents.view` — optional: record sensitive downloads if product
@@ -547,8 +564,9 @@ Notes:
   - `firm.documents.delete` — document permanently deleted
   - `firm.documents.archive` / `firm.documents.unarchive` — archive toggles
 - Log payloads should identify firm id/name, actor, target user (for head /
-  rights changes), document id/name (for document actions), and granted rights
-  flags — never store file binary contents; redact secrets.
+  rights changes), grantee firm (for firm-level access), document id/name
+  (for document actions), and granted rights flags — never store file binary
+  contents; redact secrets.
 
 3.5 Other Features (later)
 - Additional features to be added over time; keep architecture flexible.
@@ -1406,6 +1424,7 @@ STEP 1 — Shared hub core (content hub)
 [x] Folders / subfolders + nested expand/collapse library; upload above table
 [x] Document categories (`firm_documents_manage_categories`, GC-style admin CRUD)
 [x] Head grants per-document member rights via key icon / access popup
+[x] Central / Network firm-level document access (`firm_documents_manage_firm_access`; rights apply to all firm members)
 [x] Firm Head & Firm Documents activity logs (`firm.head.*`, `firm.documents.*`)
 [x] Frontend: Assign Head of Firm + Firm Documents UI (rights-gated)
 [x] Support Tickets functionality (`support_tickets`) + APIs (submit with

@@ -61,6 +61,11 @@ class FirmDocument extends Model
         return $this->hasMany(FirmDocumentMemberRight::class, 'firm_document_id');
     }
 
+    public function firmRights(): HasMany
+    {
+        return $this->hasMany(FirmDocumentFirmRight::class, 'firm_document_id');
+    }
+
     public function isArchived(): bool
     {
         return $this->archived_at !== null;

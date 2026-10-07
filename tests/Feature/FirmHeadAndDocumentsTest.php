@@ -294,4 +294,79 @@ class FirmHeadAndDocumentsTest extends TestCase
             ->assertJsonPath('hub.effective_capabilities.firm_documents_view', true)
             ->assertJsonPath('hub.effective_capabilities.firm_documents_add', true);
     }
+
+    public function test_central_document_firm_access_applies_to_all_grantee_members(): void
+    {
+        Storage::fake('public');
+        $hub = $this->createSharedHub();
+        $checklist = $hub->resolvedChecklist();
+        $checklist['firm_documents'] = true;
+        $hub->checklist = $checklist;
+        $hub->save();
+        app(HubService::class)->forgetCurrentCache();
+
+        $this->enableCaps($hub, User::ROLE_POWER_ADMIN, [
+            'firm_documents_manage_firm_access',
+            'firm_documents_add',
+            'firm_documents_view',
+        ]);
+
+        $admin = User::factory()->powerAdmin()->create();
+        $central = Firm::central();
+        $firm1 = Firm::query()->create(['name' => 'Firm One']);
+        $firm2 = Firm::query()->create(['name' => 'Firm Two']);
+        $memberA = User::factory()->create(['firm_id' => $firm1->id, 'role' => User::ROLE_USER]);
+        $memberB = User::factory()->create(['firm_id' => $firm1->id, 'role' => User::ROLE_USER]);
+        $outsider = User::factory()->create(['firm_id' => $firm2->id, 'role' => User::ROLE_USER]);
+
+        Sanctum::actingAs($admin);
+        $file = UploadedFile::fake()->create('network-policy.pdf', 50, 'application/pdf');
+        $created = $this->post('/api/firm-documents', [
+            'firm_id' => $central->id,
+            'title' => 'Network policy',
+            'attachments' => [$file],
+        ], ['Accept' => 'application/json'])->assertCreated();
+
+        $docId = (int) $created->json('document.id');
+
+        $access = $this->getJson('/api/firm-documents/'.$docId.'/member-rights')
+            ->assertOk()
+            ->assertJsonPath('mode', 'firms');
+        $this->assertNotEmpty($access->json('firms'));
+
+        $this->putJson('/api/firm-documents/'.$docId.'/member-rights', [
+            'grantee_firm_id' => $firm1->id,
+            'can_view' => true,
+            'can_add' => false,
+            'can_delete' => false,
+            'can_archive' => false,
+        ])->assertOk()
+            ->assertJsonPath('mode', 'firms');
+
+        $this->assertDatabaseHas('activity_logs', ['action' => 'firm.documents.firm_rights.grant']);
+        $this->assertDatabaseHas('firm_document_firm_rights', [
+            'firm_document_id' => $docId,
+            'grantee_firm_id' => $firm1->id,
+            'can_view' => 1,
+        ]);
+
+        // Every Firm One member can see the shared Central doc in their library.
+        Sanctum::actingAs($memberA);
+        $listA = $this->getJson('/api/firm-documents?firm_id='.$firm1->id)->assertOk();
+        $titlesA = collect($listA->json('documents'))->pluck('title')->all();
+        $this->assertContains('Network policy', $titlesA);
+
+        Sanctum::actingAs($memberB);
+        $listB = $this->getJson('/api/firm-documents?firm_id='.$firm1->id)->assertOk();
+        $titlesB = collect($listB->json('documents'))->pluck('title')->all();
+        $this->assertContains('Network policy', $titlesB);
+
+        // Firm Two has no grant — member cannot open Firm One, and (as Firm Two head) sees no shared Central doc.
+        $firm2->update(['head_user_id' => $outsider->id]);
+        Sanctum::actingAs($outsider);
+        $this->getJson('/api/firm-documents?firm_id='.$firm1->id)->assertStatus(403);
+        $listOut = $this->getJson('/api/firm-documents?firm_id='.$firm2->id)->assertOk();
+        $titlesOut = collect($listOut->json('documents'))->pluck('title')->all();
+        $this->assertNotContains('Network policy', $titlesOut);
+    }
 }

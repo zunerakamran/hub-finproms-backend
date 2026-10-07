@@ -678,6 +678,7 @@ class Hub extends Model
         'firm_documents_delete',
         'firm_documents_archive',
         'firm_documents_manage_categories',
+        'firm_documents_manage_firm_access',
     ];
 
     /**
@@ -1094,6 +1095,13 @@ class Hub extends Model
         'firm_documents_manage_categories' => [
             'label' => 'Manage firm document categories',
             'description' => 'Add, edit, and delete category options shown when uploading firm documents. Blurred while Functionalities → Firm documents is off. Same pattern as General Compliance content types.',
+            'group' => self::GROUP_DASHBOARD_FIRMS,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'firm_documents_manage_firm_access' => [
+            'label' => 'Decide firm access to Central / Network documents',
+            'description' => 'Choose which firms (and which rights) may access Central / Network documents. Access is set per document as firm rows; every member of a granted firm receives those rights. Blurred while Functionalities → Firm documents is off. Head of Central / Network can always set this for their firm’s documents.',
             'group' => self::GROUP_DASHBOARD_FIRMS,
             'default_shared' => false,
             'default_white_label' => false,

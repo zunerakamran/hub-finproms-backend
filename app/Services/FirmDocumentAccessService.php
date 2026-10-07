@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Firm;
 use App\Models\FirmDocument;
+use App\Models\FirmDocumentFirmRight;
 use App\Models\FirmDocumentMemberRight;
 use App\Models\Hub;
 use App\Models\User;
@@ -16,8 +17,10 @@ use Illuminate\Support\Facades\Schema;
  * Order:
  * 1) Head of Firm (any role) → full rights for THEIR firm.
  * 2) Per-document member grant → view / delete / archive for that document.
- * 3) Firm-wide member grant (firm_document_id null) → mainly can_add (upload).
- * 4) Capabilities matrix firm_documents_* → hub-wide for ALL firms (requires
+ * 3) Firm-level grant on Central / Network documents → every member of the
+ *    grantee firm receives those rights for that document.
+ * 4) Firm-wide member grant (firm_document_id null) → mainly can_add (upload).
+ * 5) Capabilities matrix firm_documents_* → hub-wide for ALL firms (requires
  *    Functionalities → Firm documents ON).
  */
 class FirmDocumentAccessService
@@ -31,6 +34,8 @@ class FirmDocumentAccessService
     public const RIGHT_ARCHIVE = 'archive';
 
     public const RIGHT_MANAGE_MEMBER_RIGHTS = 'manage_member_rights';
+
+    public const CAP_MANAGE_FIRM_ACCESS = 'firm_documents_manage_firm_access';
 
     private const CAP_MAP = [
         self::RIGHT_ADD => 'firm_documents_add',
@@ -80,7 +85,8 @@ class FirmDocumentAccessService
         }
 
         if ($right === self::RIGHT_MANAGE_MEMBER_RIGHTS) {
-            return false;
+            // Matrix holders may manage firm-level access on Central / Network docs.
+            return $firm->isCentral() && $this->canManageFirmAccessViaMatrix($user, $hub);
         }
 
         if ($document !== null && (int) $document->firm_id === (int) $firm->id) {
@@ -90,14 +96,26 @@ class FirmDocumentAccessService
             }
         }
 
+        // Central / Network → other firm: every member of the grantee firm gets the rights.
+        if ($document !== null && $this->firmLevelGrantAllows($user, $document, $right)) {
+            return true;
+        }
+
         // Firm-wide row (null document_id): used for upload (can_add) and legacy library access.
         $firmGrant = $this->firmWideGrant($user, $firm);
         if ($firmGrant && $this->grantAllows($firmGrant, $right)) {
             return true;
         }
 
-        // Library entry (view without a specific document): any per-doc grant unlocks the page.
-        if ($right === self::RIGHT_VIEW && $document === null && $this->hasAnyDocumentGrant($user, $firm)) {
+        // Library entry (view without a specific document): any per-doc or firm-share grant unlocks the page.
+        if ($right === self::RIGHT_VIEW && $document === null) {
+            if ($this->hasAnyDocumentGrant($user, $firm) || $this->hasAnySharedFirmGrant($user, $firm)) {
+                return true;
+            }
+        }
+
+        // Upload unlock via firm-share can_add on any Central doc shared to this firm.
+        if ($right === self::RIGHT_ADD && $document === null && $this->hasSharedFirmAddGrant($user, $firm)) {
             return true;
         }
 
@@ -111,17 +129,54 @@ class FirmDocumentAccessService
     }
 
     /**
+     * Who may set firm-level access on Central / Network documents.
+     */
+    public function canManageFirmAccess(User $user, Firm $owningFirm, ?Hub $hub = null): bool
+    {
+        $hub = $hub ?? $this->hubs->current();
+
+        if (! $owningFirm->isCentral()) {
+            return false;
+        }
+
+        if ($this->isHeadOfFirm($user, $owningFirm)) {
+            return true;
+        }
+
+        return $this->canManageFirmAccessViaMatrix($user, $hub);
+    }
+
+    public function canManageFirmAccessViaMatrix(User $user, ?Hub $hub = null): bool
+    {
+        $hub = $hub ?? $this->hubs->current();
+
+        return $this->functionalityEnabled($hub)
+            && $this->matrix->userCan($hub, $user, self::CAP_MANAGE_FIRM_ACCESS);
+    }
+
+    /**
      * Per-document effective rights for the viewer (actions on that row).
      *
      * @return array{can_view: bool, can_delete: bool, can_archive: bool, can_manage_member_rights: bool}
      */
     public function documentRightsFor(User $user, Firm $firm, FirmDocument $document, ?Hub $hub = null): array
     {
+        // Resolve against the document's owning firm (shared Central docs may appear in another firm's library).
+        $owningFirm = (int) $document->firm_id === (int) $firm->id
+            ? $firm
+            : ($document->relationLoaded('firm') && $document->firm
+                ? $document->firm
+                : Firm::query()->find((int) $document->firm_id) ?? $firm);
+
+        $canManage = $this->can($user, $owningFirm, self::RIGHT_MANAGE_MEMBER_RIGHTS, $hub)
+            || $this->canManageFirmAccess($user, $owningFirm, $hub);
+
         return [
-            'can_view' => $this->can($user, $firm, self::RIGHT_VIEW, $hub, $document),
-            'can_delete' => $this->can($user, $firm, self::RIGHT_DELETE, $hub, $document),
-            'can_archive' => $this->can($user, $firm, self::RIGHT_ARCHIVE, $hub, $document),
-            'can_manage_member_rights' => $this->can($user, $firm, self::RIGHT_MANAGE_MEMBER_RIGHTS, $hub),
+            'can_view' => $this->can($user, $owningFirm, self::RIGHT_VIEW, $hub, $document),
+            'can_delete' => $this->can($user, $owningFirm, self::RIGHT_DELETE, $hub, $document),
+            'can_archive' => $this->can($user, $owningFirm, self::RIGHT_ARCHIVE, $hub, $document),
+            'can_manage_member_rights' => $canManage,
+            'access_mode' => $owningFirm->isCentral() ? 'firms' : 'members',
         ];
     }
 
@@ -132,6 +187,7 @@ class FirmDocumentAccessService
      *   can_delete: bool,
      *   can_archive: bool,
      *   can_manage_member_rights: bool,
+     *   can_manage_firm_access: bool,
      *   can_manage_categories: bool,
      *   is_firm_head: bool,
      *   firm_id: ?int,
@@ -152,6 +208,7 @@ class FirmDocumentAccessService
         ];
 
         $canManageCategories = $enabled && $this->matrix->userCan($hub, $user, 'firm_documents_manage_categories');
+        $canManageFirmAccess = $this->canManageFirmAccessViaMatrix($user, $hub);
 
         $headedFirmId = $this->headedFirmIdFor($user, $hub);
         if ($headedFirmId) {
@@ -161,6 +218,7 @@ class FirmDocumentAccessService
                 'can_delete' => true,
                 'can_archive' => true,
                 'can_manage_member_rights' => true,
+                'can_manage_firm_access' => $canManageFirmAccess || $this->isHeadOfCentralFirm($user),
                 'can_manage_categories' => $canManageCategories,
                 'is_firm_head' => true,
                 'firm_id' => $headedFirmId,
@@ -172,15 +230,19 @@ class FirmDocumentAccessService
         $firmId = $user->firm_id ? (int) $user->firm_id : null;
         $firmGrant = null;
         $hasDocGrant = false;
+        $hasSharedView = false;
+        $hasSharedAdd = false;
         if ($firmId && Schema::hasTable('firm_document_member_rights')) {
             $firm = new Firm(['id' => $firmId]);
             $firm->exists = true;
             $firmGrant = $this->firmWideGrant($user, $firm);
             $hasDocGrant = $this->hasAnyDocumentGrant($user, $firm);
+            $hasSharedView = $this->hasAnySharedFirmGrant($user, $firm);
+            $hasSharedAdd = $this->hasSharedFirmAddGrant($user, $firm);
         }
 
-        $canView = (bool) ($firmGrant?->can_view) || $hasDocGrant || $hubWide['can_view'];
-        $canAdd = (bool) ($firmGrant?->can_add) || $hubWide['can_add'];
+        $canView = (bool) ($firmGrant?->can_view) || $hasDocGrant || $hasSharedView || $hubWide['can_view'];
+        $canAdd = (bool) ($firmGrant?->can_add) || $hasSharedAdd || $hubWide['can_add'];
         $canDelete = (bool) ($firmGrant?->can_delete) || $hubWide['can_delete'];
         $canArchive = (bool) ($firmGrant?->can_archive) || $hubWide['can_archive'];
 
@@ -190,6 +252,7 @@ class FirmDocumentAccessService
             'can_delete' => $canDelete,
             'can_archive' => $canArchive,
             'can_manage_member_rights' => false,
+            'can_manage_firm_access' => $canManageFirmAccess,
             'can_manage_categories' => $canManageCategories,
             'is_firm_head' => false,
             'firm_id' => $firmId,
@@ -225,19 +288,64 @@ class FirmDocumentAccessService
      */
     public function visibleDocumentIds(User $user, Firm $firm): array
     {
-        if (! Schema::hasTable('firm_document_member_rights')) {
+        $ids = [];
+
+        if (Schema::hasTable('firm_document_member_rights')
+            && $user->firm_id !== null
+            && (int) $user->firm_id === (int) $firm->id
+        ) {
+            $ids = FirmDocumentMemberRight::query()
+                ->where('firm_id', $firm->id)
+                ->where('user_id', $user->id)
+                ->whereNotNull('firm_document_id')
+                ->where('can_view', true)
+                ->pluck('firm_document_id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+        }
+
+        // When browsing Central / Network, include docs shared to the user's firm.
+        if ($firm->isCentral()
+            && $user->firm_id
+            && Schema::hasTable('firm_document_firm_rights')
+        ) {
+            $shared = FirmDocumentFirmRight::query()
+                ->where('grantee_firm_id', (int) $user->firm_id)
+                ->where('can_view', true)
+                ->whereIn('firm_document_id', function ($q) use ($firm) {
+                    $q->select('id')->from('firm_documents')->where('firm_id', $firm->id);
+                })
+                ->pluck('firm_document_id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+            $ids = array_merge($ids, $shared);
+        }
+
+        return array_values(array_unique($ids));
+    }
+
+    /**
+     * Central / Network document ids shared to this firm with can_view.
+     *
+     * @return list<int>
+     */
+    public function sharedCentralDocumentIdsForFirm(Firm $granteeFirm): array
+    {
+        if ($granteeFirm->isCentral() || ! Schema::hasTable('firm_document_firm_rights')) {
             return [];
         }
 
-        if ($user->firm_id === null || (int) $user->firm_id !== (int) $firm->id) {
+        $centralId = Firm::query()->where('is_central', true)->value('id');
+        if (! $centralId) {
             return [];
         }
 
-        return FirmDocumentMemberRight::query()
-            ->where('firm_id', $firm->id)
-            ->where('user_id', $user->id)
-            ->whereNotNull('firm_document_id')
+        return FirmDocumentFirmRight::query()
+            ->where('grantee_firm_id', $granteeFirm->id)
             ->where('can_view', true)
+            ->whereIn('firm_document_id', function ($q) use ($centralId) {
+                $q->select('id')->from('firm_documents')->where('firm_id', $centralId);
+            })
             ->pluck('firm_document_id')
             ->map(fn ($id) => (int) $id)
             ->unique()
@@ -386,5 +494,80 @@ class FirmDocumentAccessService
                     ->orWhere('can_add', true);
             })
             ->exists();
+    }
+
+    private function firmLevelGrantAllows(User $user, FirmDocument $document, string $right): bool
+    {
+        $grant = $this->firmLevelGrantForUser($user, (int) $document->id);
+        if (! $grant) {
+            return false;
+        }
+
+        return match ($right) {
+            self::RIGHT_ADD => (bool) $grant->can_add,
+            self::RIGHT_VIEW => (bool) $grant->can_view,
+            self::RIGHT_DELETE => (bool) $grant->can_delete,
+            self::RIGHT_ARCHIVE => (bool) $grant->can_archive,
+            default => false,
+        };
+    }
+
+    private function firmLevelGrantForUser(User $user, int $documentId): ?FirmDocumentFirmRight
+    {
+        if (! Schema::hasTable('firm_document_firm_rights') || $user->firm_id === null) {
+            return null;
+        }
+
+        return FirmDocumentFirmRight::query()
+            ->where('firm_document_id', $documentId)
+            ->where('grantee_firm_id', (int) $user->firm_id)
+            ->first();
+    }
+
+    /**
+     * Any Central / Network document shared to this firm with a usable right.
+     */
+    private function hasAnySharedFirmGrant(User $user, Firm $firm): bool
+    {
+        if (! Schema::hasTable('firm_document_firm_rights')) {
+            return false;
+        }
+
+        if ($user->firm_id === null || (int) $user->firm_id !== (int) $firm->id || $firm->isCentral()) {
+            return false;
+        }
+
+        return FirmDocumentFirmRight::query()
+            ->where('grantee_firm_id', $firm->id)
+            ->where(function ($q) {
+                $q->where('can_view', true)
+                    ->orWhere('can_add', true)
+                    ->orWhere('can_delete', true)
+                    ->orWhere('can_archive', true);
+            })
+            ->exists();
+    }
+
+    private function hasSharedFirmAddGrant(User $user, Firm $firm): bool
+    {
+        if (! Schema::hasTable('firm_document_firm_rights')) {
+            return false;
+        }
+
+        if ($user->firm_id === null || (int) $user->firm_id !== (int) $firm->id || $firm->isCentral()) {
+            return false;
+        }
+
+        return FirmDocumentFirmRight::query()
+            ->where('grantee_firm_id', $firm->id)
+            ->where('can_add', true)
+            ->exists();
+    }
+
+    private function isHeadOfCentralFirm(User $user): bool
+    {
+        $central = Firm::query()->where('is_central', true)->first();
+
+        return $central !== null && $this->isHeadOfFirm($user, $central);
     }
 }

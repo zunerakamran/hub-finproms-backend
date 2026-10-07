@@ -103,10 +103,13 @@ class FirmDocumentController extends Controller
                 'can_view' => $this->access->can($user, $firm, FirmDocumentAccessService::RIGHT_VIEW, $hub),
                 'can_delete' => $this->access->can($user, $firm, FirmDocumentAccessService::RIGHT_DELETE, $hub),
                 'can_archive' => $this->access->can($user, $firm, FirmDocumentAccessService::RIGHT_ARCHIVE, $hub),
-                'can_manage_member_rights' => $this->access->can($user, $firm, FirmDocumentAccessService::RIGHT_MANAGE_MEMBER_RIGHTS, $hub),
+                'can_manage_member_rights' => $this->access->can($user, $firm, FirmDocumentAccessService::RIGHT_MANAGE_MEMBER_RIGHTS, $hub)
+                    || $this->access->canManageFirmAccess($user, $firm, $hub),
+                'can_manage_firm_access' => $this->access->canManageFirmAccess($user, $firm, $hub),
                 'can_manage_categories' => (bool) ($summary['can_manage_categories'] ?? false),
                 'is_firm_head' => $this->access->isHeadOfFirm($user, $firm),
                 'functionality_enabled' => $this->access->functionalityEnabled($hub),
+                'is_central' => $firm->isCentral(),
             ],
             'folders' => $library['folders'],
             'documents' => $library['documents'],
@@ -342,15 +345,18 @@ class FirmDocumentController extends Controller
         $firm = $model->firm ?? Firm::query()->findOrFail($model->firm_id);
         $hub = $this->rightsHub($request, $user);
 
-        $members = $this->documents->listDocumentMemberRights($user, $firm, $model, $hub);
+        $access = $this->documents->listDocumentAccessRights($user, $firm, $model, $hub);
 
         return response()->json([
             'firm' => $firm->load('headUser:id,name,email')->toApiArray(),
             'document' => [
                 'id' => (int) $model->id,
                 'title' => (string) $model->title,
+                'is_central' => $firm->isCentral(),
             ],
-            'members' => $members,
+            'mode' => $access['mode'],
+            'members' => $access['members'],
+            'firms' => $access['firms'],
             'acting_on_white_label' => false,
         ]);
     }
@@ -360,6 +366,42 @@ class FirmDocumentController extends Controller
         /** @var User $user */
         $user = $request->user();
 
+        $model = FirmDocument::query()->findOrFail($document);
+        $firm = $model->firm ?? Firm::query()->findOrFail($model->firm_id);
+        $hub = $this->rightsHub($request, $user);
+
+        if ($firm->isCentral()) {
+            $validated = $request->validate([
+                'grantee_firm_id' => ['required', 'integer', 'exists:firms,id'],
+                'can_add' => ['sometimes', 'boolean'],
+                'can_view' => ['sometimes', 'boolean'],
+                'can_delete' => ['sometimes', 'boolean'],
+                'can_archive' => ['sometimes', 'boolean'],
+            ]);
+
+            $grantee = Firm::query()->findOrFail((int) $validated['grantee_firm_id']);
+            $row = $this->documents->setDocumentFirmRights(
+                $user,
+                $firm,
+                $model,
+                $grantee,
+                $validated,
+                $request,
+                $hub,
+            );
+
+            return response()->json([
+                'message' => 'Firm access rights updated.',
+                'mode' => 'firms',
+                'rights' => array_merge($row->toApiArray(), [
+                    'firm' => [
+                        'id' => (int) $grantee->id,
+                        'name' => (string) $grantee->name,
+                    ],
+                ]),
+            ]);
+        }
+
         $validated = $request->validate([
             'user_id' => ['required', 'integer', 'exists:users,id'],
             'can_add' => ['sometimes', 'boolean'],
@@ -368,10 +410,7 @@ class FirmDocumentController extends Controller
             'can_archive' => ['sometimes', 'boolean'],
         ]);
 
-        $model = FirmDocument::query()->findOrFail($document);
-        $firm = $model->firm ?? Firm::query()->findOrFail($model->firm_id);
         $member = User::query()->findOrFail((int) $validated['user_id']);
-        $hub = $this->rightsHub($request, $user);
 
         $row = $this->documents->setDocumentMemberRights(
             $user,
@@ -385,6 +424,7 @@ class FirmDocumentController extends Controller
 
         return response()->json([
             'message' => 'Document access rights updated.',
+            'mode' => 'members',
             'rights' => $row->relationLoaded('user') || $row->exists
                 ? array_merge($row->toApiArray(), [
                     'user' => [
