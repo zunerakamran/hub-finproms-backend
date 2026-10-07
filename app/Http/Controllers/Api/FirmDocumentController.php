@@ -448,6 +448,8 @@ class FirmDocumentController extends Controller
             ]);
         }
 
+        // Member grant (any firm, including Central / Network).
+
         $validated = $request->validate([
             'user_id' => ['required', 'integer', 'exists:users,id'],
             'can_add' => ['sometimes', 'boolean'],
@@ -470,7 +472,7 @@ class FirmDocumentController extends Controller
 
         return response()->json([
             'message' => 'Document access rights updated.',
-            'mode' => $firm->isCentral() ? 'mixed' : 'members',
+            'mode' => 'mixed',
             'rights' => $row->relationLoaded('user') || $row->exists
                 ? array_merge($row->toApiArray(), [
                     'user' => [

@@ -1107,8 +1107,8 @@ class Hub extends Model
             'default_white_label' => false,
         ],
         'firm_documents_manage_firm_access' => [
-            'label' => 'Decide which firms can see Central / Network documents',
-            'description' => 'Choose which firms may see Central / Network firm documents (allowlist). Those firms then appear in each document’s access-rights popup alongside own-firm users, where View / Add / Archive / Delete can be granted. Every member of a granted firm receives those rights. Blurred while Functionalities → Firm documents is off. Head of Central / Network can always set this for their firm’s documents.',
+            'label' => 'Decide which firms can see documents',
+            'description' => 'Choose which firms may see a firm’s documents. They appear in that document’s access rights. Head of Firm can always set this for their own firm. Blurred while Firm documents is off.',
             'group' => self::GROUP_DASHBOARD_FIRMS,
             'default_shared' => false,
             'default_white_label' => false,

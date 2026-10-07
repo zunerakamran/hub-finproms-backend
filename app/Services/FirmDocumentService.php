@@ -109,48 +109,44 @@ class FirmDocumentService
 
         $unfiled = ($docsByFolder->get('none') ?? collect())->values()->all();
 
-        // Non-central firms also see Central / Network documents shared to them.
-        $sharedFolder = null;
-        if (! $firm->isCentral()) {
-            $sharedIds = $this->access->sharedCentralDocumentIdsForFirm($firm);
-            if ($sharedIds !== []) {
-                $sharedQuery = FirmDocument::query()
-                    ->with(['attachments', 'uploader:id,name,email', 'folder:id,name,parent_id', 'category:id,name,slug', 'firm:id,name,is_central'])
-                    ->whereIn('id', $sharedIds)
-                    ->orderBy('title')
-                    ->orderBy('id');
+        // Documents from other firms shared to this firm.
+        $sharedIds = $this->access->sharedDocumentIdsForFirm($firm);
+        if ($sharedIds !== []) {
+            $sharedQuery = FirmDocument::query()
+                ->with(['attachments', 'uploader:id,name,email', 'folder:id,name,parent_id', 'category:id,name,slug', 'firm:id,name,is_central'])
+                ->whereIn('id', $sharedIds)
+                ->orderBy('title')
+                ->orderBy('id');
 
-                if ($scope === 'archived') {
-                    $sharedQuery->whereNotNull('archived_at');
-                } elseif ($scope !== 'all') {
-                    $sharedQuery->whereNull('archived_at');
-                }
+            if ($scope === 'archived') {
+                $sharedQuery->whereNotNull('archived_at');
+            } elseif ($scope !== 'all') {
+                $sharedQuery->whereNull('archived_at');
+            }
 
-                $sharedDocs = $sharedQuery->get()->map(function (FirmDocument $doc) use ($actor, $firm, $hub) {
-                    $payload = $doc->toApiArray($this->access->documentRightsFor($actor, $firm, $doc, $hub));
-                    $payload['shared_from'] = [
-                        'firm_id' => (int) $doc->firm_id,
-                        'firm_name' => $doc->firm?->name ?? Firm::CENTRAL_DEFAULT_NAME,
-                        'is_central' => true,
-                    ];
+            $sharedDocs = $sharedQuery->get()->map(function (FirmDocument $doc) use ($actor, $firm, $hub) {
+                $payload = $doc->toApiArray($this->access->documentRightsFor($actor, $firm, $doc, $hub));
+                $payload['shared_from'] = [
+                    'firm_id' => (int) $doc->firm_id,
+                    'firm_name' => $doc->firm?->name ?? 'Another firm',
+                    'is_central' => (bool) ($doc->firm?->is_central),
+                ];
 
-                    return $payload;
-                })->values()->all();
+                return $payload;
+            })->values()->all();
 
-                if ($sharedDocs !== []) {
-                    $sharedFolder = [
-                        'id' => -1,
-                        'firm_id' => (int) $firm->id,
-                        'parent_id' => null,
-                        'name' => 'Shared from '.Firm::CENTRAL_DEFAULT_NAME,
-                        'is_shared_bucket' => true,
-                        'children' => [],
-                        'documents' => $sharedDocs,
-                        'document_count' => count($sharedDocs),
-                    ];
-                    $tree = array_merge([$sharedFolder], $tree);
-                    $serialized = $serialized->merge($sharedDocs);
-                }
+            if ($sharedDocs !== []) {
+                $tree = array_merge([[
+                    'id' => -1,
+                    'firm_id' => (int) $firm->id,
+                    'parent_id' => null,
+                    'name' => 'Shared from other firms',
+                    'is_shared_bucket' => true,
+                    'children' => [],
+                    'documents' => $sharedDocs,
+                    'document_count' => count($sharedDocs),
+                ]], $tree);
+                $serialized = $serialized->merge($sharedDocs);
             }
         }
 
@@ -452,7 +448,7 @@ class FirmDocumentService
             FirmDocumentAccessService::RIGHT_MANAGE_MEMBER_RIGHTS,
             $hub
         );
-        $canManageFirms = $firm->isCentral() && $this->access->canManageFirmAccess($actor, $firm, $hub);
+        $canManageFirms = $this->access->canManageFirmAccess($actor, $firm, $hub);
 
         if (! $canManageMembers && ! $canManageFirms) {
             throw new HttpException(403, 'You do not have permission to manage document access rights.');
@@ -466,14 +462,14 @@ class FirmDocumentService
             : [];
 
         return [
-            'mode' => $firm->isCentral() ? 'mixed' : 'members',
+            'mode' => 'mixed',
             'members' => $members,
             'firms' => $firms,
         ];
     }
 
     /**
-     * Firms allowed to appear in Central / Network document access rights.
+     * Firms allowed to appear in this firm’s document access rights.
      *
      * @return array{
      *   owner_firm: array<string, mixed>,
@@ -483,20 +479,16 @@ class FirmDocumentService
      */
     public function listVisibleFirms(User $actor, Firm $ownerFirm, ?Hub $hub = null): array
     {
-        if (! $ownerFirm->isCentral()) {
-            throw ValidationException::withMessages([
-                'firm_id' => 'Visible-firm access applies only to Central / Network.',
-            ]);
-        }
-
         if (! $this->access->canManageFirmAccess($actor, $ownerFirm, $hub)) {
-            throw new HttpException(403, 'You do not have permission to decide which firms can see Central / Network documents.');
+            throw new HttpException(403, 'You do not have permission to decide which firms can see documents.');
         }
 
         $selectedIds = $this->visibleGranteeFirmIds($ownerFirm);
 
+        // Every other firm on the hub (exclude the owning firm). Do not filter
+        // is_central — many rows store null and would otherwise disappear.
         $firms = Firm::query()
-            ->where('is_central', false)
+            ->where('id', '!=', $ownerFirm->id)
             ->orderBy('name')
             ->orderBy('id')
             ->get(['id', 'name'])
@@ -516,7 +508,7 @@ class FirmDocumentService
     }
 
     /**
-     * Replace the allowlist of firms that may see Central / Network documents.
+     * Replace the allowlist of firms that may see this firm’s documents.
      *
      * @param  list<int>  $firmIds
      * @return array{
@@ -532,14 +524,8 @@ class FirmDocumentService
         ?Request $request = null,
         ?Hub $hub = null,
     ): array {
-        if (! $ownerFirm->isCentral()) {
-            throw ValidationException::withMessages([
-                'firm_id' => 'Visible-firm access applies only to Central / Network.',
-            ]);
-        }
-
         if (! $this->access->canManageFirmAccess($actor, $ownerFirm, $hub)) {
-            throw new HttpException(403, 'You do not have permission to decide which firms can see Central / Network documents.');
+            throw new HttpException(403, 'You do not have permission to decide which firms can see documents.');
         }
 
         if (! Schema::hasTable('firm_document_visible_firms')) {
@@ -548,6 +534,7 @@ class FirmDocumentService
 
         $normalized = collect($firmIds)
             ->map(fn ($id) => (int) $id)
+            ->reject(fn (int $id) => $id === (int) $ownerFirm->id)
             ->unique()
             ->values()
             ->all();
@@ -555,14 +542,14 @@ class FirmDocumentService
         if ($normalized !== []) {
             $valid = Firm::query()
                 ->whereIn('id', $normalized)
-                ->where('is_central', false)
+                ->where('id', '!=', $ownerFirm->id)
                 ->pluck('id')
                 ->map(fn ($id) => (int) $id)
                 ->all();
 
             if (count($valid) !== count($normalized)) {
                 throw ValidationException::withMessages([
-                    'firm_ids' => 'Choose only non-central firms.',
+                    'firm_ids' => 'Choose existing firms other than your own.',
                 ]);
             }
             $normalized = $valid;
@@ -678,7 +665,7 @@ class FirmDocumentService
 
         return Firm::query()
             ->whereIn('id', $allowedIds)
-            ->where('is_central', false)
+            ->where('id', '!=', $ownerFirm->id)
             ->orderBy('name')
             ->orderBy('id')
             ->get(['id', 'name', 'is_central'])
@@ -688,7 +675,7 @@ class FirmDocumentService
                 return [
                     'id' => (int) $target->id,
                     'name' => (string) $target->name,
-                    'is_central' => false,
+                    'is_central' => (bool) $target->is_central,
                     'can_add' => (bool) ($grant?->can_add),
                     'can_view' => (bool) ($grant?->can_view),
                     'can_delete' => (bool) ($grant?->can_delete),
@@ -738,25 +725,19 @@ class FirmDocumentService
             ]);
         }
 
-        if (! $firm->isCentral()) {
-            throw ValidationException::withMessages([
-                'firm_id' => 'Firm-level access applies only to Central / Network documents.',
-            ]);
-        }
-
         if (! $this->access->canManageFirmAccess($actor, $firm, $hub)) {
-            throw new HttpException(403, 'You do not have permission to manage firm access for Central / Network documents.');
+            throw new HttpException(403, 'You do not have permission to manage firm access for these documents.');
         }
 
-        if ($granteeFirm->isCentral() || (int) $granteeFirm->id === (int) $firm->id) {
+        if ((int) $granteeFirm->id === (int) $firm->id) {
             throw ValidationException::withMessages([
-                'grantee_firm_id' => 'Choose a non-central firm to grant access.',
+                'grantee_firm_id' => 'Choose a different firm to grant access.',
             ]);
         }
 
         if (! $this->isFirmVisibleForDocuments($firm, $granteeFirm)) {
             throw ValidationException::withMessages([
-                'grantee_firm_id' => 'That firm is not allowed to see Central / Network documents. Add it under “which firms can see documents” first.',
+                'grantee_firm_id' => 'That firm is not on the allowlist. Add it under “which firms can see documents” first.',
             ]);
         }
 

@@ -546,24 +546,21 @@ Notes:
   - `firm_documents_delete` — delete documents for ANY firm on the hub
   - `firm_documents_archive` — archive documents for ANY firm on the hub
   - `firm_documents_manage_categories` — add/edit/delete category options
-  - `firm_documents_manage_firm_access` — decide which firms may see
-    Central / Network documents (allowlist). Those firms then appear in
-    document access rights. Blurred while Firm documents functionality is off.
+  - `firm_documents_manage_firm_access` — decide which firms may see a
+    firm’s documents (allowlist). Blurred while Firm documents is off.
 - These are hub-wide admin tools, distinct from Head / member per-document grants.
 
-3.4.4a Central / Network documents — visible firms + access rights
-- Two-step model for Central / Network (`firms.is_central`) documents:
-  1) Visible firms allowlist — Head of Central / Network, OR any role with
-     `firm_documents_manage_firm_access`, chooses which firms may see that
-     firm’s documents (`GET/PUT /api/firm-documents/visible-firms`).
-  2) Per-document access rights (key icon) — always lists OWN-firm users
-     (same as 3.4.3) PLUS only the allowlisted firms (not every firm).
-     Mode is `mixed`. Grant View / Add / Archive / Delete to members and/or
-     firms. Firm grants apply to every current member of the grantee firm.
-- Recipient firm members see shared Central docs in their own library under
-  a “Shared from Central / Network” folder.
+3.4.4a Visible firms + mixed access rights (every firm)
+- Two-step model for ANY firm’s documents:
+  1) Visible firms allowlist — Head of that firm, OR any role with
+     `firm_documents_manage_firm_access`, chooses which other firms may see
+     that firm’s documents (`GET/PUT /api/firm-documents/visible-firms`).
+  2) Per-document access rights (key icon) — lists OWN-firm users (3.4.3)
+     PLUS only the allowlisted firms. Mode is `mixed`. Firm grants apply to
+     every current member of the grantee firm.
+- Recipient firm members see shared docs in their library under
+  “Shared from other firms”.
 - Removing a firm from the allowlist also clears its per-document firm grants.
-- Non-central firm documents keep per-member access only (3.4.3).
 
 3.4.5 Activity logs (required for the whole flow)
 - Every mutation in this flow is written to `activity_logs` (same hub audit
@@ -1451,11 +1448,13 @@ STEP 1 — Shared hub core (content hub)
 [x] Taxonomy add requests (`taxonomy_request_add`) — request new post/reel
     type/category/tag (Central), GC content type, or firm document category;
     managers with matching Manage caps approve (auto-create) or reject
+[x] Frontend: Taxonomy requests nav + pages (my / new / queue / detail) under
+    SM Template; gated by taxonomy_request_add / Manage caps
 [x] Head grants per-document member rights via key icon / access popup
-[x] Central / Network visible-firms allowlist + mixed access rights (`firm_documents_manage_firm_access`; own users + allowlisted firms; firm grants apply to all members)
+[x] Per-firm visible-firms allowlist + mixed access rights (`firm_documents_manage_firm_access`; own users + allowlisted firms; firm grants apply to all members)
 [x] Firm Head & Firm Documents activity logs (`firm.head.*`, `firm.documents.*`)
 [x] Frontend: Assign Head of Firm + Firm Documents UI (rights-gated; mixed
-    access rights + which-firms-can-see-documents for Central / Network)
+    access rights + which-firms-can-see-documents for every firm)
 [x] Support Tickets functionality (`support_tickets`) + APIs (submit with
     module/screenshots, queue, change status, comments) + `st_*` capabilities
 [x] Frontend: Support Tickets nav (My tickets / New ticket / All tickets) + pages
