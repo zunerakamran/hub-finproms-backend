@@ -9,54 +9,82 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('firm_document_categories', function (Blueprint $table) {
-            $table->id();
-            $table->string('name');
-            $table->string('slug')->unique();
-            $table->timestamps();
-        });
+        if (! Schema::hasTable('firm_document_categories')) {
+            Schema::create('firm_document_categories', function (Blueprint $table) {
+                $table->id();
+                $table->string('name');
+                $table->string('slug')->unique();
+                $table->timestamps();
+            });
+        }
 
-        Schema::create('firm_document_folders', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('firm_id')->constrained('firms')->cascadeOnDelete();
-            $table->foreignId('parent_id')
-                ->nullable()
-                ->constrained('firm_document_folders')
-                ->cascadeOnDelete();
-            $table->string('name');
-            $table->foreignId('created_by')->nullable()->constrained('users')->nullOnDelete();
-            $table->timestamps();
+        if (! Schema::hasTable('firm_document_folders')) {
+            Schema::create('firm_document_folders', function (Blueprint $table) {
+                $table->id();
+                $table->foreignId('firm_id')->constrained('firms')->cascadeOnDelete();
+                $table->foreignId('parent_id')
+                    ->nullable()
+                    ->constrained('firm_document_folders')
+                    ->cascadeOnDelete();
+                $table->string('name');
+                $table->foreignId('created_by')->nullable()->constrained('users')->nullOnDelete();
+                $table->timestamps();
 
-            $table->index(['firm_id', 'parent_id']);
-        });
+                $table->index(['firm_id', 'parent_id']);
+            });
+        }
 
-        Schema::table('firm_documents', function (Blueprint $table) {
-            $table->foreignId('folder_id')
-                ->nullable()
-                ->after('firm_id')
-                ->constrained('firm_document_folders')
-                ->nullOnDelete();
-            $table->foreignId('category_id')
-                ->nullable()
-                ->after('folder_id')
-                ->constrained('firm_document_categories')
-                ->nullOnDelete();
-        });
+        if (Schema::hasTable('firm_documents') && ! Schema::hasColumn('firm_documents', 'folder_id')) {
+            Schema::table('firm_documents', function (Blueprint $table) {
+                $table->foreignId('folder_id')
+                    ->nullable()
+                    ->after('firm_id')
+                    ->constrained('firm_document_folders')
+                    ->nullOnDelete();
+            });
+        }
 
-        // Per-document access: firm_document_id + user rights.
-        Schema::table('firm_document_member_rights', function (Blueprint $table) {
-            $table->foreignId('firm_document_id')
-                ->nullable()
-                ->after('firm_id')
-                ->constrained('firm_documents')
-                ->cascadeOnDelete();
-        });
+        if (Schema::hasTable('firm_documents') && ! Schema::hasColumn('firm_documents', 'category_id')) {
+            Schema::table('firm_documents', function (Blueprint $table) {
+                $table->foreignId('category_id')
+                    ->nullable()
+                    ->after('folder_id')
+                    ->constrained('firm_document_categories')
+                    ->nullOnDelete();
+            });
+        }
+
+        $addedDocumentId = false;
+        if (Schema::hasTable('firm_document_member_rights')
+            && ! Schema::hasColumn('firm_document_member_rights', 'firm_document_id')) {
+            Schema::table('firm_document_member_rights', function (Blueprint $table) {
+                $table->foreignId('firm_document_id')
+                    ->nullable()
+                    ->after('firm_id')
+                    ->constrained('firm_documents')
+                    ->cascadeOnDelete();
+            });
+            $addedDocumentId = true;
+        }
 
         // Expand legacy firm-wide grants onto every existing document for that firm.
+        // Only when we just added the column, or when firm-wide rows with view/delete/archive still exist.
         if (Schema::hasTable('firm_document_member_rights') && Schema::hasTable('firm_documents')) {
             $legacy = DB::table('firm_document_member_rights')
                 ->whereNull('firm_document_id')
+                ->where(function ($q) {
+                    $q->where('can_view', true)
+                        ->orWhere('can_delete', true)
+                        ->orWhere('can_archive', true);
+                })
                 ->get();
+
+            // Also expand freshly-migrated null rows once when column was just added.
+            if ($addedDocumentId && $legacy->isEmpty()) {
+                $legacy = DB::table('firm_document_member_rights')
+                    ->whereNull('firm_document_id')
+                    ->get();
+            }
 
             foreach ($legacy as $row) {
                 $docIds = DB::table('firm_documents')
@@ -98,18 +126,67 @@ return new class extends Migration
             }
         }
 
-        Schema::table('firm_document_member_rights', function (Blueprint $table) {
-            $table->dropUnique(['firm_id', 'user_id']);
-            // Per-document uniqueness is enforced in the service (NULL firm_document_id =
-            // firm-wide upload grant; MySQL unique indexes treat NULLs as distinct).
-            $table->index(['firm_document_id', 'user_id'], 'firm_doc_member_rights_doc_user_idx');
-            $table->index(['firm_id', 'user_id'], 'firm_doc_member_rights_firm_user_idx');
-        });
+        $this->replaceFirmUserUniqueWithNonUniqueIndexes();
+    }
+
+    /**
+     * MySQL will not drop firm_document_member_rights_firm_id_user_id_unique while a
+     * foreign key still depends on it. Add dedicated firm_id / user_id indexes first.
+     */
+    private function replaceFirmUserUniqueWithNonUniqueIndexes(): void
+    {
+        if (! Schema::hasTable('firm_document_member_rights')) {
+            return;
+        }
+
+        $indexNames = collect(DB::select('SHOW INDEX FROM firm_document_member_rights'))
+            ->pluck('Key_name')
+            ->unique()
+            ->values()
+            ->all();
+
+        if (! in_array('firm_doc_member_rights_firm_id_idx', $indexNames, true)) {
+            // Dedicated index so firm_id FK no longer depends on the composite unique.
+            Schema::table('firm_document_member_rights', function (Blueprint $table) {
+                $table->index('firm_id', 'firm_doc_member_rights_firm_id_idx');
+            });
+            $indexNames[] = 'firm_doc_member_rights_firm_id_idx';
+        }
+
+        if (! in_array('firm_doc_member_rights_user_id_idx', $indexNames, true)) {
+            Schema::table('firm_document_member_rights', function (Blueprint $table) {
+                $table->index('user_id', 'firm_doc_member_rights_user_id_idx');
+            });
+            $indexNames[] = 'firm_doc_member_rights_user_id_idx';
+        }
+
+        if (in_array('firm_document_member_rights_firm_id_user_id_unique', $indexNames, true)) {
+            Schema::table('firm_document_member_rights', function (Blueprint $table) {
+                $table->dropUnique('firm_document_member_rights_firm_id_user_id_unique');
+            });
+        }
+
+        $indexNames = collect(DB::select('SHOW INDEX FROM firm_document_member_rights'))
+            ->pluck('Key_name')
+            ->unique()
+            ->values()
+            ->all();
+
+        if (! in_array('firm_doc_member_rights_doc_user_idx', $indexNames, true)) {
+            Schema::table('firm_document_member_rights', function (Blueprint $table) {
+                $table->index(['firm_document_id', 'user_id'], 'firm_doc_member_rights_doc_user_idx');
+            });
+        }
+
+        if (! in_array('firm_doc_member_rights_firm_user_idx', $indexNames, true)) {
+            Schema::table('firm_document_member_rights', function (Blueprint $table) {
+                $table->index(['firm_id', 'user_id'], 'firm_doc_member_rights_firm_user_idx');
+            });
+        }
     }
 
     public function down(): void
     {
-        // Collapse back to one firm-wide row per user (best-effort).
         if (Schema::hasTable('firm_document_member_rights')) {
             $grouped = DB::table('firm_document_member_rights')
                 ->select('firm_id', 'user_id')
@@ -135,19 +212,48 @@ return new class extends Migration
                     'updated_at' => now(),
                 ]);
             }
+
+            $indexNames = collect(DB::select('SHOW INDEX FROM firm_document_member_rights'))
+                ->pluck('Key_name')
+                ->unique()
+                ->all();
+
+            Schema::table('firm_document_member_rights', function (Blueprint $table) use ($indexNames) {
+                if (in_array('firm_doc_member_rights_doc_user_idx', $indexNames, true)) {
+                    $table->dropIndex('firm_doc_member_rights_doc_user_idx');
+                }
+                if (in_array('firm_doc_member_rights_firm_user_idx', $indexNames, true)) {
+                    $table->dropIndex('firm_doc_member_rights_firm_user_idx');
+                }
+                if (in_array('firm_doc_member_rights_firm_id_idx', $indexNames, true)) {
+                    $table->dropIndex('firm_doc_member_rights_firm_id_idx');
+                }
+                if (in_array('firm_doc_member_rights_user_id_idx', $indexNames, true)) {
+                    $table->dropIndex('firm_doc_member_rights_user_id_idx');
+                }
+            });
+
+            if (Schema::hasColumn('firm_document_member_rights', 'firm_document_id')) {
+                Schema::table('firm_document_member_rights', function (Blueprint $table) {
+                    $table->dropConstrainedForeignId('firm_document_id');
+                });
+            }
+
+            Schema::table('firm_document_member_rights', function (Blueprint $table) {
+                $table->unique(['firm_id', 'user_id']);
+            });
         }
 
-        Schema::table('firm_document_member_rights', function (Blueprint $table) {
-            $table->dropIndex('firm_doc_member_rights_doc_user_idx');
-            $table->dropIndex('firm_doc_member_rights_firm_user_idx');
-            $table->dropConstrainedForeignId('firm_document_id');
-            $table->unique(['firm_id', 'user_id']);
-        });
-
-        Schema::table('firm_documents', function (Blueprint $table) {
-            $table->dropConstrainedForeignId('folder_id');
-            $table->dropConstrainedForeignId('category_id');
-        });
+        if (Schema::hasColumn('firm_documents', 'folder_id')) {
+            Schema::table('firm_documents', function (Blueprint $table) {
+                $table->dropConstrainedForeignId('folder_id');
+            });
+        }
+        if (Schema::hasColumn('firm_documents', 'category_id')) {
+            Schema::table('firm_documents', function (Blueprint $table) {
+                $table->dropConstrainedForeignId('category_id');
+            });
+        }
 
         Schema::dropIfExists('firm_document_folders');
         Schema::dropIfExists('firm_document_categories');
