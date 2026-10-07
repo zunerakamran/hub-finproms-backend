@@ -254,7 +254,13 @@ class FirmDocumentService
 
         if ($files === []) {
             throw ValidationException::withMessages([
-                'attachments' => 'At least one attachment is required.',
+                'attachments' => 'One attachment is required.',
+            ]);
+        }
+
+        if (count($files) > 1) {
+            throw ValidationException::withMessages([
+                'attachments' => 'Only one attachment is allowed per document.',
             ]);
         }
 

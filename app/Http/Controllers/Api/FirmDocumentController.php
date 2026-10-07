@@ -153,13 +153,16 @@ class FirmDocumentController extends Controller
         $user = $request->user();
 
         if ($hub = $this->actingWhiteLabelHub($request)) {
+            $uploadRules = ComplianceSupportingFiles::optionalUploadRules('attachments');
+            $uploadRules['attachments'] = ['nullable', 'array', 'max:1'];
+
             $validated = $request->validate(array_merge([
                 'firm_id' => ['required', 'integer', 'min:1'],
                 'title' => ['required', 'string', 'max:255'],
                 'description' => ['nullable', 'string', 'max:5000'],
-            ], ComplianceSupportingFiles::optionalUploadRules('attachments')));
+            ], $uploadRules));
 
-            $files = ComplianceSupportingFiles::fromRequest($request, 'attachments');
+            $files = array_slice(ComplianceSupportingFiles::fromRequest($request, 'attachments'), 0, 1);
 
             try {
                 $document = $this->whiteLabelDocuments->create(
@@ -183,6 +186,9 @@ class FirmDocumentController extends Controller
             ], 201);
         }
 
+        $uploadRules = ComplianceSupportingFiles::optionalUploadRules('attachments');
+        $uploadRules['attachments'] = ['nullable', 'array', 'max:1'];
+
         $validated = $request->validate(array_merge([
             'firm_id' => ['sometimes', 'nullable', 'integer', 'exists:firms,id'],
             'title' => ['required', 'string', 'max:255'],
@@ -191,11 +197,11 @@ class FirmDocumentController extends Controller
             'folder_name' => ['nullable', 'string', 'max:255'],
             'parent_folder_id' => ['nullable', 'integer', 'exists:firm_document_folders,id'],
             'category_id' => ['nullable', 'integer', 'exists:firm_document_categories,id'],
-        ], ComplianceSupportingFiles::optionalUploadRules('attachments')));
+        ], $uploadRules));
 
         $firm = $this->resolveFirm($user, $validated['firm_id'] ?? null);
         $hub = $this->rightsHub($request, $user);
-        $files = ComplianceSupportingFiles::fromRequest($request, 'attachments');
+        $files = array_slice(ComplianceSupportingFiles::fromRequest($request, 'attachments'), 0, 1);
 
         $document = $this->documents->create(
             $user,
