@@ -501,10 +501,27 @@ Notes:
 - Frontend unlocks “Firm documents” via `firm_document_rights.is_firm_head` /
   merged `firm_documents_*` effective capabilities (any role).
 
-3.4.3 Head grants rights to firm members (own firm only)
-- The Head may grant / revoke any combination of add / view / delete / archive
-  to members of THEIR firm. Members only receive what the head grants.
+3.4.3 Head grants rights to firm members (per document)
+- Member rights are PER DOCUMENT (not firm-wide for view/delete/archive).
+- The Head opens access rights from a key icon on each document row; popup
+  grants / revokes any combination of add / view / delete / archive for that
+  document to members of THEIR firm. Members only receive what the head grants.
+- Granting `can_add` on a document also unlocks firm-level upload for that member.
 - Cleared when a user leaves the firm or is discontinued.
+
+3.4.3a Folders / subfolders
+- Documents may sit in a folder tree (folders + nested subfolders) scoped to
+  the firm. On upload, choose an existing folder or create a new folder /
+  subfolder. Library UI is a nested expand/collapse table of folders with
+  documents inside; unfiled documents are listed separately.
+- Upload new document control sits directly above the library table.
+
+3.4.3b Categories (taxonomy, like GC content types)
+- Hub-scoped document categories (`firm_document_categories`) with name/slug.
+- Capability `firm_documents_manage_categories` (“Manage firm document
+  categories”) — blurred while Functionalities → Firm documents is off.
+  Same admin CRUD pattern as General Compliance content types.
+- Upload form category dropdown lists these options (optional).
 
 3.4.4 Capabilities matrix — hub-wide (all firms)
 - When Firm documents functionality is ON, these Capabilities are editable:
@@ -512,7 +529,8 @@ Notes:
   - `firm_documents_add` — add documents for ANY firm on the hub
   - `firm_documents_delete` — delete documents for ANY firm on the hub
   - `firm_documents_archive` — archive documents for ANY firm on the hub
-- These are hub-wide admin tools, distinct from Head / member per-firm grants.
+  - `firm_documents_manage_categories` — add/edit/delete category options
+- These are hub-wide admin tools, distinct from Head / member per-document grants.
 
 3.4.5 Activity logs (required for the whole flow)
 - Every mutation in this flow is written to `activity_logs` (same hub audit
@@ -523,6 +541,7 @@ Notes:
   - `firm.documents.member_rights.grant` — member document rights granted/updated
   - `firm.documents.member_rights.revoke` — member document rights revoked
   - `firm.documents.add` — document uploaded / created
+  - `firm.documents.folder.create` — folder created
   - `firm.documents.view` — optional: record sensitive downloads if product
     requires audit of views (otherwise omit high-volume view noise)
   - `firm.documents.delete` — document permanently deleted
@@ -1384,7 +1403,9 @@ STEP 1 — Shared hub core (content hub)
     firm appointed from that firm’s members (section 3.4.1)
 [x] Firm Documents library — head can add attachments (images, Word, PDF, etc.)
     and has all add/view/delete/archive rights (section 3.4.2–3.4.4)
-[x] Head grants firm-member document rights (add / view / delete / archive)
+[x] Folders / subfolders + nested expand/collapse library; upload above table
+[x] Document categories (`firm_documents_manage_categories`, GC-style admin CRUD)
+[x] Head grants per-document member rights via key icon / access popup
 [x] Firm Head & Firm Documents activity logs (`firm.head.*`, `firm.documents.*`)
 [x] Frontend: Assign Head of Firm + Firm Documents UI (rights-gated)
 [x] Support Tickets functionality (`support_tickets`) + APIs (submit with

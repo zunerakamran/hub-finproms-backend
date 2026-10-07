@@ -118,15 +118,16 @@ class FirmHeadAndDocumentsTest extends TestCase
         $this->assertDatabaseHas('activity_logs', ['action' => 'firm.documents.add']);
         $this->assertSame(1, FirmDocument::query()->count());
 
+        $docId = (int) FirmDocument::query()->value('id');
+
         // Member cannot view yet.
         Sanctum::actingAs($member);
         $this->getJson('/api/firm-documents?firm_id='.$firm->id)
             ->assertStatus(403);
 
-        // Head grants view.
+        // Head grants per-document view.
         Sanctum::actingAs($head);
-        $this->putJson('/api/firm-documents/member-rights', [
-            'firm_id' => $firm->id,
+        $this->putJson('/api/firm-documents/'.$docId.'/member-rights', [
             'user_id' => $member->id,
             'can_view' => true,
             'can_add' => false,
@@ -137,6 +138,7 @@ class FirmHeadAndDocumentsTest extends TestCase
         $this->assertDatabaseHas('activity_logs', ['action' => 'firm.documents.member_rights.grant']);
         $this->assertDatabaseHas('firm_document_member_rights', [
             'firm_id' => $firm->id,
+            'firm_document_id' => $docId,
             'user_id' => $member->id,
             'can_view' => 1,
         ]);
@@ -145,6 +147,52 @@ class FirmHeadAndDocumentsTest extends TestCase
         $this->getJson('/api/firm-documents?firm_id='.$firm->id)
             ->assertOk()
             ->assertJsonPath('documents.0.title', 'Policy pack');
+    }
+
+    public function test_upload_with_folder_and_category_and_nested_library(): void
+    {
+        Storage::fake('public');
+        $hub = $this->createSharedHub();
+        $checklist = $hub->resolvedChecklist();
+        $checklist['firm_documents'] = true;
+        $hub->checklist = $checklist;
+        $hub->save();
+        app(HubService::class)->forgetCurrentCache();
+
+        $this->enableCaps($hub, User::ROLE_POWER_ADMIN, [
+            'firm_documents_manage_categories',
+            'firm_documents_add',
+            'firm_documents_view',
+        ]);
+
+        $admin = User::factory()->powerAdmin()->create();
+        $firm = Firm::query()->create(['name' => 'Folder Firm']);
+        $head = User::factory()->create(['firm_id' => $firm->id, 'role' => User::ROLE_USER]);
+        $firm->update(['head_user_id' => $head->id]);
+
+        Sanctum::actingAs($admin);
+        $cat = $this->postJson('/api/power-admin/firm-documents/categories', [
+            'name' => 'Policies',
+        ])->assertCreated()->json('category');
+
+        Sanctum::actingAs($head);
+        $file = UploadedFile::fake()->create('handbook.pdf', 40, 'application/pdf');
+        $created = $this->post('/api/firm-documents', [
+            'firm_id' => $firm->id,
+            'title' => 'Handbook',
+            'folder_name' => 'HR',
+            'category_id' => $cat['id'],
+            'attachments' => [$file],
+        ], ['Accept' => 'application/json'])->assertCreated();
+
+        $this->assertNotNull($created->json('document.folder_id'));
+        $this->assertSame((int) $cat['id'], (int) $created->json('document.category_id'));
+
+        $list = $this->getJson('/api/firm-documents?firm_id='.$firm->id.'&scope=all')
+            ->assertOk();
+        $this->assertNotEmpty($list->json('folders'));
+        $this->assertSame('HR', $list->json('folders.0.name'));
+        $this->assertSame('Handbook', $list->json('folders.0.documents.0.title'));
     }
 
     public function test_matrix_view_cap_allows_any_firm_when_functionality_on(): void

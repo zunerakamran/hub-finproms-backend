@@ -74,15 +74,14 @@ class FirmDocumentController extends Controller
         $validated = $request->validate([
             'firm_id' => ['sometimes', 'nullable', 'integer', 'exists:firms,id'],
             'scope' => ['sometimes', 'string', 'in:active,archived,all'],
-            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
         ]);
 
         $firm = $this->resolveFirm($user, $validated['firm_id'] ?? null);
         $hub = $this->rightsHub($request, $user);
         $scope = $validated['scope'] ?? 'active';
-        $perPage = (int) ($validated['per_page'] ?? 25);
+        $summary = $this->access->effectiveRightsSummary($user, $hub);
 
-        $paginator = $this->documents->paginate($user, $firm, $scope, $perPage, $hub);
+        $library = $this->documents->library($user, $firm, $scope, $hub);
 
         return response()->json([
             'firm' => $firm->load('headUser:id,name,email')->toApiArray(),
@@ -92,20 +91,60 @@ class FirmDocumentController extends Controller
                 'can_delete' => $this->access->can($user, $firm, FirmDocumentAccessService::RIGHT_DELETE, $hub),
                 'can_archive' => $this->access->can($user, $firm, FirmDocumentAccessService::RIGHT_ARCHIVE, $hub),
                 'can_manage_member_rights' => $this->access->can($user, $firm, FirmDocumentAccessService::RIGHT_MANAGE_MEMBER_RIGHTS, $hub),
+                'can_manage_categories' => (bool) ($summary['can_manage_categories'] ?? false),
                 'is_firm_head' => $this->access->isHeadOfFirm($user, $firm),
                 'functionality_enabled' => $this->access->functionalityEnabled($hub),
             ],
-            'documents' => collect($paginator->items())
-                ->map(fn (FirmDocument $doc) => $doc->toApiArray())
-                ->values(),
-            'meta' => [
-                'current_page' => $paginator->currentPage(),
-                'last_page' => $paginator->lastPage(),
-                'per_page' => $paginator->perPage(),
-                'total' => $paginator->total(),
-            ],
+            'folders' => $library['folders'],
+            'documents' => $library['documents'],
+            'unfiled_documents' => $library['unfiled_documents'],
             'acting_on_white_label' => false,
         ]);
+    }
+
+    public function folders(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'firm_id' => ['sometimes', 'nullable', 'integer', 'exists:firms,id'],
+        ]);
+        $firm = $this->resolveFirm($user, $validated['firm_id'] ?? null);
+        $hub = $this->rightsHub($request, $user);
+
+        return response()->json([
+            'folders' => $this->documents->listFolders($user, $firm, $hub),
+        ]);
+    }
+
+    public function storeFolder(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'firm_id' => ['sometimes', 'nullable', 'integer', 'exists:firms,id'],
+            'name' => ['required', 'string', 'max:255'],
+            'parent_id' => ['nullable', 'integer', 'exists:firm_document_folders,id'],
+        ]);
+
+        $firm = $this->resolveFirm($user, $validated['firm_id'] ?? null);
+        $hub = $this->rightsHub($request, $user);
+
+        $folder = $this->documents->createFolder(
+            $user,
+            $firm,
+            trim($validated['name']),
+            isset($validated['parent_id']) ? (int) $validated['parent_id'] : null,
+            $request,
+            $hub,
+        );
+
+        return response()->json([
+            'message' => 'Folder created successfully.',
+            'folder' => $folder->toApiArray(false),
+        ], 201);
     }
 
     public function store(Request $request): JsonResponse
@@ -148,6 +187,10 @@ class FirmDocumentController extends Controller
             'firm_id' => ['sometimes', 'nullable', 'integer', 'exists:firms,id'],
             'title' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:5000'],
+            'folder_id' => ['nullable', 'integer', 'exists:firm_document_folders,id'],
+            'folder_name' => ['nullable', 'string', 'max:255'],
+            'parent_folder_id' => ['nullable', 'integer', 'exists:firm_document_folders,id'],
+            'category_id' => ['nullable', 'integer', 'exists:firm_document_categories,id'],
         ], ComplianceSupportingFiles::optionalUploadRules('attachments')));
 
         $firm = $this->resolveFirm($user, $validated['firm_id'] ?? null);
@@ -160,13 +203,21 @@ class FirmDocumentController extends Controller
             trim($validated['title']),
             isset($validated['description']) ? trim((string) $validated['description']) : null,
             $files,
+            [
+                'folder_id' => $validated['folder_id'] ?? null,
+                'folder_name' => $validated['folder_name'] ?? null,
+                'parent_folder_id' => $validated['parent_folder_id'] ?? null,
+                'category_id' => $validated['category_id'] ?? null,
+            ],
             $request,
             $hub,
         );
 
         return response()->json([
             'message' => 'Document uploaded successfully.',
-            'document' => $document->toApiArray(),
+            'document' => $document->toApiArray(
+                $this->access->documentRightsFor($user, $firm, $document, $hub)
+            ),
             'acting_on_white_label' => false,
         ], 201);
     }
@@ -217,11 +268,15 @@ class FirmDocumentController extends Controller
         }
 
         $model = FirmDocument::query()->findOrFail($document);
-        $updated = $this->documents->archive($user, $model, true, $request, $this->rightsHub($request, $user));
+        $firm = $model->firm ?? Firm::query()->findOrFail($model->firm_id);
+        $hub = $this->rightsHub($request, $user);
+        $updated = $this->documents->archive($user, $model, true, $request, $hub);
 
         return response()->json([
             'message' => 'Document archived successfully.',
-            'document' => $updated->toApiArray(),
+            'document' => $updated->toApiArray(
+                $this->access->documentRightsFor($user, $firm, $updated, $hub)
+            ),
         ]);
     }
 
@@ -246,11 +301,93 @@ class FirmDocumentController extends Controller
         }
 
         $model = FirmDocument::query()->findOrFail($document);
-        $updated = $this->documents->archive($user, $model, false, $request, $this->rightsHub($request, $user));
+        $firm = $model->firm ?? Firm::query()->findOrFail($model->firm_id);
+        $hub = $this->rightsHub($request, $user);
+        $updated = $this->documents->archive($user, $model, false, $request, $hub);
 
         return response()->json([
             'message' => 'Document unarchived successfully.',
-            'document' => $updated->toApiArray(),
+            'document' => $updated->toApiArray(
+                $this->access->documentRightsFor($user, $firm, $updated, $hub)
+            ),
+        ]);
+    }
+
+    public function documentMemberRights(Request $request, int $document): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $model = FirmDocument::query()->findOrFail($document);
+        $firm = $model->firm ?? Firm::query()->findOrFail($model->firm_id);
+        $hub = $this->rightsHub($request, $user);
+
+        $members = $this->documents->listDocumentMemberRights($user, $firm, $model, $hub);
+
+        return response()->json([
+            'firm' => $firm->load('headUser:id,name,email')->toApiArray(),
+            'document' => [
+                'id' => (int) $model->id,
+                'title' => (string) $model->title,
+            ],
+            'members' => $members,
+            'acting_on_white_label' => false,
+        ]);
+    }
+
+    public function setDocumentMemberRights(Request $request, int $document): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'user_id' => ['required', 'integer', 'exists:users,id'],
+            'can_add' => ['sometimes', 'boolean'],
+            'can_view' => ['sometimes', 'boolean'],
+            'can_delete' => ['sometimes', 'boolean'],
+            'can_archive' => ['sometimes', 'boolean'],
+        ]);
+
+        $model = FirmDocument::query()->findOrFail($document);
+        $firm = $model->firm ?? Firm::query()->findOrFail($model->firm_id);
+        $member = User::query()->findOrFail((int) $validated['user_id']);
+        $hub = $this->rightsHub($request, $user);
+
+        $row = $this->documents->setDocumentMemberRights(
+            $user,
+            $firm,
+            $model,
+            $member,
+            $validated,
+            $request,
+            $hub,
+        );
+
+        return response()->json([
+            'message' => 'Document access rights updated.',
+            'rights' => $row->relationLoaded('user') || $row->exists
+                ? array_merge($row->toApiArray(), [
+                    'user' => [
+                        'id' => (int) $member->id,
+                        'name' => (string) $member->name,
+                        'email' => (string) $member->email,
+                    ],
+                ])
+                : [
+                    'firm_id' => (int) $firm->id,
+                    'firm_document_id' => (int) $model->id,
+                    'user_id' => (int) $member->id,
+                    'can_add' => false,
+                    'can_view' => false,
+                    'can_delete' => false,
+                    'can_archive' => false,
+                    'user' => [
+                        'id' => (int) $member->id,
+                        'name' => (string) $member->name,
+                        'email' => (string) $member->email,
+                    ],
+                ],
+            'acting_on_white_label' => false,
         ]);
     }
 

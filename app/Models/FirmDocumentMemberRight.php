@@ -9,6 +9,7 @@ class FirmDocumentMemberRight extends Model
 {
     protected $fillable = [
         'firm_id',
+        'firm_document_id',
         'user_id',
         'can_add',
         'can_view',
@@ -31,9 +32,19 @@ class FirmDocumentMemberRight extends Model
         return $this->belongsTo(Firm::class);
     }
 
+    public function document(): BelongsTo
+    {
+        return $this->belongsTo(FirmDocument::class, 'firm_document_id');
+    }
+
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function isFirmWide(): bool
+    {
+        return $this->firm_document_id === null;
     }
 
     /**
@@ -44,6 +55,7 @@ class FirmDocumentMemberRight extends Model
         return [
             'id' => $this->id,
             'firm_id' => (int) $this->firm_id,
+            'firm_document_id' => $this->firm_document_id ? (int) $this->firm_document_id : null,
             'user_id' => (int) $this->user_id,
             'user' => $this->user ? [
                 'id' => (int) $this->user->id,

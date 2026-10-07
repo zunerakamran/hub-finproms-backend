@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\BundleController;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\CentralContentLibraryController;
 use App\Http\Controllers\Api\FirmController;
+use App\Http\Controllers\Api\FirmDocumentCategoryController;
 use App\Http\Controllers\Api\FirmDocumentController;
 use App\Http\Controllers\Api\FirmHeadController;
 use App\Http\Controllers\Api\SocialMediaComplianceController;
@@ -176,8 +177,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/firm-documents/my-rights', [FirmDocumentController::class, 'myRights']);
     Route::get('/firm-documents/member-rights', [FirmDocumentController::class, 'memberRights']);
     Route::put('/firm-documents/member-rights', [FirmDocumentController::class, 'setMemberRights']);
+    Route::get('/firm-documents/folders', [FirmDocumentController::class, 'folders']);
+    Route::post('/firm-documents/folders', [FirmDocumentController::class, 'storeFolder']);
+    Route::get('/firm-documents/categories', [FirmDocumentCategoryController::class, 'index']);
     Route::get('/firm-documents', [FirmDocumentController::class, 'index']);
     Route::post('/firm-documents', [FirmDocumentController::class, 'store']);
+    Route::get('/firm-documents/{document}/member-rights', [FirmDocumentController::class, 'documentMemberRights'])->whereNumber('document');
+    Route::put('/firm-documents/{document}/member-rights', [FirmDocumentController::class, 'setDocumentMemberRights'])->whereNumber('document');
     Route::delete('/firm-documents/{document}', [FirmDocumentController::class, 'destroy'])->whereNumber('document');
     Route::post('/firm-documents/{document}/archive', [FirmDocumentController::class, 'archive'])->whereNumber('document');
     Route::post('/firm-documents/{document}/unarchive', [FirmDocumentController::class, 'unarchive'])->whereNumber('document');
@@ -410,6 +416,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:dashboard_assign_firm_head')->group(function () {
             Route::get('/firms/{firm}/members', [FirmHeadController::class, 'members'])->whereNumber('firm');
             Route::put('/firms/{firm}/head', [FirmHeadController::class, 'assign'])->whereNumber('firm');
+        });
+
+        Route::middleware('hub_can:firm_documents_manage_categories')->group(function () {
+            Route::get('/firm-documents/categories', [FirmDocumentCategoryController::class, 'index']);
+            Route::post('/firm-documents/categories', [FirmDocumentCategoryController::class, 'store']);
+            Route::put('/firm-documents/categories/{firmDocumentCategory}', [FirmDocumentCategoryController::class, 'update'])->whereNumber('firmDocumentCategory');
+            Route::delete('/firm-documents/categories/{firmDocumentCategory}', [FirmDocumentCategoryController::class, 'destroy'])->whereNumber('firmDocumentCategory');
         });
 
         Route::middleware('hub_can:dashboard_manage_types')->group(function () {
@@ -915,6 +928,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:dashboard_assign_firm_head')->group(function () {
             Route::get('/firms/{firm}/members', [FirmHeadController::class, 'members'])->whereNumber('firm');
             Route::put('/firms/{firm}/head', [FirmHeadController::class, 'assign'])->whereNumber('firm');
+        });
+
+        Route::middleware('hub_can:firm_documents_manage_categories')->group(function () {
+            Route::get('/firm-documents/categories', [FirmDocumentCategoryController::class, 'index']);
+            Route::post('/firm-documents/categories', [FirmDocumentCategoryController::class, 'store']);
+            Route::put('/firm-documents/categories/{firmDocumentCategory}', [FirmDocumentCategoryController::class, 'update'])->whereNumber('firmDocumentCategory');
+            Route::delete('/firm-documents/categories/{firmDocumentCategory}', [FirmDocumentCategoryController::class, 'destroy'])->whereNumber('firmDocumentCategory');
         });
 
         Route::middleware('hub_can:dashboard_manage_types')->group(function () {

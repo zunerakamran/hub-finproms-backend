@@ -10,6 +10,8 @@ class FirmDocument extends Model
 {
     protected $fillable = [
         'firm_id',
+        'folder_id',
+        'category_id',
         'title',
         'description',
         'uploaded_by',
@@ -29,6 +31,16 @@ class FirmDocument extends Model
         return $this->belongsTo(Firm::class);
     }
 
+    public function folder(): BelongsTo
+    {
+        return $this->belongsTo(FirmDocumentFolder::class, 'folder_id');
+    }
+
+    public function category(): BelongsTo
+    {
+        return $this->belongsTo(FirmDocumentCategory::class, 'category_id');
+    }
+
     public function uploader(): BelongsTo
     {
         return $this->belongsTo(User::class, 'uploaded_by');
@@ -44,6 +56,11 @@ class FirmDocument extends Model
         return $this->hasMany(FirmDocumentAttachment::class)->orderBy('sort_order')->orderBy('id');
     }
 
+    public function memberRights(): HasMany
+    {
+        return $this->hasMany(FirmDocumentMemberRight::class, 'firm_document_id');
+    }
+
     public function isArchived(): bool
     {
         return $this->archived_at !== null;
@@ -52,11 +69,27 @@ class FirmDocument extends Model
     /**
      * @return array<string, mixed>
      */
-    public function toApiArray(): array
+    public function toApiArray(?array $viewerRights = null): array
     {
         return [
             'id' => $this->id,
             'firm_id' => (int) $this->firm_id,
+            'folder_id' => $this->folder_id ? (int) $this->folder_id : null,
+            'folder' => $this->relationLoaded('folder') && $this->folder
+                ? [
+                    'id' => (int) $this->folder->id,
+                    'name' => (string) $this->folder->name,
+                    'parent_id' => $this->folder->parent_id ? (int) $this->folder->parent_id : null,
+                ]
+                : null,
+            'category_id' => $this->category_id ? (int) $this->category_id : null,
+            'category' => $this->relationLoaded('category') && $this->category
+                ? [
+                    'id' => (int) $this->category->id,
+                    'name' => (string) $this->category->name,
+                    'slug' => (string) $this->category->slug,
+                ]
+                : null,
             'title' => $this->title,
             'description' => $this->description,
             'uploaded_by' => $this->uploaded_by ? (int) $this->uploaded_by : null,
@@ -71,6 +104,7 @@ class FirmDocument extends Model
             'attachments' => $this->relationLoaded('attachments')
                 ? $this->attachments->map(fn (FirmDocumentAttachment $a) => $a->toApiArray())->values()->all()
                 : [],
+            'viewer_rights' => $viewerRights,
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
         ];

@@ -677,6 +677,7 @@ class Hub extends Model
         'firm_documents_add',
         'firm_documents_delete',
         'firm_documents_archive',
+        'firm_documents_manage_categories',
     ];
 
     /**
@@ -1086,6 +1087,13 @@ class Hub extends Model
         'firm_documents_archive' => [
             'label' => 'Archive firm documents (all firms)',
             'description' => 'Archive / unarchive documents for ANY firm on this hub. Blurred while Functionalities → Firm documents is off. Head of Firm always has archive for their own firm without this capability.',
+            'group' => self::GROUP_DASHBOARD_FIRMS,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'firm_documents_manage_categories' => [
+            'label' => 'Manage firm document categories',
+            'description' => 'Add, edit, and delete category options shown when uploading firm documents. Blurred while Functionalities → Firm documents is off. Same pattern as General Compliance content types.',
             'group' => self::GROUP_DASHBOARD_FIRMS,
             'default_shared' => false,
             'default_white_label' => false,

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Firm;
+use App\Models\FirmDocument;
 use App\Models\FirmDocumentMemberRight;
 use App\Models\Hub;
 use App\Models\User;
@@ -10,12 +11,13 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Resolves firm-document rights for a user against a firm.
+ * Resolves firm-document rights for a user against a firm / document.
  *
  * Order:
- * 1) Head of Firm (any role) → full rights for THEIR firm (appointment unlocks Documents).
- * 2) Member grant row → rights for THEIR firm only.
- * 3) Capabilities matrix firm_documents_* → hub-wide for ALL firms (requires
+ * 1) Head of Firm (any role) → full rights for THEIR firm.
+ * 2) Per-document member grant → view / delete / archive for that document.
+ * 3) Firm-wide member grant (firm_document_id null) → mainly can_add (upload).
+ * 4) Capabilities matrix firm_documents_* → hub-wide for ALL firms (requires
  *    Functionalities → Firm documents ON).
  */
 class FirmDocumentAccessService
@@ -69,38 +71,36 @@ class FirmDocumentAccessService
             && strcasecmp((string) $head->email, (string) $user->email) === 0;
     }
 
-    public function can(User $user, Firm $firm, string $right, ?Hub $hub = null): bool
+    public function can(User $user, Firm $firm, string $right, ?Hub $hub = null, ?FirmDocument $document = null): bool
     {
         $hub = $hub ?? $this->hubs->current();
 
-        // Head of Firm (any role): full rights for their own firm — appointment unlocks Documents.
         if ($this->isHeadOfFirm($user, $firm)) {
             return true;
         }
 
-        // Member grants are firm-scoped (own firm only).
-        if ($right !== self::RIGHT_MANAGE_MEMBER_RIGHTS) {
-            $grant = $this->memberGrant($user, $firm);
-            if ($grant) {
-                $granted = match ($right) {
-                    self::RIGHT_ADD => (bool) $grant->can_add,
-                    self::RIGHT_VIEW => (bool) $grant->can_view,
-                    self::RIGHT_DELETE => (bool) $grant->can_delete,
-                    self::RIGHT_ARCHIVE => (bool) $grant->can_archive,
-                    default => false,
-                };
-                if ($granted) {
-                    return true;
-                }
-            }
-        }
-
-        // Only the Head of Firm manages member rights (not matrix / assign-head).
         if ($right === self::RIGHT_MANAGE_MEMBER_RIGHTS) {
             return false;
         }
 
-        // Hub-wide matrix caps require Functionalities → Firm documents.
+        if ($document !== null && (int) $document->firm_id === (int) $firm->id) {
+            $docGrant = $this->documentGrant($user, $firm, (int) $document->id);
+            if ($docGrant && $this->grantAllows($docGrant, $right)) {
+                return true;
+            }
+        }
+
+        // Firm-wide row (null document_id): used for upload (can_add) and legacy library access.
+        $firmGrant = $this->firmWideGrant($user, $firm);
+        if ($firmGrant && $this->grantAllows($firmGrant, $right)) {
+            return true;
+        }
+
+        // Library entry (view without a specific document): any per-doc grant unlocks the page.
+        if ($right === self::RIGHT_VIEW && $document === null && $this->hasAnyDocumentGrant($user, $firm)) {
+            return true;
+        }
+
         if (! $this->functionalityEnabled($hub)) {
             return false;
         }
@@ -111,12 +111,28 @@ class FirmDocumentAccessService
     }
 
     /**
+     * Per-document effective rights for the viewer (actions on that row).
+     *
+     * @return array{can_view: bool, can_delete: bool, can_archive: bool, can_manage_member_rights: bool}
+     */
+    public function documentRightsFor(User $user, Firm $firm, FirmDocument $document, ?Hub $hub = null): array
+    {
+        return [
+            'can_view' => $this->can($user, $firm, self::RIGHT_VIEW, $hub, $document),
+            'can_delete' => $this->can($user, $firm, self::RIGHT_DELETE, $hub, $document),
+            'can_archive' => $this->can($user, $firm, self::RIGHT_ARCHIVE, $hub, $document),
+            'can_manage_member_rights' => $this->can($user, $firm, self::RIGHT_MANAGE_MEMBER_RIGHTS, $hub),
+        ];
+    }
+
+    /**
      * @return array{
      *   can_add: bool,
      *   can_view: bool,
      *   can_delete: bool,
      *   can_archive: bool,
      *   can_manage_member_rights: bool,
+     *   can_manage_categories: bool,
      *   is_firm_head: bool,
      *   firm_id: ?int,
      *   functionality_enabled: bool,
@@ -135,7 +151,8 @@ class FirmDocumentAccessService
             'can_archive' => $enabled && $this->matrix->userCan($hub, $user, 'firm_documents_archive'),
         ];
 
-        // Appointment as Head unlocks Firm documents for that user (any role).
+        $canManageCategories = $enabled && $this->matrix->userCan($hub, $user, 'firm_documents_manage_categories');
+
         $headedFirmId = $this->headedFirmIdFor($user, $hub);
         if ($headedFirmId) {
             return [
@@ -144,6 +161,7 @@ class FirmDocumentAccessService
                 'can_delete' => true,
                 'can_archive' => true,
                 'can_manage_member_rights' => true,
+                'can_manage_categories' => $canManageCategories,
                 'is_firm_head' => true,
                 'firm_id' => $headedFirmId,
                 'functionality_enabled' => $enabled,
@@ -152,34 +170,81 @@ class FirmDocumentAccessService
         }
 
         $firmId = $user->firm_id ? (int) $user->firm_id : null;
-
-        $grant = null;
+        $firmGrant = null;
+        $hasDocGrant = false;
         if ($firmId && Schema::hasTable('firm_document_member_rights')) {
-            $grant = FirmDocumentMemberRight::query()
-                ->where('firm_id', $firmId)
-                ->where('user_id', $user->id)
-                ->first();
+            $firm = new Firm(['id' => $firmId]);
+            $firm->exists = true;
+            $firmGrant = $this->firmWideGrant($user, $firm);
+            $hasDocGrant = $this->hasAnyDocumentGrant($user, $firm);
         }
 
-        $hasGrant = (bool) ($grant?->can_add || $grant?->can_view || $grant?->can_delete || $grant?->can_archive);
+        $canView = (bool) ($firmGrant?->can_view) || $hasDocGrant || $hubWide['can_view'];
+        $canAdd = (bool) ($firmGrant?->can_add) || $hubWide['can_add'];
+        $canDelete = (bool) ($firmGrant?->can_delete) || $hubWide['can_delete'];
+        $canArchive = (bool) ($firmGrant?->can_archive) || $hubWide['can_archive'];
 
         return [
-            'can_add' => (bool) ($grant?->can_add) || $hubWide['can_add'],
-            'can_view' => (bool) ($grant?->can_view) || $hubWide['can_view'],
-            'can_delete' => (bool) ($grant?->can_delete) || $hubWide['can_delete'],
-            'can_archive' => (bool) ($grant?->can_archive) || $hubWide['can_archive'],
+            'can_add' => $canAdd,
+            'can_view' => $canView,
+            'can_delete' => $canDelete,
+            'can_archive' => $canArchive,
             'can_manage_member_rights' => false,
+            'can_manage_categories' => $canManageCategories,
             'is_firm_head' => false,
             'firm_id' => $firmId,
-            'functionality_enabled' => $enabled || $hasGrant || $hubWide['can_view'] || $hubWide['can_add'],
+            'functionality_enabled' => $enabled || $canView || $canAdd,
             'hub_wide' => $hubWide,
         ];
     }
 
     /**
-     * Firm id where this user is Head of Firm (local DB, or remote hub DB by email).
-     * Role-agnostic: manager, advisor, approver, client_admin, etc.
+     * Whether the user sees every document for the firm (vs filtered to grants).
      */
+    public function seesAllFirmDocuments(User $user, Firm $firm, ?Hub $hub = null): bool
+    {
+        $hub = $hub ?? $this->hubs->current();
+
+        if ($this->isHeadOfFirm($user, $firm)) {
+            return true;
+        }
+
+        if ($this->functionalityEnabled($hub) && $this->matrix->userCan($hub, $user, 'firm_documents_view')) {
+            return true;
+        }
+
+        $firmGrant = $this->firmWideGrant($user, $firm);
+
+        return (bool) ($firmGrant?->can_view);
+    }
+
+    /**
+     * Document ids the user may view when not seeing all.
+     *
+     * @return list<int>
+     */
+    public function visibleDocumentIds(User $user, Firm $firm): array
+    {
+        if (! Schema::hasTable('firm_document_member_rights')) {
+            return [];
+        }
+
+        if ($user->firm_id === null || (int) $user->firm_id !== (int) $firm->id) {
+            return [];
+        }
+
+        return FirmDocumentMemberRight::query()
+            ->where('firm_id', $firm->id)
+            ->where('user_id', $user->id)
+            ->whereNotNull('firm_document_id')
+            ->where('can_view', true)
+            ->pluck('firm_document_id')
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
     public function headedFirmIdFor(User $user, ?Hub $hub = null): ?int
     {
         $hub = $hub ?? $this->hubs->current();
@@ -255,7 +320,18 @@ class FirmDocumentAccessService
         Firm::query()->where('head_user_id', $user->id)->update(['head_user_id' => null]);
     }
 
-    private function memberGrant(User $user, Firm $firm): ?FirmDocumentMemberRight
+    private function grantAllows(FirmDocumentMemberRight $grant, string $right): bool
+    {
+        return match ($right) {
+            self::RIGHT_ADD => (bool) $grant->can_add,
+            self::RIGHT_VIEW => (bool) $grant->can_view,
+            self::RIGHT_DELETE => (bool) $grant->can_delete,
+            self::RIGHT_ARCHIVE => (bool) $grant->can_archive,
+            default => false,
+        };
+    }
+
+    private function documentGrant(User $user, Firm $firm, int $documentId): ?FirmDocumentMemberRight
     {
         if (! Schema::hasTable('firm_document_member_rights')) {
             return null;
@@ -267,7 +343,48 @@ class FirmDocumentAccessService
 
         return FirmDocumentMemberRight::query()
             ->where('firm_id', $firm->id)
+            ->where('firm_document_id', $documentId)
             ->where('user_id', $user->id)
             ->first();
+    }
+
+    private function firmWideGrant(User $user, Firm $firm): ?FirmDocumentMemberRight
+    {
+        if (! Schema::hasTable('firm_document_member_rights')) {
+            return null;
+        }
+
+        if ($user->firm_id === null || (int) $user->firm_id !== (int) $firm->id) {
+            return null;
+        }
+
+        return FirmDocumentMemberRight::query()
+            ->where('firm_id', $firm->id)
+            ->whereNull('firm_document_id')
+            ->where('user_id', $user->id)
+            ->first();
+    }
+
+    private function hasAnyDocumentGrant(User $user, Firm $firm): bool
+    {
+        if (! Schema::hasTable('firm_document_member_rights')) {
+            return false;
+        }
+
+        if ($user->firm_id === null || (int) $user->firm_id !== (int) $firm->id) {
+            return false;
+        }
+
+        return FirmDocumentMemberRight::query()
+            ->where('firm_id', $firm->id)
+            ->where('user_id', $user->id)
+            ->whereNotNull('firm_document_id')
+            ->where(function ($q) {
+                $q->where('can_view', true)
+                    ->orWhere('can_delete', true)
+                    ->orWhere('can_archive', true)
+                    ->orWhere('can_add', true);
+            })
+            ->exists();
     }
 }
