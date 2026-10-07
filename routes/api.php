@@ -177,6 +177,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/firm-documents/my-rights', [FirmDocumentController::class, 'myRights']);
     Route::get('/firm-documents/member-rights', [FirmDocumentController::class, 'memberRights']);
     Route::put('/firm-documents/member-rights', [FirmDocumentController::class, 'setMemberRights']);
+    Route::get('/firm-documents/visible-firms', [FirmDocumentController::class, 'visibleFirms']);
+    Route::put('/firm-documents/visible-firms', [FirmDocumentController::class, 'syncVisibleFirms']);
     Route::get('/firm-documents/folders', [FirmDocumentController::class, 'folders']);
     Route::post('/firm-documents/folders', [FirmDocumentController::class, 'storeFolder']);
     Route::get('/firm-documents/categories', [FirmDocumentCategoryController::class, 'index']);

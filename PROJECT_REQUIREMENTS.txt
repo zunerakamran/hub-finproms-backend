@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-05 (hub one-time invoices page + dashboard_view_one_time_invoices)
+Last updated: 2026-10-07 (Central document visible-firms allowlist + mixed access rights)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -530,22 +530,24 @@ Notes:
   - `firm_documents_delete` — delete documents for ANY firm on the hub
   - `firm_documents_archive` — archive documents for ANY firm on the hub
   - `firm_documents_manage_categories` — add/edit/delete category options
-  - `firm_documents_manage_firm_access` — decide which firms may access
-    Central / Network documents (and which rights). Blurred while Firm
-    documents functionality is off.
+  - `firm_documents_manage_firm_access` — decide which firms may see
+    Central / Network documents (allowlist). Those firms then appear in
+    document access rights. Blurred while Firm documents functionality is off.
 - These are hub-wide admin tools, distinct from Head / member per-document grants.
 
-3.4.4a Central / Network documents — firm-level access
-- Documents owned by the Central / Network firm (`firms.is_central`) use
-  firm-level access (not per-member rows).
-- Who may set that access: Head of Central / Network, OR any role with
-  `firm_documents_manage_firm_access` on the Capabilities matrix.
-- Access rights popup for those documents lists Firm names (Firm 1, Firm 2, …)
-  with View / Add / Archive / Delete. Rights granted to a firm apply to
-  every current member of that firm for that document.
+3.4.4a Central / Network documents — visible firms + access rights
+- Two-step model for Central / Network (`firms.is_central`) documents:
+  1) Visible firms allowlist — Head of Central / Network, OR any role with
+     `firm_documents_manage_firm_access`, chooses which firms may see that
+     firm’s documents (`GET/PUT /api/firm-documents/visible-firms`).
+  2) Per-document access rights (key icon) — always lists OWN-firm users
+     (same as 3.4.3) PLUS only the allowlisted firms (not every firm).
+     Mode is `mixed`. Grant View / Add / Archive / Delete to members and/or
+     firms. Firm grants apply to every current member of the grantee firm.
 - Recipient firm members see shared Central docs in their own library under
   a “Shared from Central / Network” folder.
-- Non-central firm documents keep per-member access (3.4.3).
+- Removing a firm from the allowlist also clears its per-document firm grants.
+- Non-central firm documents keep per-member access only (3.4.3).
 
 3.4.5 Activity logs (required for the whole flow)
 - Every mutation in this flow is written to `activity_logs` (same hub audit
@@ -555,6 +557,7 @@ Notes:
   - `firm.head.clear` — Head of Firm cleared
   - `firm.documents.member_rights.grant` — member document rights granted/updated
   - `firm.documents.member_rights.revoke` — member document rights revoked
+  - `firm.documents.visible_firms.sync` — Central visible-firms allowlist updated
   - `firm.documents.firm_rights.grant` — firm-level Central doc access granted/updated
   - `firm.documents.firm_rights.revoke` — firm-level Central doc access revoked
   - `firm.documents.add` — document uploaded / created
@@ -1424,9 +1427,10 @@ STEP 1 — Shared hub core (content hub)
 [x] Folders / subfolders + nested expand/collapse library; upload above table
 [x] Document categories (`firm_documents_manage_categories`, GC-style admin CRUD)
 [x] Head grants per-document member rights via key icon / access popup
-[x] Central / Network firm-level document access (`firm_documents_manage_firm_access`; rights apply to all firm members)
+[x] Central / Network visible-firms allowlist + mixed access rights (`firm_documents_manage_firm_access`; own users + allowlisted firms; firm grants apply to all members)
 [x] Firm Head & Firm Documents activity logs (`firm.head.*`, `firm.documents.*`)
-[x] Frontend: Assign Head of Firm + Firm Documents UI (rights-gated)
+[x] Frontend: Assign Head of Firm + Firm Documents UI (rights-gated; mixed
+    access rights + which-firms-can-see-documents for Central / Network)
 [x] Support Tickets functionality (`support_tickets`) + APIs (submit with
     module/screenshots, queue, change status, comments) + `st_*` capabilities
 [x] Frontend: Support Tickets nav (My tickets / New ticket / All tickets) + pages

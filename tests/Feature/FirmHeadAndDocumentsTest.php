@@ -313,6 +313,7 @@ class FirmHeadAndDocumentsTest extends TestCase
 
         $admin = User::factory()->powerAdmin()->create();
         $central = Firm::central();
+        $centralMember = User::factory()->create(['firm_id' => $central->id, 'role' => User::ROLE_USER]);
         $firm1 = Firm::query()->create(['name' => 'Firm One']);
         $firm2 = Firm::query()->create(['name' => 'Firm Two']);
         $memberA = User::factory()->create(['firm_id' => $firm1->id, 'role' => User::ROLE_USER]);
@@ -320,6 +321,15 @@ class FirmHeadAndDocumentsTest extends TestCase
         $outsider = User::factory()->create(['firm_id' => $firm2->id, 'role' => User::ROLE_USER]);
 
         Sanctum::actingAs($admin);
+
+        // Allowlist Firm One only — Firm Two must not appear in access rights.
+        $this->putJson('/api/firm-documents/visible-firms', [
+            'firm_id' => $central->id,
+            'firm_ids' => [$firm1->id],
+        ])->assertOk()
+            ->assertJsonPath('selected_firm_ids.0', $firm1->id);
+        $this->assertDatabaseHas('activity_logs', ['action' => 'firm.documents.visible_firms.sync']);
+
         $file = UploadedFile::fake()->create('network-policy.pdf', 50, 'application/pdf');
         $created = $this->post('/api/firm-documents', [
             'firm_id' => $central->id,
@@ -331,8 +341,17 @@ class FirmHeadAndDocumentsTest extends TestCase
 
         $access = $this->getJson('/api/firm-documents/'.$docId.'/member-rights')
             ->assertOk()
-            ->assertJsonPath('mode', 'firms');
-        $this->assertNotEmpty($access->json('firms'));
+            ->assertJsonPath('mode', 'mixed');
+        $firmIds = collect($access->json('firms'))->pluck('id')->all();
+        $this->assertSame([$firm1->id], $firmIds);
+        $memberIds = collect($access->json('members'))->pluck('id')->all();
+        $this->assertContains($centralMember->id, $memberIds);
+
+        // Cannot grant a firm that is not on the allowlist.
+        $this->putJson('/api/firm-documents/'.$docId.'/member-rights', [
+            'grantee_firm_id' => $firm2->id,
+            'can_view' => true,
+        ])->assertStatus(422);
 
         $this->putJson('/api/firm-documents/'.$docId.'/member-rights', [
             'grantee_firm_id' => $firm1->id,
@@ -341,12 +360,26 @@ class FirmHeadAndDocumentsTest extends TestCase
             'can_delete' => false,
             'can_archive' => false,
         ])->assertOk()
-            ->assertJsonPath('mode', 'firms');
+            ->assertJsonPath('mode', 'mixed');
+
+        // Own-firm member grants still work on Central documents.
+        $this->putJson('/api/firm-documents/'.$docId.'/member-rights', [
+            'user_id' => $centralMember->id,
+            'can_view' => true,
+            'can_add' => false,
+            'can_delete' => false,
+            'can_archive' => false,
+        ])->assertOk();
 
         $this->assertDatabaseHas('activity_logs', ['action' => 'firm.documents.firm_rights.grant']);
         $this->assertDatabaseHas('firm_document_firm_rights', [
             'firm_document_id' => $docId,
             'grantee_firm_id' => $firm1->id,
+            'can_view' => 1,
+        ]);
+        $this->assertDatabaseHas('firm_document_member_rights', [
+            'firm_document_id' => $docId,
+            'user_id' => $centralMember->id,
             'can_view' => 1,
         ]);
 

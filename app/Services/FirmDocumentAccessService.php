@@ -85,7 +85,8 @@ class FirmDocumentAccessService
         }
 
         if ($right === self::RIGHT_MANAGE_MEMBER_RIGHTS) {
-            // Matrix holders may manage firm-level access on Central / Network docs.
+            // Head already returned true above. Matrix holders with firm-access may
+            // also manage Central / Network document member grants.
             return $firm->isCentral() && $this->canManageFirmAccessViaMatrix($user, $hub);
         }
 
@@ -176,7 +177,7 @@ class FirmDocumentAccessService
             'can_delete' => $this->can($user, $owningFirm, self::RIGHT_DELETE, $hub, $document),
             'can_archive' => $this->can($user, $owningFirm, self::RIGHT_ARCHIVE, $hub, $document),
             'can_manage_member_rights' => $canManage,
-            'access_mode' => $owningFirm->isCentral() ? 'firms' : 'members',
+            'access_mode' => $owningFirm->isCentral() ? 'mixed' : 'members',
         ];
     }
 

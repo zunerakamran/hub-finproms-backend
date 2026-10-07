@@ -9,12 +9,14 @@ use App\Models\FirmDocumentCategory;
 use App\Models\FirmDocumentFirmRight;
 use App\Models\FirmDocumentFolder;
 use App\Models\FirmDocumentMemberRight;
+use App\Models\FirmDocumentVisibleFirm;
 use App\Models\Hub;
 use App\Models\User;
 use App\Support\ComplianceSupportingFiles;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
@@ -431,7 +433,8 @@ class FirmDocumentService
 
     /**
      * Access-rights payload for the key-icon popup.
-     * Central / Network documents → firm rows; other firms → member rows.
+     * Always lists own-firm members. Central / Network also lists firms from the
+     * visible-firms allowlist (not every firm on the hub).
      *
      * @return array{mode: string, members: list<array<string, mixed>>, firms: list<array<string, mixed>>}
      */
@@ -443,25 +446,171 @@ class FirmDocumentService
             ]);
         }
 
-        if ($firm->isCentral()) {
-            if (! $this->access->canManageFirmAccess($actor, $firm, $hub)) {
-                throw new HttpException(403, 'You do not have permission to manage firm access for Central / Network documents.');
-            }
+        $canManageMembers = $this->access->can(
+            $actor,
+            $firm,
+            FirmDocumentAccessService::RIGHT_MANAGE_MEMBER_RIGHTS,
+            $hub
+        );
+        $canManageFirms = $firm->isCentral() && $this->access->canManageFirmAccess($actor, $firm, $hub);
 
-            return [
-                'mode' => 'firms',
-                'members' => [],
-                'firms' => $this->listDocumentFirmRights($document),
-            ];
+        if (! $canManageMembers && ! $canManageFirms) {
+            throw new HttpException(403, 'You do not have permission to manage document access rights.');
         }
 
-        $this->assertCan($actor, $firm, FirmDocumentAccessService::RIGHT_MANAGE_MEMBER_RIGHTS, $hub);
+        $members = $canManageMembers || $canManageFirms
+            ? $this->listDocumentMemberRightsRows($firm, $document)
+            : [];
+        $firms = $canManageFirms
+            ? $this->listDocumentFirmRights($firm, $document)
+            : [];
 
         return [
-            'mode' => 'members',
-            'members' => $this->listDocumentMemberRightsRows($firm, $document),
-            'firms' => [],
+            'mode' => $firm->isCentral() ? 'mixed' : 'members',
+            'members' => $members,
+            'firms' => $firms,
         ];
+    }
+
+    /**
+     * Firms allowed to appear in Central / Network document access rights.
+     *
+     * @return array{
+     *   owner_firm: array<string, mixed>,
+     *   selected_firm_ids: list<int>,
+     *   firms: list<array{id: int, name: string, selected: bool}>
+     * }
+     */
+    public function listVisibleFirms(User $actor, Firm $ownerFirm, ?Hub $hub = null): array
+    {
+        if (! $ownerFirm->isCentral()) {
+            throw ValidationException::withMessages([
+                'firm_id' => 'Visible-firm access applies only to Central / Network.',
+            ]);
+        }
+
+        if (! $this->access->canManageFirmAccess($actor, $ownerFirm, $hub)) {
+            throw new HttpException(403, 'You do not have permission to decide which firms can see Central / Network documents.');
+        }
+
+        $selectedIds = $this->visibleGranteeFirmIds($ownerFirm);
+
+        $firms = Firm::query()
+            ->where('is_central', false)
+            ->orderBy('name')
+            ->orderBy('id')
+            ->get(['id', 'name'])
+            ->map(fn (Firm $f) => [
+                'id' => (int) $f->id,
+                'name' => (string) $f->name,
+                'selected' => in_array((int) $f->id, $selectedIds, true),
+            ])
+            ->values()
+            ->all();
+
+        return [
+            'owner_firm' => $ownerFirm->loadMissing('headUser:id,name,email')->toApiArray(),
+            'selected_firm_ids' => $selectedIds,
+            'firms' => $firms,
+        ];
+    }
+
+    /**
+     * Replace the allowlist of firms that may see Central / Network documents.
+     *
+     * @param  list<int>  $firmIds
+     * @return array{
+     *   owner_firm: array<string, mixed>,
+     *   selected_firm_ids: list<int>,
+     *   firms: list<array{id: int, name: string, selected: bool}>
+     * }
+     */
+    public function syncVisibleFirms(
+        User $actor,
+        Firm $ownerFirm,
+        array $firmIds,
+        ?Request $request = null,
+        ?Hub $hub = null,
+    ): array {
+        if (! $ownerFirm->isCentral()) {
+            throw ValidationException::withMessages([
+                'firm_id' => 'Visible-firm access applies only to Central / Network.',
+            ]);
+        }
+
+        if (! $this->access->canManageFirmAccess($actor, $ownerFirm, $hub)) {
+            throw new HttpException(403, 'You do not have permission to decide which firms can see Central / Network documents.');
+        }
+
+        if (! Schema::hasTable('firm_document_visible_firms')) {
+            throw new HttpException(503, 'Visible-firm access is not available yet. Run migrations.');
+        }
+
+        $normalized = collect($firmIds)
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($normalized !== []) {
+            $valid = Firm::query()
+                ->whereIn('id', $normalized)
+                ->where('is_central', false)
+                ->pluck('id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+
+            if (count($valid) !== count($normalized)) {
+                throw ValidationException::withMessages([
+                    'firm_ids' => 'Choose only non-central firms.',
+                ]);
+            }
+            $normalized = $valid;
+        }
+
+        $previous = $this->visibleGranteeFirmIds($ownerFirm);
+        $removed = array_values(array_diff($previous, $normalized));
+
+        DB::transaction(function () use ($ownerFirm, $normalized, $removed) {
+            FirmDocumentVisibleFirm::query()
+                ->where('owner_firm_id', $ownerFirm->id)
+                ->delete();
+
+            foreach ($normalized as $granteeId) {
+                FirmDocumentVisibleFirm::query()->create([
+                    'owner_firm_id' => $ownerFirm->id,
+                    'grantee_firm_id' => $granteeId,
+                ]);
+            }
+
+            // Drop per-document firm grants for firms no longer on the allowlist.
+            if ($removed !== [] && Schema::hasTable('firm_document_firm_rights')) {
+                FirmDocumentFirmRight::query()
+                    ->whereIn('grantee_firm_id', $removed)
+                    ->whereIn('firm_document_id', function ($q) use ($ownerFirm) {
+                        $q->select('id')->from('firm_documents')->where('firm_id', $ownerFirm->id);
+                    })
+                    ->delete();
+            }
+        });
+
+        $this->activityLogs->log([
+            'action' => 'firm.documents.visible_firms.sync',
+            'description' => 'Updated which firms may see documents for “'.$ownerFirm->name.'”',
+            'user' => $actor,
+            'hub' => $this->hubs->current(),
+            'subject' => $ownerFirm,
+            'request' => $request,
+            'status_code' => 200,
+            'properties' => [
+                'firm_id' => $ownerFirm->id,
+                'firm_name' => $ownerFirm->name,
+                'selected_firm_ids' => $normalized,
+                'removed_firm_ids' => $removed,
+            ],
+        ]);
+
+        return $this->listVisibleFirms($actor, $ownerFirm, $hub);
     }
 
     /**
@@ -510,16 +659,25 @@ class FirmDocumentService
     }
 
     /**
+     * Firm rows in the access-rights popup — only allowlisted firms.
+     *
      * @return list<array<string, mixed>>
      */
-    private function listDocumentFirmRights(FirmDocument $document): array
+    private function listDocumentFirmRights(Firm $ownerFirm, FirmDocument $document): array
     {
+        $allowedIds = $this->visibleGranteeFirmIds($ownerFirm);
+        if ($allowedIds === []) {
+            return [];
+        }
+
         $grants = FirmDocumentFirmRight::query()
             ->where('firm_document_id', $document->id)
+            ->whereIn('grantee_firm_id', $allowedIds)
             ->get()
             ->keyBy(fn (FirmDocumentFirmRight $r) => (int) $r->grantee_firm_id);
 
         return Firm::query()
+            ->whereIn('id', $allowedIds)
             ->where('is_central', false)
             ->orderBy('name')
             ->orderBy('id')
@@ -537,6 +695,29 @@ class FirmDocumentService
                     'can_archive' => (bool) ($grant?->can_archive),
                 ];
             })->values()->all();
+    }
+
+    /**
+     * @return list<int>
+     */
+    private function visibleGranteeFirmIds(Firm $ownerFirm): array
+    {
+        if (! Schema::hasTable('firm_document_visible_firms')) {
+            return [];
+        }
+
+        return FirmDocumentVisibleFirm::query()
+            ->where('owner_firm_id', $ownerFirm->id)
+            ->pluck('grantee_firm_id')
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    public function isFirmVisibleForDocuments(Firm $ownerFirm, Firm $granteeFirm): bool
+    {
+        return in_array((int) $granteeFirm->id, $this->visibleGranteeFirmIds($ownerFirm), true);
     }
 
     /**
@@ -570,6 +751,12 @@ class FirmDocumentService
         if ($granteeFirm->isCentral() || (int) $granteeFirm->id === (int) $firm->id) {
             throw ValidationException::withMessages([
                 'grantee_firm_id' => 'Choose a non-central firm to grant access.',
+            ]);
+        }
+
+        if (! $this->isFirmVisibleForDocuments($firm, $granteeFirm)) {
+            throw ValidationException::withMessages([
+                'grantee_firm_id' => 'That firm is not allowed to see Central / Network documents. Add it under “which firms can see documents” first.',
             ]);
         }
 
@@ -665,12 +852,6 @@ class FirmDocumentService
         ?Request $request = null,
         ?Hub $hub = null,
     ): FirmDocumentMemberRight {
-        if ($firm->isCentral()) {
-            throw ValidationException::withMessages([
-                'user_id' => 'Central / Network documents use firm-level access. Pass grantee_firm_id instead of user_id.',
-            ]);
-        }
-
         $this->assertCan($actor, $firm, FirmDocumentAccessService::RIGHT_MANAGE_MEMBER_RIGHTS, $hub);
 
         if ((int) $document->firm_id !== (int) $firm->id) {

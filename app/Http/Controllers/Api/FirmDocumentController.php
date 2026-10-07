@@ -361,6 +361,50 @@ class FirmDocumentController extends Controller
         ]);
     }
 
+    public function visibleFirms(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'firm_id' => ['sometimes', 'nullable', 'integer', 'exists:firms,id'],
+        ]);
+        $firm = $this->resolveFirm($user, $validated['firm_id'] ?? null);
+        $hub = $this->rightsHub($request, $user);
+        $payload = $this->documents->listVisibleFirms($user, $firm, $hub);
+
+        return response()->json(array_merge($payload, [
+            'acting_on_white_label' => false,
+        ]));
+    }
+
+    public function syncVisibleFirms(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'firm_id' => ['sometimes', 'nullable', 'integer', 'exists:firms,id'],
+            'firm_ids' => ['required', 'array'],
+            'firm_ids.*' => ['integer', 'exists:firms,id'],
+        ]);
+        $firm = $this->resolveFirm($user, $validated['firm_id'] ?? null);
+        $hub = $this->rightsHub($request, $user);
+        $payload = $this->documents->syncVisibleFirms(
+            $user,
+            $firm,
+            $validated['firm_ids'],
+            $request,
+            $hub,
+        );
+
+        return response()->json(array_merge([
+            'message' => 'Visible firms updated.',
+        ], $payload, [
+            'acting_on_white_label' => false,
+        ]));
+    }
+
     public function setDocumentMemberRights(Request $request, int $document): JsonResponse
     {
         /** @var User $user */
@@ -370,7 +414,8 @@ class FirmDocumentController extends Controller
         $firm = $model->firm ?? Firm::query()->findOrFail($model->firm_id);
         $hub = $this->rightsHub($request, $user);
 
-        if ($firm->isCentral()) {
+        // Firm-level grant (Central / Network → allowlisted firms).
+        if ($request->filled('grantee_firm_id')) {
             $validated = $request->validate([
                 'grantee_firm_id' => ['required', 'integer', 'exists:firms,id'],
                 'can_add' => ['sometimes', 'boolean'],
@@ -392,13 +437,14 @@ class FirmDocumentController extends Controller
 
             return response()->json([
                 'message' => 'Firm access rights updated.',
-                'mode' => 'firms',
+                'mode' => 'mixed',
                 'rights' => array_merge($row->toApiArray(), [
                     'firm' => [
                         'id' => (int) $grantee->id,
                         'name' => (string) $grantee->name,
                     ],
                 ]),
+                'acting_on_white_label' => false,
             ]);
         }
 
@@ -424,7 +470,7 @@ class FirmDocumentController extends Controller
 
         return response()->json([
             'message' => 'Document access rights updated.',
-            'mode' => 'members',
+            'mode' => $firm->isCentral() ? 'mixed' : 'members',
             'rights' => $row->relationLoaded('user') || $row->exists
                 ? array_merge($row->toApiArray(), [
                     'user' => [
