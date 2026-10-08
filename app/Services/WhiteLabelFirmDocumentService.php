@@ -277,6 +277,168 @@ class WhiteLabelFirmDocumentService
     }
 
     /**
+     * Firms allowed to appear in this firm’s document access rights (remote hub).
+     *
+     * @return array{
+     *   owner_firm: array<string, mixed>,
+     *   selected_firm_ids: list<int>,
+     *   firms: list<array{id: int, name: string, selected: bool}>
+     * }
+     */
+    public function listVisibleFirms(Hub $hub, User $actor, int $ownerFirmId): array
+    {
+        $this->assertTarget($hub);
+        $this->assertFirmExists($hub, $ownerFirmId);
+        $this->assertCanManageFirmAccess($hub, $actor, $ownerFirmId);
+
+        return $this->remoteDb->run($hub, function (string $connection) use ($ownerFirmId) {
+            $ownerFirm = $this->serializeFirm($connection, $ownerFirmId);
+            $selectedIds = $this->visibleGranteeFirmIdsOn($connection, $ownerFirmId);
+
+            $firms = DB::connection($connection)->table('firms')
+                ->where('id', '!=', $ownerFirmId)
+                ->orderBy('name')
+                ->orderBy('id')
+                ->get(['id', 'name'])
+                ->map(fn ($row) => [
+                    'id' => (int) $row->id,
+                    'name' => (string) $row->name,
+                    'selected' => in_array((int) $row->id, $selectedIds, true),
+                ])
+                ->values()
+                ->all();
+
+            return [
+                'owner_firm' => $ownerFirm,
+                'selected_firm_ids' => $selectedIds,
+                'firms' => $firms,
+            ];
+        });
+    }
+
+    /**
+     * Replace the allowlist of firms that may see this firm’s documents (remote hub).
+     *
+     * @param  list<int>  $firmIds
+     * @return array{
+     *   owner_firm: array<string, mixed>,
+     *   selected_firm_ids: list<int>,
+     *   firms: list<array{id: int, name: string, selected: bool}>
+     * }
+     */
+    public function syncVisibleFirms(
+        Hub $hub,
+        User $actor,
+        int $ownerFirmId,
+        array $firmIds,
+        ?Request $request = null,
+    ): array {
+        $this->assertTarget($hub);
+        $this->assertFirmExists($hub, $ownerFirmId);
+        $this->assertCanManageFirmAccess($hub, $actor, $ownerFirmId);
+
+        $result = $this->remoteDb->run($hub, function (string $connection) use ($ownerFirmId, $firmIds) {
+            $this->assertVisibleFirmsTable($connection);
+
+            $normalized = collect($firmIds)
+                ->map(fn ($id) => (int) $id)
+                ->reject(fn (int $id) => $id === $ownerFirmId)
+                ->unique()
+                ->values()
+                ->all();
+
+            if ($normalized !== []) {
+                $valid = DB::connection($connection)->table('firms')
+                    ->whereIn('id', $normalized)
+                    ->where('id', '!=', $ownerFirmId)
+                    ->pluck('id')
+                    ->map(fn ($id) => (int) $id)
+                    ->all();
+
+                if (count($valid) !== count($normalized)) {
+                    throw new InvalidArgumentException('Choose existing firms other than your own.');
+                }
+                $normalized = $valid;
+            }
+
+            $previous = $this->visibleGranteeFirmIdsOn($connection, $ownerFirmId);
+            $removed = array_values(array_diff($previous, $normalized));
+
+            DB::connection($connection)->table('firm_document_visible_firms')
+                ->where('owner_firm_id', $ownerFirmId)
+                ->delete();
+
+            $now = now();
+            foreach ($normalized as $granteeId) {
+                DB::connection($connection)->table('firm_document_visible_firms')->insert([
+                    'owner_firm_id' => $ownerFirmId,
+                    'grantee_firm_id' => $granteeId,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ]);
+            }
+
+            // Drop per-document firm grants for firms no longer on the allowlist.
+            if ($removed !== [] && DB::connection($connection)->getSchemaBuilder()->hasTable('firm_document_firm_rights')) {
+                $documentIds = DB::connection($connection)->table('firm_documents')
+                    ->where('firm_id', $ownerFirmId)
+                    ->pluck('id')
+                    ->all();
+
+                if ($documentIds !== []) {
+                    DB::connection($connection)->table('firm_document_firm_rights')
+                        ->whereIn('grantee_firm_id', $removed)
+                        ->whereIn('firm_document_id', $documentIds)
+                        ->delete();
+                }
+            }
+
+            $ownerFirm = $this->serializeFirm($connection, $ownerFirmId);
+            $firms = DB::connection($connection)->table('firms')
+                ->where('id', '!=', $ownerFirmId)
+                ->orderBy('name')
+                ->orderBy('id')
+                ->get(['id', 'name'])
+                ->map(fn ($row) => [
+                    'id' => (int) $row->id,
+                    'name' => (string) $row->name,
+                    'selected' => in_array((int) $row->id, $normalized, true),
+                ])
+                ->values()
+                ->all();
+
+            return [
+                'owner_firm' => $ownerFirm,
+                'selected_firm_ids' => $normalized,
+                'firms' => $firms,
+                'removed_firm_ids' => $removed,
+            ];
+        });
+
+        $this->activityLogs->log([
+            'action' => 'firm.documents.visible_firms.sync',
+            'description' => 'Updated which firms may see documents for “'
+                .($result['owner_firm']['name'] ?? 'firm').'” (remote hub)',
+            'user' => $actor,
+            'hub' => $this->hubs->current(),
+            'request' => $request,
+            'status_code' => 200,
+            'properties' => [
+                'firm_id' => $ownerFirmId,
+                'firm_name' => $result['owner_firm']['name'] ?? null,
+                'selected_firm_ids' => $result['selected_firm_ids'],
+                'removed_firm_ids' => $result['removed_firm_ids'] ?? [],
+                'acting_remotely' => true,
+                'target_hub_id' => $hub->id,
+            ],
+        ]);
+
+        unset($result['removed_firm_ids']);
+
+        return $result;
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function memberRights(Hub $hub, User $actor, int $firmId): array
@@ -458,12 +620,16 @@ class WhiteLabelFirmDocumentService
      */
     public function rightsPayload(Hub $hub, User $actor, int $firmId): array
     {
+        $canManageFirmAccess = $this->actorCanManageFirmAccess($hub, $actor, $firmId);
+
         return [
             'can_add' => $this->actorCan($hub, $actor, $firmId, FirmDocumentAccessService::RIGHT_ADD),
             'can_view' => $this->actorCan($hub, $actor, $firmId, FirmDocumentAccessService::RIGHT_VIEW),
             'can_delete' => $this->actorCan($hub, $actor, $firmId, FirmDocumentAccessService::RIGHT_DELETE),
             'can_archive' => $this->actorCan($hub, $actor, $firmId, FirmDocumentAccessService::RIGHT_ARCHIVE),
-            'can_manage_member_rights' => $this->actorCan($hub, $actor, $firmId, FirmDocumentAccessService::RIGHT_MANAGE_MEMBER_RIGHTS),
+            'can_manage_member_rights' => $this->actorCan($hub, $actor, $firmId, FirmDocumentAccessService::RIGHT_MANAGE_MEMBER_RIGHTS)
+                || $canManageFirmAccess,
+            'can_manage_firm_access' => $canManageFirmAccess,
             'is_firm_head' => $this->actorIsHead($hub, $actor, $firmId),
             'functionality_enabled' => $hub->hasFirmDocumentsFunctionality(),
         ];
@@ -716,6 +882,23 @@ class WhiteLabelFirmDocumentService
         }
     }
 
+    private function assertCanManageFirmAccess(Hub $hub, User $actor, int $firmId): void
+    {
+        if (! $this->actorCanManageFirmAccess($hub, $actor, $firmId)) {
+            throw new InvalidArgumentException('You do not have permission to decide which firms can see documents.');
+        }
+    }
+
+    public function actorCanManageFirmAccess(Hub $hub, User $actor, int $firmId): bool
+    {
+        if ($this->actorIsHead($hub, $actor, $firmId)) {
+            return true;
+        }
+
+        return $hub->hasFirmDocumentsFunctionality()
+            && $this->matrix->userCan($hub, $actor, FirmDocumentAccessService::CAP_MANAGE_FIRM_ACCESS);
+    }
+
     private function assertFunctionality(Hub $hub): void
     {
         // Hub-wide matrix use still needs the functionality; Head/member paths
@@ -742,6 +925,34 @@ class WhiteLabelFirmDocumentService
                 'This hub has not been migrated for Firm Documents yet. Run migrations on that hub’s database.'
             );
         }
+    }
+
+    private function assertVisibleFirmsTable(string $connection): void
+    {
+        $schema = DB::connection($connection)->getSchemaBuilder();
+        if (! $schema->hasTable('firm_document_visible_firms')) {
+            throw new InvalidArgumentException(
+                'Visible-firm access is not available yet on this hub. Run migrations on that hub’s database.'
+            );
+        }
+    }
+
+    /**
+     * @return list<int>
+     */
+    private function visibleGranteeFirmIdsOn(string $connection, int $ownerFirmId): array
+    {
+        if (! DB::connection($connection)->getSchemaBuilder()->hasTable('firm_document_visible_firms')) {
+            return [];
+        }
+
+        return DB::connection($connection)->table('firm_document_visible_firms')
+            ->where('owner_firm_id', $ownerFirmId)
+            ->pluck('grantee_firm_id')
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /**

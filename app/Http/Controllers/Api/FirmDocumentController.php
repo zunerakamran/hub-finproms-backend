@@ -366,6 +366,28 @@ class FirmDocumentController extends Controller
         /** @var User $user */
         $user = $request->user();
 
+        // Remote content hub: firm ids live on that hub’s DB (not local exists:firms).
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            $validated = $request->validate([
+                'firm_id' => ['required', 'integer', 'min:1'],
+            ]);
+
+            try {
+                $payload = $this->whiteLabelDocuments->listVisibleFirms(
+                    $hub,
+                    $user,
+                    (int) $validated['firm_id'],
+                );
+            } catch (InvalidArgumentException $e) {
+                return $this->actingHubNotFoundOrValidation($e);
+            }
+
+            return response()->json(array_merge($payload, [
+                'target_hub' => $this->targetHubPayload($hub),
+                'acting_on_white_label' => true,
+            ]));
+        }
+
         $validated = $request->validate([
             'firm_id' => ['sometimes', 'nullable', 'integer', 'exists:firms,id'],
         ]);
@@ -382,6 +404,33 @@ class FirmDocumentController extends Controller
     {
         /** @var User $user */
         $user = $request->user();
+
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            $validated = $request->validate([
+                'firm_id' => ['required', 'integer', 'min:1'],
+                'firm_ids' => ['required', 'array'],
+                'firm_ids.*' => ['integer', 'min:1'],
+            ]);
+
+            try {
+                $payload = $this->whiteLabelDocuments->syncVisibleFirms(
+                    $hub,
+                    $user,
+                    (int) $validated['firm_id'],
+                    $validated['firm_ids'],
+                    $request,
+                );
+            } catch (InvalidArgumentException $e) {
+                return $this->actingHubNotFoundOrValidation($e);
+            }
+
+            return response()->json(array_merge([
+                'message' => 'Visible firms updated.',
+            ], $payload, [
+                'target_hub' => $this->targetHubPayload($hub),
+                'acting_on_white_label' => true,
+            ]));
+        }
 
         $validated = $request->validate([
             'firm_id' => ['sometimes', 'nullable', 'integer', 'exists:firms,id'],
