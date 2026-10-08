@@ -98,6 +98,7 @@ Route::get('/media/{path}', [PublicStorageController::class, 'show'])
 // Website Compliance — public endpoints for live templates / scheduler cron
 Route::get('/website-compliance/public/pages', [WcPublicController::class, 'getAllPages']);
 Route::get('/website-compliance/public/pages/{slug}', [WcPublicController::class, 'getPage']);
+Route::get('/website-compliance/public/templates', [WcPublicController::class, 'listHubTemplates']);
 Route::get('/website-compliance/public/templates/{slug}', [WcPublicController::class, 'getTemplateShowcase']);
 Route::get('/website-compliance/pages/home', [WcPublicController::class, 'getHomePageByAdvisor']);
 Route::get('/website-compliance/uploaded-images/{filename}', [WcUploadController::class, 'show'])

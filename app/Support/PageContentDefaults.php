@@ -19,6 +19,7 @@ class PageContentDefaults
     {
         return [
             'home' => [
+                // Hero (section 1 — already built)
                 'title' => '*Transform* your social media in minutes with ready-made *templates*',
                 'lead' => 'Discover **fully editable** posts and reels designed to simplify your creative process — compliant content, ready to publish.',
                 'cta_browse_posts' => 'Browse posts',
@@ -28,6 +29,63 @@ class PageContentDefaults
                 'guest_hint' => 'Browse the home showcase freely. Sign in to open posts, bundles, and plans.',
                 'catalog_disabled' => 'Catalog browsing is not enabled on this hub.',
                 'empty_posts' => 'Posts will appear here once published.',
+                // Header nav labels
+                'nav_categories' => 'Categories',
+                'nav_templates' => 'Website templates',
+                'nav_tickets' => 'My tickets',
+                'nav_raise_ticket' => 'Create a new ticket',
+                // Section 3 — Browse by Categories
+                'categories_title' => 'Browse by Categories',
+                'categories_lead' => 'Explore content collections available on this hub.',
+                'categories_empty' => 'Categories will appear here once published on this hub.',
+                'categories_view_all' => 'View all',
+                // Section 4 — Website templates (up to 4)
+                'templates_title' => 'Website templates',
+                'templates_lead' => 'Showcase website templates available on this hub.',
+                'templates_empty' => 'Website templates are not available on this hub yet.',
+                'templates_cta' => 'View template',
+                'templates_view_all' => 'Browse templates',
+                // Section 5 — Tickets (3 tabs)
+                'tickets_title' => 'Support tickets',
+                'tickets_lead' => 'Check ticket status, browse your tickets, or raise a new one.',
+                'tickets_tab_overview' => 'Tickets',
+                'tickets_tab_mine' => 'My tickets',
+                'tickets_tab_raise' => 'Raise a ticket',
+                'tickets_overview_body' => 'Track open requests and get help from the support team.',
+                'tickets_status_open' => 'Open',
+                'tickets_status_progress' => 'In progress',
+                'tickets_status_completed' => 'Completed',
+                'tickets_browse' => 'Browse tickets',
+                'tickets_raise_cta' => 'Create new ticket',
+                'tickets_raise_body' => 'Need help? Open a ticket and our team will get back to you.',
+                'tickets_empty' => 'You have no tickets yet.',
+                'tickets_guest_hint' => 'Sign in to view your tickets and raise a new one.',
+                'tickets_disabled' => 'Support tickets are not enabled on this hub.',
+                // Section 6 — Documents
+                'documents_title' => 'Discover our documents, guides & checklists',
+                'documents_lead' => 'Browse firm documents curated for your hub — policies, planners, and ready-to-use resources.',
+                'documents_body' => 'Open the document library to read more and download what you need.',
+                'documents_cta' => 'Read more',
+                'documents_image_1' => '',
+                'documents_image_2' => '',
+                'documents_image_3' => '',
+                'documents_disabled' => 'Documents are not enabled on this hub.',
+                // Section 7 — Need assistance
+                'assistance_title' => 'Need assistance? Our specialized agents will help you!',
+                'assistance_lead' => 'Get in touch with experts via live chat, WhatsApp, or email.',
+                'assistance_chat_label' => 'Live chat',
+                'assistance_chat_text' => 'Chat with a specialist in real time.',
+                'assistance_chat_url' => '',
+                'assistance_whatsapp_label' => 'WhatsApp',
+                'assistance_whatsapp_text' => 'Message us on WhatsApp for quick help.',
+                'assistance_whatsapp_url' => '',
+                'assistance_email_label' => 'Email',
+                'assistance_email_text' => 'Send us an email and we will respond soon.',
+                'assistance_email' => '',
+                // Footer
+                'footer_tagline' => 'Compliant content, ready to publish',
+                'footer_copyright' => '© {year} {brand}. All rights reserved.',
+                'footer_powered_by' => 'Powered by Bypass',
             ],
             'catalog' => [
                 'eyebrow' => 'Content library',

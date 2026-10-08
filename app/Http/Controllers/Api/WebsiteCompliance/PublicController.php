@@ -6,7 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Models\Hub;
 use App\Models\WebsiteCompliance\Page;
 use App\Models\WebsiteCompliance\Section;
+use App\Models\WebsiteCompliance\Template;
 use App\Models\WebsiteCompliance\TemplateRequest;
+use App\Services\HubService;
 use App\Services\WebsiteCompliance\AdvisorSectionService;
 use App\Services\WebsiteCompliance\CpanelSyncService;
 use App\Services\WhiteLabelDatabaseService;
@@ -116,6 +118,59 @@ class PublicController extends Controller
             ->get();
 
         return response()->json($this->publicPagePayload($page, $sections))
+            ->header('Cache-Control', 'no-store, no-cache, must-revalidate');
+    }
+
+    /**
+     * Public home-page showcase: up to 4 active website templates for this hub.
+     * Returns an empty list when the WC module / catalog is unavailable.
+     */
+    public function listHubTemplates(Request $request): JsonResponse
+    {
+        $limit = max(1, min(4, (int) $request->query('limit', 4)));
+
+        try {
+            $hub = app(HubService::class)->current();
+        } catch (\Throwable) {
+            $hub = null;
+        }
+
+        if (! $hub || ! $hub->hasWebsiteComplianceModule()) {
+            return response()->json(['templates' => []])
+                ->header('Cache-Control', 'no-store, no-cache, must-revalidate');
+        }
+
+        $allowed = HubTemplateCatalog::allowedSlugs();
+        if ($allowed === []) {
+            return response()->json(['templates' => []])
+                ->header('Cache-Control', 'no-store, no-cache, must-revalidate');
+        }
+
+        try {
+            $templates = Template::query()
+                ->where('is_active', true)
+                ->whereIn('slug', $allowed)
+                ->orderBy('name')
+                ->orderBy('id')
+                ->limit($limit)
+                ->get(['id', 'name', 'slug', 'description', 'thumbnail_url', 'preview_url'])
+                ->map(function (Template $template) {
+                    return [
+                        'id' => $template->id,
+                        'name' => $template->name,
+                        'slug' => $template->slug,
+                        'description' => $template->description,
+                        'thumbnail_url' => CpanelSyncService::absoluteAssetUrl($template->thumbnail_url),
+                        'preview_url' => $template->preview_url
+                            ?: HubTemplateCatalog::previewUrlFor((string) $template->slug),
+                    ];
+                })
+                ->values();
+        } catch (\Throwable) {
+            $templates = collect();
+        }
+
+        return response()->json(['templates' => $templates])
             ->header('Cache-Control', 'no-store, no-cache, must-revalidate');
     }
 
