@@ -2667,7 +2667,10 @@ class Hub extends Model
 
         $poweredByLogo = trim((string) ($resolved['home']['footer_powered_by_logo'] ?? ''));
         if ($poweredByLogo !== '') {
-            $resolved['home']['footer_powered_by_logo'] = $this->publicAssetUrl($poweredByLogo) ?? $poweredByLogo;
+            // Host-absolute like branding logos — relative /storage/… breaks on the Vite frontend.
+            $resolved['home']['footer_powered_by_logo'] = $this->absoluteAssetUrl(
+                $this->publicAssetUrl($poweredByLogo)
+            ) ?? $poweredByLogo;
         }
 
         return $resolved;

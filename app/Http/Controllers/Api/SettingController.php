@@ -216,10 +216,12 @@ class SettingController extends Controller
             ) {
                 $incomingLogo = trim((string) ($incoming['home']['footer_powered_by_logo'] ?? ''));
                 $previousPublic = Storage::disk('public')->url($previousPoweredByLogo);
+                $previousAbsolute = rtrim((string) config('app.url'), '/').'/'.ltrim($previousPublic, '/');
                 if (
                     $incomingLogo === ''
                     || $incomingLogo === $previousPoweredByLogo
                     || $incomingLogo === $previousPublic
+                    || $incomingLogo === $previousAbsolute
                 ) {
                     $merged['home']['footer_powered_by_logo'] = $previousPoweredByLogo;
                 }
