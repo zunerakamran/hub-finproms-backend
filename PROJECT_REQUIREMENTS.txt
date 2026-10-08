@@ -646,7 +646,11 @@ Notes:
   nav stays the existing site links (Home / Posts / Reels / Bundles / …).
   Categories use a 4-column grid; website templates use a 3-column grid
   with the same hover-to-scroll preview as the dashboard template cards;
-  documents list latest firm documents first.
+  documents section matches a two-column promo layout (category counts +
+  fanned previews), ordering latest uploads first then most-used
+  (category usage / attachment count); after documents, a 4-card features
+  section covers SM Templates / Canva editing / Website Compliance /
+  Generic Compliance (copy from page_content).
 - Dashboard menu labels are stored on `hubs.dashboard_nav` (JSON). Defaults live
   in `App\Support\DashboardNavDefaults`. Separators include context-specific
   Hub labels (Central / Shared / White-labelled). Menu items are keyed by path.
