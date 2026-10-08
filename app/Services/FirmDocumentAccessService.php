@@ -38,6 +38,9 @@ class FirmDocumentAccessService
 
     public const CAP_MANAGE_FIRM_ACCESS = 'firm_documents_manage_firm_access';
 
+    /** Key-icon per-document access rights (hub-wide). */
+    public const CAP_MANAGE_ACCESS_RIGHTS = 'firm_documents_manage_access_rights';
+
     private const CAP_MAP = [
         self::RIGHT_ADD => 'firm_documents_add',
         self::RIGHT_VIEW => 'firm_documents_view',
@@ -86,9 +89,9 @@ class FirmDocumentAccessService
         }
 
         if ($right === self::RIGHT_MANAGE_MEMBER_RIGHTS) {
-            // Head already returned true above. Matrix holders with firm-access may
-            // also manage document member grants on any firm.
-            return $this->canManageFirmAccessViaMatrix($user, $hub);
+            // Head already returned true above. Matrix “Access rights of all documents”
+            // unlocks the key icon for every firm on the hub.
+            return $this->canManageAccessRightsViaMatrix($user, $hub);
         }
 
         // Upload is Head of Firm only (head already returned true above).
@@ -153,6 +156,28 @@ class FirmDocumentAccessService
         return $this->matrixFirmDocCap($user, $hub, self::CAP_MANAGE_FIRM_ACCESS);
     }
 
+    public function canManageAccessRightsViaMatrix(User $user, ?Hub $hub = null): bool
+    {
+        $hub = $hub ?? $this->hubs->current();
+
+        return $this->matrixFirmDocCap($user, $hub, self::CAP_MANAGE_ACCESS_RIGHTS);
+    }
+
+    /**
+     * Key icon / per-document access rights for a firm’s documents.
+     * Head of that firm, or hub-wide Access rights of all documents capability.
+     */
+    public function canManageDocumentAccessRights(User $user, Firm $owningFirm, ?Hub $hub = null): bool
+    {
+        $hub = $hub ?? $this->hubs->current();
+
+        if ($this->isHeadOfFirm($user, $owningFirm)) {
+            return true;
+        }
+
+        return $this->canManageAccessRightsViaMatrix($user, $hub);
+    }
+
     /**
      * Per-document effective rights for the viewer (actions on that row).
      *
@@ -167,14 +192,11 @@ class FirmDocumentAccessService
                 ? $document->firm
                 : Firm::query()->find((int) $document->firm_id) ?? $firm);
 
-        $canManage = $this->can($user, $owningFirm, self::RIGHT_MANAGE_MEMBER_RIGHTS, $hub)
-            || $this->canManageFirmAccess($user, $owningFirm, $hub);
-
         return [
             'can_view' => $this->can($user, $owningFirm, self::RIGHT_VIEW, $hub, $document),
             'can_delete' => $this->can($user, $owningFirm, self::RIGHT_DELETE, $hub, $document),
             'can_archive' => $this->can($user, $owningFirm, self::RIGHT_ARCHIVE, $hub, $document),
-            'can_manage_member_rights' => $canManage,
+            'can_manage_member_rights' => $this->canManageDocumentAccessRights($user, $owningFirm, $hub),
             'access_mode' => 'mixed',
         ];
     }
@@ -209,6 +231,7 @@ class FirmDocumentAccessService
 
         $canManageCategories = $this->matrixFirmDocCap($user, $hub, 'firm_documents_manage_categories');
         $canManageFirmAccess = $this->canManageFirmAccessViaMatrix($user, $hub);
+        $canManageAccessRights = $this->canManageAccessRightsViaMatrix($user, $hub);
 
         $headedFirmId = $this->headedFirmIdFor($user, $hub);
         if ($headedFirmId) {
@@ -253,7 +276,7 @@ class FirmDocumentAccessService
             'can_view' => $canView,
             'can_delete' => $canDelete,
             'can_archive' => $canArchive,
-            'can_manage_member_rights' => false,
+            'can_manage_member_rights' => $canManageAccessRights,
             'can_manage_firm_access' => $canManageFirmAccess,
             'can_manage_categories' => $canManageCategories,
             'is_firm_head' => false,

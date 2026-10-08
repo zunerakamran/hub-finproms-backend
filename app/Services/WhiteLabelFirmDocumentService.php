@@ -873,14 +873,19 @@ class WhiteLabelFirmDocumentService
     public function rightsPayload(Hub $hub, User $actor, int $firmId): array
     {
         $canManageFirmAccess = $this->actorCanManageFirmAccess($hub, $actor, $firmId);
+        $canManageAccessRights = $this->actorCan(
+            $hub,
+            $actor,
+            $firmId,
+            FirmDocumentAccessService::RIGHT_MANAGE_MEMBER_RIGHTS
+        );
 
         return [
             'can_add' => $this->actorCan($hub, $actor, $firmId, FirmDocumentAccessService::RIGHT_ADD),
             'can_view' => $this->actorCan($hub, $actor, $firmId, FirmDocumentAccessService::RIGHT_VIEW),
             'can_delete' => $this->actorCan($hub, $actor, $firmId, FirmDocumentAccessService::RIGHT_DELETE),
             'can_archive' => $this->actorCan($hub, $actor, $firmId, FirmDocumentAccessService::RIGHT_ARCHIVE),
-            'can_manage_member_rights' => $this->actorCan($hub, $actor, $firmId, FirmDocumentAccessService::RIGHT_MANAGE_MEMBER_RIGHTS)
-                || $canManageFirmAccess,
+            'can_manage_member_rights' => $canManageAccessRights,
             'can_manage_firm_access' => $canManageFirmAccess,
             'is_firm_head' => $this->actorIsHead($hub, $actor, $firmId),
             'functionality_enabled' => $hub->hasFirmDocumentsFunctionality(),
@@ -1051,7 +1056,8 @@ class WhiteLabelFirmDocumentService
         }
 
         if ($right === FirmDocumentAccessService::RIGHT_MANAGE_MEMBER_RIGHTS) {
-            return false;
+            return $hub->hasFirmDocumentsFunctionality()
+                && $this->matrix->userCan($hub, $actor, FirmDocumentAccessService::CAP_MANAGE_ACCESS_RIGHTS);
         }
 
         // Upload is Head of Firm only (head already returned true above).

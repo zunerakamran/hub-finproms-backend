@@ -543,8 +543,12 @@ Notes:
 - When Firm documents functionality is ON, these Capabilities are editable:
   - `firm_documents_view` — view documents for ANY firm on the hub
   - `firm_documents_add` — add documents for ANY firm on the hub
+    (uploads are Head of Firm only; capability kept for checklist compatibility)
   - `firm_documents_delete` — delete documents for ANY firm on the hub
   - `firm_documents_archive` — archive documents for ANY firm on the hub
+  - `firm_documents_manage_access_rights` — key-icon access rights on
+    documents for ANY firm (members + allowlisted firms). Head always has
+    this for their own firm.
   - `firm_documents_manage_categories` — add/edit/delete category options
   - `firm_documents_manage_firm_access` — decide which firms may see a
     firm’s documents (allowlist). Blurred while Firm documents is off.

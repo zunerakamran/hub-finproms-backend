@@ -107,8 +107,7 @@ class FirmDocumentController extends Controller
                 'can_view' => $this->access->can($user, $firm, FirmDocumentAccessService::RIGHT_VIEW, $hub),
                 'can_delete' => $this->access->can($user, $firm, FirmDocumentAccessService::RIGHT_DELETE, $hub),
                 'can_archive' => $this->access->can($user, $firm, FirmDocumentAccessService::RIGHT_ARCHIVE, $hub),
-                'can_manage_member_rights' => $this->access->can($user, $firm, FirmDocumentAccessService::RIGHT_MANAGE_MEMBER_RIGHTS, $hub)
-                    || $this->access->canManageFirmAccess($user, $firm, $hub),
+                'can_manage_member_rights' => $this->access->canManageDocumentAccessRights($user, $firm, $hub),
                 'can_manage_firm_access' => $this->access->canManageFirmAccess($user, $firm, $hub),
                 'can_manage_categories' => (bool) ($summary['can_manage_categories'] ?? false),
                 'is_firm_head' => $this->access->isHeadOfFirm($user, $firm),

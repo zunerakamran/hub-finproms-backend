@@ -448,29 +448,15 @@ class FirmDocumentService
             ]);
         }
 
-        $canManageMembers = $this->access->can(
-            $actor,
-            $firm,
-            FirmDocumentAccessService::RIGHT_MANAGE_MEMBER_RIGHTS,
-            $hub
-        );
-        $canManageFirms = $this->access->canManageFirmAccess($actor, $firm, $hub);
-
-        if (! $canManageMembers && ! $canManageFirms) {
+        // Key icon: Head of Firm or hub-wide “Access rights of all documents”.
+        if (! $this->access->canManageDocumentAccessRights($actor, $firm, $hub)) {
             throw new HttpException(403, 'You do not have permission to manage document access rights.');
         }
 
-        $members = $canManageMembers || $canManageFirms
-            ? $this->listDocumentMemberRightsRows($firm, $document)
-            : [];
-        $firms = $canManageFirms
-            ? $this->listDocumentFirmRights($firm, $document)
-            : [];
-
         return [
             'mode' => 'mixed',
-            'members' => $members,
-            'firms' => $firms,
+            'members' => $this->listDocumentMemberRightsRows($firm, $document),
+            'firms' => $this->listDocumentFirmRights($firm, $document),
         ];
     }
 
@@ -734,7 +720,7 @@ class FirmDocumentService
             ]);
         }
 
-        if (! $this->access->canManageFirmAccess($actor, $firm, $hub)) {
+        if (! $this->access->canManageDocumentAccessRights($actor, $firm, $hub)) {
             throw new HttpException(403, 'You do not have permission to manage firm access for these documents.');
         }
 

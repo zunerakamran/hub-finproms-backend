@@ -677,6 +677,7 @@ class Hub extends Model
         'firm_documents_add',
         'firm_documents_delete',
         'firm_documents_archive',
+        'firm_documents_manage_access_rights',
         'firm_documents_manage_categories',
         'firm_documents_manage_firm_access',
     ];
@@ -1095,6 +1096,13 @@ class Hub extends Model
         'firm_documents_archive' => [
             'label' => 'Archive firm documents (all firms)',
             'description' => 'Archive / unarchive documents for ANY firm on this hub. Blurred while Functionalities → Firm documents is off. Head of Firm always has archive for their own firm without this capability.',
+            'group' => self::GROUP_DASHBOARD_FIRMS,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'firm_documents_manage_access_rights' => [
+            'label' => 'Access rights of all documents',
+            'description' => 'Use the key icon on documents for ANY firm on this hub: grant or revoke View / Archive / Delete for that firm’s members and allowlisted firms. Blurred while Functionalities → Firm documents is off. Head of Firm always has this for their own firm without this capability.',
             'group' => self::GROUP_DASHBOARD_FIRMS,
             'default_shared' => false,
             'default_white_label' => false,
