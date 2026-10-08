@@ -326,14 +326,12 @@ class ActingHubService
             return $effective;
         }
 
-        // Head / grants unlock the Firm documents nav (view) and upload (add).
+        // Head / grants unlock the Firm documents nav (view). Upload is Head-only
+        // on the library page (rights.can_add), not a hub-wide matrix cell.
         // Do NOT promote delete/archive/manage_firm_access into hub-wide effective
         // caps — those are firm/document scoped (library rights + viewer_rights).
         if ($summary['can_view'] || ($summary['is_firm_head'] ?? false)) {
             $effective['firm_documents_view'] = true;
-        }
-        if ($summary['can_add'] || ($summary['is_firm_head'] ?? false)) {
-            $effective['firm_documents_add'] = true;
         }
 
         return $effective;

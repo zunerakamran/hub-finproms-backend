@@ -1080,7 +1080,7 @@ class Hub extends Model
         ],
         'firm_documents_add' => [
             'label' => 'Add firm documents (all firms)',
-            'description' => 'Upload documents for ANY firm on this hub. Blurred while Functionalities → Firm documents is off. Head of Firm always has add for their own firm without this capability.',
+            'description' => 'Deprecated for uploads: only the Head of Firm may add documents for their firm. Kept for checklist compatibility. Blurred while Functionalities → Firm documents is off.',
             'group' => self::GROUP_DASHBOARD_FIRMS,
             'default_shared' => false,
             'default_white_label' => false,

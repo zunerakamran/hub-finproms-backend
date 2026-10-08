@@ -1004,11 +1004,15 @@ class WhiteLabelFirmDocumentService
             return false;
         }
 
+        // Upload is Head of Firm only (head already returned true above).
+        if ($right === FirmDocumentAccessService::RIGHT_ADD) {
+            return false;
+        }
+
         // Member grants on remote (match actor by email → remote user id).
         $grant = $this->remoteMemberGrant($hub, $actor, $firmId);
         if ($grant) {
             $ok = match ($right) {
-                FirmDocumentAccessService::RIGHT_ADD => (bool) $grant->can_add,
                 FirmDocumentAccessService::RIGHT_VIEW => (bool) $grant->can_view,
                 FirmDocumentAccessService::RIGHT_DELETE => (bool) $grant->can_delete,
                 FirmDocumentAccessService::RIGHT_ARCHIVE => (bool) $grant->can_archive,
@@ -1025,7 +1029,6 @@ class WhiteLabelFirmDocumentService
         }
 
         $cap = match ($right) {
-            FirmDocumentAccessService::RIGHT_ADD => 'firm_documents_add',
             FirmDocumentAccessService::RIGHT_VIEW => 'firm_documents_view',
             FirmDocumentAccessService::RIGHT_DELETE => 'firm_documents_delete',
             FirmDocumentAccessService::RIGHT_ARCHIVE => 'firm_documents_archive',

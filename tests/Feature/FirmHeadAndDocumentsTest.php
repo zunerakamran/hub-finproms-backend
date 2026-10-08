@@ -292,9 +292,9 @@ class FirmHeadAndDocumentsTest extends TestCase
         $this->getJson('/api/hub')
             ->assertOk()
             ->assertJsonPath('hub.firm_document_rights.is_firm_head', true)
+            ->assertJsonPath('hub.firm_document_rights.can_add', true)
             ->assertJsonPath('hub.firm_document_rights.can_manage_firm_access', false)
-            ->assertJsonPath('hub.effective_capabilities.firm_documents_view', true)
-            ->assertJsonPath('hub.effective_capabilities.firm_documents_add', true);
+            ->assertJsonPath('hub.effective_capabilities.firm_documents_view', true);
     }
 
     public function test_central_document_firm_access_applies_to_all_grantee_members(): void

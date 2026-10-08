@@ -20,9 +20,9 @@ use Illuminate\Support\Facades\Schema;
  * 2) Per-document member grant → view / delete / archive for that document.
  * 3) Firm-level grant on a document → every member of the grantee firm
  *    receives those rights for that document.
- * 4) Firm-wide member grant (firm_document_id null) → mainly can_add (upload).
- * 5) Capabilities matrix firm_documents_* → hub-wide for ALL firms (requires
- *    Functionalities → Firm documents ON).
+ * 4) Upload (add) is Head of Firm only — not grantable and not matrix-driven.
+ * 5) Capabilities matrix firm_documents_* (view / delete / archive) → hub-wide
+ *    for ALL firms (requires Functionalities → Firm documents ON).
  */
 class FirmDocumentAccessService
 {
@@ -91,6 +91,11 @@ class FirmDocumentAccessService
             return $this->canManageFirmAccessViaMatrix($user, $hub);
         }
 
+        // Upload is Head of Firm only (head already returned true above).
+        if ($right === self::RIGHT_ADD) {
+            return false;
+        }
+
         if ($document !== null && (int) $document->firm_id === (int) $firm->id) {
             $docGrant = $this->documentGrant($user, $firm, (int) $document->id);
             if ($docGrant && $this->grantAllows($docGrant, $right)) {
@@ -103,7 +108,7 @@ class FirmDocumentAccessService
             return true;
         }
 
-        // Firm-wide row (null document_id): used for upload (can_add) and legacy library access.
+        // Firm-wide row (null document_id): legacy library access (view / delete / archive).
         $firmGrant = $this->firmWideGrant($user, $firm);
         if ($firmGrant && $this->grantAllows($firmGrant, $right)) {
             return true;
@@ -119,11 +124,6 @@ class FirmDocumentAccessService
             if ($this->hasGrantedDocsFromOwnerFirm($user, $firm)) {
                 return true;
             }
-        }
-
-        // Upload unlock via firm-share can_add on any doc shared to this firm.
-        if ($right === self::RIGHT_ADD && $document === null && $this->hasSharedFirmAddGrant($user, $firm)) {
-            return true;
         }
 
         $cap = self::CAP_MAP[$right] ?? null;
@@ -200,7 +200,8 @@ class FirmDocumentAccessService
         $enabled = $this->functionalityEnabled($hub);
 
         $hubWide = [
-            'can_add' => $this->matrixFirmDocCap($user, $hub, 'firm_documents_add'),
+            // Add is Head-only — never via matrix / grants.
+            'can_add' => false,
             'can_view' => $this->matrixFirmDocCap($user, $hub, 'firm_documents_view'),
             'can_delete' => $this->matrixFirmDocCap($user, $hub, 'firm_documents_delete'),
             'can_archive' => $this->matrixFirmDocCap($user, $hub, 'firm_documents_archive'),
@@ -237,7 +238,8 @@ class FirmDocumentAccessService
         $firmAgg = $this->aggregateFirmGrantsForUser($user);
 
         $canView = $memberAgg['can_view'] || $firmAgg['can_view'] || $hubWide['can_view'];
-        $canAdd = $memberAgg['can_add'] || $firmAgg['can_add'] || $hubWide['can_add'];
+        // Upload is Head of Firm only.
+        $canAdd = false;
         $canDelete = $memberAgg['can_delete'] || $firmAgg['can_delete'] || $hubWide['can_delete'];
         $canArchive = $memberAgg['can_archive'] || $firmAgg['can_archive'] || $hubWide['can_archive'];
 

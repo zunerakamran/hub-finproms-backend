@@ -608,7 +608,8 @@ class FirmDocumentService
                 'name' => (string) $member->name,
                 'email' => (string) $member->email,
                 'is_firm_head' => $isHead,
-                'can_add' => $isHead ? true : (bool) ($grant?->can_add),
+                // Upload is Head-only — never grantable.
+                'can_add' => $isHead,
                 'can_view' => $isHead ? true : (bool) ($grant?->can_view),
                 'can_delete' => $isHead ? true : (bool) ($grant?->can_delete),
                 'can_archive' => $isHead ? true : (bool) ($grant?->can_archive),
@@ -644,11 +645,12 @@ class FirmDocumentService
                 $grant = $grants->get((int) $target->id);
 
                 // Allowlist only makes the firm eligible; Head must grant View (etc.) per document.
+                // Upload is Head-only — never grantable to other firms.
                 return [
                     'id' => (int) $target->id,
                     'name' => (string) $target->name,
                     'is_central' => (bool) $target->is_central,
-                    'can_add' => (bool) ($grant?->can_add),
+                    'can_add' => false,
                     'can_view' => (bool) ($grant?->can_view),
                     'can_delete' => (bool) ($grant?->can_delete),
                     'can_archive' => (bool) ($grant?->can_archive),
@@ -713,7 +715,8 @@ class FirmDocumentService
             ]);
         }
 
-        $canAdd = (bool) ($rights['can_add'] ?? false);
+        // Add/upload is Head of Firm only — never grantable to other firms.
+        $canAdd = false;
         $canView = (bool) ($rights['can_view'] ?? false);
         $canDelete = (bool) ($rights['can_delete'] ?? false);
         $canArchive = (bool) ($rights['can_archive'] ?? false);
@@ -825,7 +828,8 @@ class FirmDocumentService
             ]);
         }
 
-        $canAdd = (bool) ($rights['can_add'] ?? false);
+        // Add/upload is Head of Firm only — never grantable to members.
+        $canAdd = false;
         $canView = (bool) ($rights['can_view'] ?? false);
         $canDelete = (bool) ($rights['can_delete'] ?? false);
         $canArchive = (bool) ($rights['can_archive'] ?? false);
@@ -881,33 +885,6 @@ class FirmDocumentService
                 'can_archive' => $canArchive,
             ]
         );
-
-        // Firm-wide upload: when can_add is granted on any document, also allow firm uploads.
-        if ($canAdd) {
-            $uploadGrant = FirmDocumentMemberRight::query()
-                ->where('firm_id', $firm->id)
-                ->whereNull('firm_document_id')
-                ->where('user_id', $member->id)
-                ->first();
-            if ($uploadGrant) {
-                $uploadGrant->update([
-                    'can_add' => true,
-                    'can_view' => false,
-                    'can_delete' => false,
-                    'can_archive' => false,
-                ]);
-            } else {
-                FirmDocumentMemberRight::query()->create([
-                    'firm_id' => $firm->id,
-                    'firm_document_id' => null,
-                    'user_id' => $member->id,
-                    'can_add' => true,
-                    'can_view' => false,
-                    'can_delete' => false,
-                    'can_archive' => false,
-                ]);
-            }
-        }
 
         $this->activityLogs->log([
             'action' => 'firm.documents.member_rights.grant',
