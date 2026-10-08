@@ -231,11 +231,19 @@ class FirmDocumentAccessService
         $hasDocGrant = false;
         $hasSharedView = false;
         $hasSharedAdd = false;
-        if ($firmId && Schema::hasTable('firm_document_member_rights')) {
+        if ($firmId) {
             $firm = new Firm(['id' => $firmId]);
             $firm->exists = true;
-            $firmGrant = $this->firmWideGrant($user, $firm);
-            $hasDocGrant = $this->hasAnyDocumentGrant($user, $firm);
+
+            // Own-firm member grants (per-doc / firm-wide).
+            if (Schema::hasTable('firm_document_member_rights')) {
+                $firmGrant = $this->firmWideGrant($user, $firm);
+                $hasDocGrant = $this->hasAnyDocumentGrant($user, $firm);
+            }
+
+            // Shared docs: explicit firm grants OR Document access control allowlist.
+            // Must run even when member_rights table is missing — otherwise
+            // allowlisted firm users never get firm_documents_view for the nav.
             $hasSharedView = $this->hasAnySharedFirmGrant($user, $firm);
             $hasSharedAdd = $this->hasSharedFirmAddGrant($user, $firm);
         }

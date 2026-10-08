@@ -370,8 +370,17 @@ class FirmHeadAndDocumentsTest extends TestCase
             'can_view' => 1,
         ]);
 
-        // Every Firm One member can see the shared Central doc via allowlist alone.
+        // Allowlist unlocks Firm documents nav + library for every Firm One member.
         Sanctum::actingAs($memberA);
+        $this->getJson('/api/firm-documents/my-rights')
+            ->assertOk()
+            ->assertJsonPath('rights.can_view', true)
+            ->assertJsonPath('rights.is_firm_head', false);
+        $this->getJson('/api/hub')
+            ->assertOk()
+            ->assertJsonPath('hub.firm_document_rights.can_view', true)
+            ->assertJsonPath('hub.effective_capabilities.firm_documents_view', true);
+
         $listA = $this->getJson('/api/firm-documents?firm_id='.$firm1->id)->assertOk();
         $titlesA = collect($listA->json('documents'))->pluck('title')->all();
         $this->assertContains('Network policy', $titlesA);
