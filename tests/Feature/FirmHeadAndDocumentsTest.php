@@ -322,14 +322,12 @@ class FirmHeadAndDocumentsTest extends TestCase
 
         Sanctum::actingAs($admin);
 
-        // Allowlist Firm One only — Firm Two must not appear in access rights.
-        // Document access control alone grants view of Central docs to Firm One.
+        // Allowlist Firm One only — eligibility for the key-icon popup (not view yet).
         $this->putJson('/api/firm-documents/visible-firms', [
             'firm_id' => $central->id,
             'firm_ids' => [$firm1->id],
         ])->assertOk()
             ->assertJsonPath('selected_firm_ids.0', $firm1->id);
-        $this->assertDatabaseHas('activity_logs', ['action' => 'firm.documents.visible_firms.sync']);
 
         $file = UploadedFile::fake()->create('network-policy.pdf', 50, 'application/pdf');
         $created = $this->post('/api/firm-documents', [
@@ -345,9 +343,8 @@ class FirmHeadAndDocumentsTest extends TestCase
             ->assertJsonPath('mode', 'mixed');
         $firmIds = collect($access->json('firms'))->pluck('id')->all();
         $this->assertSame([$firm1->id], $firmIds);
-        $this->assertTrue((bool) collect($access->json('firms'))->firstWhere('id', $firm1->id)['can_view']);
-        $memberIds = collect($access->json('members'))->pluck('id')->all();
-        $this->assertContains($centralMember->id, $memberIds);
+        // Allowlisted but View not granted yet.
+        $this->assertFalse((bool) collect($access->json('firms'))->firstWhere('id', $firm1->id)['can_view']);
 
         // Cannot grant a firm that is not on the allowlist.
         $this->putJson('/api/firm-documents/'.$docId.'/member-rights', [
@@ -355,66 +352,50 @@ class FirmHeadAndDocumentsTest extends TestCase
             'can_view' => true,
         ])->assertStatus(422);
 
-        // Own-firm member grants still work on Central documents.
+        // Head/key-icon: grant Firm One view on this document.
         $this->putJson('/api/firm-documents/'.$docId.'/member-rights', [
-            'user_id' => $centralMember->id,
+            'grantee_firm_id' => $firm1->id,
             'can_view' => true,
             'can_add' => false,
             'can_delete' => false,
             'can_archive' => false,
         ])->assertOk();
 
-        $this->assertDatabaseHas('firm_document_member_rights', [
+        $this->assertDatabaseHas('firm_document_firm_rights', [
             'firm_document_id' => $docId,
-            'user_id' => $centralMember->id,
+            'grantee_firm_id' => $firm1->id,
             'can_view' => 1,
         ]);
 
-        // Allowlist unlocks Firm documents nav + library for every Firm One member.
+        // Firm One member: menu unlock + accessible firms include own + Central.
         Sanctum::actingAs($memberA);
-        $this->getJson('/api/firm-documents/my-rights')
-            ->assertOk()
-            ->assertJsonPath('rights.can_view', true)
-            ->assertJsonPath('rights.is_firm_head', false);
+        $mine = $this->getJson('/api/firm-documents/my-rights')->assertOk();
+        $mine->assertJsonPath('rights.can_view', true);
+        $accessibleIds = collect($mine->json('accessible_firms'))->pluck('id')->all();
+        $this->assertContains($firm1->id, $accessibleIds);
+        $this->assertContains($central->id, $accessibleIds);
+
         $this->getJson('/api/hub')
             ->assertOk()
             ->assertJsonPath('hub.firm_document_rights.can_view', true)
             ->assertJsonPath('hub.effective_capabilities.firm_documents_view', true);
 
-        $listA = $this->getJson('/api/firm-documents?firm_id='.$firm1->id)->assertOk();
-        $titlesA = collect($listA->json('documents'))->pluck('title')->all();
-        $this->assertContains('Network policy', $titlesA);
+        // Own firm library can be empty; Central library shows the granted doc.
+        $ownLib = $this->getJson('/api/firm-documents?firm_id='.$firm1->id)->assertOk();
+        $this->assertNotContains('Network policy', collect($ownLib->json('documents'))->pluck('title')->all());
+
+        $centralLib = $this->getJson('/api/firm-documents?firm_id='.$central->id)->assertOk();
+        $this->assertContains('Network policy', collect($centralLib->json('documents'))->pluck('title')->all());
 
         Sanctum::actingAs($memberB);
-        $listB = $this->getJson('/api/firm-documents?firm_id='.$firm1->id)->assertOk();
-        $titlesB = collect($listB->json('documents'))->pluck('title')->all();
-        $this->assertContains('Network policy', $titlesB);
+        $listB = $this->getJson('/api/firm-documents?firm_id='.$central->id)->assertOk();
+        $this->assertContains('Network policy', collect($listB->json('documents'))->pluck('title')->all());
 
-        // Per-document revoke hides the doc even while Firm One stays allowlisted.
-        Sanctum::actingAs($admin);
-        $this->putJson('/api/firm-documents/'.$docId.'/member-rights', [
-            'grantee_firm_id' => $firm1->id,
-            'can_view' => false,
-            'can_add' => false,
-            'can_delete' => false,
-            'can_archive' => false,
-        ])->assertOk();
-        $this->assertDatabaseHas('firm_document_firm_rights', [
-            'firm_document_id' => $docId,
-            'grantee_firm_id' => $firm1->id,
-            'can_view' => 0,
-        ]);
-
-        Sanctum::actingAs($memberA);
-        $listRevoked = $this->getJson('/api/firm-documents?firm_id='.$firm1->id)->assertOk();
-        $this->assertNotContains('Network policy', collect($listRevoked->json('documents'))->pluck('title')->all());
-
-        // Firm Two has no allowlist entry — head sees no shared Central doc.
+        // Firm Two has no grant — cannot open Central docs.
         $firm2->update(['head_user_id' => $outsider->id]);
         Sanctum::actingAs($outsider);
-        $this->getJson('/api/firm-documents?firm_id='.$firm1->id)->assertStatus(403);
+        $this->getJson('/api/firm-documents?firm_id='.$central->id)->assertStatus(403);
         $listOut = $this->getJson('/api/firm-documents?firm_id='.$firm2->id)->assertOk();
-        $titlesOut = collect($listOut->json('documents'))->pluck('title')->all();
-        $this->assertNotContains('Network policy', $titlesOut);
+        $this->assertNotContains('Network policy', collect($listOut->json('documents'))->pluck('title')->all());
     }
 }

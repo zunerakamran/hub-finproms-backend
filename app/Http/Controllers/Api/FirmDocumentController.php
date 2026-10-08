@@ -33,9 +33,13 @@ class FirmDocumentController extends Controller
         /** @var User $user */
         $user = $request->user();
         $hub = $this->rightsHub($request, $user);
+        $rights = $this->access->effectiveRightsSummary($user, $hub);
 
         return response()->json([
-            'rights' => $this->access->effectiveRightsSummary($user, $hub),
+            'rights' => $rights,
+            // Own firm + firms that granted this user’s firm access to specific documents
+            // (e.g. Central / Network after a key-icon View grant).
+            'accessible_firms' => $this->access->accessibleFirmsFor($user, $hub),
         ]);
     }
 

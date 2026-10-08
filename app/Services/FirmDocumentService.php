@@ -109,46 +109,17 @@ class FirmDocumentService
 
         $unfiled = ($docsByFolder->get('none') ?? collect())->values()->all();
 
-        // Documents from other firms shared to this firm.
-        $sharedIds = $this->access->sharedDocumentIdsForFirm($firm);
-        if ($sharedIds !== []) {
-            $sharedQuery = FirmDocument::query()
-                ->with(['attachments', 'uploader:id,name,email', 'folder:id,name,parent_id', 'category:id,name,slug', 'firm:id,name,is_central'])
-                ->whereIn('id', $sharedIds)
-                ->orderBy('title')
-                ->orderBy('id');
-
-            if ($scope === 'archived') {
-                $sharedQuery->whereNotNull('archived_at');
-            } elseif ($scope !== 'all') {
-                $sharedQuery->whereNull('archived_at');
-            }
-
-            $sharedDocs = $sharedQuery->get()->map(function (FirmDocument $doc) use ($actor, $firm, $hub) {
-                $payload = $doc->toApiArray($this->access->documentRightsFor($actor, $firm, $doc, $hub));
-                $payload['shared_from'] = [
-                    'firm_id' => (int) $doc->firm_id,
-                    'firm_name' => $doc->firm?->name ?? 'Another firm',
-                    'is_central' => (bool) ($doc->firm?->is_central),
-                ];
-
-                return $payload;
-            })->values()->all();
-
-            if ($sharedDocs !== []) {
-                $tree = array_merge([[
-                    'id' => -1,
-                    'firm_id' => (int) $firm->id,
-                    'parent_id' => null,
-                    'name' => 'Shared from other firms',
-                    'is_shared_bucket' => true,
-                    'children' => [],
-                    'documents' => $sharedDocs,
-                    'document_count' => count($sharedDocs),
-                ]], $tree);
-                $serialized = $serialized->merge($sharedDocs);
-            }
+        // Grantee viewing another firm: hide empty folders (only granted docs matter).
+        if (! $this->access->seesAllFirmDocuments($actor, $firm, $hub)) {
+            $tree = array_values(array_filter(
+                $tree,
+                fn (array $folder) => (int) ($folder['document_count'] ?? 0) > 0
+            ));
         }
+
+        // Shared docs from other firms appear when the user opens that owner firm
+        // in the picker (e.g. Central / Network), filtered by per-document grants —
+        // not mixed into the grantee’s own-firm library.
 
         return [
             'folders' => $tree,
@@ -672,13 +643,13 @@ class FirmDocumentService
             ->map(function (Firm $target) use ($grants) {
                 $grant = $grants->get((int) $target->id);
 
-                // Allowlisted firms can view by default until explicitly revoked.
+                // Allowlist only makes the firm eligible; Head must grant View (etc.) per document.
                 return [
                     'id' => (int) $target->id,
                     'name' => (string) $target->name,
                     'is_central' => (bool) $target->is_central,
                     'can_add' => (bool) ($grant?->can_add),
-                    'can_view' => $grant ? (bool) $grant->can_view : true,
+                    'can_view' => (bool) ($grant?->can_view),
                     'can_delete' => (bool) ($grant?->can_delete),
                     'can_archive' => (bool) ($grant?->can_archive),
                 ];
@@ -752,41 +723,36 @@ class FirmDocumentService
             ->where('grantee_firm_id', $granteeFirm->id)
             ->first();
 
-        // Keep an explicit row when all rights are off so allowlist default-view
-        // does not immediately re-share this document after a per-doc revoke.
         if (! $canAdd && ! $canView && ! $canDelete && ! $canArchive) {
-            $row = FirmDocumentFirmRight::query()->updateOrCreate(
-                [
-                    'firm_document_id' => $document->id,
-                    'grantee_firm_id' => $granteeFirm->id,
-                ],
-                [
-                    'can_add' => false,
-                    'can_view' => false,
-                    'can_delete' => false,
-                    'can_archive' => false,
-                ]
-            );
+            if ($existing) {
+                $existing->delete();
+                $this->activityLogs->log([
+                    'action' => 'firm.documents.firm_rights.revoke',
+                    'description' => 'Revoked firm access for '.$granteeFirm->name.' on “'.$document->title.'”',
+                    'user' => $actor,
+                    'hub' => $this->hubs->current(),
+                    'subject' => $granteeFirm,
+                    'request' => $request,
+                    'status_code' => 200,
+                    'properties' => [
+                        'firm_id' => $firm->id,
+                        'firm_name' => $firm->name,
+                        'document_id' => $document->id,
+                        'document_title' => $document->title,
+                        'grantee_firm_id' => $granteeFirm->id,
+                        'grantee_firm_name' => $granteeFirm->name,
+                    ],
+                ]);
+            }
 
-            $this->activityLogs->log([
-                'action' => 'firm.documents.firm_rights.revoke',
-                'description' => 'Revoked firm access for '.$granteeFirm->name.' on “'.$document->title.'”',
-                'user' => $actor,
-                'hub' => $this->hubs->current(),
-                'subject' => $granteeFirm,
-                'request' => $request,
-                'status_code' => 200,
-                'properties' => [
-                    'firm_id' => $firm->id,
-                    'firm_name' => $firm->name,
-                    'document_id' => $document->id,
-                    'document_title' => $document->title,
-                    'grantee_firm_id' => $granteeFirm->id,
-                    'grantee_firm_name' => $granteeFirm->name,
-                ],
+            return new FirmDocumentFirmRight([
+                'firm_document_id' => $document->id,
+                'grantee_firm_id' => $granteeFirm->id,
+                'can_add' => false,
+                'can_view' => false,
+                'can_delete' => false,
+                'can_archive' => false,
             ]);
-
-            return $row->load('granteeFirm:id,name,is_central');
         }
 
         $row = FirmDocumentFirmRight::query()->updateOrCreate(
