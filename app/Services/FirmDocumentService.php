@@ -672,12 +672,13 @@ class FirmDocumentService
             ->map(function (Firm $target) use ($grants) {
                 $grant = $grants->get((int) $target->id);
 
+                // Allowlisted firms can view by default until explicitly revoked.
                 return [
                     'id' => (int) $target->id,
                     'name' => (string) $target->name,
                     'is_central' => (bool) $target->is_central,
                     'can_add' => (bool) ($grant?->can_add),
-                    'can_view' => (bool) ($grant?->can_view),
+                    'can_view' => $grant ? (bool) $grant->can_view : true,
                     'can_delete' => (bool) ($grant?->can_delete),
                     'can_archive' => (bool) ($grant?->can_archive),
                 ];
@@ -751,36 +752,41 @@ class FirmDocumentService
             ->where('grantee_firm_id', $granteeFirm->id)
             ->first();
 
+        // Keep an explicit row when all rights are off so allowlist default-view
+        // does not immediately re-share this document after a per-doc revoke.
         if (! $canAdd && ! $canView && ! $canDelete && ! $canArchive) {
-            if ($existing) {
-                $existing->delete();
-                $this->activityLogs->log([
-                    'action' => 'firm.documents.firm_rights.revoke',
-                    'description' => 'Revoked firm access for '.$granteeFirm->name.' on “'.$document->title.'”',
-                    'user' => $actor,
-                    'hub' => $this->hubs->current(),
-                    'subject' => $granteeFirm,
-                    'request' => $request,
-                    'status_code' => 200,
-                    'properties' => [
-                        'firm_id' => $firm->id,
-                        'firm_name' => $firm->name,
-                        'document_id' => $document->id,
-                        'document_title' => $document->title,
-                        'grantee_firm_id' => $granteeFirm->id,
-                        'grantee_firm_name' => $granteeFirm->name,
-                    ],
-                ]);
-            }
+            $row = FirmDocumentFirmRight::query()->updateOrCreate(
+                [
+                    'firm_document_id' => $document->id,
+                    'grantee_firm_id' => $granteeFirm->id,
+                ],
+                [
+                    'can_add' => false,
+                    'can_view' => false,
+                    'can_delete' => false,
+                    'can_archive' => false,
+                ]
+            );
 
-            return new FirmDocumentFirmRight([
-                'firm_document_id' => $document->id,
-                'grantee_firm_id' => $granteeFirm->id,
-                'can_add' => false,
-                'can_view' => false,
-                'can_delete' => false,
-                'can_archive' => false,
+            $this->activityLogs->log([
+                'action' => 'firm.documents.firm_rights.revoke',
+                'description' => 'Revoked firm access for '.$granteeFirm->name.' on “'.$document->title.'”',
+                'user' => $actor,
+                'hub' => $this->hubs->current(),
+                'subject' => $granteeFirm,
+                'request' => $request,
+                'status_code' => 200,
+                'properties' => [
+                    'firm_id' => $firm->id,
+                    'firm_name' => $firm->name,
+                    'document_id' => $document->id,
+                    'document_title' => $document->title,
+                    'grantee_firm_id' => $granteeFirm->id,
+                    'grantee_firm_name' => $granteeFirm->name,
+                ],
             ]);
+
+            return $row->load('granteeFirm:id,name,is_central');
         }
 
         $row = FirmDocumentFirmRight::query()->updateOrCreate(

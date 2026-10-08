@@ -6,6 +6,7 @@ use App\Models\Firm;
 use App\Models\FirmDocument;
 use App\Models\FirmDocumentFirmRight;
 use App\Models\FirmDocumentMemberRight;
+use App\Models\FirmDocumentVisibleFirm;
 use App\Models\Hub;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -324,25 +325,60 @@ class FirmDocumentAccessService
     /**
      * Document ids from other firms shared to this firm with can_view.
      *
+     * Sources:
+     * 1) Explicit firm_document_firm_rights with can_view
+     * 2) Document access control allowlist (firm_document_visible_firms) — view by
+     *    default for every document of the owning firm, unless explicitly revoked
+     *    (firm_rights row with can_view = false)
+     *
      * @return list<int>
      */
     public function sharedDocumentIdsForFirm(Firm $granteeFirm): array
     {
-        if (! Schema::hasTable('firm_document_firm_rights')) {
-            return [];
+        $ids = [];
+
+        if (Schema::hasTable('firm_document_firm_rights')) {
+            $ids = FirmDocumentFirmRight::query()
+                ->where('grantee_firm_id', $granteeFirm->id)
+                ->where('can_view', true)
+                ->whereIn('firm_document_id', function ($q) use ($granteeFirm) {
+                    $q->select('id')->from('firm_documents')->where('firm_id', '!=', $granteeFirm->id);
+                })
+                ->pluck('firm_document_id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
         }
 
-        return FirmDocumentFirmRight::query()
-            ->where('grantee_firm_id', $granteeFirm->id)
-            ->where('can_view', true)
-            ->whereIn('firm_document_id', function ($q) use ($granteeFirm) {
-                $q->select('id')->from('firm_documents')->where('firm_id', '!=', $granteeFirm->id);
-            })
-            ->pluck('firm_document_id')
-            ->map(fn ($id) => (int) $id)
-            ->unique()
-            ->values()
-            ->all();
+        if (Schema::hasTable('firm_document_visible_firms')) {
+            $ownerIds = FirmDocumentVisibleFirm::query()
+                ->where('grantee_firm_id', $granteeFirm->id)
+                ->pluck('owner_firm_id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+
+            if ($ownerIds !== []) {
+                $allowlistDocIds = FirmDocument::query()
+                    ->whereIn('firm_id', $ownerIds)
+                    ->pluck('id')
+                    ->map(fn ($id) => (int) $id)
+                    ->all();
+
+                $revoked = [];
+                if (Schema::hasTable('firm_document_firm_rights') && $allowlistDocIds !== []) {
+                    $revoked = FirmDocumentFirmRight::query()
+                        ->where('grantee_firm_id', $granteeFirm->id)
+                        ->where('can_view', false)
+                        ->whereIn('firm_document_id', $allowlistDocIds)
+                        ->pluck('firm_document_id')
+                        ->map(fn ($id) => (int) $id)
+                        ->all();
+                }
+
+                $ids = array_merge($ids, array_values(array_diff($allowlistDocIds, $revoked)));
+            }
+        }
+
+        return array_values(array_unique($ids));
     }
 
     /**
@@ -501,17 +537,38 @@ class FirmDocumentAccessService
     private function firmLevelGrantAllows(User $user, FirmDocument $document, string $right): bool
     {
         $grant = $this->firmLevelGrantForUser($user, (int) $document->id);
-        if (! $grant) {
+        if ($grant) {
+            return match ($right) {
+                self::RIGHT_ADD => (bool) $grant->can_add,
+                self::RIGHT_VIEW => (bool) $grant->can_view,
+                self::RIGHT_DELETE => (bool) $grant->can_delete,
+                self::RIGHT_ARCHIVE => (bool) $grant->can_archive,
+                default => false,
+            };
+        }
+
+        // No firm-rights row yet: Document access control allowlist grants view
+        // for every member of the grantee firm.
+        if ($right === self::RIGHT_VIEW && $user->firm_id) {
+            return $this->firmIsAllowlistedForOwner((int) $user->firm_id, (int) $document->firm_id);
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether $granteeFirmId is on $ownerFirmId’s Document access control allowlist.
+     */
+    public function firmIsAllowlistedForOwner(int $granteeFirmId, int $ownerFirmId): bool
+    {
+        if ($granteeFirmId === $ownerFirmId || ! Schema::hasTable('firm_document_visible_firms')) {
             return false;
         }
 
-        return match ($right) {
-            self::RIGHT_ADD => (bool) $grant->can_add,
-            self::RIGHT_VIEW => (bool) $grant->can_view,
-            self::RIGHT_DELETE => (bool) $grant->can_delete,
-            self::RIGHT_ARCHIVE => (bool) $grant->can_archive,
-            default => false,
-        };
+        return FirmDocumentVisibleFirm::query()
+            ->where('owner_firm_id', $ownerFirmId)
+            ->where('grantee_firm_id', $granteeFirmId)
+            ->exists();
     }
 
     private function firmLevelGrantForUser(User $user, int $documentId): ?FirmDocumentFirmRight
@@ -531,23 +588,29 @@ class FirmDocumentAccessService
      */
     private function hasAnySharedFirmGrant(User $user, Firm $firm): bool
     {
-        if (! Schema::hasTable('firm_document_firm_rights')) {
-            return false;
-        }
-
         if ($user->firm_id === null || (int) $user->firm_id !== (int) $firm->id) {
             return false;
         }
 
-        return FirmDocumentFirmRight::query()
-            ->where('grantee_firm_id', $firm->id)
-            ->where(function ($q) {
-                $q->where('can_view', true)
-                    ->orWhere('can_add', true)
-                    ->orWhere('can_delete', true)
-                    ->orWhere('can_archive', true);
-            })
-            ->exists();
+        if (Schema::hasTable('firm_document_firm_rights')
+            && FirmDocumentFirmRight::query()
+                ->where('grantee_firm_id', $firm->id)
+                ->where(function ($q) {
+                    $q->where('can_view', true)
+                        ->orWhere('can_add', true)
+                        ->orWhere('can_delete', true)
+                        ->orWhere('can_archive', true);
+                })
+                ->exists()
+        ) {
+            return true;
+        }
+
+        // Allowlisted under another firm’s Document access control ⇒ library unlock.
+        return Schema::hasTable('firm_document_visible_firms')
+            && FirmDocumentVisibleFirm::query()
+                ->where('grantee_firm_id', $firm->id)
+                ->exists();
     }
 
     private function hasSharedFirmAddGrant(User $user, Firm $firm): bool

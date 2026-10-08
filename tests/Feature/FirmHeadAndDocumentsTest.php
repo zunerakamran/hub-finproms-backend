@@ -323,6 +323,7 @@ class FirmHeadAndDocumentsTest extends TestCase
         Sanctum::actingAs($admin);
 
         // Allowlist Firm One only — Firm Two must not appear in access rights.
+        // Document access control alone grants view of Central docs to Firm One.
         $this->putJson('/api/firm-documents/visible-firms', [
             'firm_id' => $central->id,
             'firm_ids' => [$firm1->id],
@@ -344,6 +345,7 @@ class FirmHeadAndDocumentsTest extends TestCase
             ->assertJsonPath('mode', 'mixed');
         $firmIds = collect($access->json('firms'))->pluck('id')->all();
         $this->assertSame([$firm1->id], $firmIds);
+        $this->assertTrue((bool) collect($access->json('firms'))->firstWhere('id', $firm1->id)['can_view']);
         $memberIds = collect($access->json('members'))->pluck('id')->all();
         $this->assertContains($centralMember->id, $memberIds);
 
@@ -352,15 +354,6 @@ class FirmHeadAndDocumentsTest extends TestCase
             'grantee_firm_id' => $firm2->id,
             'can_view' => true,
         ])->assertStatus(422);
-
-        $this->putJson('/api/firm-documents/'.$docId.'/member-rights', [
-            'grantee_firm_id' => $firm1->id,
-            'can_view' => true,
-            'can_add' => false,
-            'can_delete' => false,
-            'can_archive' => false,
-        ])->assertOk()
-            ->assertJsonPath('mode', 'mixed');
 
         // Own-firm member grants still work on Central documents.
         $this->putJson('/api/firm-documents/'.$docId.'/member-rights', [
@@ -371,19 +364,13 @@ class FirmHeadAndDocumentsTest extends TestCase
             'can_archive' => false,
         ])->assertOk();
 
-        $this->assertDatabaseHas('activity_logs', ['action' => 'firm.documents.firm_rights.grant']);
-        $this->assertDatabaseHas('firm_document_firm_rights', [
-            'firm_document_id' => $docId,
-            'grantee_firm_id' => $firm1->id,
-            'can_view' => 1,
-        ]);
         $this->assertDatabaseHas('firm_document_member_rights', [
             'firm_document_id' => $docId,
             'user_id' => $centralMember->id,
             'can_view' => 1,
         ]);
 
-        // Every Firm One member can see the shared Central doc in their library.
+        // Every Firm One member can see the shared Central doc via allowlist alone.
         Sanctum::actingAs($memberA);
         $listA = $this->getJson('/api/firm-documents?firm_id='.$firm1->id)->assertOk();
         $titlesA = collect($listA->json('documents'))->pluck('title')->all();
@@ -394,7 +381,26 @@ class FirmHeadAndDocumentsTest extends TestCase
         $titlesB = collect($listB->json('documents'))->pluck('title')->all();
         $this->assertContains('Network policy', $titlesB);
 
-        // Firm Two has no grant — member cannot open Firm One, and (as Firm Two head) sees no shared Central doc.
+        // Per-document revoke hides the doc even while Firm One stays allowlisted.
+        Sanctum::actingAs($admin);
+        $this->putJson('/api/firm-documents/'.$docId.'/member-rights', [
+            'grantee_firm_id' => $firm1->id,
+            'can_view' => false,
+            'can_add' => false,
+            'can_delete' => false,
+            'can_archive' => false,
+        ])->assertOk();
+        $this->assertDatabaseHas('firm_document_firm_rights', [
+            'firm_document_id' => $docId,
+            'grantee_firm_id' => $firm1->id,
+            'can_view' => 0,
+        ]);
+
+        Sanctum::actingAs($memberA);
+        $listRevoked = $this->getJson('/api/firm-documents?firm_id='.$firm1->id)->assertOk();
+        $this->assertNotContains('Network policy', collect($listRevoked->json('documents'))->pluck('title')->all());
+
+        // Firm Two has no allowlist entry — head sees no shared Central doc.
         $firm2->update(['head_user_id' => $outsider->id]);
         Sanctum::actingAs($outsider);
         $this->getJson('/api/firm-documents?firm_id='.$firm1->id)->assertStatus(403);

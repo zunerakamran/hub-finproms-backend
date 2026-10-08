@@ -124,6 +124,28 @@ class FirmDocumentController extends Controller
         /** @var User $user */
         $user = $request->user();
 
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            $validated = $request->validate([
+                'firm_id' => ['required', 'integer', 'min:1'],
+            ]);
+
+            try {
+                $folders = $this->whiteLabelDocuments->listFolders(
+                    $hub,
+                    $user,
+                    (int) $validated['firm_id'],
+                );
+            } catch (InvalidArgumentException $e) {
+                return $this->actingHubNotFoundOrValidation($e);
+            }
+
+            return response()->json([
+                'folders' => $folders,
+                'target_hub' => $this->targetHubPayload($hub),
+                'acting_on_white_label' => true,
+            ]);
+        }
+
         $validated = $request->validate([
             'firm_id' => ['sometimes', 'nullable', 'integer', 'exists:firms,id'],
         ]);
@@ -132,6 +154,7 @@ class FirmDocumentController extends Controller
 
         return response()->json([
             'folders' => $this->documents->listFolders($user, $firm, $hub),
+            'acting_on_white_label' => false,
         ]);
     }
 
@@ -139,6 +162,34 @@ class FirmDocumentController extends Controller
     {
         /** @var User $user */
         $user = $request->user();
+
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            $validated = $request->validate([
+                'firm_id' => ['required', 'integer', 'min:1'],
+                'name' => ['required', 'string', 'max:255'],
+                'parent_id' => ['nullable', 'integer', 'min:1'],
+            ]);
+
+            try {
+                $folder = $this->whiteLabelDocuments->createFolder(
+                    $hub,
+                    $user,
+                    (int) $validated['firm_id'],
+                    trim($validated['name']),
+                    isset($validated['parent_id']) ? (int) $validated['parent_id'] : null,
+                    $request,
+                );
+            } catch (InvalidArgumentException $e) {
+                return $this->actingHubNotFoundOrValidation($e);
+            }
+
+            return response()->json([
+                'message' => 'Folder created successfully.',
+                'folder' => $folder,
+                'target_hub' => $this->targetHubPayload($hub),
+                'acting_on_white_label' => true,
+            ], 201);
+        }
 
         $validated = $request->validate([
             'firm_id' => ['sometimes', 'nullable', 'integer', 'exists:firms,id'],
@@ -161,6 +212,7 @@ class FirmDocumentController extends Controller
         return response()->json([
             'message' => 'Folder created successfully.',
             'folder' => $folder->toApiArray(false),
+            'acting_on_white_label' => false,
         ], 201);
     }
 
@@ -177,6 +229,10 @@ class FirmDocumentController extends Controller
                 'firm_id' => ['required', 'integer', 'min:1'],
                 'title' => ['required', 'string', 'max:255'],
                 'description' => ['nullable', 'string', 'max:5000'],
+                'folder_id' => ['nullable', 'integer', 'min:1'],
+                'folder_name' => ['nullable', 'string', 'max:255'],
+                'parent_folder_id' => ['nullable', 'integer', 'min:1'],
+                'category_id' => ['nullable', 'integer', 'min:1'],
             ], $uploadRules));
 
             $files = array_slice(ComplianceSupportingFiles::fromRequest($request, 'attachments'), 0, 1);
@@ -190,6 +246,12 @@ class FirmDocumentController extends Controller
                     isset($validated['description']) ? trim((string) $validated['description']) : null,
                     $files,
                     $request,
+                    [
+                        'folder_id' => $validated['folder_id'] ?? null,
+                        'folder_name' => $validated['folder_name'] ?? null,
+                        'parent_folder_id' => $validated['parent_folder_id'] ?? null,
+                        'category_id' => $validated['category_id'] ?? null,
+                    ],
                 );
             } catch (InvalidArgumentException $e) {
                 return $this->actingHubNotFoundOrValidation($e);

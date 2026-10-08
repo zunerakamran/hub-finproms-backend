@@ -30,9 +30,11 @@ class WhiteLabelFirmDocumentService
     }
 
     /**
+     * Nested folder library for a remote hub (same shape as local FirmDocumentService::library).
+     *
      * @return array<string, mixed>
      */
-    public function index(Hub $hub, User $actor, int $firmId, string $scope, int $perPage, int $page = 1): array
+    public function index(Hub $hub, User $actor, int $firmId, string $scope, int $perPage = 25, int $page = 1): array
     {
         $this->assertTarget($hub);
         $this->assertFunctionality($hub);
@@ -40,14 +42,26 @@ class WhiteLabelFirmDocumentService
         $this->assertCanOnRemote($hub, $actor, $firmId, FirmDocumentAccessService::RIGHT_VIEW);
 
         $rights = $this->rightsPayload($hub, $actor, $firmId);
+        $viewerRights = [
+            'can_view' => (bool) ($rights['can_view'] ?? false),
+            'can_delete' => (bool) ($rights['can_delete'] ?? false),
+            'can_archive' => (bool) ($rights['can_archive'] ?? false),
+            'can_manage_member_rights' => (bool) ($rights['can_manage_member_rights'] ?? false),
+            'access_mode' => 'mixed',
+        ];
 
-        $payload = $this->remoteDb->run($hub, function (string $connection) use ($firmId, $scope, $perPage, $page) {
+        $payload = $this->remoteDb->run($hub, function (string $connection) use ($firmId, $scope, $viewerRights) {
             $this->assertDocumentsTables($connection);
+            $schema = DB::connection($connection)->getSchemaBuilder();
+            $hasFolders = $schema->hasTable('firm_document_folders');
+            $hasFolderCol = $schema->hasColumn('firm_documents', 'folder_id');
+            $hasCategoryCol = $schema->hasColumn('firm_documents', 'category_id');
+            $hasFirmRights = $schema->hasTable('firm_document_firm_rights');
 
             $query = DB::connection($connection)->table('firm_documents')
                 ->where('firm_id', $firmId)
-                ->orderByDesc('created_at')
-                ->orderByDesc('id');
+                ->orderBy('title')
+                ->orderBy('id');
 
             if ($scope === 'archived') {
                 $query->whereNotNull('archived_at');
@@ -55,25 +69,159 @@ class WhiteLabelFirmDocumentService
                 $query->whereNull('archived_at');
             }
 
-            $total = (clone $query)->count();
-            $perPage = max(1, min(100, $perPage));
-            $lastPage = max(1, (int) ceil($total / $perPage));
-            $page = max(1, min($page, $lastPage));
-            $rows = $query->forPage($page, $perPage)->get();
+            $rows = $query->get();
+            $serialized = $rows->map(function ($row) use ($connection, $viewerRights, $hasFolders, $hasFolderCol, $hasCategoryCol) {
+                return $this->serializeDocument(
+                    $connection,
+                    $row,
+                    $viewerRights,
+                    $hasFolders && $hasFolderCol,
+                    $hasCategoryCol,
+                );
+            })->values();
 
-            $documents = $rows->map(function ($row) use ($connection) {
-                return $this->serializeDocument($connection, $row);
-            })->values()->all();
+            $folders = collect();
+            if ($hasFolders) {
+                $folders = DB::connection($connection)->table('firm_document_folders')
+                    ->where('firm_id', $firmId)
+                    ->orderBy('name')
+                    ->orderBy('id')
+                    ->get();
+            }
+
+            $byParent = $folders->groupBy(fn ($f) => $f->parent_id === null ? 'root' : (string) $f->parent_id);
+            $docsByFolder = $serialized->groupBy(function (array $d) {
+                return $d['folder_id'] === null ? 'none' : (string) $d['folder_id'];
+            });
+
+            $buildFolder = function ($folder) use (&$buildFolder, $byParent, $docsByFolder): array {
+                $childFolders = ($byParent->get((string) $folder->id) ?? collect())
+                    ->map(fn ($child) => $buildFolder($child))
+                    ->values()
+                    ->all();
+
+                $folderDocs = ($docsByFolder->get((string) $folder->id) ?? collect())->values()->all();
+
+                return [
+                    'id' => (int) $folder->id,
+                    'firm_id' => (int) $folder->firm_id,
+                    'parent_id' => $folder->parent_id ? (int) $folder->parent_id : null,
+                    'name' => (string) $folder->name,
+                    'created_by' => isset($folder->created_by) && $folder->created_by
+                        ? (int) $folder->created_by
+                        : null,
+                    'created_at' => $folder->created_at ?? null,
+                    'updated_at' => $folder->updated_at ?? null,
+                    'children' => $childFolders,
+                    'documents' => $folderDocs,
+                    'document_count' => count($folderDocs) + collect($childFolders)->sum('document_count'),
+                ];
+            };
+
+            $tree = ($byParent->get('root') ?? collect())
+                ->map(fn ($folder) => $buildFolder($folder))
+                ->values()
+                ->all();
+
+            $unfiled = ($docsByFolder->get('none') ?? collect())->values()->all();
+
+            // Shared docs from other firms (explicit firm grants + allowlist default view).
+            $sharedIds = [];
+            if ($hasFirmRights) {
+                $sharedIds = DB::connection($connection)->table('firm_document_firm_rights as r')
+                    ->join('firm_documents as d', 'd.id', '=', 'r.firm_document_id')
+                    ->where('r.grantee_firm_id', $firmId)
+                    ->where('r.can_view', true)
+                    ->where('d.firm_id', '!=', $firmId)
+                    ->pluck('r.firm_document_id')
+                    ->map(fn ($id) => (int) $id)
+                    ->all();
+            }
+
+            $hasVisibleFirms = $schema->hasTable('firm_document_visible_firms');
+            if ($hasVisibleFirms) {
+                $ownerIds = DB::connection($connection)->table('firm_document_visible_firms')
+                    ->where('grantee_firm_id', $firmId)
+                    ->pluck('owner_firm_id')
+                    ->map(fn ($id) => (int) $id)
+                    ->all();
+
+                if ($ownerIds !== []) {
+                    $allowlistDocIds = DB::connection($connection)->table('firm_documents')
+                        ->whereIn('firm_id', $ownerIds)
+                        ->pluck('id')
+                        ->map(fn ($id) => (int) $id)
+                        ->all();
+
+                    $revoked = [];
+                    if ($hasFirmRights && $allowlistDocIds !== []) {
+                        $revoked = DB::connection($connection)->table('firm_document_firm_rights')
+                            ->where('grantee_firm_id', $firmId)
+                            ->where('can_view', false)
+                            ->whereIn('firm_document_id', $allowlistDocIds)
+                            ->pluck('firm_document_id')
+                            ->map(fn ($id) => (int) $id)
+                            ->all();
+                    }
+
+                    $sharedIds = array_merge($sharedIds, array_values(array_diff($allowlistDocIds, $revoked)));
+                }
+            }
+
+            $sharedIds = array_values(array_unique($sharedIds));
+
+            if ($sharedIds !== []) {
+                $sharedQuery = DB::connection($connection)->table('firm_documents')
+                    ->whereIn('id', $sharedIds)
+                    ->orderBy('title')
+                    ->orderBy('id');
+
+                if ($scope === 'archived') {
+                    $sharedQuery->whereNotNull('archived_at');
+                } elseif ($scope !== 'all') {
+                    $sharedQuery->whereNull('archived_at');
+                }
+
+                $sharedDocs = $sharedQuery->get()->map(function ($row) use ($connection, $viewerRights, $hasFolders, $hasFolderCol, $hasCategoryCol) {
+                    $payload = $this->serializeDocument(
+                        $connection,
+                        $row,
+                        $viewerRights,
+                        $hasFolders && $hasFolderCol,
+                        $hasCategoryCol,
+                    );
+                    $owner = DB::connection($connection)->table('firms')
+                        ->where('id', $row->firm_id)
+                        ->first(['id', 'name', 'is_central']);
+                    $payload['shared_from'] = [
+                        'firm_id' => (int) $row->firm_id,
+                        'firm_name' => $owner->name ?? 'Another firm',
+                        'is_central' => (bool) ($owner->is_central ?? false),
+                    ];
+
+                    return $payload;
+                })->values()->all();
+
+                if ($sharedDocs !== []) {
+                    $tree = array_merge([[
+                        'id' => -1,
+                        'firm_id' => $firmId,
+                        'parent_id' => null,
+                        'name' => 'Shared from other firms',
+                        'is_shared_bucket' => true,
+                        'children' => [],
+                        'documents' => $sharedDocs,
+                        'document_count' => count($sharedDocs),
+                    ]], $tree);
+                    $serialized = $serialized->merge($sharedDocs);
+                }
+            }
 
             return [
                 'firm' => $this->serializeFirm($connection, $firmId),
-                'documents' => $documents,
-                'meta' => [
-                    'current_page' => $page,
-                    'last_page' => $lastPage,
-                    'per_page' => $perPage,
-                    'total' => $total,
-                ],
+                'folders' => $tree,
+                'documents' => $serialized->values()->all(),
+                'unfiled_documents' => $unfiled,
             ];
         });
 
@@ -81,7 +229,123 @@ class WhiteLabelFirmDocumentService
     }
 
     /**
+     * Flat folder list for upload / “new folder” pickers (remote hub).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function listFolders(Hub $hub, User $actor, int $firmId): array
+    {
+        $this->assertTarget($hub);
+        $this->assertFirmExists($hub, $firmId);
+        $this->assertCanOnRemote($hub, $actor, $firmId, FirmDocumentAccessService::RIGHT_VIEW);
+
+        return $this->remoteDb->run($hub, function (string $connection) use ($firmId) {
+            $schema = DB::connection($connection)->getSchemaBuilder();
+            if (! $schema->hasTable('firm_document_folders')) {
+                return [];
+            }
+
+            return DB::connection($connection)->table('firm_document_folders')
+                ->where('firm_id', $firmId)
+                ->orderBy('name')
+                ->orderBy('id')
+                ->get()
+                ->map(fn ($folder) => [
+                    'id' => (int) $folder->id,
+                    'firm_id' => (int) $folder->firm_id,
+                    'parent_id' => $folder->parent_id ? (int) $folder->parent_id : null,
+                    'name' => (string) $folder->name,
+                    'created_by' => isset($folder->created_by) && $folder->created_by
+                        ? (int) $folder->created_by
+                        : null,
+                    'created_at' => $folder->created_at ?? null,
+                    'updated_at' => $folder->updated_at ?? null,
+                ])
+                ->values()
+                ->all();
+        });
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function createFolder(
+        Hub $hub,
+        User $actor,
+        int $firmId,
+        string $name,
+        ?int $parentId = null,
+        ?Request $request = null,
+    ): array {
+        $this->assertTarget($hub);
+        $this->assertFirmExists($hub, $firmId);
+        $this->assertCanOnRemote($hub, $actor, $firmId, FirmDocumentAccessService::RIGHT_ADD);
+
+        $remoteUserId = $this->resolveRemoteActorId($hub, $actor);
+
+        $folder = $this->remoteDb->run($hub, function (string $connection) use ($firmId, $name, $parentId, $remoteUserId) {
+            $schema = DB::connection($connection)->getSchemaBuilder();
+            if (! $schema->hasTable('firm_document_folders')) {
+                throw new InvalidArgumentException(
+                    'This hub has not been migrated for Firm Document folders yet. Run migrations on that hub’s database.'
+                );
+            }
+
+            if ($parentId !== null) {
+                $parent = DB::connection($connection)->table('firm_document_folders')
+                    ->where('firm_id', $firmId)
+                    ->where('id', $parentId)
+                    ->first();
+                if (! $parent) {
+                    throw new InvalidArgumentException('Parent folder not found for this firm.');
+                }
+            }
+
+            $id = (int) DB::connection($connection)->table('firm_document_folders')->insertGetId([
+                'firm_id' => $firmId,
+                'parent_id' => $parentId,
+                'name' => $name,
+                'created_by' => $remoteUserId,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            $row = DB::connection($connection)->table('firm_document_folders')->where('id', $id)->first();
+
+            return [
+                'id' => (int) $row->id,
+                'firm_id' => (int) $row->firm_id,
+                'parent_id' => $row->parent_id ? (int) $row->parent_id : null,
+                'name' => (string) $row->name,
+                'created_by' => $row->created_by ? (int) $row->created_by : null,
+                'created_at' => $row->created_at ?? null,
+                'updated_at' => $row->updated_at ?? null,
+            ];
+        });
+
+        $this->activityLogs->log([
+            'action' => 'firm.documents.folder.create',
+            'description' => 'Created firm document folder “'.$folder['name'].'” (remote hub)',
+            'user' => $actor,
+            'hub' => $this->hubs->current(),
+            'request' => $request,
+            'status_code' => 201,
+            'properties' => [
+                'firm_id' => $firmId,
+                'folder_id' => $folder['id'],
+                'folder_name' => $folder['name'],
+                'parent_id' => $parentId,
+                'acting_remotely' => true,
+                'target_hub_id' => $hub->id,
+            ],
+        ]);
+
+        return $folder;
+    }
+
+    /**
      * @param  list<UploadedFile>  $files
+     * @param  array{folder_id?: mixed, folder_name?: mixed, parent_folder_id?: mixed, category_id?: mixed}  $meta
      * @return array<string, mixed>
      */
     public function create(
@@ -92,6 +356,7 @@ class WhiteLabelFirmDocumentService
         ?string $description,
         array $files,
         ?Request $request = null,
+        array $meta = [],
     ): array {
         $this->assertTarget($hub);
         $this->assertFunctionality($hub);
@@ -105,10 +370,29 @@ class WhiteLabelFirmDocumentService
 
         $remoteUserId = $this->resolveRemoteActorId($hub, $actor);
 
-        $document = $this->remoteDb->run($hub, function (string $connection) use ($firmId, $title, $description, $files, $remoteUserId) {
+        $document = $this->remoteDb->run($hub, function (string $connection) use ($firmId, $title, $description, $files, $remoteUserId, $meta) {
             $this->assertDocumentsTables($connection);
+            $schema = DB::connection($connection)->getSchemaBuilder();
+            $hasFolderCol = $schema->hasColumn('firm_documents', 'folder_id');
+            $hasCategoryCol = $schema->hasColumn('firm_documents', 'category_id');
+            $hasFolders = $schema->hasTable('firm_document_folders');
 
-            $docId = (int) DB::connection($connection)->table('firm_documents')->insertGetId([
+            $folderId = null;
+            if ($hasFolders && $hasFolderCol) {
+                $folderId = $this->resolveFolderIdOn($connection, $firmId, $meta, $remoteUserId);
+            }
+
+            $categoryId = null;
+            if ($hasCategoryCol && ! empty($meta['category_id'])) {
+                $categoryId = (int) $meta['category_id'];
+                if ($schema->hasTable('firm_document_categories')
+                    && ! DB::connection($connection)->table('firm_document_categories')->where('id', $categoryId)->exists()
+                ) {
+                    throw new InvalidArgumentException('Select a valid category.');
+                }
+            }
+
+            $payload = [
                 'firm_id' => $firmId,
                 'title' => $title,
                 'description' => $description,
@@ -117,7 +401,15 @@ class WhiteLabelFirmDocumentService
                 'archived_by' => null,
                 'created_at' => now(),
                 'updated_at' => now(),
-            ]);
+            ];
+            if ($hasFolderCol) {
+                $payload['folder_id'] = $folderId;
+            }
+            if ($hasCategoryCol) {
+                $payload['category_id'] = $categoryId;
+            }
+
+            $docId = (int) DB::connection($connection)->table('firm_documents')->insertGetId($payload);
 
             foreach (array_values($files) as $index => $file) {
                 $path = $file->store('firm-documents/'.$firmId, 'public');
@@ -136,7 +428,7 @@ class WhiteLabelFirmDocumentService
 
             $row = DB::connection($connection)->table('firm_documents')->where('id', $docId)->first();
 
-            return $this->serializeDocument($connection, $row);
+            return $this->serializeDocument($connection, $row, null, $hasFolders && $hasFolderCol, $hasCategoryCol);
         });
 
         $this->activityLogs->log([
@@ -1018,10 +1310,61 @@ class WhiteLabelFirmDocumentService
     }
 
     /**
+     * @param  array{folder_id?: mixed, folder_name?: mixed, parent_folder_id?: mixed}  $meta
+     */
+    private function resolveFolderIdOn(string $connection, int $firmId, array $meta, ?int $remoteUserId): ?int
+    {
+        if (! empty($meta['folder_id'])) {
+            $folder = DB::connection($connection)->table('firm_document_folders')
+                ->where('firm_id', $firmId)
+                ->where('id', (int) $meta['folder_id'])
+                ->first();
+            if (! $folder) {
+                throw new InvalidArgumentException('Folder not found for this firm.');
+            }
+
+            return (int) $folder->id;
+        }
+
+        $folderName = isset($meta['folder_name']) ? trim((string) $meta['folder_name']) : '';
+        if ($folderName === '') {
+            return null;
+        }
+
+        $parentId = isset($meta['parent_folder_id']) && $meta['parent_folder_id'] !== '' && $meta['parent_folder_id'] !== null
+            ? (int) $meta['parent_folder_id']
+            : null;
+
+        if ($parentId !== null) {
+            $parent = DB::connection($connection)->table('firm_document_folders')
+                ->where('firm_id', $firmId)
+                ->where('id', $parentId)
+                ->first();
+            if (! $parent) {
+                throw new InvalidArgumentException('Parent folder not found for this firm.');
+            }
+        }
+
+        return (int) DB::connection($connection)->table('firm_document_folders')->insertGetId([
+            'firm_id' => $firmId,
+            'parent_id' => $parentId,
+            'name' => $folderName,
+            'created_by' => $remoteUserId,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    /**
      * @return array<string, mixed>
      */
-    private function serializeDocument(string $connection, object $row): array
-    {
+    private function serializeDocument(
+        string $connection,
+        object $row,
+        ?array $viewerRights = null,
+        bool $includeFolder = true,
+        bool $includeCategory = true,
+    ): array {
         $attachments = DB::connection($connection)->table('firm_document_attachments')
             ->where('firm_document_id', $row->id)
             ->orderBy('sort_order')
@@ -1052,9 +1395,47 @@ class WhiteLabelFirmDocumentService
             }
         }
 
+        $folderId = $includeFolder && isset($row->folder_id) && $row->folder_id
+            ? (int) $row->folder_id
+            : null;
+        $folder = null;
+        if ($folderId && DB::connection($connection)->getSchemaBuilder()->hasTable('firm_document_folders')) {
+            $folderRow = DB::connection($connection)->table('firm_document_folders')
+                ->where('id', $folderId)
+                ->first(['id', 'name', 'parent_id']);
+            if ($folderRow) {
+                $folder = [
+                    'id' => (int) $folderRow->id,
+                    'name' => (string) $folderRow->name,
+                    'parent_id' => $folderRow->parent_id ? (int) $folderRow->parent_id : null,
+                ];
+            }
+        }
+
+        $categoryId = $includeCategory && isset($row->category_id) && $row->category_id
+            ? (int) $row->category_id
+            : null;
+        $category = null;
+        if ($categoryId && DB::connection($connection)->getSchemaBuilder()->hasTable('firm_document_categories')) {
+            $catRow = DB::connection($connection)->table('firm_document_categories')
+                ->where('id', $categoryId)
+                ->first(['id', 'name', 'slug']);
+            if ($catRow) {
+                $category = [
+                    'id' => (int) $catRow->id,
+                    'name' => (string) $catRow->name,
+                    'slug' => (string) $catRow->slug,
+                ];
+            }
+        }
+
         return [
             'id' => (int) $row->id,
             'firm_id' => (int) $row->firm_id,
+            'folder_id' => $folderId,
+            'folder' => $folder,
+            'category_id' => $categoryId,
+            'category' => $category,
             'title' => (string) $row->title,
             'description' => $row->description,
             'uploaded_by' => $row->uploaded_by ? (int) $row->uploaded_by : null,
@@ -1063,6 +1444,7 @@ class WhiteLabelFirmDocumentService
             'archived_by' => $row->archived_by ? (int) $row->archived_by : null,
             'is_archived' => $row->archived_at !== null,
             'attachments' => $attachments,
+            'viewer_rights' => $viewerRights,
             'created_at' => $row->created_at,
             'updated_at' => $row->updated_at,
         ];
