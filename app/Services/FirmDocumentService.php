@@ -613,7 +613,12 @@ class FirmDocumentService
             ->keyBy(fn (FirmDocumentMemberRight $r) => (int) $r->user_id);
 
         $members = User::query()
-            ->where('firm_id', $firm->id)
+            ->where(function ($q) use ($firm) {
+                $q->where('firm_id', $firm->id);
+                if ($firm->head_user_id) {
+                    $q->orWhere('id', (int) $firm->head_user_id);
+                }
+            })
             ->where(function ($q) {
                 $q->where('is_discontinued', false)->orWhereNull('is_discontinued');
             })
@@ -629,7 +634,7 @@ class FirmDocumentService
                 'name' => (string) $member->name,
                 'email' => (string) $member->email,
                 'is_firm_head' => $isHead,
-                // Upload is Head-only — never grantable.
+                // Upload is never grantable via key icon.
                 'can_add' => $isHead,
                 'can_view' => $isHead ? true : (bool) ($grant?->can_view),
                 'can_delete' => $isHead ? true : (bool) ($grant?->can_delete),

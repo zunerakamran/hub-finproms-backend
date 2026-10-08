@@ -132,7 +132,7 @@ class TaxonomyAddRequestController extends Controller
         $row = $this->requests->approve($hub, $user, $taxonomyAddRequest, $validated, $request);
 
         return response()->json([
-            'message' => 'Request approved and taxonomy option created.',
+            'message' => 'Request marked as approved.',
             'data' => $row->toApiArray(),
         ]);
     }

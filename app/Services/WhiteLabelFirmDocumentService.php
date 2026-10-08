@@ -529,6 +529,416 @@ class WhiteLabelFirmDocumentService
     }
 
     /**
+     * Key-icon access rights payload for a remote document.
+     *
+     * @return array{
+     *   firm: array<string, mixed>,
+     *   document: array{id: int, title: string, is_central: bool},
+     *   mode: string,
+     *   members: list<array<string, mixed>>,
+     *   firms: list<array<string, mixed>>
+     * }
+     */
+    public function listDocumentAccessRights(Hub $hub, User $actor, int $documentId): array
+    {
+        $this->assertTarget($hub);
+
+        $meta = $this->remoteDb->run($hub, function (string $connection) use ($documentId) {
+            $this->assertDocumentsTables($connection);
+            $row = DB::connection($connection)->table('firm_documents')->where('id', $documentId)->first();
+            if (! $row) {
+                throw new InvalidArgumentException('Document not found on this hub.');
+            }
+
+            return [
+                'firm_id' => (int) $row->firm_id,
+                'title' => (string) $row->title,
+            ];
+        });
+
+        $this->assertCanManageDocumentAccessRights($hub, $actor, $meta['firm_id']);
+
+        return $this->remoteDb->run($hub, function (string $connection) use ($documentId, $meta) {
+            $firm = $this->serializeFirm($connection, $meta['firm_id']);
+            $headId = isset($firm['head_user_id']) ? (int) $firm['head_user_id'] : null;
+            $schema = DB::connection($connection)->getSchemaBuilder();
+
+            $grants = collect();
+            if ($schema->hasTable('firm_document_member_rights')) {
+                $grants = DB::connection($connection)->table('firm_document_member_rights')
+                    ->where('firm_document_id', $documentId)
+                    ->get()
+                    ->keyBy('user_id');
+            }
+
+            $memberQuery = DB::connection($connection)->table('users')
+                ->where(function ($q) use ($meta, $headId) {
+                    $q->where('firm_id', $meta['firm_id']);
+                    if ($headId) {
+                        $q->orWhere('id', $headId);
+                    }
+                })
+                ->orderBy('name');
+
+            if ($schema->hasColumn('users', 'is_discontinued')) {
+                $memberQuery->where(function ($q) {
+                    $q->where('is_discontinued', false)->orWhereNull('is_discontinued');
+                });
+            }
+
+            $members = $memberQuery->get(['id', 'name', 'email'])->map(function ($member) use ($grants, $headId) {
+                $isHead = $headId && (int) $headId === (int) $member->id;
+                $grant = $grants->get($member->id);
+
+                return [
+                    'id' => (int) $member->id,
+                    'name' => (string) $member->name,
+                    'email' => (string) $member->email,
+                    'is_firm_head' => $isHead,
+                    'can_add' => $isHead,
+                    'can_view' => $isHead ? true : (bool) ($grant->can_view ?? false),
+                    'can_delete' => $isHead ? true : (bool) ($grant->can_delete ?? false),
+                    'can_archive' => $isHead ? true : (bool) ($grant->can_archive ?? false),
+                ];
+            })->values()->all();
+
+            $firms = [];
+            if ($schema->hasTable('firm_document_visible_firms')) {
+                $allowedIds = $this->visibleGranteeFirmIdsOn($connection, $meta['firm_id']);
+                $firmGrants = collect();
+                if ($schema->hasTable('firm_document_firm_rights') && $allowedIds !== []) {
+                    $firmGrants = DB::connection($connection)->table('firm_document_firm_rights')
+                        ->where('firm_document_id', $documentId)
+                        ->whereIn('grantee_firm_id', $allowedIds)
+                        ->get()
+                        ->keyBy('grantee_firm_id');
+                }
+
+                if ($allowedIds !== []) {
+                    $firms = DB::connection($connection)->table('firms')
+                        ->whereIn('id', $allowedIds)
+                        ->where('id', '!=', $meta['firm_id'])
+                        ->orderBy('name')
+                        ->orderBy('id')
+                        ->get(['id', 'name', 'is_central'])
+                        ->map(function ($target) use ($firmGrants) {
+                            $grant = $firmGrants->get($target->id);
+
+                            return [
+                                'id' => (int) $target->id,
+                                'name' => (string) $target->name,
+                                'is_central' => (bool) ($target->is_central ?? false),
+                                'can_add' => false,
+                                'can_view' => (bool) ($grant->can_view ?? false),
+                                'can_delete' => (bool) ($grant->can_delete ?? false),
+                                'can_archive' => (bool) ($grant->can_archive ?? false),
+                            ];
+                        })
+                        ->values()
+                        ->all();
+                }
+            }
+
+            return [
+                'firm' => $firm,
+                'document' => [
+                    'id' => $documentId,
+                    'title' => $meta['title'],
+                    'is_central' => (bool) ($firm['is_central'] ?? false),
+                ],
+                'mode' => 'mixed',
+                'members' => $members,
+                'firms' => $firms,
+            ];
+        });
+    }
+
+    /**
+     * @param  array{can_add?: bool, can_view?: bool, can_delete?: bool, can_archive?: bool}  $rights
+     * @return array<string, mixed>
+     */
+    public function setDocumentMemberRights(
+        Hub $hub,
+        User $actor,
+        int $documentId,
+        int $memberUserId,
+        array $rights,
+        ?Request $request = null,
+    ): array {
+        $this->assertTarget($hub);
+
+        $meta = $this->remoteDb->run($hub, function (string $connection) use ($documentId) {
+            $this->assertDocumentsTables($connection);
+            $row = DB::connection($connection)->table('firm_documents')->where('id', $documentId)->first();
+            if (! $row) {
+                throw new InvalidArgumentException('Document not found on this hub.');
+            }
+
+            return [
+                'firm_id' => (int) $row->firm_id,
+                'title' => (string) $row->title,
+            ];
+        });
+
+        $this->assertCanManageDocumentAccessRights($hub, $actor, $meta['firm_id']);
+
+        $result = $this->remoteDb->run($hub, function (string $connection) use ($documentId, $memberUserId, $rights, $meta) {
+            $this->assertDocumentsTables($connection);
+            $schema = DB::connection($connection)->getSchemaBuilder();
+            if (! $schema->hasTable('firm_document_member_rights')) {
+                throw new InvalidArgumentException('Document access rights are not available on this hub yet.');
+            }
+
+            $member = DB::connection($connection)->table('users')->where('id', $memberUserId)->first();
+            if (! $member) {
+                throw new InvalidArgumentException('User not found on this hub.');
+            }
+
+            $firm = DB::connection($connection)->table('firms')->where('id', $meta['firm_id'])->first();
+            $headId = $firm->head_user_id ?? null;
+            if ($headId && (int) $headId === $memberUserId) {
+                throw new InvalidArgumentException('The Head of Firm already has all document rights.');
+            }
+            if ((int) ($member->firm_id ?? 0) !== (int) $meta['firm_id']) {
+                throw new InvalidArgumentException('Document rights can only be granted to members of this firm.');
+            }
+
+            $canView = (bool) ($rights['can_view'] ?? false);
+            $canDelete = (bool) ($rights['can_delete'] ?? false);
+            $canArchive = (bool) ($rights['can_archive'] ?? false);
+
+            $existing = DB::connection($connection)->table('firm_document_member_rights')
+                ->where('firm_document_id', $documentId)
+                ->where('user_id', $memberUserId)
+                ->first();
+
+            if (! $canView && ! $canDelete && ! $canArchive) {
+                if ($existing) {
+                    DB::connection($connection)->table('firm_document_member_rights')
+                        ->where('id', $existing->id)
+                        ->delete();
+                }
+
+                return [
+                    'revoked' => true,
+                    'rights' => [
+                        'firm_id' => $meta['firm_id'],
+                        'firm_document_id' => $documentId,
+                        'user_id' => $memberUserId,
+                        'can_add' => false,
+                        'can_view' => false,
+                        'can_delete' => false,
+                        'can_archive' => false,
+                        'user' => [
+                            'id' => (int) $member->id,
+                            'name' => (string) $member->name,
+                            'email' => (string) $member->email,
+                        ],
+                    ],
+                ];
+            }
+
+            $payload = [
+                'firm_id' => $meta['firm_id'],
+                'firm_document_id' => $documentId,
+                'user_id' => $memberUserId,
+                'can_add' => false,
+                'can_view' => $canView,
+                'can_delete' => $canDelete,
+                'can_archive' => $canArchive,
+                'updated_at' => now(),
+            ];
+
+            if ($existing) {
+                DB::connection($connection)->table('firm_document_member_rights')
+                    ->where('id', $existing->id)
+                    ->update($payload);
+            } else {
+                $payload['created_at'] = now();
+                DB::connection($connection)->table('firm_document_member_rights')->insert($payload);
+            }
+
+            return [
+                'revoked' => false,
+                'rights' => [
+                    'firm_id' => $meta['firm_id'],
+                    'firm_document_id' => $documentId,
+                    'user_id' => $memberUserId,
+                    'can_add' => false,
+                    'can_view' => $canView,
+                    'can_delete' => $canDelete,
+                    'can_archive' => $canArchive,
+                    'user' => [
+                        'id' => (int) $member->id,
+                        'name' => (string) $member->name,
+                        'email' => (string) $member->email,
+                    ],
+                ],
+            ];
+        });
+
+        $this->activityLogs->log([
+            'action' => ($result['revoked'] ?? false)
+                ? 'firm.documents.member_rights.revoke'
+                : 'firm.documents.member_rights.grant',
+            'description' => (($result['revoked'] ?? false) ? 'Revoked' : 'Updated')
+                .' document access for '.($result['rights']['user']['name'] ?? 'user').' (remote hub)',
+            'user' => $actor,
+            'hub' => $this->hubs->current(),
+            'request' => $request,
+            'status_code' => 200,
+            'properties' => array_merge($result['rights'] ?? [], [
+                'document_title' => $meta['title'],
+                'acting_remotely' => true,
+                'target_hub_id' => $hub->id,
+            ]),
+        ]);
+
+        return $result['rights'];
+    }
+
+    /**
+     * @param  array{can_add?: bool, can_view?: bool, can_delete?: bool, can_archive?: bool}  $rights
+     * @return array<string, mixed>
+     */
+    public function setDocumentFirmRights(
+        Hub $hub,
+        User $actor,
+        int $documentId,
+        int $granteeFirmId,
+        array $rights,
+        ?Request $request = null,
+    ): array {
+        $this->assertTarget($hub);
+
+        $meta = $this->remoteDb->run($hub, function (string $connection) use ($documentId) {
+            $this->assertDocumentsTables($connection);
+            $row = DB::connection($connection)->table('firm_documents')->where('id', $documentId)->first();
+            if (! $row) {
+                throw new InvalidArgumentException('Document not found on this hub.');
+            }
+
+            return [
+                'firm_id' => (int) $row->firm_id,
+                'title' => (string) $row->title,
+            ];
+        });
+
+        $this->assertCanManageDocumentAccessRights($hub, $actor, $meta['firm_id']);
+
+        if ($granteeFirmId === (int) $meta['firm_id']) {
+            throw new InvalidArgumentException('Choose a different firm to grant access.');
+        }
+
+        $result = $this->remoteDb->run($hub, function (string $connection) use ($documentId, $granteeFirmId, $rights, $meta) {
+            $this->assertDocumentsTables($connection);
+            $schema = DB::connection($connection)->getSchemaBuilder();
+            if (! $schema->hasTable('firm_document_firm_rights')) {
+                throw new InvalidArgumentException('Firm access rights are not available on this hub yet.');
+            }
+
+            $grantee = DB::connection($connection)->table('firms')->where('id', $granteeFirmId)->first(['id', 'name']);
+            if (! $grantee) {
+                throw new InvalidArgumentException('Firm not found on this hub.');
+            }
+
+            $allowed = $this->visibleGranteeFirmIdsOn($connection, $meta['firm_id']);
+            if (! in_array($granteeFirmId, $allowed, true)) {
+                throw new InvalidArgumentException(
+                    'That firm is not on the allowlist. Add it under “which firms can see documents” first.'
+                );
+            }
+
+            $canView = (bool) ($rights['can_view'] ?? false);
+            $canDelete = (bool) ($rights['can_delete'] ?? false);
+            $canArchive = (bool) ($rights['can_archive'] ?? false);
+
+            $existing = DB::connection($connection)->table('firm_document_firm_rights')
+                ->where('firm_document_id', $documentId)
+                ->where('grantee_firm_id', $granteeFirmId)
+                ->first();
+
+            if (! $canView && ! $canDelete && ! $canArchive) {
+                if ($existing) {
+                    DB::connection($connection)->table('firm_document_firm_rights')
+                        ->where('id', $existing->id)
+                        ->delete();
+                }
+
+                return [
+                    'revoked' => true,
+                    'rights' => [
+                        'firm_document_id' => $documentId,
+                        'grantee_firm_id' => $granteeFirmId,
+                        'can_add' => false,
+                        'can_view' => false,
+                        'can_delete' => false,
+                        'can_archive' => false,
+                        'firm' => [
+                            'id' => (int) $grantee->id,
+                            'name' => (string) $grantee->name,
+                        ],
+                    ],
+                ];
+            }
+
+            $payload = [
+                'firm_document_id' => $documentId,
+                'grantee_firm_id' => $granteeFirmId,
+                'can_add' => false,
+                'can_view' => $canView,
+                'can_delete' => $canDelete,
+                'can_archive' => $canArchive,
+                'updated_at' => now(),
+            ];
+
+            if ($existing) {
+                DB::connection($connection)->table('firm_document_firm_rights')
+                    ->where('id', $existing->id)
+                    ->update($payload);
+            } else {
+                $payload['created_at'] = now();
+                DB::connection($connection)->table('firm_document_firm_rights')->insert($payload);
+            }
+
+            return [
+                'revoked' => false,
+                'rights' => [
+                    'firm_document_id' => $documentId,
+                    'grantee_firm_id' => $granteeFirmId,
+                    'can_add' => false,
+                    'can_view' => $canView,
+                    'can_delete' => $canDelete,
+                    'can_archive' => $canArchive,
+                    'firm' => [
+                        'id' => (int) $grantee->id,
+                        'name' => (string) $grantee->name,
+                    ],
+                ],
+            ];
+        });
+
+        $this->activityLogs->log([
+            'action' => ($result['revoked'] ?? false)
+                ? 'firm.documents.firm_rights.revoke'
+                : 'firm.documents.firm_rights.grant',
+            'description' => (($result['revoked'] ?? false) ? 'Revoked' : 'Updated')
+                .' firm access for '.($result['rights']['firm']['name'] ?? 'firm').' (remote hub)',
+            'user' => $actor,
+            'hub' => $this->hubs->current(),
+            'request' => $request,
+            'status_code' => 200,
+            'properties' => array_merge($result['rights'] ?? [], [
+                'document_title' => $meta['title'],
+                'acting_remotely' => true,
+                'target_hub_id' => $hub->id,
+            ]),
+        ]);
+
+        return $result['rights'];
+    }
+
+    /**
      * Firms allowed to appear in this firm’s document access rights (remote hub).
      *
      * @return array{
@@ -1060,9 +1470,10 @@ class WhiteLabelFirmDocumentService
                 && $this->matrix->userCan($hub, $actor, FirmDocumentAccessService::CAP_MANAGE_ACCESS_RIGHTS);
         }
 
-        // Upload is Head of Firm only (head already returned true above).
+        // Upload: Head (above) or hub-wide matrix — never via key-icon grants.
         if ($right === FirmDocumentAccessService::RIGHT_ADD) {
-            return false;
+            return $hub->hasFirmDocumentsFunctionality()
+                && $this->matrix->userCan($hub, $actor, 'firm_documents_add');
         }
 
         // Member grants on remote (match actor by email → remote user id).
@@ -1147,6 +1558,13 @@ class WhiteLabelFirmDocumentService
     {
         if (! $this->actorCanManageFirmAccess($hub, $actor, $firmId)) {
             throw new InvalidArgumentException('You do not have permission to decide which firms can see documents.');
+        }
+    }
+
+    private function assertCanManageDocumentAccessRights(Hub $hub, User $actor, int $firmId): void
+    {
+        if (! $this->actorCan($hub, $actor, $firmId, FirmDocumentAccessService::RIGHT_MANAGE_MEMBER_RIGHTS)) {
+            throw new InvalidArgumentException('You do not have permission to manage document access rights.');
         }
     }
 

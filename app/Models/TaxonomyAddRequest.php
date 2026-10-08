@@ -38,9 +38,9 @@ class TaxonomyAddRequest extends Model
      * @var array<string, string>
      */
     public const TARGET_LABELS = [
-        self::TARGET_CONTENT_TYPE => 'SM Template Library (Posts/reels) type',
-        self::TARGET_CATEGORY => 'SM Template Library (Posts/reels) category',
-        self::TARGET_TAG => 'SM Template Library (Posts/reels) tag',
+        self::TARGET_CONTENT_TYPE => 'SM Templates Library type',
+        self::TARGET_CATEGORY => 'SM Templates Library category',
+        self::TARGET_TAG => 'SM Templates Library tag',
         self::TARGET_GC_CONTENT_TYPE => 'Generic Compliance content type',
         self::TARGET_FIRM_DOCUMENT_CATEGORY => 'Firm document category',
     ];
@@ -52,8 +52,8 @@ class TaxonomyAddRequest extends Model
 
     /**
      * Legacy central-only keys (content types were Central-only; categories/tags
-     * are requestable on every hub so Shared / WL users can ask for SM Template
-     * Library options — approve auto-creates on the hub that reviews).
+     * are requestable on every hub so Shared / WL users can ask for SM Templates
+     * Library options — reviewers create manually, then mark Approved).
      *
      * @var list<string>
      */

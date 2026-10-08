@@ -432,6 +432,19 @@ class FirmDocumentController extends Controller
         /** @var User $user */
         $user = $request->user();
 
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            try {
+                $payload = $this->whiteLabelDocuments->listDocumentAccessRights($hub, $user, $document);
+            } catch (InvalidArgumentException $e) {
+                return $this->actingHubNotFoundOrValidation($e);
+            }
+
+            return response()->json(array_merge($payload, [
+                'target_hub' => $this->targetHubPayload($hub),
+                'acting_on_white_label' => true,
+            ]));
+        }
+
         $model = FirmDocument::query()->findOrFail($document);
         $firm = $model->firm ?? Firm::query()->findOrFail($model->firm_id);
         $hub = $this->rightsHub($request, $user);
@@ -549,6 +562,68 @@ class FirmDocumentController extends Controller
     {
         /** @var User $user */
         $user = $request->user();
+
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            if ($request->filled('grantee_firm_id')) {
+                $validated = $request->validate([
+                    'grantee_firm_id' => ['required', 'integer', 'min:1'],
+                    'can_add' => ['sometimes', 'boolean'],
+                    'can_view' => ['sometimes', 'boolean'],
+                    'can_delete' => ['sometimes', 'boolean'],
+                    'can_archive' => ['sometimes', 'boolean'],
+                ]);
+
+                try {
+                    $rights = $this->whiteLabelDocuments->setDocumentFirmRights(
+                        $hub,
+                        $user,
+                        $document,
+                        (int) $validated['grantee_firm_id'],
+                        $validated,
+                        $request,
+                    );
+                } catch (InvalidArgumentException $e) {
+                    return $this->actingHubNotFoundOrValidation($e);
+                }
+
+                return response()->json([
+                    'message' => 'Firm access rights updated.',
+                    'mode' => 'mixed',
+                    'rights' => $rights,
+                    'target_hub' => $this->targetHubPayload($hub),
+                    'acting_on_white_label' => true,
+                ]);
+            }
+
+            $validated = $request->validate([
+                'user_id' => ['required', 'integer', 'min:1'],
+                'can_add' => ['sometimes', 'boolean'],
+                'can_view' => ['sometimes', 'boolean'],
+                'can_delete' => ['sometimes', 'boolean'],
+                'can_archive' => ['sometimes', 'boolean'],
+            ]);
+
+            try {
+                $rights = $this->whiteLabelDocuments->setDocumentMemberRights(
+                    $hub,
+                    $user,
+                    $document,
+                    (int) $validated['user_id'],
+                    $validated,
+                    $request,
+                );
+            } catch (InvalidArgumentException $e) {
+                return $this->actingHubNotFoundOrValidation($e);
+            }
+
+            return response()->json([
+                'message' => 'Document access rights updated.',
+                'mode' => 'mixed',
+                'rights' => $rights,
+                'target_hub' => $this->targetHubPayload($hub),
+                'acting_on_white_label' => true,
+            ]);
+        }
 
         $model = FirmDocument::query()->findOrFail($document);
         $firm = $model->firm ?? Firm::query()->findOrFail($model->firm_id);

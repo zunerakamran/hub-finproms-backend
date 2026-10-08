@@ -529,13 +529,13 @@ Notes:
 3.4.3c Taxonomy add requests
 - Capability `taxonomy_request_add` (“Request new category / tag / type”) in
   Content catalog capabilities. One request capability covers:
-  - SM Template Library (posts/reels) category or tag
+  - SM Templates Library category or tag
   - Generic Compliance content type (GC module must be on)
   - Firm document category (Firm documents functionality must be on)
 - Capability `taxonomy_request_manage` (“Manage taxonomy requests”) — see the
-  queue, approve (auto-creates the option), or reject with a review note.
-  Manual create/edit of the same options remains on the existing Manage
-  categories / tags / GC content types / firm document categories pages.
+  queue. Reviewers create the option manually on the existing Manage
+  categories / tags / GC content types / firm document categories pages,
+  then mark the request Approved — or reject with a review note.
 - Submit: proposed name + remarks. Statuses: Pending / Approved / Rejected.
 - Dashboard nav: separate “Taxonomy requests” separator (Taxonomy requests /
   Request taxonomy / Taxonomy queue) — not under SM Template.
@@ -546,8 +546,8 @@ Notes:
 3.4.4 Capabilities matrix — hub-wide (all firms)
 - When Firm documents functionality is ON, these Capabilities are editable:
   - `firm_documents_view` — view documents for ANY firm on the hub
-  - `firm_documents_add` — add documents for ANY firm on the hub
-    (uploads are Head of Firm only; capability kept for checklist compatibility)
+  - `firm_documents_add` — upload documents for ANY firm on the hub
+    (Head always has add for their own firm; not grantable via key icon)
   - `firm_documents_delete` — delete documents for ANY firm on the hub
   - `firm_documents_archive` — archive documents for ANY firm on the hub
   - `firm_documents_manage_access_rights` — key-icon access rights on
@@ -961,10 +961,11 @@ Notes:
   - Manage types / categories / tags — Central only (library taxonomy); DISABLED
     on Shared / White-labelled hubs
   - Request new category / tag / type (`taxonomy_request_add`) — submit a
-    request (proposed name + remarks) to add: SM Template Library category or
+    request (proposed name + remarks) to add: SM Templates Library category or
     tag; Generic Compliance content type; or firm document category.
   - Manage taxonomy requests (`taxonomy_request_manage`) — see the queue;
-    approve (auto-creates the option) or reject (review note required).
+    create the option manually, then mark Approved — or reject (review note
+    required).
   - Manage subscription plans — same roles
   - Manage settings (NEW banner, logo upload, color scheme, application name,
     Home/Posts/detail page content) — same roles
@@ -1453,8 +1454,8 @@ STEP 1 — Shared hub core (content hub)
 [x] Folders / subfolders + nested expand/collapse library; upload above table
 [x] Document categories (`firm_documents_manage_categories`, GC-style admin CRUD)
 [x] Taxonomy add requests (`taxonomy_request_add` + `taxonomy_request_manage`) —
-    request SM Template category/tag, GC content type, or firm document
-    category; reviewers approve (auto-create) or reject
+    request SM Templates Library category/tag, GC content type, or firm document
+    category; reviewers create manually then mark Approved, or reject
 [x] Frontend: Taxonomy requests nav + pages (my / new / queue / detail) under
     dedicated Taxonomy requests separator; gated by taxonomy_request_add /
     taxonomy_request_manage

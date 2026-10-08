@@ -2,11 +2,7 @@
 
 namespace Tests\Feature;
 
-use App\Models\Category;
-use App\Models\FirmDocumentCategory;
-use App\Models\GeneralComplianceContentType;
 use App\Models\Hub;
-use App\Models\Tag;
 use App\Models\TaxonomyAddRequest;
 use App\Models\User;
 use App\Services\CapabilitiesMatrixService;
@@ -160,7 +156,7 @@ class TaxonomyAddRequestTest extends TestCase
         ])->assertCreated();
     }
 
-    public function test_admin_can_approve_and_auto_create_category_on_central(): void
+    public function test_admin_can_mark_request_approved_without_auto_create(): void
     {
         $this->createCentralHub();
 
@@ -182,22 +178,21 @@ class TaxonomyAddRequestTest extends TestCase
             ->assertJsonFragment(['id' => $request->id]);
 
         $this->postJson('/api/power-admin/taxonomy-add-requests/'.$request->id.'/approve', [
-            'review_note' => 'Looks good.',
+            'review_note' => 'Created manually under Categories.',
         ])
             ->assertOk()
             ->assertJsonPath('data.status', TaxonomyAddRequest::STATUS_APPROVED)
-            ->assertJsonPath('data.review_note', 'Looks good.');
+            ->assertJsonPath('data.review_note', 'Created manually under Categories.');
 
-        $this->assertDatabaseHas('categories', ['name' => 'ESG Themes']);
-        $this->assertNotNull(Category::query()->where('name', 'ESG Themes')->value('id'));
+        $this->assertDatabaseMissing('categories', ['name' => 'ESG Themes']);
         $this->assertDatabaseHas('taxonomy_add_requests', [
             'id' => $request->id,
             'status' => TaxonomyAddRequest::STATUS_APPROVED,
-            'created_entity_id' => Category::query()->where('name', 'ESG Themes')->value('id'),
+            'created_entity_id' => null,
         ]);
     }
 
-    public function test_admin_can_approve_tag(): void
+    public function test_admin_can_mark_tag_request_approved_without_auto_create(): void
     {
         $this->createCentralHub();
 
@@ -214,9 +209,9 @@ class TaxonomyAddRequestTest extends TestCase
         ]);
 
         $this->postJson('/api/power-admin/taxonomy-add-requests/'.$tagRequest->id.'/approve')
-            ->assertOk();
-        $this->assertDatabaseHas('tags', ['name' => 'pensions']);
-        $this->assertNotNull(Tag::query()->where('name', 'pensions')->first());
+            ->assertOk()
+            ->assertJsonPath('data.status', TaxonomyAddRequest::STATUS_APPROVED);
+        $this->assertDatabaseMissing('tags', ['name' => 'pensions']);
     }
 
     public function test_admin_can_reject_with_note(): void
@@ -281,14 +276,14 @@ class TaxonomyAddRequestTest extends TestCase
             ->assertJsonFragment(['id' => $firmId]);
 
         $this->postJson('/api/client-admin/taxonomy-add-requests/'.$gcId.'/approve')
-            ->assertOk();
-        $this->assertDatabaseHas('general_compliance_content_types', ['name' => 'Brochure']);
-        $this->assertNotNull(GeneralComplianceContentType::query()->where('name', 'Brochure')->first());
+            ->assertOk()
+            ->assertJsonPath('data.status', TaxonomyAddRequest::STATUS_APPROVED);
+        $this->assertDatabaseMissing('general_compliance_content_types', ['name' => 'Brochure']);
 
         $this->postJson('/api/client-admin/taxonomy-add-requests/'.$firmId.'/approve')
-            ->assertOk();
-        $this->assertDatabaseHas('firm_document_categories', ['name' => 'Compliance Packs']);
-        $this->assertNotNull(FirmDocumentCategory::query()->where('name', 'Compliance Packs')->first());
+            ->assertOk()
+            ->assertJsonPath('data.status', TaxonomyAddRequest::STATUS_APPROVED);
+        $this->assertDatabaseMissing('firm_document_categories', ['name' => 'Compliance Packs']);
     }
 
     public function test_submit_forbidden_without_capability(): void

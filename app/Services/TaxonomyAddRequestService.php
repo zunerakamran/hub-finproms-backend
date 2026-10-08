@@ -7,13 +7,10 @@ use App\Models\ContentType;
 use App\Models\FirmDocumentCategory;
 use App\Models\GeneralComplianceContentType;
 use App\Models\Hub;
-use App\Models\Post;
 use App\Models\Tag;
 use App\Models\TaxonomyAddRequest;
 use App\Models\User;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class TaxonomyAddRequestService
@@ -242,7 +239,7 @@ class TaxonomyAddRequestService
     }
 
     /**
-     * Approve and auto-create the taxonomy row.
+     * Mark a request Approved after the reviewer has created the option manually.
      *
      * @param  array{review_note?: string|null}  $data
      */
@@ -261,29 +258,21 @@ class TaxonomyAddRequestService
         }
 
         $this->assertTargetAllowedOnHub($hub, (string) $request->target);
-        $this->assertNameAvailable((string) $request->target, (string) $request->proposed_name);
 
         $note = trim((string) ($data['review_note'] ?? ''));
 
-        $entity = DB::transaction(function () use ($request, $user, $note) {
-            $created = $this->createTaxonomyEntity((string) $request->target, (string) $request->proposed_name);
-
-            $request->update([
-                'status' => TaxonomyAddRequest::STATUS_APPROVED,
-                'review_note' => $note !== '' ? $note : null,
-                'reviewed_by' => $user->id,
-                'reviewed_at' => now(),
-                'created_entity_id' => $created['id'],
-            ]);
-
-            return $created;
-        });
+        $request->update([
+            'status' => TaxonomyAddRequest::STATUS_APPROVED,
+            'review_note' => $note !== '' ? $note : null,
+            'reviewed_by' => $user->id,
+            'reviewed_at' => now(),
+        ]);
 
         $fresh = $request->fresh(['user', 'reviewedByUser']);
 
         $this->activityLogs->log([
             'action' => 'taxonomy_add_request.approve',
-            'description' => 'Approved taxonomy request #'.$request->id.' and created '.$request->target,
+            'description' => 'Approved taxonomy request #'.$request->id,
             'user' => $user,
             'hub' => $hub,
             'subject' => $fresh,
@@ -292,7 +281,6 @@ class TaxonomyAddRequestService
             'properties' => [
                 'target' => $request->target,
                 'proposed_name' => $request->proposed_name,
-                'created_entity_id' => $entity['id'],
             ],
         ]);
 
@@ -386,108 +374,6 @@ class TaxonomyAddRequestService
                 'proposed_name' => 'That name is already in use.',
             ]);
         }
-    }
-
-    /**
-     * @return array{id: int, name: string}
-     */
-    private function createTaxonomyEntity(string $target, string $name): array
-    {
-        return match ($target) {
-            TaxonomyAddRequest::TARGET_CONTENT_TYPE => $this->createContentType($name),
-            TaxonomyAddRequest::TARGET_CATEGORY => $this->createCategory($name),
-            TaxonomyAddRequest::TARGET_TAG => $this->createTag($name),
-            TaxonomyAddRequest::TARGET_GC_CONTENT_TYPE => $this->createGcContentType($name),
-            TaxonomyAddRequest::TARGET_FIRM_DOCUMENT_CATEGORY => $this->createFirmDocumentCategory($name),
-            default => throw ValidationException::withMessages([
-                'target' => 'Unsupported taxonomy target.',
-            ]),
-        };
-    }
-
-    /**
-     * @return array{id: int, name: string}
-     */
-    private function createContentType(string $name): array
-    {
-        $slug = $this->uniqueSlug(ContentType::class, $name);
-        $row = ContentType::query()->create([
-            'name' => $name,
-            'slug' => $slug,
-        ]);
-        Post::clearTypeSlugMap();
-
-        return ['id' => (int) $row->id, 'name' => $row->name];
-    }
-
-    /**
-     * @return array{id: int, name: string}
-     */
-    private function createCategory(string $name): array
-    {
-        $slug = $this->uniqueSlug(Category::class, $name);
-        $row = Category::query()->create([
-            'name' => $name,
-            'slug' => $slug,
-        ]);
-
-        return ['id' => (int) $row->id, 'name' => $row->name];
-    }
-
-    /**
-     * @return array{id: int, name: string}
-     */
-    private function createTag(string $name): array
-    {
-        $row = Tag::query()->create([
-            'name' => $name,
-        ]);
-
-        return ['id' => (int) $row->id, 'name' => $row->name];
-    }
-
-    /**
-     * @return array{id: int, name: string}
-     */
-    private function createGcContentType(string $name): array
-    {
-        $slug = $this->uniqueSlug(GeneralComplianceContentType::class, $name);
-        $row = GeneralComplianceContentType::query()->create([
-            'name' => $name,
-            'slug' => $slug,
-        ]);
-
-        return ['id' => (int) $row->id, 'name' => $row->name];
-    }
-
-    /**
-     * @return array{id: int, name: string}
-     */
-    private function createFirmDocumentCategory(string $name): array
-    {
-        $slug = $this->uniqueSlug(FirmDocumentCategory::class, $name);
-        $row = FirmDocumentCategory::query()->create([
-            'name' => $name,
-            'slug' => $slug,
-        ]);
-
-        return ['id' => (int) $row->id, 'name' => $row->name];
-    }
-
-    /**
-     * @param  class-string  $modelClass
-     */
-    private function uniqueSlug(string $modelClass, string $name): string
-    {
-        $base = Str::slug($name) ?: 'item';
-        $slug = $base;
-        $i = 2;
-        while ($modelClass::query()->where('slug', $slug)->exists()) {
-            $slug = $base.'-'.$i;
-            $i++;
-        }
-
-        return $slug;
     }
 
     /**

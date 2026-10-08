@@ -1051,14 +1051,14 @@ class Hub extends Model
         ],
         'taxonomy_request_add' => [
             'label' => 'Request new category / tag / type',
-            'description' => 'Submit a request to add an SM Template Library (posts/reels) category or tag, a Generic Compliance content type, or a firm document category — with remarks.',
+            'description' => 'Submit a request to add an SM Templates Library category or tag, a Generic Compliance content type, or a firm document category — with remarks.',
             'group' => self::GROUP_DASHBOARD_CONTENT,
             'default_shared' => false,
             'default_white_label' => false,
         ],
         'taxonomy_request_manage' => [
             'label' => 'Manage taxonomy requests',
-            'description' => 'See the taxonomy request queue and approve (auto-creates the option) or reject with a note. Also covers reviewing requests that others submitted.',
+            'description' => 'See the taxonomy request queue. Create the option manually (Categories / Tags / GC content types / firm document categories), then mark the request Approved — or reject with a note.',
             'group' => self::GROUP_DASHBOARD_CONTENT,
             'default_shared' => false,
             'default_white_label' => false,
@@ -1088,7 +1088,7 @@ class Hub extends Model
         ],
         'firm_documents_add' => [
             'label' => 'Add firm documents (all firms)',
-            'description' => 'Deprecated for uploads: only the Head of Firm may add documents for their firm. Kept for checklist compatibility. Blurred while Functionalities → Firm documents is off.',
+            'description' => 'Upload documents for ANY firm on this hub. Blurred while Functionalities → Firm documents is off. Head of Firm always has add for their own firm without this capability. Not grantable via the key icon.',
             'group' => self::GROUP_DASHBOARD_FIRMS,
             'default_shared' => false,
             'default_white_label' => false,

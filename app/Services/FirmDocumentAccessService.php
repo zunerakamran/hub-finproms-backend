@@ -94,9 +94,9 @@ class FirmDocumentAccessService
             return $this->canManageAccessRightsViaMatrix($user, $hub);
         }
 
-        // Upload is Head of Firm only (head already returned true above).
+        // Upload: Head (above) or hub-wide matrix — never via key-icon grants.
         if ($right === self::RIGHT_ADD) {
-            return false;
+            return $this->matrixFirmDocCap($user, $hub, 'firm_documents_add');
         }
 
         if ($document !== null && (int) $document->firm_id === (int) $firm->id) {
@@ -222,8 +222,7 @@ class FirmDocumentAccessService
         $enabled = $this->functionalityEnabled($hub);
 
         $hubWide = [
-            // Add is Head-only — never via matrix / grants.
-            'can_add' => false,
+            'can_add' => $this->matrixFirmDocCap($user, $hub, 'firm_documents_add'),
             'can_view' => $this->matrixFirmDocCap($user, $hub, 'firm_documents_view'),
             'can_delete' => $this->matrixFirmDocCap($user, $hub, 'firm_documents_delete'),
             'can_archive' => $this->matrixFirmDocCap($user, $hub, 'firm_documents_archive'),
@@ -261,8 +260,8 @@ class FirmDocumentAccessService
         $firmAgg = $this->aggregateFirmGrantsForUser($user);
 
         $canView = $memberAgg['can_view'] || $firmAgg['can_view'] || $hubWide['can_view'];
-        // Upload is Head of Firm only.
-        $canAdd = false;
+        // Upload: Head (branch above) or hub-wide matrix — not key-icon grants.
+        $canAdd = $hubWide['can_add'];
         $canDelete = $memberAgg['can_delete'] || $firmAgg['can_delete'] || $hubWide['can_delete'];
         $canArchive = $memberAgg['can_archive'] || $firmAgg['can_archive'] || $hubWide['can_archive'];
 
