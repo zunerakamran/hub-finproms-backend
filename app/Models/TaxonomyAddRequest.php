@@ -23,10 +23,11 @@ class TaxonomyAddRequest extends Model
     public const TARGET_FIRM_DOCUMENT_CATEGORY = 'firm_document_category';
 
     /**
+     * Requestable taxonomy targets (submit dropdown).
+     *
      * @var list<string>
      */
     public const TARGETS = [
-        self::TARGET_CONTENT_TYPE,
         self::TARGET_CATEGORY,
         self::TARGET_TAG,
         self::TARGET_GC_CONTENT_TYPE,
@@ -37,35 +38,27 @@ class TaxonomyAddRequest extends Model
      * @var array<string, string>
      */
     public const TARGET_LABELS = [
-        self::TARGET_CONTENT_TYPE => 'Post / reel content type',
-        self::TARGET_CATEGORY => 'Post / reel category',
-        self::TARGET_TAG => 'Post / reel tag',
-        self::TARGET_GC_CONTENT_TYPE => 'General compliance content type',
+        self::TARGET_CONTENT_TYPE => 'SM Template Library (Posts/reels) type',
+        self::TARGET_CATEGORY => 'SM Template Library (Posts/reels) category',
+        self::TARGET_TAG => 'SM Template Library (Posts/reels) tag',
+        self::TARGET_GC_CONTENT_TYPE => 'Generic Compliance content type',
         self::TARGET_FIRM_DOCUMENT_CATEGORY => 'Firm document category',
     ];
 
     /**
-     * Manage capability required to review / approve each target.
-     *
-     * @var array<string, string>
+     * Capability that can review / approve / reject any taxonomy add request.
      */
-    public const TARGET_MANAGE_CAPABILITIES = [
-        self::TARGET_CONTENT_TYPE => 'dashboard_manage_types',
-        self::TARGET_CATEGORY => 'dashboard_manage_categories',
-        self::TARGET_TAG => 'dashboard_manage_tags',
-        self::TARGET_GC_CONTENT_TYPE => 'gc_manage_content_types',
-        self::TARGET_FIRM_DOCUMENT_CATEGORY => 'firm_documents_manage_categories',
-    ];
+    public const REVIEW_CAPABILITY = 'taxonomy_request_manage';
 
     /**
-     * Targets that may only be requested / created on Central.
+     * Legacy central-only keys (content types were Central-only; categories/tags
+     * are requestable on every hub so Shared / WL users can ask for SM Template
+     * Library options — approve auto-creates on the hub that reviews).
      *
      * @var list<string>
      */
     public const CENTRAL_ONLY_TARGETS = [
         self::TARGET_CONTENT_TYPE,
-        self::TARGET_CATEGORY,
-        self::TARGET_TAG,
     ];
 
     public const STATUS_PENDING = 'Pending';
@@ -119,11 +112,6 @@ class TaxonomyAddRequest extends Model
         }
 
         return self::TARGET_LABELS[$target] ?? $target;
-    }
-
-    public static function manageCapabilityFor(string $target): ?string
-    {
-        return self::TARGET_MANAGE_CAPABILITIES[$target] ?? null;
     }
 
     public static function isCentralOnlyTarget(string $target): bool

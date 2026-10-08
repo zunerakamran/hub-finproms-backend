@@ -3,7 +3,6 @@
 namespace Tests\Feature;
 
 use App\Models\Category;
-use App\Models\ContentType;
 use App\Models\FirmDocumentCategory;
 use App\Models\GeneralComplianceContentType;
 use App\Models\Hub;
@@ -41,9 +40,7 @@ class TaxonomyAddRequestTest extends TestCase
         $caps = $matrix->resolvedRoleCapabilities($hub);
         $caps[User::ROLE_USER]['taxonomy_request_add'] = true;
         $caps[User::ROLE_POWER_ADMIN]['taxonomy_request_add'] = true;
-        $caps[User::ROLE_POWER_ADMIN]['dashboard_manage_types'] = true;
-        $caps[User::ROLE_POWER_ADMIN]['dashboard_manage_categories'] = true;
-        $caps[User::ROLE_POWER_ADMIN]['dashboard_manage_tags'] = true;
+        $caps[User::ROLE_POWER_ADMIN]['taxonomy_request_manage'] = true;
         $hub->role_capabilities = $caps;
         $hub->save();
         app(HubService::class)->forgetCurrentCache();
@@ -77,8 +74,7 @@ class TaxonomyAddRequestTest extends TestCase
         $caps = $matrix->resolvedRoleCapabilities($hub);
         $caps[User::ROLE_USER]['taxonomy_request_add'] = true;
         $caps[User::ROLE_FINPROMS_ADMIN]['taxonomy_request_add'] = true;
-        $caps[User::ROLE_FINPROMS_ADMIN]['gc_manage_content_types'] = true;
-        $caps[User::ROLE_FINPROMS_ADMIN]['firm_documents_manage_categories'] = true;
+        $caps[User::ROLE_FINPROMS_ADMIN]['taxonomy_request_manage'] = true;
         $hub->role_capabilities = $caps;
         $hub->save();
         app(HubService::class)->forgetCurrentCache();
@@ -87,13 +83,36 @@ class TaxonomyAddRequestTest extends TestCase
         return $hub;
     }
 
-    public function test_capability_is_registered(): void
+    public function test_capabilities_are_registered(): void
     {
         $this->assertArrayHasKey('taxonomy_request_add', Hub::CHECKLIST_DEFINITIONS);
+        $this->assertArrayHasKey('taxonomy_request_manage', Hub::CHECKLIST_DEFINITIONS);
         $this->assertSame(
             Hub::GROUP_DASHBOARD_CONTENT,
             Hub::CHECKLIST_DEFINITIONS['taxonomy_request_add']['group']
         );
+        $this->assertSame(
+            Hub::GROUP_DASHBOARD_CONTENT,
+            Hub::CHECKLIST_DEFINITIONS['taxonomy_request_manage']['group']
+        );
+    }
+
+    public function test_options_include_sm_category_and_tag_on_shared_hub(): void
+    {
+        $this->createSharedHubWithFirmDocsAndGc();
+
+        $user = User::factory()->create(['role' => User::ROLE_USER]);
+        Sanctum::actingAs($user);
+
+        $keys = collect($this->getJson('/api/taxonomy-add-requests/options')->json('targets'))
+            ->pluck('key')
+            ->all();
+
+        $this->assertContains(TaxonomyAddRequest::TARGET_CATEGORY, $keys);
+        $this->assertContains(TaxonomyAddRequest::TARGET_TAG, $keys);
+        $this->assertContains(TaxonomyAddRequest::TARGET_GC_CONTENT_TYPE, $keys);
+        $this->assertContains(TaxonomyAddRequest::TARGET_FIRM_DOCUMENT_CATEGORY, $keys);
+        $this->assertNotContains(TaxonomyAddRequest::TARGET_CONTENT_TYPE, $keys);
     }
 
     public function test_user_can_submit_and_view_own_content_taxonomy_request_on_central(): void
@@ -121,7 +140,7 @@ class TaxonomyAddRequestTest extends TestCase
             ->assertJsonPath('data.0.id', $id);
     }
 
-    public function test_content_taxonomy_request_blocked_on_shared_hub(): void
+    public function test_user_can_submit_sm_category_and_tag_on_shared_hub(): void
     {
         $this->createSharedHubWithFirmDocsAndGc();
 
@@ -129,11 +148,16 @@ class TaxonomyAddRequestTest extends TestCase
         Sanctum::actingAs($user);
 
         $this->postJson('/api/taxonomy-add-requests', [
+            'target' => TaxonomyAddRequest::TARGET_CATEGORY,
+            'proposed_name' => 'Shared Category',
+            'remarks' => 'Needed on this hub.',
+        ])->assertCreated();
+
+        $this->postJson('/api/taxonomy-add-requests', [
             'target' => TaxonomyAddRequest::TARGET_TAG,
-            'proposed_name' => 'Isa',
-            'remarks' => 'Should only work on Central.',
-        ])->assertStatus(422)
-            ->assertJsonValidationErrors(['target']);
+            'proposed_name' => 'Shared Tag',
+            'remarks' => 'Needed on this hub.',
+        ])->assertCreated();
     }
 
     public function test_admin_can_approve_and_auto_create_category_on_central(): void
@@ -173,26 +197,13 @@ class TaxonomyAddRequestTest extends TestCase
         ]);
     }
 
-    public function test_admin_can_approve_content_type_and_tag(): void
+    public function test_admin_can_approve_tag(): void
     {
         $this->createCentralHub();
 
         $user = User::factory()->create(['role' => User::ROLE_USER]);
         $admin = User::factory()->create(['role' => User::ROLE_POWER_ADMIN]);
         Sanctum::actingAs($admin);
-
-        $typeRequest = TaxonomyAddRequest::query()->create([
-            'user_id' => $user->id,
-            'target' => TaxonomyAddRequest::TARGET_CONTENT_TYPE,
-            'proposed_name' => 'Carousel',
-            'remarks' => 'New format.',
-            'status' => TaxonomyAddRequest::STATUS_PENDING,
-        ]);
-
-        $this->postJson('/api/power-admin/taxonomy-add-requests/'.$typeRequest->id.'/approve')
-            ->assertOk();
-        $this->assertDatabaseHas('content_types', ['name' => 'Carousel']);
-        $this->assertNotNull(ContentType::query()->where('name', 'Carousel')->first());
 
         $tagRequest = TaxonomyAddRequest::query()->create([
             'user_id' => $user->id,
@@ -300,5 +311,24 @@ class TaxonomyAddRequestTest extends TestCase
             'proposed_name' => 'Blocked',
             'remarks' => 'No capability.',
         ])->assertForbidden();
+    }
+
+    public function test_queue_forbidden_without_manage_capability(): void
+    {
+        $this->createCentralHub();
+
+        $matrix = app(CapabilitiesMatrixService::class);
+        $hub = app(HubService::class)->current();
+        $caps = $matrix->resolvedRoleCapabilities($hub);
+        $caps[User::ROLE_POWER_ADMIN]['taxonomy_request_manage'] = false;
+        $hub->role_capabilities = $caps;
+        $hub->save();
+        $matrix->forgetResolvedCaches();
+
+        $admin = User::factory()->create(['role' => User::ROLE_POWER_ADMIN]);
+        Sanctum::actingAs($admin);
+
+        $this->getJson('/api/power-admin/taxonomy-add-requests')
+            ->assertForbidden();
     }
 }

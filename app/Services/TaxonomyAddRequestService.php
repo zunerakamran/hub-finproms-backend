@@ -31,36 +31,22 @@ class TaxonomyAddRequestService
      *   statuses: list<string>
      * }
      */
-    public function options(): array
+    public function options(?Hub $hub = null): array
     {
+        $targets = collect(TaxonomyAddRequest::TARGETS)
+            ->filter(fn (string $key) => $hub === null || $this->isTargetAvailableOnHub($hub, $key))
+            ->map(fn (string $key) => [
+                'key' => $key,
+                'label' => TaxonomyAddRequest::targetLabel($key),
+                'central_only' => TaxonomyAddRequest::isCentralOnlyTarget($key),
+            ])
+            ->values()
+            ->all();
+
         return [
-            'targets' => collect(TaxonomyAddRequest::TARGETS)
-                ->map(fn (string $key) => [
-                    'key' => $key,
-                    'label' => TaxonomyAddRequest::targetLabel($key),
-                    'central_only' => TaxonomyAddRequest::isCentralOnlyTarget($key),
-                ])
-                ->values()
-                ->all(),
+            'targets' => $targets,
             'statuses' => TaxonomyAddRequest::STATUSES,
         ];
-    }
-
-    /**
-     * Manage capabilities the actor can use to review requests on this hub.
-     *
-     * @return list<string>
-     */
-    public function reviewableManageCapabilities(Hub $hub, User $user): array
-    {
-        $caps = [];
-        foreach (array_unique(array_values(TaxonomyAddRequest::TARGET_MANAGE_CAPABILITIES)) as $cap) {
-            if ($this->matrix->userCan($hub, $user, $cap)) {
-                $caps[] = $cap;
-            }
-        }
-
-        return $caps;
     }
 
     /**
@@ -68,29 +54,51 @@ class TaxonomyAddRequestService
      */
     public function reviewableTargets(Hub $hub, User $user): array
     {
-        $targets = [];
-        foreach (TaxonomyAddRequest::TARGET_MANAGE_CAPABILITIES as $target => $cap) {
-            if ($this->matrix->userCan($hub, $user, $cap)) {
-                $targets[] = $target;
-            }
+        if (! $this->canReviewAny($hub, $user)) {
+            return [];
         }
 
-        return $targets;
+        // Reviewers with Manage taxonomy requests see the full queue, including
+        // legacy content_type rows that are no longer offered in the submit dropdown.
+        return array_values(array_unique([
+            ...TaxonomyAddRequest::TARGETS,
+            TaxonomyAddRequest::TARGET_CONTENT_TYPE,
+        ]));
     }
 
     public function canReviewAny(Hub $hub, User $user): bool
     {
-        return $this->reviewableTargets($hub, $user) !== [];
+        return $this->matrix->userCan($hub, $user, TaxonomyAddRequest::REVIEW_CAPABILITY);
     }
 
     public function canReview(Hub $hub, User $user, TaxonomyAddRequest $request): bool
     {
-        $cap = TaxonomyAddRequest::manageCapabilityFor((string) $request->target);
-        if ($cap === null) {
+        return $this->canReviewAny($hub, $user);
+    }
+
+    public function isTargetAvailableOnHub(Hub $hub, string $target): bool
+    {
+        if (! in_array($target, TaxonomyAddRequest::TARGETS, true)) {
             return false;
         }
 
-        return $this->matrix->userCan($hub, $user, $cap);
+        if (TaxonomyAddRequest::isCentralOnlyTarget($target) && ! $hub->isCentral()) {
+            return false;
+        }
+
+        if ($target === TaxonomyAddRequest::TARGET_GC_CONTENT_TYPE
+            && ! $hub->hasGeneralComplianceModule()
+        ) {
+            return false;
+        }
+
+        if ($target === TaxonomyAddRequest::TARGET_FIRM_DOCUMENT_CATEGORY
+            && ! $hub->hasFirmDocumentsFunctionality()
+        ) {
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -345,7 +353,7 @@ class TaxonomyAddRequestService
     {
         if (TaxonomyAddRequest::isCentralOnlyTarget($target) && ! $hub->isCentral()) {
             throw ValidationException::withMessages([
-                'target' => 'Post / reel types, categories, and tags can only be requested on Central (Central content library taxonomy).',
+                'target' => 'That taxonomy option can only be requested on Central.',
             ]);
         }
 
@@ -494,7 +502,11 @@ class TaxonomyAddRequestService
         }
 
         $target = $filters['target'] ?? null;
-        if (is_string($target) && $target !== '' && in_array($target, TaxonomyAddRequest::TARGETS, true)) {
+        $allowedTargets = [
+            ...TaxonomyAddRequest::TARGETS,
+            TaxonomyAddRequest::TARGET_CONTENT_TYPE,
+        ];
+        if (is_string($target) && $target !== '' && in_array($target, $allowedTargets, true)) {
             $query->where('target', $target);
         }
 

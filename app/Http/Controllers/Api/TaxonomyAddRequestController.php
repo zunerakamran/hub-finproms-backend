@@ -24,7 +24,8 @@ class TaxonomyAddRequestController extends Controller
     private function requestHub(?User $user): Hub
     {
         if ($user) {
-            return $this->actingHubs->capabilityHub($user, 'taxonomy_request_add');
+            // Either submit or review capability resolves the acting content hub the same way.
+            return $this->actingHubs->capabilityHub($user, 'taxonomy_request_manage');
         }
 
         return $this->hubs->current();
@@ -34,7 +35,7 @@ class TaxonomyAddRequestController extends Controller
     {
         $hub = $this->requestHub($request->user());
 
-        return response()->json($this->requests->options());
+        return response()->json($this->requests->options($hub));
     }
 
     public function store(Request $request): JsonResponse
@@ -77,7 +78,7 @@ class TaxonomyAddRequestController extends Controller
                 'total' => $paginator->total(),
             ],
             'filters' => $filters,
-            'options' => $this->requests->options(),
+            'options' => $this->requests->options($hub),
         ]);
     }
 
@@ -102,7 +103,7 @@ class TaxonomyAddRequestController extends Controller
             ],
             'filters' => $filters,
             'reviewable_targets' => $this->requests->reviewableTargets($hub, $user),
-            'options' => $this->requests->options(),
+            'options' => $this->requests->options($hub),
         ]);
     }
 

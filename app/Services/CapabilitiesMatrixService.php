@@ -804,6 +804,7 @@ class CapabilitiesMatrixService
             'dashboard_assign_firm_head',
             'dashboard_manage_tags',
             'dashboard_view_tags',
+            'taxonomy_request_manage',
             'dashboard_manage_subscriber_credits',
             'dashboard_manage_modules',
             'dashboard_manage_module_pricing',

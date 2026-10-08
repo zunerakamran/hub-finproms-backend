@@ -236,7 +236,7 @@ Route::middleware('auth:sanctum')->group(function () {
         });
     });
 
-    // Taxonomy add requests — request new types/categories/tags (gated by taxonomy_request_add / manage_*).
+    // Taxonomy add requests — request (taxonomy_request_add) / review (taxonomy_request_manage).
     Route::middleware('acting_wl_wc_db')->group(function () {
         Route::get('/taxonomy-add-requests/options', [TaxonomyAddRequestController::class, 'options']);
 
@@ -668,9 +668,9 @@ Route::middleware('auth:sanctum')->group(function () {
             });
         });
 
-        // Taxonomy add requests — queue for users with matching Manage capabilities
+        // Taxonomy add requests — queue for taxonomy_request_manage
         Route::middleware('acting_wl_wc_db')->group(function () {
-            Route::middleware('hub_can:dashboard_manage_types,dashboard_manage_categories,dashboard_manage_tags,gc_manage_content_types,firm_documents_manage_categories')->group(function () {
+            Route::middleware('hub_can:taxonomy_request_manage')->group(function () {
                 Route::get('/taxonomy-add-requests', [TaxonomyAddRequestController::class, 'index']);
                 Route::get('/taxonomy-add-requests/options', [TaxonomyAddRequestController::class, 'options']);
                 Route::get('/taxonomy-add-requests/{taxonomyAddRequest}', [TaxonomyAddRequestController::class, 'show'])
@@ -1083,9 +1083,9 @@ Route::middleware('auth:sanctum')->group(function () {
             });
         });
 
-        // Taxonomy add requests — queue for users with matching Manage capabilities
+        // Taxonomy add requests — queue for taxonomy_request_manage
         Route::middleware('acting_wl_wc_db')->group(function () {
-            Route::middleware('hub_can:dashboard_manage_types,dashboard_manage_categories,dashboard_manage_tags,gc_manage_content_types,firm_documents_manage_categories')->group(function () {
+            Route::middleware('hub_can:taxonomy_request_manage')->group(function () {
                 Route::get('/taxonomy-add-requests', [TaxonomyAddRequestController::class, 'index']);
                 Route::get('/taxonomy-add-requests/options', [TaxonomyAddRequestController::class, 'options']);
                 Route::get('/taxonomy-add-requests/{taxonomyAddRequest}', [TaxonomyAddRequestController::class, 'show'])

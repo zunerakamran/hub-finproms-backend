@@ -19,6 +19,7 @@ class DashboardNavDefaults
         return [
             'account',
             'content',
+            'taxonomy',
             'hub',
             'modules',
             'advisors',
@@ -50,9 +51,9 @@ class DashboardNavDefaults
             '/my-dashboard/types' => 'content',
             '/my-dashboard/categories' => 'content',
             '/my-dashboard/tags' => 'content',
-            '/my-dashboard/taxonomy-add-requests' => 'content',
-            '/my-dashboard/taxonomy-add-requests/new' => 'content',
-            '/my-dashboard/taxonomy-add-requests/queue' => 'content',
+            '/my-dashboard/taxonomy-add-requests' => 'taxonomy',
+            '/my-dashboard/taxonomy-add-requests/new' => 'taxonomy',
+            '/my-dashboard/taxonomy-add-requests/queue' => 'taxonomy',
             '/my-dashboard/firms' => 'hub',
             '/my-dashboard/firm-documents' => 'hub',
             '/my-dashboard/plans' => 'hub',
@@ -132,6 +133,7 @@ class DashboardNavDefaults
                 'dashboard' => 'Dashboard',
                 'account' => 'Account',
                 'content' => 'SM Template',
+                'taxonomy' => 'Taxonomy requests',
                 'hub' => 'Hub',
                 'hub_central' => 'Central Hub',
                 'hub_shared' => 'Shared hub',
@@ -408,6 +410,32 @@ class DashboardNavDefaults
                 fn ($path) => is_string($path) ? ($map[$path] ?? $path) : $path,
                 $nav['item_order']
             ));
+        }
+
+        // Move taxonomy request menus out of SM Template into their own separator.
+        $taxonomyPaths = [
+            '/my-dashboard/taxonomy-add-requests',
+            '/my-dashboard/taxonomy-add-requests/new',
+            '/my-dashboard/taxonomy-add-requests/queue',
+        ];
+        if (is_array($nav['item_groups'] ?? null)) {
+            foreach ($taxonomyPaths as $path) {
+                if (($nav['item_groups'][$path] ?? null) === 'content') {
+                    $nav['item_groups'][$path] = 'taxonomy';
+                }
+            }
+        }
+        if (is_array($nav['section_order'] ?? null)
+            && ! in_array('taxonomy', $nav['section_order'], true)
+        ) {
+            $order = $nav['section_order'];
+            $contentIdx = array_search('content', $order, true);
+            if ($contentIdx === false) {
+                $order[] = 'taxonomy';
+            } else {
+                array_splice($order, $contentIdx + 1, 0, ['taxonomy']);
+            }
+            $nav['section_order'] = $order;
         }
 
         return $nav;
