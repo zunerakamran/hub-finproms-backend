@@ -286,11 +286,13 @@ class FirmHeadAndDocumentsTest extends TestCase
             ->assertJsonPath('rights.is_firm_head', true)
             ->assertJsonPath('rights.can_view', true)
             ->assertJsonPath('rights.can_add', true)
+            ->assertJsonPath('rights.can_manage_firm_access', false)
             ->assertJsonPath('rights.firm_id', $firm->id);
 
         $this->getJson('/api/hub')
             ->assertOk()
             ->assertJsonPath('hub.firm_document_rights.is_firm_head', true)
+            ->assertJsonPath('hub.firm_document_rights.can_manage_firm_access', false)
             ->assertJsonPath('hub.effective_capabilities.firm_documents_view', true)
             ->assertJsonPath('hub.effective_capabilities.firm_documents_add', true);
     }
@@ -386,6 +388,13 @@ class FirmHeadAndDocumentsTest extends TestCase
 
         $centralLib = $this->getJson('/api/firm-documents?firm_id='.$central->id)->assertOk();
         $this->assertContains('Network policy', collect($centralLib->json('documents'))->pluck('title')->all());
+        $centralLib->assertJsonPath('rights.can_archive', false)
+            ->assertJsonPath('rights.can_delete', false);
+        $granted = collect($centralLib->json('documents'))->firstWhere('title', 'Network policy');
+        $this->assertNotNull($granted);
+        $this->assertTrue((bool) ($granted['viewer_rights']['can_view'] ?? false));
+        $this->assertFalse((bool) ($granted['viewer_rights']['can_archive'] ?? true));
+        $this->assertFalse((bool) ($granted['viewer_rights']['can_delete'] ?? true));
 
         Sanctum::actingAs($memberB);
         $listB = $this->getJson('/api/firm-documents?firm_id='.$central->id)->assertOk();

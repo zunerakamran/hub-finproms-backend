@@ -326,18 +326,14 @@ class ActingHubService
             return $effective;
         }
 
-        // Head of Firm / grants unlock Documents in the nav (appointment is enough).
+        // Head / grants unlock the Firm documents nav (view) and upload (add).
+        // Do NOT promote delete/archive/manage_firm_access into hub-wide effective
+        // caps — those are firm/document scoped (library rights + viewer_rights).
         if ($summary['can_view'] || ($summary['is_firm_head'] ?? false)) {
             $effective['firm_documents_view'] = true;
         }
         if ($summary['can_add'] || ($summary['is_firm_head'] ?? false)) {
             $effective['firm_documents_add'] = true;
-        }
-        if ($summary['can_delete'] || ($summary['is_firm_head'] ?? false)) {
-            $effective['firm_documents_delete'] = true;
-        }
-        if ($summary['can_archive'] || ($summary['is_firm_head'] ?? false)) {
-            $effective['firm_documents_archive'] = true;
         }
 
         return $effective;

@@ -216,13 +216,16 @@ class FirmDocumentAccessService
 
         $headedFirmId = $this->headedFirmIdFor($user, $hub);
         if ($headedFirmId) {
+            // Head has full rights on THEIR firm only (library / viewer_rights).
+            // can_manage_firm_access stays matrix-only so Document access control
+            // is not shown to every firm head via hub.firm_document_rights / can().
             return [
                 'can_add' => true,
                 'can_view' => true,
                 'can_delete' => true,
                 'can_archive' => true,
                 'can_manage_member_rights' => true,
-                'can_manage_firm_access' => true,
+                'can_manage_firm_access' => $canManageFirmAccess,
                 'can_manage_categories' => $canManageCategories,
                 'is_firm_head' => true,
                 'firm_id' => $headedFirmId,
@@ -246,9 +249,7 @@ class FirmDocumentAccessService
                 $hasDocGrant = $this->hasAnyDocumentGrant($user, $firm);
             }
 
-            // Shared docs: explicit firm grants OR Document access control allowlist.
-            // Must run even when member_rights table is missing — otherwise
-            // allowlisted firm users never get firm_documents_view for the nav.
+            // Shared docs: key-icon firm grants only (allowlist is eligibility, not view).
             $hasSharedView = $this->hasAnySharedFirmGrant($user, $firm);
             $hasSharedAdd = $this->hasSharedFirmAddGrant($user, $firm);
         }
