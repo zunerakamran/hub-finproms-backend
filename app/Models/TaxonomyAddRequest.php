@@ -138,6 +138,18 @@ class TaxonomyAddRequest extends Model
             $this->unsetRelation('reviewedByUser');
         }
 
+        $reviewer = $this->reviewedByUser;
+        if (! $reviewer && $this->reviewed_by) {
+            // Reviewer may live on Central while this row is on a remounted hub DB.
+            try {
+                $reviewer = User::on(config('database.default'))
+                    ->select(['id', 'name', 'email', 'role'])
+                    ->find($this->reviewed_by);
+            } catch (\Throwable) {
+                $reviewer = null;
+            }
+        }
+
         return [
             'id' => $this->id,
             'user_id' => $this->user_id,
@@ -156,11 +168,11 @@ class TaxonomyAddRequest extends Model
                 'email' => $this->user->email,
                 'role' => $this->user->role,
             ] : null,
-            'reviewed_by_user' => $this->reviewedByUser ? [
-                'id' => $this->reviewedByUser->id,
-                'name' => $this->reviewedByUser->name,
-                'email' => $this->reviewedByUser->email,
-                'role' => $this->reviewedByUser->role,
+            'reviewed_by_user' => $reviewer ? [
+                'id' => $reviewer->id,
+                'name' => $reviewer->name,
+                'email' => $reviewer->email,
+                'role' => $reviewer->role,
             ] : null,
             'created_at' => optional($this->created_at)?->toIso8601String(),
             'updated_at' => optional($this->updated_at)?->toIso8601String(),

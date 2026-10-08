@@ -19,7 +19,8 @@ return new class extends Migration
                 $table->text('remarks');
                 $table->string('status', 20)->default('Pending');
                 $table->text('review_note')->nullable();
-                $table->foreignId('reviewed_by')->nullable()->constrained('users')->nullOnDelete();
+                // No FK: reviewer may be a Central Power Admin while this table is on a remounted hub DB.
+                $table->unsignedBigInteger('reviewed_by')->nullable();
                 $table->timestamp('reviewed_at')->nullable();
                 $table->unsignedBigInteger('created_entity_id')->nullable();
                 $table->timestamps();

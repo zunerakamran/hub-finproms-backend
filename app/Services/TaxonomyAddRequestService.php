@@ -257,8 +257,6 @@ class TaxonomyAddRequestService
             ]);
         }
 
-        $this->assertTargetAllowedOnHub($hub, (string) $request->target);
-
         $note = trim((string) ($data['review_note'] ?? ''));
 
         $request->update([
@@ -268,21 +266,25 @@ class TaxonomyAddRequestService
             'reviewed_at' => now(),
         ]);
 
-        $fresh = $request->fresh(['user', 'reviewedByUser']);
+        $fresh = $this->freshForResponse($request);
 
-        $this->activityLogs->log([
-            'action' => 'taxonomy_add_request.approve',
-            'description' => 'Approved taxonomy request #'.$request->id,
-            'user' => $user,
-            'hub' => $hub,
-            'subject' => $fresh,
-            'request' => $httpRequest,
-            'status_code' => 200,
-            'properties' => [
-                'target' => $request->target,
-                'proposed_name' => $request->proposed_name,
-            ],
-        ]);
+        try {
+            $this->activityLogs->log([
+                'action' => 'taxonomy_add_request.approve',
+                'description' => 'Approved taxonomy request #'.$request->id,
+                'user' => $user,
+                'hub' => $hub,
+                'subject' => $fresh,
+                'request' => $httpRequest,
+                'status_code' => 200,
+                'properties' => [
+                    'target' => $request->target,
+                    'proposed_name' => $request->proposed_name,
+                ],
+            ]);
+        } catch (\Throwable) {
+            // Status change must succeed even if activity logging fails.
+        }
 
         return $fresh;
     }
@@ -318,23 +320,43 @@ class TaxonomyAddRequestService
             'reviewed_at' => now(),
         ]);
 
-        $fresh = $request->fresh(['user', 'reviewedByUser']);
+        $fresh = $this->freshForResponse($request);
 
-        $this->activityLogs->log([
-            'action' => 'taxonomy_add_request.reject',
-            'description' => 'Rejected taxonomy request #'.$request->id,
-            'user' => $user,
-            'hub' => $hub,
-            'subject' => $fresh,
-            'request' => $httpRequest,
-            'status_code' => 200,
-            'properties' => [
-                'target' => $request->target,
-                'proposed_name' => $request->proposed_name,
-            ],
-        ]);
+        try {
+            $this->activityLogs->log([
+                'action' => 'taxonomy_add_request.reject',
+                'description' => 'Rejected taxonomy request #'.$request->id,
+                'user' => $user,
+                'hub' => $hub,
+                'subject' => $fresh,
+                'request' => $httpRequest,
+                'status_code' => 200,
+                'properties' => [
+                    'target' => $request->target,
+                    'proposed_name' => $request->proposed_name,
+                ],
+            ]);
+        } catch (\Throwable) {
+            // Status change must succeed even if activity logging fails.
+        }
 
         return $fresh;
+    }
+
+    private function freshForResponse(TaxonomyAddRequest $request): TaxonomyAddRequest
+    {
+        try {
+            $fresh = $request->fresh(['user:id,name,email,role', 'reviewedByUser:id,name,email,role']);
+            if ($fresh instanceof TaxonomyAddRequest) {
+                return $fresh;
+            }
+        } catch (\Throwable) {
+            // Cross-DB reviewer lookup can fail while acting on a remote hub.
+        }
+
+        $request->refresh();
+
+        return $request;
     }
 
     private function assertTargetAllowedOnHub(Hub $hub, string $target): void
