@@ -29,11 +29,6 @@ class PageContentDefaults
                 'guest_hint' => 'Browse the home showcase freely. Sign in to open posts, bundles, and plans.',
                 'catalog_disabled' => 'Catalog browsing is not enabled on this hub.',
                 'empty_posts' => 'Posts will appear here once published.',
-                // Header nav labels
-                'nav_categories' => 'Categories',
-                'nav_templates' => 'Website templates',
-                'nav_tickets' => 'My tickets',
-                'nav_raise_ticket' => 'Create a new ticket',
                 // Section 3 — Browse by Categories
                 'categories_title' => 'Browse by Categories',
                 'categories_lead' => 'Explore content collections available on this hub.',

@@ -127,7 +127,7 @@ class PublicController extends Controller
      */
     public function listHubTemplates(Request $request): JsonResponse
     {
-        $limit = max(1, min(4, (int) $request->query('limit', 4)));
+        $limit = max(1, min(24, (int) $request->query('limit', 12)));
 
         try {
             $hub = app(HubService::class)->current();

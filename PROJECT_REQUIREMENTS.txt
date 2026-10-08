@@ -642,9 +642,11 @@ Notes:
   6) Need assistance — Live chat / WhatsApp / Email cards from page_content
      URLs (and branding from_email fallback for email)
   Footer shows hub copyright (`footer_copyright` with `{year}`/`{brand}`)
-  plus `footer_powered_by` (default “Powered by Bypass”). Header also links
-  Categories, Website templates, My tickets, and Create a new ticket when
-  the matching modules/capabilities allow.
+  plus `footer_powered_by` (default “Powered by Bypass”). Public header
+  nav stays the existing site links (Home / Posts / Reels / Bundles / …).
+  Categories use a 4-column grid; website templates use a 3-column grid
+  with the same hover-to-scroll preview as the dashboard template cards;
+  documents list latest firm documents first.
 - Dashboard menu labels are stored on `hubs.dashboard_nav` (JSON). Defaults live
   in `App\Support\DashboardNavDefaults`. Separators include context-specific
   Hub labels (Central / Shared / White-labelled). Menu items are keyed by path.
