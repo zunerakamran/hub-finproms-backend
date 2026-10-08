@@ -639,18 +639,18 @@ Notes:
      wired to Support Tickets module + member ticket APIs when enabled
   5) Documents — promo layout with Read more → firm documents (or login);
      optional stacked image URLs from page_content
-  6) Need assistance — Live chat / WhatsApp / Email cards from page_content
-     URLs (and branding from_email fallback for email)
+  6) Features — 4 cards (SM Templates / Canva / Website Compliance /
+     Generic Compliance) with page_content copy + links
   Footer shows hub copyright (`footer_copyright` with `{year}`/`{brand}`)
-  plus `footer_powered_by` (default “Powered by Bypass”). Public header
-  nav stays the existing site links (Home / Posts / Reels / Bundles / …).
-  Categories use a 4-column grid; website templates use a 3-column grid
-  with the same hover-to-scroll preview as the dashboard template cards;
+  plus Powered by (`footer_powered_by_name`, optional `footer_powered_by_logo`
+  image URL, optional `footer_powered_by_url` opening in a new tab).
+  Public header nav stays the existing site links
+  (Home / Posts / Reels / Bundles / …). Categories use a left-aligned
+  4-column grid; website templates use a left-aligned 3-column grid with
+  the same hover-to-scroll preview as the dashboard template cards;
   documents section matches a two-column promo layout (category counts +
-  fanned previews), ordering latest uploads first then most-used
-  (category usage / attachment count); after documents, a 4-card features
-  section covers SM Templates / Canva editing / Website Compliance /
-  Generic Compliance (copy from page_content).
+  carousel previews), ordering latest uploads first then most-used
+  (category usage / attachment count).
 - Dashboard menu labels are stored on `hubs.dashboard_nav` (JSON). Defaults live
   in `App\Support\DashboardNavDefaults`. Separators include context-specific
   Hub labels (Central / Shared / White-labelled). Menu items are keyed by path.
