@@ -87,11 +87,21 @@ class FirmDocumentService
         $byParent = $folders->groupBy(fn (FirmDocumentFolder $f) => $f->parent_id === null ? 'root' : (string) $f->parent_id);
         $docsByFolder = $serialized->groupBy(fn (array $d) => $d['folder_id'] === null ? 'none' : (string) $d['folder_id']);
 
-        $buildFolder = function (FirmDocumentFolder $folder) use (&$buildFolder, $byParent, $docsByFolder): array {
+        // Limited viewers: hide folders (nested too) with no accessible documents.
+        $pruneEmpty = ! $this->access->seesAllFirmDocuments($actor, $firm, $hub);
+
+        $buildFolder = function (FirmDocumentFolder $folder) use (&$buildFolder, $byParent, $docsByFolder, $pruneEmpty): array {
             $childFolders = ($byParent->get((string) $folder->id) ?? collect())
                 ->map(fn (FirmDocumentFolder $child) => $buildFolder($child))
                 ->values()
                 ->all();
+
+            if ($pruneEmpty) {
+                $childFolders = array_values(array_filter(
+                    $childFolders,
+                    fn (array $child) => (int) ($child['document_count'] ?? 0) > 0
+                ));
+            }
 
             $folderDocs = ($docsByFolder->get((string) $folder->id) ?? collect())->values()->all();
 
@@ -109,8 +119,7 @@ class FirmDocumentService
 
         $unfiled = ($docsByFolder->get('none') ?? collect())->values()->all();
 
-        // Grantee viewing another firm: hide empty folders (only granted docs matter).
-        if (! $this->access->seesAllFirmDocuments($actor, $firm, $hub)) {
+        if ($pruneEmpty) {
             $tree = array_values(array_filter(
                 $tree,
                 fn (array $folder) => (int) ($folder['document_count'] ?? 0) > 0
@@ -142,6 +151,32 @@ class FirmDocumentService
             ->get();
 
         return $folders->map(fn (FirmDocumentFolder $f) => $f->toApiArray(false))->values()->all();
+    }
+
+    /**
+     * Single document detail for the view page.
+     *
+     * @return array{firm: array<string, mixed>, document: array<string, mixed>}
+     */
+    public function show(User $actor, FirmDocument $document, ?Hub $hub = null): array
+    {
+        $firm = $document->firm ?? Firm::query()->findOrFail((int) $document->firm_id);
+        $this->assertCan($actor, $firm, FirmDocumentAccessService::RIGHT_VIEW, $hub, $document);
+
+        $document->load([
+            'attachments',
+            'uploader:id,name,email',
+            'folder:id,name,parent_id',
+            'category:id,name,slug',
+            'firm.headUser:id,name,email',
+        ]);
+
+        return [
+            'firm' => $firm->loadMissing('headUser:id,name,email')->toApiArray(),
+            'document' => $document->toApiArray(
+                $this->access->documentRightsFor($actor, $firm, $document, $hub)
+            ),
+        ];
     }
 
     public function createFolder(

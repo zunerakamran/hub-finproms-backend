@@ -311,6 +311,32 @@ class FirmDocumentController extends Controller
         ], 201);
     }
 
+    public function show(Request $request, int $document): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            try {
+                $payload = $this->whiteLabelDocuments->show($hub, $user, $document);
+            } catch (InvalidArgumentException $e) {
+                return $this->actingHubNotFoundOrValidation($e);
+            }
+
+            return response()->json(array_merge($payload, [
+                'target_hub' => $this->targetHubPayload($hub),
+                'acting_on_white_label' => true,
+            ]));
+        }
+
+        $model = FirmDocument::query()->findOrFail($document);
+        $payload = $this->documents->show($user, $model, $this->rightsHub($request, $user));
+
+        return response()->json(array_merge($payload, [
+            'acting_on_white_label' => false,
+        ]));
+    }
+
     public function destroy(Request $request, int $document): JsonResponse
     {
         /** @var User $user */

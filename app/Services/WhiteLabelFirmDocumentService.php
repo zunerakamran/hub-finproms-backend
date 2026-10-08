@@ -360,6 +360,56 @@ class WhiteLabelFirmDocumentService
         return $document;
     }
 
+    /**
+     * @return array{firm: array<string, mixed>, document: array<string, mixed>}
+     */
+    public function show(Hub $hub, User $actor, int $documentId): array
+    {
+        $this->assertTarget($hub);
+        $this->assertFunctionality($hub);
+
+        $meta = $this->remoteDb->run($hub, function (string $connection) use ($documentId) {
+            $this->assertDocumentsTables($connection);
+            $row = DB::connection($connection)->table('firm_documents')->where('id', $documentId)->first();
+            if (! $row) {
+                throw new InvalidArgumentException('Document not found on this hub.');
+            }
+
+            return ['firm_id' => (int) $row->firm_id];
+        });
+
+        $this->assertCanOnRemote($hub, $actor, $meta['firm_id'], FirmDocumentAccessService::RIGHT_VIEW);
+
+        $rights = $this->rightsPayload($hub, $actor, $meta['firm_id']);
+        $viewerRights = [
+            'can_view' => (bool) ($rights['can_view'] ?? false),
+            'can_delete' => (bool) ($rights['can_delete'] ?? false),
+            'can_archive' => (bool) ($rights['can_archive'] ?? false),
+            'can_manage_member_rights' => (bool) ($rights['can_manage_member_rights'] ?? false),
+            'access_mode' => 'mixed',
+        ];
+
+        return $this->remoteDb->run($hub, function (string $connection) use ($documentId, $viewerRights, $meta) {
+            $this->assertDocumentsTables($connection);
+            $schema = DB::connection($connection)->getSchemaBuilder();
+            $row = DB::connection($connection)->table('firm_documents')->where('id', $documentId)->first();
+            if (! $row) {
+                throw new InvalidArgumentException('Document not found on this hub.');
+            }
+
+            return [
+                'firm' => $this->serializeFirm($connection, $meta['firm_id']),
+                'document' => $this->serializeDocument(
+                    $connection,
+                    $row,
+                    $viewerRights,
+                    $schema->hasTable('firm_document_folders') && $schema->hasColumn('firm_documents', 'folder_id'),
+                    $schema->hasColumn('firm_documents', 'category_id'),
+                ),
+            ];
+        });
+    }
+
     public function delete(Hub $hub, User $actor, int $documentId, ?Request $request = null): void
     {
         $this->assertTarget($hub);

@@ -185,6 +185,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/firm-documents/categories', [FirmDocumentCategoryController::class, 'index']);
     Route::get('/firm-documents', [FirmDocumentController::class, 'index']);
     Route::post('/firm-documents', [FirmDocumentController::class, 'store']);
+    Route::get('/firm-documents/{document}', [FirmDocumentController::class, 'show'])->whereNumber('document');
     Route::get('/firm-documents/{document}/member-rights', [FirmDocumentController::class, 'documentMemberRights'])->whereNumber('document');
     Route::put('/firm-documents/{document}/member-rights', [FirmDocumentController::class, 'setDocumentMemberRights'])->whereNumber('document');
     Route::delete('/firm-documents/{document}', [FirmDocumentController::class, 'destroy'])->whereNumber('document');
