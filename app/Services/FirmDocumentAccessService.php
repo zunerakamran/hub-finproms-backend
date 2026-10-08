@@ -126,13 +126,9 @@ class FirmDocumentAccessService
             return true;
         }
 
-        if (! $this->functionalityEnabled($hub)) {
-            return false;
-        }
-
         $cap = self::CAP_MAP[$right] ?? null;
 
-        return $cap !== null && $this->matrix->userCan($hub, $user, $cap);
+        return $cap !== null && $this->matrixFirmDocCap($user, $hub, $cap);
     }
 
     /**
@@ -154,8 +150,7 @@ class FirmDocumentAccessService
     {
         $hub = $hub ?? $this->hubs->current();
 
-        return $this->functionalityEnabled($hub)
-            && $this->matrix->userCan($hub, $user, self::CAP_MANAGE_FIRM_ACCESS);
+        return $this->matrixFirmDocCap($user, $hub, self::CAP_MANAGE_FIRM_ACCESS);
     }
 
     /**
@@ -205,13 +200,13 @@ class FirmDocumentAccessService
         $enabled = $this->functionalityEnabled($hub);
 
         $hubWide = [
-            'can_add' => $enabled && $this->matrix->userCan($hub, $user, 'firm_documents_add'),
-            'can_view' => $enabled && $this->matrix->userCan($hub, $user, 'firm_documents_view'),
-            'can_delete' => $enabled && $this->matrix->userCan($hub, $user, 'firm_documents_delete'),
-            'can_archive' => $enabled && $this->matrix->userCan($hub, $user, 'firm_documents_archive'),
+            'can_add' => $this->matrixFirmDocCap($user, $hub, 'firm_documents_add'),
+            'can_view' => $this->matrixFirmDocCap($user, $hub, 'firm_documents_view'),
+            'can_delete' => $this->matrixFirmDocCap($user, $hub, 'firm_documents_delete'),
+            'can_archive' => $this->matrixFirmDocCap($user, $hub, 'firm_documents_archive'),
         ];
 
-        $canManageCategories = $enabled && $this->matrix->userCan($hub, $user, 'firm_documents_manage_categories');
+        $canManageCategories = $this->matrixFirmDocCap($user, $hub, 'firm_documents_manage_categories');
         $canManageFirmAccess = $this->canManageFirmAccessViaMatrix($user, $hub);
 
         $headedFirmId = $this->headedFirmIdFor($user, $hub);
@@ -235,29 +230,21 @@ class FirmDocumentAccessService
         }
 
         $firmId = $user->firm_id ? (int) $user->firm_id : null;
-        $firmGrant = null;
-        $hasDocGrant = false;
-        $hasSharedView = false;
-        $hasSharedAdd = false;
-        if ($firmId) {
-            $firm = new Firm(['id' => $firmId]);
-            $firm->exists = true;
+        // Aggregate by user_id / firm_id so Advisor / Approver / User (any role)
+        // unlock the Firm documents menu when key-icon rights exist — even if
+        // firm_id was missing from a narrow check path.
+        $memberAgg = $this->aggregateMemberGrantsForUser($user);
+        $firmAgg = $this->aggregateFirmGrantsForUser($user);
 
-            // Own-firm member grants (per-doc / firm-wide).
-            if (Schema::hasTable('firm_document_member_rights')) {
-                $firmGrant = $this->firmWideGrant($user, $firm);
-                $hasDocGrant = $this->hasAnyDocumentGrant($user, $firm);
-            }
+        $canView = $memberAgg['can_view'] || $firmAgg['can_view'] || $hubWide['can_view'];
+        $canAdd = $memberAgg['can_add'] || $firmAgg['can_add'] || $hubWide['can_add'];
+        $canDelete = $memberAgg['can_delete'] || $firmAgg['can_delete'] || $hubWide['can_delete'];
+        $canArchive = $memberAgg['can_archive'] || $firmAgg['can_archive'] || $hubWide['can_archive'];
 
-            // Shared docs: key-icon firm grants only (allowlist is eligibility, not view).
-            $hasSharedView = $this->hasAnySharedFirmGrant($user, $firm);
-            $hasSharedAdd = $this->hasSharedFirmAddGrant($user, $firm);
+        // Any grant bit unlocks the nav (same as before for mixed grant rows).
+        if ($memberAgg['any'] || $firmAgg['any']) {
+            $canView = true;
         }
-
-        $canView = (bool) ($firmGrant?->can_view) || $hasDocGrant || $hasSharedView || $hubWide['can_view'];
-        $canAdd = (bool) ($firmGrant?->can_add) || $hasSharedAdd || $hubWide['can_add'];
-        $canDelete = (bool) ($firmGrant?->can_delete) || $hubWide['can_delete'];
-        $canArchive = (bool) ($firmGrant?->can_archive) || $hubWide['can_archive'];
 
         return [
             'can_add' => $canAdd,
@@ -275,6 +262,87 @@ class FirmDocumentAccessService
     }
 
     /**
+     * Matrix firm-document caps. Excel advisors are often role=user with
+     * is_advisor=true — also honour the Advisor column so ticks there apply.
+     */
+    private function matrixFirmDocCap(User $user, Hub $hub, string $cap): bool
+    {
+        if (! $this->functionalityEnabled($hub)) {
+            return false;
+        }
+
+        if ($this->matrix->userCan($hub, $user, $cap)) {
+            return true;
+        }
+
+        if ($user->isAdvisor() && (string) $user->role !== User::ROLE_ADVISOR) {
+            return $this->matrix->roleCan($hub, User::ROLE_ADVISOR, $cap);
+        }
+
+        return false;
+    }
+
+    /**
+     * @return array{can_view: bool, can_add: bool, can_delete: bool, can_archive: bool, any: bool}
+     */
+    private function aggregateMemberGrantsForUser(User $user): array
+    {
+        $empty = ['can_view' => false, 'can_add' => false, 'can_delete' => false, 'can_archive' => false, 'any' => false];
+        if (! Schema::hasTable('firm_document_member_rights')) {
+            return $empty;
+        }
+
+        $rows = FirmDocumentMemberRight::query()
+            ->where('user_id', (int) $user->id)
+            ->get(['can_view', 'can_add', 'can_delete', 'can_archive']);
+
+        if ($rows->isEmpty()) {
+            return $empty;
+        }
+
+        $out = $empty;
+        foreach ($rows as $row) {
+            $out['can_view'] = $out['can_view'] || (bool) $row->can_view;
+            $out['can_add'] = $out['can_add'] || (bool) $row->can_add;
+            $out['can_delete'] = $out['can_delete'] || (bool) $row->can_delete;
+            $out['can_archive'] = $out['can_archive'] || (bool) $row->can_archive;
+        }
+        $out['any'] = $out['can_view'] || $out['can_add'] || $out['can_delete'] || $out['can_archive'];
+
+        return $out;
+    }
+
+    /**
+     * @return array{can_view: bool, can_add: bool, can_delete: bool, can_archive: bool, any: bool}
+     */
+    private function aggregateFirmGrantsForUser(User $user): array
+    {
+        $empty = ['can_view' => false, 'can_add' => false, 'can_delete' => false, 'can_archive' => false, 'any' => false];
+        if (! Schema::hasTable('firm_document_firm_rights') || $user->firm_id === null) {
+            return $empty;
+        }
+
+        $rows = FirmDocumentFirmRight::query()
+            ->where('grantee_firm_id', (int) $user->firm_id)
+            ->get(['can_view', 'can_add', 'can_delete', 'can_archive']);
+
+        if ($rows->isEmpty()) {
+            return $empty;
+        }
+
+        $out = $empty;
+        foreach ($rows as $row) {
+            $out['can_view'] = $out['can_view'] || (bool) $row->can_view;
+            $out['can_add'] = $out['can_add'] || (bool) $row->can_add;
+            $out['can_delete'] = $out['can_delete'] || (bool) $row->can_delete;
+            $out['can_archive'] = $out['can_archive'] || (bool) $row->can_archive;
+        }
+        $out['any'] = $out['can_view'] || $out['can_add'] || $out['can_delete'] || $out['can_archive'];
+
+        return $out;
+    }
+
+    /**
      * Whether the user sees every document for the firm (vs filtered to grants).
      */
     public function seesAllFirmDocuments(User $user, Firm $firm, ?Hub $hub = null): bool
@@ -285,7 +353,7 @@ class FirmDocumentAccessService
             return true;
         }
 
-        if ($this->functionalityEnabled($hub) && $this->matrix->userCan($hub, $user, 'firm_documents_view')) {
+        if ($this->matrixFirmDocCap($user, $hub, 'firm_documents_view')) {
             return true;
         }
 
@@ -392,7 +460,7 @@ class FirmDocumentAccessService
         }
 
         // Hub-wide matrix users see every firm via listFirms — still include own first.
-        if ($this->functionalityEnabled($hub) && $this->matrix->userCan($hub, $user, 'firm_documents_view')) {
+        if ($this->matrixFirmDocCap($user, $hub, 'firm_documents_view')) {
             return $firms;
         }
 

@@ -377,6 +377,21 @@ class FirmHeadAndDocumentsTest extends TestCase
         $this->assertContains($firm1->id, $accessibleIds);
         $this->assertContains($central->id, $accessibleIds);
 
+        // Advisor-flagged user (role=user, is_advisor) with same firm grant also unlocks.
+        $advisorMember = User::factory()->create([
+            'firm_id' => $firm1->id,
+            'role' => User::ROLE_USER,
+            'is_advisor' => true,
+        ]);
+        Sanctum::actingAs($advisorMember);
+        $this->getJson('/api/firm-documents/my-rights')
+            ->assertOk()
+            ->assertJsonPath('rights.can_view', true);
+        $this->getJson('/api/hub')
+            ->assertOk()
+            ->assertJsonPath('hub.firm_document_rights.can_view', true)
+            ->assertJsonPath('hub.effective_capabilities.firm_documents_view', true);
+
         $this->getJson('/api/hub')
             ->assertOk()
             ->assertJsonPath('hub.firm_document_rights.can_view', true)
