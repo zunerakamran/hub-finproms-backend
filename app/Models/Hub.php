@@ -2661,9 +2661,16 @@ class Hub extends Model
      */
     public function resolvedPageContent(): array
     {
-        return \App\Support\PageContentDefaults::resolve(
+        $resolved = \App\Support\PageContentDefaults::resolve(
             is_array($this->page_content) ? $this->page_content : null
         );
+
+        $poweredByLogo = trim((string) ($resolved['home']['footer_powered_by_logo'] ?? ''));
+        if ($poweredByLogo !== '') {
+            $resolved['home']['footer_powered_by_logo'] = $this->publicAssetUrl($poweredByLogo) ?? $poweredByLogo;
+        }
+
+        return $resolved;
     }
 
     /**

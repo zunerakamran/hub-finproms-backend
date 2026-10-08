@@ -63,6 +63,8 @@ class SettingController extends Controller
             'accent_color' => ['nullable', 'string', 'max:32'],
             'page_content' => ['sometimes'],
             'dashboard_nav' => ['sometimes'],
+            'footer_powered_by_logo' => ['sometimes', 'file', 'image', 'max:5120'],
+            'remove_footer_powered_by_logo' => ['sometimes', 'boolean'],
         ]);
 
         if (array_key_exists('new_banner_days', $validated)) {
@@ -168,6 +170,14 @@ class SettingController extends Controller
             $hubDirty = true;
         }
 
+        $previousPoweredByLogo = is_array($hub->page_content)
+            ? ($hub->page_content['home']['footer_powered_by_logo'] ?? null)
+            : null;
+        $removePoweredByLogo = filter_var(
+            $request->input('remove_footer_powered_by_logo'),
+            FILTER_VALIDATE_BOOLEAN
+        );
+
         if ($request->exists('page_content')) {
             $raw = $request->input('page_content');
             if (is_string($raw)) {
@@ -197,7 +207,49 @@ class SettingController extends Controller
                 }
             }
 
+            // Keep the storage path when the UI echoes back the resolved public URL.
+            if (
+                ! $request->hasFile('footer_powered_by_logo')
+                && ! $removePoweredByLogo
+                && is_string($previousPoweredByLogo)
+                && str_starts_with($previousPoweredByLogo, 'hubs/powered-by-logos/')
+            ) {
+                $incomingLogo = trim((string) ($incoming['home']['footer_powered_by_logo'] ?? ''));
+                $previousPublic = Storage::disk('public')->url($previousPoweredByLogo);
+                if (
+                    $incomingLogo === ''
+                    || $incomingLogo === $previousPoweredByLogo
+                    || $incomingLogo === $previousPublic
+                ) {
+                    $merged['home']['footer_powered_by_logo'] = $previousPoweredByLogo;
+                }
+            }
+
             $hub->page_content = $merged === [] ? null : $merged;
+            $hubDirty = true;
+        }
+
+        if ($removePoweredByLogo && ! $request->hasFile('footer_powered_by_logo')) {
+            $this->deleteStoredAsset(
+                is_string($previousPoweredByLogo) ? $previousPoweredByLogo : null,
+                'hubs/powered-by-logos/'
+            );
+            $pageContent = is_array($hub->page_content) ? $hub->page_content : [];
+            unset($pageContent['home']['footer_powered_by_logo']);
+            if (($pageContent['home'] ?? null) === []) {
+                unset($pageContent['home']);
+            }
+            $hub->page_content = $pageContent === [] ? null : $pageContent;
+            $hubDirty = true;
+        }
+
+        if ($request->hasFile('footer_powered_by_logo')) {
+            $pageContent = is_array($hub->page_content) ? $hub->page_content : [];
+            $old = $pageContent['home']['footer_powered_by_logo'] ?? $previousPoweredByLogo;
+            $this->deleteStoredAsset(is_string($old) ? $old : null, 'hubs/powered-by-logos/');
+            $path = $request->file('footer_powered_by_logo')->store('hubs/powered-by-logos', 'public');
+            $pageContent['home']['footer_powered_by_logo'] = $path;
+            $hub->page_content = $pageContent;
             $hubDirty = true;
         }
 
