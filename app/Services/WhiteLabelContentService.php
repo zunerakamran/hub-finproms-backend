@@ -338,15 +338,11 @@ class WhiteLabelContentService
     {
         $connection = $this->connect($hub);
         try {
+            $this->ensureCategoryIconColumns($connection);
             $rows = DB::connection($connection)->table('categories')->orderBy('name')->get();
 
             return [
-                'categories' => $rows->map(fn ($r) => [
-                    'id' => $r->id,
-                    'name' => $r->name,
-                    'slug' => $r->slug,
-                    'posts_count' => 0,
-                ])->all(),
+                'categories' => $rows->map(fn ($r) => $this->mapCategoryRow($r))->all(),
             ];
         } finally {
             $this->remoteDb->disconnect($hub);
@@ -354,40 +350,52 @@ class WhiteLabelContentService
     }
 
     /**
-     * @param  array{name: string, slug?: ?string}  $payload
+     * @param  array{name: string, slug?: ?string, icon?: ?string, icon_path?: ?string, remove_icon?: bool}  $payload
      * @return array<string, mixed>
      */
     public function createCategory(Hub $hub, array $payload): array
     {
         $connection = $this->connect($hub);
         try {
+            $this->ensureCategoryIconColumns($connection);
             $name = trim($payload['name']);
             $slug = trim((string) ($payload['slug'] ?? '')) ?: Str::slug($name);
             if (DB::connection($connection)->table('categories')->where('name', $name)->exists()) {
                 throw new InvalidArgumentException('A category with that name already exists on this hub.');
             }
             $now = now();
-            $id = (int) DB::connection($connection)->table('categories')->insertGetId([
+            $insert = [
                 'name' => $name,
                 'slug' => $slug,
                 'created_at' => $now,
                 'updated_at' => $now,
-            ]);
+            ];
+            $schema = Schema::connection($connection);
+            if ($schema->hasColumn('categories', 'icon')) {
+                $insert['icon'] = filled($payload['icon'] ?? null) ? (string) $payload['icon'] : null;
+            }
+            if ($schema->hasColumn('categories', 'icon_path')) {
+                $insert['icon_path'] = filled($payload['icon_path'] ?? null) ? (string) $payload['icon_path'] : null;
+            }
+            $id = (int) DB::connection($connection)->table('categories')->insertGetId($insert);
 
-            return ['id' => $id, 'name' => $name, 'slug' => $slug];
+            return $this->mapCategoryRow(
+                DB::connection($connection)->table('categories')->where('id', $id)->first()
+            );
         } finally {
             $this->remoteDb->disconnect($hub);
         }
     }
 
     /**
-     * @param  array{name: string, slug?: ?string}  $payload
+     * @param  array{name: string, slug?: ?string, icon?: ?string, icon_path?: ?string, remove_icon?: bool}  $payload
      * @return array<string, mixed>
      */
     public function updateCategory(Hub $hub, int $categoryId, array $payload): array
     {
         $connection = $this->connect($hub);
         try {
+            $this->ensureCategoryIconColumns($connection);
             $row = DB::connection($connection)->table('categories')->where('id', $categoryId)->first();
             if (! $row) {
                 throw new InvalidArgumentException('Category not found on this white-labelled hub.');
@@ -405,11 +413,33 @@ class WhiteLabelContentService
                 throw new InvalidArgumentException('A category with that name already exists on this hub.');
             }
 
-            DB::connection($connection)->table('categories')->where('id', $categoryId)->update([
+            $updates = [
                 'name' => $newName,
                 'slug' => $slug,
                 'updated_at' => now(),
-            ]);
+            ];
+            $schema = Schema::connection($connection);
+            if ($schema->hasColumn('categories', 'icon') && array_key_exists('icon', $payload)) {
+                $updates['icon'] = filled($payload['icon']) ? (string) $payload['icon'] : null;
+            }
+            if ($schema->hasColumn('categories', 'icon_path')) {
+                if (! empty($payload['remove_icon']) && ! array_key_exists('icon_path', $payload)) {
+                    $updates['icon_path'] = null;
+                    $updates['icon'] = null;
+                } elseif (array_key_exists('icon_path', $payload)) {
+                    $updates['icon_path'] = filled($payload['icon_path']) ? (string) $payload['icon_path'] : null;
+                    if (filled($payload['icon_path'])) {
+                        $updates['icon'] = null;
+                    }
+                } elseif (
+                    filled($payload['icon'] ?? null)
+                    && filter_var($payload['clear_upload'] ?? false, FILTER_VALIDATE_BOOLEAN)
+                ) {
+                    $updates['icon_path'] = null;
+                }
+            }
+
+            DB::connection($connection)->table('categories')->where('id', $categoryId)->update($updates);
 
             if ($oldName !== $newName) {
                 $this->ensurePostCategoriesColumn($connection);
@@ -434,9 +464,65 @@ class WhiteLabelContentService
                 }
             }
 
-            return ['id' => $categoryId, 'name' => $newName, 'slug' => $slug];
+            return $this->mapCategoryRow(
+                DB::connection($connection)->table('categories')->where('id', $categoryId)->first()
+            );
         } finally {
             $this->remoteDb->disconnect($hub);
+        }
+    }
+
+    /**
+     * @param  object|null  $row
+     * @return array{id: int, name: string, slug: ?string, icon: ?string, icon_url: ?string, posts_count: int}
+     */
+    private function mapCategoryRow(?object $row): array
+    {
+        if (! $row) {
+            return [
+                'id' => 0,
+                'name' => '',
+                'slug' => null,
+                'icon' => null,
+                'icon_url' => null,
+                'posts_count' => 0,
+            ];
+        }
+
+        $iconPath = isset($row->icon_path) ? trim((string) $row->icon_path) : '';
+        $iconUrl = null;
+        if ($iconPath !== '') {
+            $iconUrl = (str_starts_with($iconPath, 'http://') || str_starts_with($iconPath, 'https://'))
+                ? $iconPath
+                : rtrim((string) config('app.url'), '/').'/api/media/'.ltrim($iconPath, '/');
+        }
+
+        return [
+            'id' => (int) $row->id,
+            'name' => (string) $row->name,
+            'slug' => $row->slug ?? null,
+            'icon' => filled($row->icon ?? null) ? (string) $row->icon : null,
+            'icon_url' => $iconUrl,
+            'posts_count' => 0,
+        ];
+    }
+
+    private function ensureCategoryIconColumns(string $connection): void
+    {
+        $schema = Schema::connection($connection);
+        if (! $schema->hasTable('categories')) {
+            return;
+        }
+
+        if (! $schema->hasColumn('categories', 'icon')) {
+            $schema->table('categories', function (Blueprint $table) {
+                $table->string('icon', 64)->nullable();
+            });
+        }
+        if (! $schema->hasColumn('categories', 'icon_path')) {
+            $schema->table('categories', function (Blueprint $table) {
+                $table->string('icon_path', 1000)->nullable();
+            });
         }
     }
 

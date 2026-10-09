@@ -8,8 +8,10 @@ use App\Services\ActingHubService;
 use App\Services\CapabilitiesMatrixService;
 use App\Services\HubService;
 use App\Services\WhiteLabelContentService;
+use App\Support\CategoryIconOptions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use InvalidArgumentException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
@@ -184,10 +186,7 @@ class HubContentController extends Controller
         $hub = $this->resolveActingWhiteLabel($request);
         $this->assertActingContentCapability($request, $hub, 'dashboard_manage_categories');
 
-        $validated = $request->validate([
-            'name' => ['required', 'string', 'max:100'],
-            'slug' => ['nullable', 'string', 'max:100'],
-        ]);
+        $validated = $this->validateCategoryIconPayload($request);
 
         try {
             $category = $this->content->createCategory($hub, $validated);
@@ -379,10 +378,7 @@ class HubContentController extends Controller
     {
         $hub = $this->resolveActingWhiteLabel($request);
         $this->assertActingContentCapability($request, $hub, 'dashboard_manage_categories');
-        $validated = $request->validate([
-            'name' => ['required', 'string', 'max:100'],
-            'slug' => ['nullable', 'string', 'max:100'],
-        ]);
+        $validated = $this->validateCategoryIconPayload($request);
 
         try {
             $updated = $this->content->updateCategory($hub, $category, $validated);
@@ -397,6 +393,50 @@ class HubContentController extends Controller
             'category' => $updated,
             'target_hub' => ['id' => $hub->id, 'name' => $hub->name, 'slug' => $hub->slug],
         ]);
+    }
+
+    /**
+     * @return array{name: string, slug: ?string, icon: ?string, icon_path?: ?string, remove_icon?: bool, clear_upload?: bool}
+     */
+    private function validateCategoryIconPayload(Request $request): array
+    {
+        if ($request->has('icon') && trim((string) $request->input('icon')) === '') {
+            $request->merge(['icon' => null]);
+        }
+
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:100'],
+            'slug' => ['nullable', 'string', 'max:100'],
+            'icon' => ['nullable', 'string', 'max:64', Rule::in(CategoryIconOptions::keys())],
+            'icon_file' => ['sometimes', 'file', 'image', 'max:2048'],
+            'remove_icon' => ['sometimes', 'boolean'],
+            'clear_upload' => ['sometimes', 'boolean'],
+        ]);
+
+        $payload = [
+            'name' => trim($validated['name']),
+            'slug' => $validated['slug'] ?? null,
+            'icon' => filled($validated['icon'] ?? null) ? (string) $validated['icon'] : null,
+        ];
+
+        if (filter_var($request->input('remove_icon'), FILTER_VALIDATE_BOOLEAN)
+            && ! $request->hasFile('icon_file')) {
+            $payload['remove_icon'] = true;
+            $payload['icon_path'] = null;
+            $payload['icon'] = null;
+        }
+
+        if (filter_var($request->input('clear_upload'), FILTER_VALIDATE_BOOLEAN)) {
+            $payload['clear_upload'] = true;
+        }
+
+        if ($request->hasFile('icon_file')) {
+            $path = $request->file('icon_file')->store('categories/icons', 'public');
+            $payload['icon_path'] = rtrim((string) config('app.url'), '/').'/api/media/'.$path;
+            $payload['icon'] = null;
+        }
+
+        return $payload;
     }
 
     public function destroyCategory(Request $request, int $category): JsonResponse

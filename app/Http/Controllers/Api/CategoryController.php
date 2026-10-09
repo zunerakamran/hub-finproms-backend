@@ -2,10 +2,11 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Http\Controllers\Controller;
 use App\Http\Controllers\Api\Concerns\CreatesOnActingWhiteLabelHub;
+use App\Http\Controllers\Controller;
 use App\Models\Category;
 use App\Models\Post;
+use App\Support\CategoryIconOptions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -29,100 +30,83 @@ class CategoryController extends Controller
 
         $categories = Category::query()
             ->orderBy('name')
-            ->get(['id', 'name', 'slug'])
-            ->map(fn (Category $category) => [
-                'id' => $category->id,
-                'name' => $category->name,
-                'slug' => $category->slug,
-                'posts_count' => Post::query()
+            ->get()
+            ->map(fn (Category $category) => $category->toApiArray(
+                Post::query()
                     ->where('is_active', true)
                     ->whereJsonContains('categories', $category->name)
-                    ->count(),
-            ])
+                    ->count()
+            ))
             ->values();
 
         return response()->json([
             'categories' => $categories,
             'total_posts' => Post::query()->where('is_active', true)->count(),
+            'icon_options' => CategoryIconOptions::keys(),
         ]);
     }
 
     public function store(Request $request): JsonResponse
     {
-        if ($hub = $this->actingWhiteLabelHub($request)) {
-            $validated = $request->validate([
-                'name' => ['required', 'string', 'max:100'],
-                'slug' => ['nullable', 'string', 'max:100'],
-            ]);
+        $validated = $this->validateCategoryPayload($request);
 
-            return $this->createCategoryOnActingHub($hub, $validated);
+        if ($hub = $this->actingWhiteLabelHub($request)) {
+            $payload = $this->payloadForRemote($request, $validated);
+
+            return $this->createCategoryOnActingHub($hub, $payload);
         }
 
-        $validated = $request->validate([
-            'name' => ['required', 'string', 'max:100', 'unique:categories,name'],
-            'slug' => ['nullable', 'string', 'max:100', 'unique:categories,slug'],
-        ]);
-
-        $name = trim($validated['name']);
-        $slug = trim((string) ($validated['slug'] ?? '')) ?: Str::slug($name);
-
         $category = Category::create([
-            'name' => $name,
-            'slug' => $slug,
+            'name' => $validated['name'],
+            'slug' => $validated['slug'],
+            'icon' => $validated['icon'],
+            'icon_path' => null,
         ]);
+
+        $this->applyIconUpload($request, $category);
 
         return response()->json([
             'message' => 'Category created successfully.',
-            'category' => $category,
+            'category' => $category->fresh()->toApiArray(0),
         ], 201);
     }
 
     public function update(Request $request, int $category): JsonResponse
     {
         if ($hub = $this->actingWhiteLabelHub($request)) {
-            $validated = $request->validate([
-                'name' => ['required', 'string', 'max:100'],
-                'slug' => ['nullable', 'string', 'max:100'],
-            ]);
+            $validated = $this->validateCategoryPayload($request, null);
+            $payload = $this->payloadForRemote($request, $validated);
 
-            return $this->updateCategoryOnActingHub($hub, $category, $validated);
+            return $this->updateCategoryOnActingHub($hub, $category, $payload);
         }
 
         $model = Category::query()->findOrFail($category);
-
-        $validated = $request->validate([
-            'name' => [
-                'required',
-                'string',
-                'max:100',
-                Rule::unique('categories', 'name')->ignore($model->id),
-            ],
-            'slug' => [
-                'nullable',
-                'string',
-                'max:100',
-                Rule::unique('categories', 'slug')->ignore($model->id),
-            ],
-        ]);
+        $validated = $this->validateCategoryPayload($request, $model);
 
         $oldName = $model->name;
-        $newName = trim($validated['name']);
-        $slug = array_key_exists('slug', $validated) && filled($validated['slug'])
-            ? trim($validated['slug'])
-            : Str::slug($newName);
-
-        $model->update([
-            'name' => $newName,
-            'slug' => $slug,
+        $model->fill([
+            'name' => $validated['name'],
+            'slug' => $validated['slug'],
+            'icon' => $validated['icon'],
         ]);
 
-        if ($oldName !== $newName) {
+        $removeIcon = filter_var($request->input('remove_icon'), FILTER_VALIDATE_BOOLEAN);
+        if ($removeIcon && ! $request->hasFile('icon_file')) {
+            $model->deleteStoredIcon();
+            $model->icon_path = null;
+            $model->icon = null;
+        }
+
+        $model->save();
+        $this->applyIconUpload($request, $model);
+
+        if ($oldName !== $model->name) {
             Post::query()
                 ->whereJsonContains('categories', $oldName)
                 ->get()
-                ->each(function (Post $post) use ($oldName, $newName) {
+                ->each(function (Post $post) use ($oldName, $model) {
                     $categories = collect($post->categories ?? [])
-                        ->map(fn ($value) => $value === $oldName ? $newName : $value)
+                        ->map(fn ($value) => $value === $oldName ? $model->name : $value)
                         ->unique()
                         ->values()
                         ->all();
@@ -131,9 +115,16 @@ class CategoryController extends Controller
                 });
         }
 
+        $fresh = $model->fresh();
+
         return response()->json([
             'message' => 'Category updated successfully.',
-            'category' => $model->fresh(),
+            'category' => $fresh->toApiArray(
+                Post::query()
+                    ->where('is_active', true)
+                    ->whereJsonContains('categories', $fresh->name)
+                    ->count()
+            ),
         ]);
     }
 
@@ -157,5 +148,105 @@ class CategoryController extends Controller
         return response()->json([
             'message' => 'Category deleted successfully.',
         ]);
+    }
+
+    /**
+     * @return array{name: string, slug: string, icon: ?string}
+     */
+    private function validateCategoryPayload(Request $request, ?Category $existing = null): array
+    {
+        $nameRules = ['required', 'string', 'max:100'];
+        $slugRules = ['nullable', 'string', 'max:100'];
+
+        if ($existing) {
+            $nameRules[] = Rule::unique('categories', 'name')->ignore($existing->id);
+            $slugRules[] = Rule::unique('categories', 'slug')->ignore($existing->id);
+        } elseif (! $this->actingWhiteLabelHub($request)) {
+            $nameRules[] = 'unique:categories,name';
+            $slugRules[] = 'unique:categories,slug';
+        }
+
+        if ($request->has('icon') && trim((string) $request->input('icon')) === '') {
+            $request->merge(['icon' => null]);
+        }
+
+        $validated = $request->validate([
+            'name' => $nameRules,
+            'slug' => $slugRules,
+            'icon' => ['nullable', 'string', 'max:64', Rule::in(CategoryIconOptions::keys())],
+            'icon_file' => ['sometimes', 'file', 'image', 'max:2048'],
+            'remove_icon' => ['sometimes', 'boolean'],
+            'clear_upload' => ['sometimes', 'boolean'],
+        ]);
+
+        $name = trim($validated['name']);
+        $slug = trim((string) ($validated['slug'] ?? '')) ?: Str::slug($name);
+        $icon = array_key_exists('icon', $validated)
+            ? (filled($validated['icon'] ?? null) ? (string) $validated['icon'] : null)
+            : ($existing?->icon);
+
+        return [
+            'name' => $name,
+            'slug' => $slug,
+            'icon' => $icon,
+        ];
+    }
+
+    private function applyIconUpload(Request $request, Category $category): void
+    {
+        if (! $request->hasFile('icon_file')) {
+            // Font icon selected → drop any previous upload so the FA icon shows.
+            if (
+                filled($category->icon)
+                && filter_var($request->input('clear_upload'), FILTER_VALIDATE_BOOLEAN)
+            ) {
+                $category->deleteStoredIcon();
+                $category->icon_path = null;
+                $category->save();
+            }
+
+            return;
+        }
+
+        $category->deleteStoredIcon();
+        $path = $request->file('icon_file')->store('categories/icons', 'public');
+        $category->icon_path = $path;
+        // Uploaded image takes precedence; clear font icon so UI shows the file.
+        $category->icon = null;
+        $category->save();
+    }
+
+    /**
+     * Build remote payload; uploaded files stay on this deploy and are sent as absolute URLs.
+     *
+     * @param  array{name: string, slug: string, icon: ?string}  $validated
+     * @return array{name: string, slug: string, icon: ?string, icon_path?: ?string, remove_icon?: bool}
+     */
+    private function payloadForRemote(Request $request, array $validated): array
+    {
+        $payload = [
+            'name' => $validated['name'],
+            'slug' => $validated['slug'],
+            'icon' => $validated['icon'],
+        ];
+
+        $removeIcon = filter_var($request->input('remove_icon'), FILTER_VALIDATE_BOOLEAN);
+        if ($removeIcon && ! $request->hasFile('icon_file')) {
+            $payload['remove_icon'] = true;
+            $payload['icon_path'] = null;
+            $payload['icon'] = null;
+        }
+
+        if (filter_var($request->input('clear_upload'), FILTER_VALIDATE_BOOLEAN)) {
+            $payload['clear_upload'] = true;
+        }
+
+        if ($request->hasFile('icon_file')) {
+            $path = $request->file('icon_file')->store('categories/icons', 'public');
+            $payload['icon_path'] = rtrim((string) config('app.url'), '/').'/api/media/'.$path;
+            $payload['icon'] = null;
+        }
+
+        return $payload;
     }
 }

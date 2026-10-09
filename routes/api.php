@@ -375,7 +375,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::delete('/hub-content/types/{type}', [HubContentController::class, 'destroyType']);
             Route::get('/hub-content/categories', [HubContentController::class, 'categories']);
             Route::post('/hub-content/categories', [HubContentController::class, 'storeCategory']);
-            Route::put('/hub-content/categories/{category}', [HubContentController::class, 'updateCategory']);
+            Route::match(['put', 'post'], '/hub-content/categories/{category}', [HubContentController::class, 'updateCategory']);
             Route::delete('/hub-content/categories/{category}', [HubContentController::class, 'destroyCategory']);
             Route::get('/hub-content/tags', [HubContentController::class, 'tags']);
             Route::post('/hub-content/tags', [HubContentController::class, 'storeTag']);
@@ -419,7 +419,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::middleware('hub_can:dashboard_manage_categories')->group(function () {
             Route::post('/categories', [CategoryController::class, 'store']);
-            Route::put('/categories/{category}', [CategoryController::class, 'update']);
+            // POST accepts multipart icon uploads (PHP does not populate files on PUT).
+            Route::match(['put', 'post'], '/categories/{category}', [CategoryController::class, 'update']);
             Route::delete('/categories/{category}', [CategoryController::class, 'destroy']);
         });
 
@@ -901,7 +902,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::delete('/hub-content/types/{type}', [HubContentController::class, 'destroyType']);
             Route::get('/hub-content/categories', [HubContentController::class, 'categories']);
             Route::post('/hub-content/categories', [HubContentController::class, 'storeCategory']);
-            Route::put('/hub-content/categories/{category}', [HubContentController::class, 'updateCategory']);
+            Route::match(['put', 'post'], '/hub-content/categories/{category}', [HubContentController::class, 'updateCategory']);
             Route::delete('/hub-content/categories/{category}', [HubContentController::class, 'destroyCategory']);
             Route::get('/hub-content/tags', [HubContentController::class, 'tags']);
             Route::post('/hub-content/tags', [HubContentController::class, 'storeTag']);
@@ -945,7 +946,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::middleware('hub_can:dashboard_manage_categories')->group(function () {
             Route::post('/categories', [CategoryController::class, 'store']);
-            Route::put('/categories/{category}', [CategoryController::class, 'update']);
+            // POST accepts multipart icon uploads (PHP does not populate files on PUT).
+            Route::match(['put', 'post'], '/categories/{category}', [CategoryController::class, 'update']);
             Route::delete('/categories/{category}', [CategoryController::class, 'destroy']);
         });
 

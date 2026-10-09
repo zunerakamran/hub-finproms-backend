@@ -100,6 +100,11 @@ Deploy rule:
 2.1 Content classification (THREE separate fields)
 - TYPE — what the item is: post, reel, etc. (managed list; drives reel play button).
 - CATEGORY — topical/grouping category (separate from type; e.g. product themes).
+  Categories support an optional icon: curated Font Awesome key (`icon`) and/or
+  uploaded image (`icon_path` → public `icon_url` via /api/media). Upload wins
+  over font icon when both would apply. Central Categories admin lists icons to
+  pick from and accepts an image upload; home “Browse by Categories” renders
+  upload → font icon → name initial. Icons sync to content hubs on distribute.
 - TAGS — free labels for filtering (separate from type and category).
 - Every content item has type + category + tags. Do NOT treat category as type.
 
@@ -1303,6 +1308,7 @@ STEP 1 — Shared hub core (content hub)
 [x] Shared hub content browsing (posts) — basic exists
 [x] Content type (post, reel, etc.) — separate from category
 [x] Category — separate from type and tags
+[x] Category icons (font-icon picker + image upload; shown on home categories)
 [x] Tags — separate from type and category
 [x] Reel play button on listing page
 [x] Reel video upload (when type is Reel) + video_url / is_video API

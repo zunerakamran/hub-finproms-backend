@@ -511,24 +511,57 @@ class ContentPushService
 
     private function upsertCategoryOnRemote(string $connection, Category $category): int
     {
+        $this->ensureRemoteCategoryIconColumns($connection);
+
+        $iconPath = null;
+        if (filled($category->icon_path)) {
+            $iconPath = $category->iconPublicUrl() ?: (string) $category->icon_path;
+        }
+
         $existing = DB::connection($connection)->table('categories')->where('name', $category->name)->first();
+        $updates = [
+            'slug' => $category->slug ?: Str::slug($category->name),
+            'updated_at' => now(),
+        ];
+        $schema = Schema::connection($connection);
+        if ($schema->hasColumn('categories', 'icon')) {
+            $updates['icon'] = filled($category->icon) ? (string) $category->icon : null;
+        }
+        if ($schema->hasColumn('categories', 'icon_path')) {
+            $updates['icon_path'] = $iconPath;
+        }
+
         if ($existing) {
-            DB::connection($connection)->table('categories')->where('id', $existing->id)->update([
-                'slug' => $category->slug ?: Str::slug($category->name),
-                'updated_at' => now(),
-            ]);
+            DB::connection($connection)->table('categories')->where('id', $existing->id)->update($updates);
 
             return (int) $existing->id;
         }
 
         $now = now();
-
-        return (int) DB::connection($connection)->table('categories')->insertGetId([
+        $insert = array_merge($updates, [
             'name' => $category->name,
-            'slug' => $category->slug ?: Str::slug($category->name),
             'created_at' => $now,
-            'updated_at' => $now,
         ]);
+
+        return (int) DB::connection($connection)->table('categories')->insertGetId($insert);
+    }
+
+    private function ensureRemoteCategoryIconColumns(string $connection): void
+    {
+        $schema = Schema::connection($connection);
+        if (! $schema->hasTable('categories')) {
+            return;
+        }
+        if (! $schema->hasColumn('categories', 'icon')) {
+            $schema->table('categories', function (Blueprint $table) {
+                $table->string('icon', 64)->nullable();
+            });
+        }
+        if (! $schema->hasColumn('categories', 'icon_path')) {
+            $schema->table('categories', function (Blueprint $table) {
+                $table->string('icon_path', 1000)->nullable();
+            });
+        }
     }
 
     private function upsertTypeOnRemote(string $connection, ContentType $type): int
