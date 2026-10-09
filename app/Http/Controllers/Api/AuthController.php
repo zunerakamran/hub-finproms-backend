@@ -482,6 +482,8 @@ class AuthController extends Controller
         $hub = $this->hubs->current();
         $user->setAttribute('terms_accepted', $user->hasAcceptedTerms($hub));
         $user->setAttribute('terms_required_version', $hub->termsVersion());
+        $user->setAttribute('privacy_accepted', $user->hasAcceptedPrivacy($hub));
+        $user->setAttribute('privacy_required_version', $hub->privacyVersion());
 
         $user->loadMissing([
             'firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
@@ -552,12 +554,40 @@ class AuthController extends Controller
         }
 
         $user = $user->fresh();
-        $user->setAttribute('terms_accepted', $user->hasAcceptedTerms($hub));
-        $user->setAttribute('terms_required_version', $hub->termsVersion());
 
         return response()->json([
             'message' => 'Terms & Conditions accepted.',
-            'user' => $user,
+            'user' => $this->decorateUserForAuthResponse($user),
+        ]);
+    }
+
+    public function acceptPrivacy(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $hub = $this->hubs->current();
+
+        $user->acceptPrivacy($hub);
+
+        try {
+            $this->activityLogs->log([
+                'action' => 'auth.privacy_accepted',
+                'description' => 'Privacy Policy acknowledged (v'.$hub->privacyVersion().'): '.$user->email,
+                'user' => $user,
+                'request' => $request,
+                'subject' => $user,
+                'status_code' => 200,
+                'properties' => ['privacy_version' => $hub->privacyVersion()],
+            ]);
+        } catch (\Throwable) {
+            //
+        }
+
+        $user = $user->fresh();
+
+        return response()->json([
+            'message' => 'Privacy Policy acknowledged.',
+            'user' => $this->decorateUserForAuthResponse($user),
         ]);
     }
 
@@ -743,9 +773,6 @@ class AuthController extends Controller
         }
 
         $user = $user->fresh();
-        $hub = $this->hubs->current();
-        $user->setAttribute('terms_accepted', $user->hasAcceptedTerms($hub));
-        $user->setAttribute('terms_required_version', $hub->termsVersion());
 
         $message = 'Profile updated successfully.';
         if ($emailChanging) {
@@ -754,7 +781,7 @@ class AuthController extends Controller
 
         return response()->json([
             'message' => $message,
-            'user' => $user,
+            'user' => $this->decorateUserForAuthResponse($user),
             'email_verification_required' => $emailChanging,
         ]);
     }

@@ -108,6 +108,8 @@ class User extends Authenticatable
         'modules',
         'terms_accepted_at',
         'terms_accepted_version',
+        'privacy_accepted_at',
+        'privacy_accepted_version',
         'two_factor_enabled',
         'avatar_path',
     ];
@@ -130,6 +132,8 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'terms_accepted_at' => 'datetime',
             'terms_accepted_version' => 'integer',
+            'privacy_accepted_at' => 'datetime',
+            'privacy_accepted_version' => 'integer',
             'password' => 'hashed',
             'credits' => 'integer',
             'is_advisor' => 'boolean',
@@ -331,6 +335,27 @@ class User extends Authenticatable
         return $this->forceFill([
             'terms_accepted_at' => $this->freshTimestamp(),
             'terms_accepted_version' => $hub->termsVersion(),
+        ])->save();
+    }
+
+    public function hasAcceptedPrivacy(Hub $hub): bool
+    {
+        if (! $hub->privacyPublicPayload()['required']) {
+            return true;
+        }
+
+        if ($this->privacy_accepted_at === null || $this->privacy_accepted_version === null) {
+            return false;
+        }
+
+        return (int) $this->privacy_accepted_version === (int) $hub->privacyVersion();
+    }
+
+    public function acceptPrivacy(Hub $hub): bool
+    {
+        return $this->forceFill([
+            'privacy_accepted_at' => $this->freshTimestamp(),
+            'privacy_accepted_version' => $hub->privacyVersion(),
         ])->save();
     }
 

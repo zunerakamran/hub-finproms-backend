@@ -54,6 +54,7 @@ use App\Http\Controllers\Api\PurchaseController;
 use App\Http\Controllers\Api\SettingController;
 use App\Http\Controllers\Api\RoleDisplayNameController;
 use App\Http\Controllers\Api\EmailTemplateController;
+use App\Http\Controllers\Api\PrivacyController;
 use App\Http\Controllers\Api\TermsController;
 use App\Http\Controllers\Api\ComplianceStatusDisplayNameController;
 use App\Http\Controllers\Api\StripeWebhookController;
@@ -81,6 +82,7 @@ Route::prefix('auth')->group(function () {
         Route::post('/logout', [AuthController::class, 'logout']);
         Route::get('/me', [AuthController::class, 'me']);
         Route::post('/accept-terms', [AuthController::class, 'acceptTerms']);
+        Route::post('/accept-privacy', [AuthController::class, 'acceptPrivacy']);
         // POST accepts multipart avatar; PUT/PATCH for JSON-only updates.
         Route::match(['put', 'patch', 'post'], '/profile', [AuthController::class, 'updateProfile']);
     });
@@ -488,6 +490,12 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/terms', [TermsController::class, 'show']);
             Route::put('/terms', [TermsController::class, 'update']);
             Route::post('/terms/reset', [TermsController::class, 'reset']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_privacy')->group(function () {
+            Route::get('/privacy', [PrivacyController::class, 'show']);
+            Route::put('/privacy', [PrivacyController::class, 'update']);
+            Route::post('/privacy/reset', [PrivacyController::class, 'reset']);
         });
 
         Route::middleware('hub_can:dashboard_manage_compliance_status_display_names')->group(function () {

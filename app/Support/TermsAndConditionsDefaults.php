@@ -35,7 +35,7 @@ class TermsAndConditionsDefaults
 <h3>5. Acceptable use</h3>
 <p>You agree not to attempt to disrupt the service, bypass security controls, or use the hub for unlawful or misleading financial promotions. The operator may suspend accounts that breach these terms.</p>
 <h3>6. Privacy</h3>
-<p>We process account and usage data as needed to operate this hub (for example authentication, billing, and support). Contact the hub administrator for privacy questions.</p>
+<p>How we process personal data is described in this hub’s separate Privacy Policy (UK GDPR). Please read and acknowledge that policy when prompted. For privacy questions, contact the hub administrator.</p>
 <h3>7. Changes and contact</h3>
 <p>These terms may be updated from the hub dashboard. Continued use after you accept a new version constitutes agreement to that version. For questions, use the support contact shown on this hub.</p>
 HTML;
@@ -58,7 +58,9 @@ HTML;
 <p>If social media, website, or general content pre-approval modules are enabled, submissions and approvals must follow the statuses and processes defined on this hub. Approvals do not replace your own regulatory responsibilities.</p>
 <h3>6. Acceptable use and security</h3>
 <p>Do not misuse the platform, attempt unauthorised access, or upload unlawful or inappropriate material. The hub operator may suspend or discontinue accounts that breach these terms or firm policy.</p>
-<h3>7. Changes and contact</h3>
+<h3>7. Privacy</h3>
+<p>How personal data is processed on this hub is described in the separate Privacy Policy (UK GDPR). Please read and acknowledge that policy when prompted. Contact your hub administrator for privacy questions.</p>
+<h3>8. Changes and contact</h3>
 <p>These terms can be updated by users who have permission to manage Terms &amp; Conditions. Contact your hub administrator for questions about access or these terms.</p>
 HTML;
     }
@@ -80,7 +82,9 @@ HTML;
 <p>Protect your credentials, enable available security features (such as login OTP when required), and report suspected misuse promptly.</p>
 <h3>6. Acceptable use</h3>
 <p>Do not use Central to harm tenants, bypass agreed controls, or access hubs without authorisation. Misuse may result in suspension of access.</p>
-<h3>7. Changes and contact</h3>
+<h3>7. Privacy</h3>
+<p>How personal data is processed on Central Hub is described in the separate Privacy Policy (UK GDPR). Please read and acknowledge that policy when prompted.</p>
+<h3>8. Changes and contact</h3>
 <p>These terms may be updated from the dashboard by roles with “Manage terms &amp; conditions” enabled. Contact your platform administrator for questions.</p>
 HTML;
     }

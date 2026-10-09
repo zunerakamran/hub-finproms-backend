@@ -1209,6 +1209,13 @@ class Hub extends Model
             'default_shared' => true,
             'default_white_label' => true,
         ],
+        'dashboard_manage_privacy' => [
+            'label' => 'Manage privacy policy',
+            'description' => 'Edit the Privacy Policy (UK GDPR transparency notice) shown to users on first login and when the text is updated. Available on Shared, White-label, and Central hubs.',
+            'group' => self::GROUP_DASHBOARD_HUB,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
         'dashboard_manage_role_display_names' => [
             'label' => 'Manage roles',
             'description' => 'List roles (with user counts), add or remove roles on this hub’s Capabilities matrix, and customize how role names appear in the UI. Who may manage roles is controlled by this capability.',
@@ -1646,6 +1653,7 @@ class Hub extends Model
         'compliance_status_display_names',
         'email_templates',
         'terms_and_conditions',
+        'privacy_policy',
         'page_content',
         'dashboard_nav',
         'advisor_billing_renew_day',
@@ -1684,6 +1692,7 @@ class Hub extends Model
             'compliance_status_display_names' => 'array',
             'email_templates' => 'array',
             'terms_and_conditions' => 'array',
+            'privacy_policy' => 'array',
             'page_content' => 'array',
             'dashboard_nav' => 'array',
             'advisor_billing_renew_day' => 'integer',
@@ -2680,6 +2689,7 @@ class Hub extends Model
                 'login_otp_required' => false,
                 'login_otp_per_user' => true,
                 'terms' => $this->termsPublicPayload(),
+                'privacy' => $this->privacyPublicPayload(),
             ],
         ];
     }
@@ -2765,6 +2775,52 @@ class Hub extends Model
             'version' => $terms['version'],
             'content' => $terms['content'],
             'updated_at' => $terms['updated_at'],
+        ];
+    }
+
+    /**
+     * Resolved Privacy Policy for this hub (stored custom or type default).
+     *
+     * @return array{content: string, version: int, updated_at: ?string, is_custom: bool}
+     */
+    public function resolvedPrivacyPolicy(): array
+    {
+        $stored = is_array($this->privacy_policy) ? $this->privacy_policy : [];
+        $content = isset($stored['content']) ? trim((string) $stored['content']) : '';
+        $isCustom = $content !== '';
+
+        if (! $isCustom) {
+            $content = \App\Support\PrivacyPolicyDefaults::forType((string) $this->type);
+        }
+
+        $version = max(1, (int) ($stored['version'] ?? 1));
+        $updatedAt = isset($stored['updated_at']) ? (string) $stored['updated_at'] : null;
+
+        return [
+            'content' => $content,
+            'version' => $version,
+            'updated_at' => $updatedAt,
+            'is_custom' => $isCustom,
+        ];
+    }
+
+    public function privacyVersion(): int
+    {
+        return $this->resolvedPrivacyPolicy()['version'];
+    }
+
+    /**
+     * @return array{required: bool, version: int, content: string, updated_at: ?string}
+     */
+    public function privacyPublicPayload(): array
+    {
+        $privacy = $this->resolvedPrivacyPolicy();
+
+        return [
+            'required' => trim($privacy['content']) !== '',
+            'version' => $privacy['version'],
+            'content' => $privacy['content'],
+            'updated_at' => $privacy['updated_at'],
         ];
     }
 

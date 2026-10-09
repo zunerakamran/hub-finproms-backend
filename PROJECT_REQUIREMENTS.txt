@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-08 (Hub home page multi-section layout + page_content keys)
+Last updated: 2026-10-09 (UK GDPR Phase 1 frontend PrivacyGate + admin editor)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -175,6 +175,32 @@ Deploy rule:
   (hub_can:dashboard_manage_terms); POST /api/auth/accept-terms (auth).
 - Public GET /hub includes `auth.terms` { required, version, content }.
 - Frontend: /my-dashboard/terms admin page; TermsGate modal after login.
+
+2.2d Privacy Policy (all hub types) — UK GDPR Phase 1
+- Separate from Terms & Conditions (section 2.2c). Terms remain contractual;
+  Privacy Policy is the transparency notice under UK GDPR + DPA 2018.
+- Capability matrix key: `dashboard_manage_privacy` (“Manage privacy policy”)
+  in Hub operations. Defaults ON for hub-admin style roles (same pattern as
+  `dashboard_manage_terms`); Power Admin toggles per hub / role on Central.
+- Hub stores rich HTML Privacy Policy (`hubs.privacy_policy` JSON: content,
+  version, updated_at). Seed sensible default copy per hub type (Shared /
+  White-label / Central) covering: who the controller is, what personal data
+  is processed, purposes, lawful bases, retention summary, recipients /
+  processors (e.g. Stripe, email, hosting), international transfers if any,
+  individual rights, and how to contact the hub / raise a complaint with the
+  ICO. Capable users can edit via rich-text editor.
+- On first login (and when the version changes after an edit), authenticated
+  users must view and acknowledge the current privacy policy before using the
+  app (same gate pattern as Terms). Acceptance stored on the user:
+  `privacy_accepted_at`, `privacy_accepted_version`.
+- Public GET /hub includes `auth.privacy` { required, version, content }.
+- APIs: GET/PUT /api/client-admin/privacy, POST /api/client-admin/privacy/reset
+  (hub_can:dashboard_manage_privacy); POST /api/auth/accept-privacy (auth).
+- Frontend: /my-dashboard/privacy admin page; PrivacyGate (or combined
+  legal-gate after Terms) after login.
+- Remove or shorten the generic “Privacy” subsection inside default Terms so
+  it points to the Privacy Policy instead of duplicating it.
+- See section 6E for the full UK GDPR roadmap (DSAR, erasure, retention, etc.).
 
 2.3 Content metrics
 - Each post/reel tracks:
@@ -1255,6 +1281,122 @@ Notes:
 
 
 --------------------------------------------------------------------------------
+6E. UK GDPR / DATA PROTECTION (ALL HUB TYPES)
+--------------------------------------------------------------------------------
+Regulator / law: UK GDPR + Data Protection Act 2018 (ICO). This section is
+product + process requirements for FinProms hubs. Legal copy must be reviewed
+by the customer’s counsel before go-live; engineering ships the tooling.
+
+Existing foundations that ALREADY help (do not rebuild):
+- Auth: Sanctum SPA cookies, email verification, optional login OTP (2FA)
+- Access control: role × Capabilities matrix
+- Audit: activity_logs + compliance_audit_events (FCA-style workflow trail)
+- Secret encryption at rest (Stripe, hub DB, cPanel); SecurityHeaders
+- Terms accept gate (section 2.2c) — contractual, not a privacy notice
+- Admin hard-delete of users (Power Admin / white-label remote) — not erasure
+
+Personal-data inventory (controllers must keep this accurate):
+  users — name, email, password hash, avatar, terms/privacy acceptance,
+    Stripe customer/PM ids, role/firm flags, suspend/discontinue
+  sessions / tokens — user_id, ip_address, user_agent; OTP/reset by email
+  activity_logs — denormalised user_name, user_email, user_role, ip, ua
+  compliance_audit_events — denormalised actor / related user identity
+  invoices / billing — billing_name, billing_email, payment refs
+  wc_template_requests.contact_details — phone, email, address, website
+  firm_documents + SMC/GC/WC/support attachments — files + uploader identity
+  advisor_import_batches — Excel + JSON lists of name/email
+  hub_backups — full DB dumps (highest residual risk; retention already in 6B)
+  support_tickets — free text, browser_info, attachments
+
+Lawful bases (document in Privacy Policy; typical for this product):
+  - Contract / steps to enter contract — account, subscriptions, billing
+  - Legitimate interests — security logs, fraud prevention, product analytics
+    that are strictly necessary (document LIA where used)
+  - Legal obligation — tax/invoice retention, FCA-related records where
+    applicable to the operator’s regulated activities
+  - Consent — only where relied on (e.g. non-essential cookies / marketing
+    if added later). Prefer not to invent marketing consent until needed.
+
+FCA audit vs erasure tension (MUST follow):
+  Compliance audit trails often must retain “who approved what”. Erasure must
+  ANONYMISE the person (e.g. display name “Deleted user”, clear email/IP)
+  while keeping event rows and foreign-key-safe placeholders. Do not wipe the
+  whole compliance trail when fulfilling a right-to-erasure request.
+
+--------------------------------------------------------------------------------
+6E.1 Implementation phases (build in this order)
+--------------------------------------------------------------------------------
+
+Phase 1 — Transparency (START HERE)  [see also section 2.2d]
+  [x] Privacy Policy content + capability + accept gate (mirror Terms) — backend
+  [x] Defaults per hub type; Terms §Privacy points to Privacy Policy
+  [x] Frontend admin editor + post-login PrivacyGate (after TermsGate)
+  [x] Document processor list in policy defaults (Stripe, email provider,
+      hosting/S3 if used, cPanel sync, Central backup store)
+
+Phase 2 — Subject access / portability (DSAR)
+  [ ] Capability: `dashboard_manage_gdpr` (“Manage GDPR / data requests”)
+      Hub operations group; defaults ON for hub-admin style roles only
+  [ ] Admin (and optionally self-service later) “Export personal data” for a
+      user: JSON or ZIP packing profile, invoices metadata, tickets, WC
+      contact_details for that advisor, activity/compliance events scoped to
+      that user_id, firm-doc upload metadata they created (not other users’
+      files), import-batch rows that mention them
+  [ ] APIs (hub_can:dashboard_manage_gdpr):
+      - GET  …/gdpr/users/{user}/export  (or POST + async download job)
+      - GET  …/gdpr/requests (optional request log)
+  [ ] Frontend: GDPR / Privacy requests page under /my-dashboard
+  [ ] Activity log actions: `gdpr.export`, `gdpr.erase`, `gdpr.rectify`
+  [ ] Target: respond to SARs within 30 days (ops process + tooling)
+
+Phase 3 — Rectification + erasure / anonymisation
+  [ ] Rectify via existing profile update + admin path for SAR corrections
+      (including WC contact_details when that user/advisor owns them)
+  [ ] Erasure service (NOT only hard-delete):
+      - Clear / anonymise PII on users (or soft-retire account)
+      - Scrub denormalised name/email/IP on activity_logs +
+        compliance_audit_events for that user
+      - Delete avatar files; scrub uploader display names where safe
+      - Remove or anonymise advisor-import batch entries for that email
+      - Stripe: delete/detach customer when appropriate (document edge cases)
+      - Keep anonymised audit events for FCA integrity
+  [ ] Hub backups: document that historical dumps may retain PII until
+      retention prune; do not invent per-user backup rewrite in v1
+  [ ] API: POST …/gdpr/users/{user}/erase (hub_can:dashboard_manage_gdpr)
+  [ ] Optional later: self-service “delete my account” (Shared Hub) with
+      confirmation + cool-off
+
+Phase 4 — Retention & minimisation
+  [ ] Configurable retention (hub settings or config) for:
+      activity_logs, expired OTP/reset/verification tokens, sessions,
+      advisor-import files, closed support tickets (after N days)
+  [ ] Scheduled Artisan prune jobs (respect backup retention in 6B separately)
+  [ ] Do not retain passwords/secrets in any export or log (already redacted)
+
+Phase 5 — Cookies / marketing (only if product needs them)
+  [ ] Cookie preference centre + records if non-essential cookies/analytics
+      are added (PECR + UK GDPR)
+  [ ] Marketing opt-in/out fields only if FinProms adds marketing email
+
+Phase 6 — Breach & accountability (mostly ops; light product)
+  [ ] Breach / incident runbook (outside code): detect → assess → ICO ≤72h
+      if required → notify individuals if high risk
+  [ ] Optional: simple admin incident log table (date, summary, notified)
+  [ ] Staff guidance: who handles SARs / erasure on each hub
+  [ ] DPAs with processors (Stripe, email, host) — commercial/legal, not code
+  [ ] DPO appointment only if thresholds met (legal decision)
+
+--------------------------------------------------------------------------------
+6E.2 Out of scope for v1 (explicit)
+--------------------------------------------------------------------------------
+- Field-level encryption of name/email (hashed passwords + secret encryption
+  already exist)
+- Rewriting historical hub_backup SQL dumps per erasure request
+- Full RoPA UI inside the product (keep RoPA as an ops spreadsheet/doc)
+- AI / analytics processors not currently integrated
+
+
+--------------------------------------------------------------------------------
 7. ARCHITECTURE PRINCIPLES (DERIVED FROM REQUIREMENTS)
 --------------------------------------------------------------------------------
 - Single codebase for Central Hub Controller + Shared hub(s) + all White-labels.
@@ -1276,6 +1418,9 @@ Notes:
   cPanel and registering them on Central Hub.
 - Design for future: AI generation (FinProms admin), in-app edit, compliance,
   firm head + firm documents, more features.
+- UK GDPR tooling (section 6E): privacy notice separate from Terms; DSAR
+  export; anonymising erasure that preserves FCA-style audit integrity;
+  retention prune jobs. Build in the phased order in 6E.1.
 - Settings that vary (e.g. NEW-banner duration) come from the database.
 
 
@@ -1558,6 +1703,25 @@ SECURITY HARDENING (phase 2 — 2026-10-04)
     (hub local + Central), Backup now / download / restore, pa_manage_hub_backups
 [ ] Future: TOTP authenticator 2FA for Power Admin (in addition to email OTP)
 [ ] Future: mime allowlists on all uploads; disallow/sanitize SVG
+
+--------------------------------------------------------------------------------
+UK GDPR / DATA PROTECTION (section 2.2d + 6E) — Phase 1 backend done
+--------------------------------------------------------------------------------
+[x] Phase 1 (backend): Privacy Policy (hubs.privacy_policy) +
+    dashboard_manage_privacy + accept gate (privacy_accepted_*) + defaults per
+    hub type + APIs (GET/PUT/reset privacy, POST accept-privacy) + GET /hub
+    auth.privacy + Terms defaults point to Privacy Policy + nav label key
+[x] Phase 1 (frontend): /my-dashboard/privacy editor + PrivacyGate after
+    TermsGate; API helpers; nav + capability dashboard_manage_privacy;
+    auth.privacy_accepted compare; activity log label auth.privacy_accepted
+[ ] Phase 2: DSAR export (dashboard_manage_gdpr) — admin export of one user’s
+    personal data + activity log keys gdpr.export; frontend GDPR page
+[ ] Phase 3: Erasure / anonymise service (scrub logs + avatar + import rows;
+    keep anonymised compliance audit events); POST …/gdpr/users/{user}/erase
+[ ] Phase 4: Retention prune jobs (activity_logs, expired tokens/sessions,
+    import files, old support tickets) — separate from hub backup retention
+[ ] Phase 5 (if needed): cookie consent / marketing opt-in
+[ ] Phase 6 (ops): breach runbook + processor DPAs; optional incident log
 
 ================================================================================
 END OF REQUIREMENTS
