@@ -55,6 +55,7 @@ use App\Http\Controllers\Api\SettingController;
 use App\Http\Controllers\Api\RoleDisplayNameController;
 use App\Http\Controllers\Api\EmailTemplateController;
 use App\Http\Controllers\Api\GdprController;
+use App\Http\Controllers\Api\GdprIncidentController;
 use App\Http\Controllers\Api\PrivacyController;
 use App\Http\Controllers\Api\TermsController;
 use App\Http\Controllers\Api\ComplianceStatusDisplayNameController;
@@ -504,6 +505,9 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/gdpr/users', [GdprController::class, 'users']);
             Route::get('/gdpr/users/{user}/export', [GdprController::class, 'export'])->whereNumber('user');
             Route::post('/gdpr/users/{user}/erase', [GdprController::class, 'erase'])->whereNumber('user');
+            Route::get('/gdpr/incidents', [GdprIncidentController::class, 'index']);
+            Route::post('/gdpr/incidents', [GdprIncidentController::class, 'store']);
+            Route::put('/gdpr/incidents/{incident}', [GdprIncidentController::class, 'update'])->whereNumber('incident');
         });
 
         Route::middleware('hub_can:dashboard_manage_compliance_status_display_names')->group(function () {

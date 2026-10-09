@@ -45,9 +45,11 @@ class PrivacyPolicyDefaults
 <p>We keep personal data only as long as needed for the purposes above, including legal, accounting, and security requirements. Session and security tokens are short-lived; invoices and some logs may be retained longer. Hub database backups are retained according to the configured backup retention settings.</p>
 <h3>7. Your rights</h3>
 <p>Under UK GDPR you may have rights to access, rectify, erase, restrict, or object to certain processing, and to data portability. To exercise these rights, contact the hub administrator. We may need to verify your identity. Some records (for example anonymised audit events or invoices) may be retained where we have a continuing legal or legitimate need.</p>
-<h3>8. Security</h3>
+<h3>8. Cookies</h3>
+<p>This hub uses essential cookies only (session login and CSRF protection). We do not currently use analytics or marketing cookies. If that changes, we will seek consent where required.</p>
+<h3>9. Security</h3>
 <p>We use technical and organisational measures appropriate to the risk, including encrypted connections, access controls, hashed passwords, and optional login OTP where enabled on your account.</p>
-<h3>9. Changes</h3>
+<h3>10. Changes</h3>
 <p>This policy may be updated from the hub dashboard. Continued use after you acknowledge a new version confirms you have been informed of that version.</p>
 HTML;
     }
@@ -77,9 +79,11 @@ HTML;
 <p>Data is retained as needed to operate the hub, meet legal/accounting needs, and maintain compliance audit integrity. Historical backups may retain personal data until pruned under backup retention settings. Erasure requests may anonymise identity while preserving necessary audit events.</p>
 <h3>7. Your rights</h3>
 <p>You may request access, correction, erasure, restriction, objection, or portability where applicable. Contact your hub administrator. Identity checks may apply. Some anonymised or legally required records may be retained.</p>
-<h3>8. Security and confidentiality</h3>
+<h3>8. Cookies</h3>
+<p>This hub uses essential cookies only (session login and CSRF protection). Analytics and marketing cookies are not used in the current product.</p>
+<h3>9. Security and confidentiality</h3>
 <p>Treat hub materials as confidential per your firm policy. Protect your credentials and use available security features (such as login OTP). Report suspected misuse promptly.</p>
-<h3>9. Changes</h3>
+<h3>10. Changes</h3>
 <p>This policy can be updated by users with permission to manage the Privacy Policy. Acknowledgement may be required after updates.</p>
 HTML;
     }
@@ -107,9 +111,11 @@ HTML;
 <p>Operator account and log data are retained as needed for security and administration. Hub backups follow configured retention counts. Remote credentials are stored encrypted and should be kept only while a hub remains registered.</p>
 <h3>7. Your rights</h3>
 <p>Operators may request access, correction, erasure, restriction, objection, or portability where applicable via the platform administrator. Some security and backup records may be retained or anonymised rather than fully deleted.</p>
-<h3>8. Security</h3>
+<h3>8. Cookies</h3>
+<p>Central Hub uses essential cookies only (session login and CSRF protection). No marketing or analytics cookies are set by the current product.</p>
+<h3>9. Security</h3>
 <p>Protect credentials, enable login OTP where appropriate, and use the minimum access required when acting on tenant hubs. Treat remote credentials and tenant data as confidential.</p>
-<h3>9. Changes</h3>
+<h3>10. Changes</h3>
 <p>This policy may be updated from the dashboard by roles with “Manage privacy policy” enabled.</p>
 HTML;
     }

@@ -2697,6 +2697,7 @@ class Hub extends Model
                 'login_otp_per_user' => true,
                 'terms' => $this->termsPublicPayload(),
                 'privacy' => $this->privacyPublicPayload(),
+                'cookies' => \App\Support\CookieNoticeDefaults::publicPayload(),
             ],
         ];
     }

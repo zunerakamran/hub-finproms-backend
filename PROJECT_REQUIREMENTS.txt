@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-09 (UK GDPR Phase 4 retention prune jobs)
+Last updated: 2026-10-09 (UK GDPR Phases 5–6 cookies notice + incident log)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -1385,17 +1385,36 @@ Phase 4 — Retention & minimisation
   [x] Passwords/secrets already redacted in activity logs / excluded from export
 
 Phase 5 — Cookies / marketing (only if product needs them)
-  [ ] Cookie preference centre + records if non-essential cookies/analytics
-      are added (PECR + UK GDPR)
-  [ ] Marketing opt-in/out fields only if FinProms adds marketing email
+  [x] Essential-cookies notice only (session + CSRF) — no analytics/marketing
+      cookies in the current product (PECR / UK GDPR)
+  [x] GET /hub `auth.cookies` payload + frontend CookieBanner (dismissible;
+      localStorage version key); Privacy Policy defaults include Cookies section
+  [ ] Full cookie preference centre — only when non-essential cookies/analytics
+      are added later
+  [ ] Marketing opt-in/out fields — only if FinProms adds marketing email
 
 Phase 6 — Breach & accountability (mostly ops; light product)
-  [ ] Breach / incident runbook (outside code): detect → assess → ICO ≤72h
-      if required → notify individuals if high risk
-  [ ] Optional: simple admin incident log table (date, summary, notified)
-  [ ] Staff guidance: who handles SARs / erasure on each hub
-  [ ] DPAs with processors (Stripe, email, host) — commercial/legal, not code
-  [ ] DPO appointment only if thresholds met (legal decision)
+  [x] Breach / incident runbook embedded in GDPR admin API + UI (detect →
+      assess → ICO ≤72h if required → notify individuals if high risk)
+  [x] Admin incident log: `gdpr_incidents` table + GET/POST/PUT
+      …/gdpr/incidents (hub_can:dashboard_manage_gdpr)
+  [x] Staff guidance in runbook: SAR/erasure owners = dashboard_manage_gdpr;
+      DPAs with processors are commercial/legal outside the app; DPO only if
+      legal thresholds met
+  [ ] Formal processor DPAs (Stripe, email, host) — legal/commercial, not code
+  [ ] DPO appointment decision — legal counsel
+
+--------------------------------------------------------------------------------
+6E.3 Breach runbook (ops checklist)
+--------------------------------------------------------------------------------
+1. Detect & contain the incident (revoke access, rotate secrets, isolate).
+2. Assess personal-data risk (what data, how many people, harm likelihood).
+3. If notification required, report to the ICO without undue delay and within
+   72 hours of becoming aware: https://ico.org.uk/for-organisations/report-a-breach/
+4. If high risk to individuals, inform them without undue delay.
+5. Log the incident under GDPR / data requests → Breach / incident log.
+6. Handle related SARs / erasure via the same GDPR page.
+7. Review lessons learned; confirm processor DPAs remain current.
 
 --------------------------------------------------------------------------------
 6E.2 Out of scope for v1 (explicit)
@@ -1733,8 +1752,10 @@ UK GDPR / DATA PROTECTION (section 2.2d + 6E) — Phase 1 backend done
     POST …/gdpr/users/{user}/erase; frontend erase + gdpr.erase log
 [x] Phase 4: Retention prune (`gdpr:prune-retention`, config/gdpr.php,
     daily 02:30); GET gdpr/retention + frontend policy panel
-[ ] Phase 5 (if needed): cookie consent / marketing opt-in
-[ ] Phase 6 (ops): breach runbook + processor DPAs; optional incident log
+[x] Phase 5: Essential cookie notice (auth.cookies + CookieBanner); no
+    marketing/analytics cookies; preference centre deferred until needed
+[x] Phase 6: gdpr_incidents log + runbook in GDPR UI; formal DPAs/DPO remain
+    legal/ops outside code
 
 ================================================================================
 END OF REQUIREMENTS
