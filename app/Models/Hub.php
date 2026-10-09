@@ -1216,6 +1216,13 @@ class Hub extends Model
             'default_shared' => true,
             'default_white_label' => true,
         ],
+        'dashboard_manage_gdpr' => [
+            'label' => 'Manage GDPR / data requests',
+            'description' => 'Search users and export a UK GDPR subject-access (DSAR) JSON package of their personal data on this hub. Available on Shared, White-label, and Central hubs.',
+            'group' => self::GROUP_DASHBOARD_HUB,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
         'dashboard_manage_role_display_names' => [
             'label' => 'Manage roles',
             'description' => 'List roles (with user counts), add or remove roles on this hub’s Capabilities matrix, and customize how role names appear in the UI. Who may manage roles is controlled by this capability.',

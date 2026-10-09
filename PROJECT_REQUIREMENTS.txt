@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-09 (UK GDPR Phase 1 frontend PrivacyGate + admin editor)
+Last updated: 2026-10-09 (UK GDPR Phase 2 DSAR export — backend + frontend)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -1335,19 +1335,20 @@ Phase 1 — Transparency (START HERE)  [see also section 2.2d]
       hosting/S3 if used, cPanel sync, Central backup store)
 
 Phase 2 — Subject access / portability (DSAR)
-  [ ] Capability: `dashboard_manage_gdpr` (“Manage GDPR / data requests”)
-      Hub operations group; defaults ON for hub-admin style roles only
-  [ ] Admin (and optionally self-service later) “Export personal data” for a
-      user: JSON or ZIP packing profile, invoices metadata, tickets, WC
-      contact_details for that advisor, activity/compliance events scoped to
-      that user_id, firm-doc upload metadata they created (not other users’
-      files), import-batch rows that mention them
-  [ ] APIs (hub_can:dashboard_manage_gdpr):
-      - GET  …/gdpr/users/{user}/export  (or POST + async download job)
-      - GET  …/gdpr/requests (optional request log)
-  [ ] Frontend: GDPR / Privacy requests page under /my-dashboard
-  [ ] Activity log actions: `gdpr.export`, `gdpr.erase`, `gdpr.rectify`
-  [ ] Target: respond to SARs within 30 days (ops process + tooling)
+  [x] Capability: `dashboard_manage_gdpr` (“Manage GDPR / data requests”)
+      Hub operations group; defaults ON for hub-admin style roles
+      (approver/advisor/admin-staff/user off by matrix defaults)
+  [x] Admin “Export personal data” JSON package: profile, firm, invoices,
+      support tickets, WC template-request contact_details, activity logs,
+      compliance audit events, firm-doc upload metadata, advisor-import
+      batch mentions (no passwords / payment-method secrets / file bytes)
+  [x] APIs (hub_can:dashboard_manage_gdpr):
+      - GET …/gdpr/users (search)
+      - GET …/gdpr/users/{user}/export (JSON download; works when acting remotely)
+  [ ] Optional later: GET …/gdpr/requests request log table
+  [x] Frontend: /my-dashboard/gdpr — search users + download export
+  [x] Activity log action: `gdpr.export` (erase/rectify reserved for Phase 3)
+  [x] Ops note in UI: aim to fulfil SARs within 30 days
 
 Phase 3 — Rectification + erasure / anonymisation
   [ ] Rectify via existing profile update + admin path for SAR corrections
@@ -1714,8 +1715,9 @@ UK GDPR / DATA PROTECTION (section 2.2d + 6E) — Phase 1 backend done
 [x] Phase 1 (frontend): /my-dashboard/privacy editor + PrivacyGate after
     TermsGate; API helpers; nav + capability dashboard_manage_privacy;
     auth.privacy_accepted compare; activity log label auth.privacy_accepted
-[ ] Phase 2: DSAR export (dashboard_manage_gdpr) — admin export of one user’s
-    personal data + activity log keys gdpr.export; frontend GDPR page
+[x] Phase 2: DSAR export (dashboard_manage_gdpr) — GET gdpr/users +
+    gdpr/users/{id}/export JSON; GdprDataExportService; frontend
+    /my-dashboard/gdpr; activity log gdpr.export
 [ ] Phase 3: Erasure / anonymise service (scrub logs + avatar + import rows;
     keep anonymised compliance audit events); POST …/gdpr/users/{user}/erase
 [ ] Phase 4: Retention prune jobs (activity_logs, expired tokens/sessions,
