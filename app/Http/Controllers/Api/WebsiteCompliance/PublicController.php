@@ -122,8 +122,8 @@ class PublicController extends Controller
     }
 
     /**
-     * Public home-page showcase: up to 4 active website templates for this hub.
-     * Returns an empty list when the WC module / catalog is unavailable.
+     * Public home-page showcase: active website templates for this hub.
+     * Frontend pads to 3 cards; returns empty when WC module / catalog is off.
      */
     public function listHubTemplates(Request $request): JsonResponse
     {

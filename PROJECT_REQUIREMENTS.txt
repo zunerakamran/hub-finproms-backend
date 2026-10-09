@@ -636,10 +636,12 @@ Notes:
 - Public Home page (`/`) sections (all hubs; copy editable under Settings →
   Page content → Home):
   1) Hero — existing brand + title/lead/CTAs + post marquee (unchanged)
-  2) Browse by Categories — hub categories (hidden empty / catalog-off states)
-  3) Website templates — up to 4 active showcase templates for this hub
-     (`GET /api/website-compliance/public/templates`); section omitted when
-     none / WC module off
+  2) Browse by Categories — top 8 hub categories by post count (hidden empty /
+     catalog-off states); “View all” still opens the full catalog
+  3) Website templates — always 3 showcase cards (left-aligned 3-column grid).
+     Uses up to 3 distinct active hub templates; if fewer exist, the available
+     template(s) are repeated to fill 3 boxes. Section omitted when none /
+     WC module off (`GET /api/website-compliance/public/templates`)
   4) Support tickets — three tabs (Tickets / My tickets / Raise a ticket);
      wired to Support Tickets module + member ticket APIs when enabled
   5) Documents — promo layout with Read more → firm documents (or login);
@@ -651,7 +653,7 @@ Notes:
   image URL, optional `footer_powered_by_url` opening in a new tab).
   Public header nav stays the existing site links
   (Home / Posts / Reels / Bundles / …). Categories use a left-aligned
-  4-column grid; website templates use a left-aligned 3-column grid with
+  4-column grid (max 8 cards); website templates always show 3 cards with
   the same hover-to-scroll preview as the dashboard template cards;
   documents section matches a two-column promo layout (category counts +
   carousel previews), ordering latest uploads first then most-used
