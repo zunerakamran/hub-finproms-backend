@@ -26,3 +26,10 @@ Schedule::command('billing:process-module-cycles')
 Schedule::command('hubs:run-due-backups')
     ->everyMinute()
     ->withoutOverlapping(120);
+
+// UK GDPR Phase 4: prune expired activity logs, auth tokens, sessions,
+// advisor-import files, and closed support tickets (config/gdpr.php).
+// Does not prune compliance_audit_events or hub backups (those use 6B retention).
+Schedule::command('gdpr:prune-retention')
+    ->dailyAt('02:30')
+    ->withoutOverlapping();

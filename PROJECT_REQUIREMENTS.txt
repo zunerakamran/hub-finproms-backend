@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-09 (UK GDPR Phase 3 erasure / anonymisation)
+Last updated: 2026-10-09 (UK GDPR Phase 4 retention prune jobs)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -1374,11 +1374,15 @@ Phase 3 — Rectification + erasure / anonymisation
   [ ] Optional later: live Stripe customer delete via API when configured
 
 Phase 4 — Retention & minimisation
-  [ ] Configurable retention (hub settings or config) for:
-      activity_logs, expired OTP/reset/verification tokens, sessions,
-      advisor-import files, closed support tickets (after N days)
-  [ ] Scheduled Artisan prune jobs (respect backup retention in 6B separately)
-  [ ] Do not retain passwords/secrets in any export or log (already redacted)
+  [x] Configurable retention via `config/gdpr.php` + `.env` keys
+      (GDPR_RETENTION_*); set 0 to disable a category. Categories:
+      activity_logs, login OTP, email verification, password reset,
+      sessions, advisor-import stored files, closed/resolved support tickets
+  [x] Artisan `gdpr:prune-retention` (+ `--dry-run`); scheduled daily 02:30
+  [x] Does NOT prune compliance_audit_events or hub_backups (6B separate)
+  [x] GET …/gdpr/retention — policy visibility for GDPR admin page
+  [x] Frontend GDPR page shows current retention policy summary
+  [x] Passwords/secrets already redacted in activity logs / excluded from export
 
 Phase 5 — Cookies / marketing (only if product needs them)
   [ ] Cookie preference centre + records if non-essential cookies/analytics
@@ -1727,8 +1731,8 @@ UK GDPR / DATA PROTECTION (section 2.2d + 6E) — Phase 1 backend done
 [x] Phase 3: Erasure / anonymise (GdprErasureService + gdpr_erased_at;
     scrub logs/invoices/tickets/WC/import rows; keep audit events);
     POST …/gdpr/users/{user}/erase; frontend erase + gdpr.erase log
-[ ] Phase 4: Retention prune jobs (activity_logs, expired tokens/sessions,
-    import files, old support tickets) — separate from hub backup retention
+[x] Phase 4: Retention prune (`gdpr:prune-retention`, config/gdpr.php,
+    daily 02:30); GET gdpr/retention + frontend policy panel
 [ ] Phase 5 (if needed): cookie consent / marketing opt-in
 [ ] Phase 6 (ops): breach runbook + processor DPAs; optional incident log
 

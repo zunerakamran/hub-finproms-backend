@@ -9,6 +9,7 @@ use App\Services\ActingHubService;
 use App\Services\ActivityLogService;
 use App\Services\GdprDataExportService;
 use App\Services\GdprErasureService;
+use App\Services\GdprRetentionPruneService;
 use App\Services\WhiteLabelDatabaseService;
 use App\Services\WhiteLabelUserService;
 use Illuminate\Http\JsonResponse;
@@ -26,8 +27,33 @@ class GdprController extends Controller
         private readonly WhiteLabelDatabaseService $remoteDb,
         private readonly GdprDataExportService $exports,
         private readonly GdprErasureService $erasures,
+        private readonly GdprRetentionPruneService $retention,
         private readonly ActivityLogService $activityLogs
     ) {}
+
+    /**
+     * Current retention policy (config/gdpr.php) for admin visibility.
+     */
+    public function retention(): JsonResponse
+    {
+        $policy = $this->retention->policy();
+
+        return response()->json([
+            'policy' => $policy,
+            'notes' => [
+                'Configured via .env / config/gdpr.php (not per-hub UI in v1).',
+                'Scheduled daily at 02:30 via `gdpr:prune-retention`.',
+                'Compliance audit events are never pruned by this job.',
+                'Hub database backups use separate retention (backup settings / section 6B).',
+                'Set a category to 0 days/hours to disable pruning for that category.',
+            ],
+            'schedule' => [
+                'command' => 'gdpr:prune-retention',
+                'frequency' => 'daily',
+                'time' => '02:30',
+            ],
+        ]);
+    }
 
     /**
      * Search users on the current / acting hub for DSAR tooling.
