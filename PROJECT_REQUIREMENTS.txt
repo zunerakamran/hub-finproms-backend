@@ -651,10 +651,11 @@ Notes:
   Footer shows hub copyright (`footer_copyright` with `{year}`/`{brand}`)
   plus Powered by (`footer_powered_by_name`, optional `footer_powered_by_logo`
   image URL, optional `footer_powered_by_url` opening in a new tab).
-  Public header nav stays the existing site links
-  (Home / Posts / Reels / Bundles / …). Categories use a left-aligned
-  4-column grid (max 8 cards); website templates always show 3 cards with
-  the same hover-to-scroll preview as the dashboard template cards;
+  Public header shows hub brand plus editable `nav_tagline` (page_content home;
+  blank hides the line) and site links (Home / Posts / Reels / Bundles / …).
+  Categories use a left-aligned 4-column grid (max 8 cards); website templates
+  always show 3 cards with the same hover-to-scroll preview as the dashboard
+  template cards;
   documents section matches a two-column promo layout (category counts +
   carousel previews), ordering latest uploads first then most-used
   (category usage / attachment count).

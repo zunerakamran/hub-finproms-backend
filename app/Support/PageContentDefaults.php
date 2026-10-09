@@ -83,6 +83,8 @@ class PageContentDefaults
                 'features_card4_title' => 'Generic Compliance',
                 'features_card4_text' => 'Submit generic compliance items, track status, and keep a clear audit trail for every request.',
                 'features_card4_url' => '/my-dashboard/general-compliance',
+                // Header / nav
+                'nav_tagline' => 'Compliant content hub',
                 // Footer
                 'footer_tagline' => 'Compliant content, ready to publish',
                 'footer_copyright' => '© {year} {brand}. All rights reserved.',
