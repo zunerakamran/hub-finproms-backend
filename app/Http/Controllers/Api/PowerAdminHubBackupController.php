@@ -134,6 +134,7 @@ class PowerAdminHubBackupController extends Controller
                 ->post($apiUrl.'/internal/hub-backups/run', [
                     'triggered_by' => HubBackup::TRIGGER_MANUAL,
                     'central_receive_url' => $receiveUrl,
+                    'hub_slug' => $hub->slug,
                 ]);
 
             if (! $response->successful()) {

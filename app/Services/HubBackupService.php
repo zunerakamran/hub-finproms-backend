@@ -184,9 +184,16 @@ class HubBackupService
 
     /**
      * Upload a completed local backup to Central (content hubs only).
+     *
+     * @param  string|null  $uploadToken  Prefer the key Central used to call /run (avoids slug/token drift).
+     * @param  string|null  $hubSlug  Canonical Central registry slug for this hub.
      */
-    public function uploadLocalBackupToCentral(HubBackup $backup, ?string $centralReceiveUrl = null): ?array
-    {
+    public function uploadLocalBackupToCentral(
+        HubBackup $backup,
+        ?string $centralReceiveUrl = null,
+        ?string $uploadToken = null,
+        ?string $hubSlug = null,
+    ): ?array {
         if (config('hub.is_control_plane')) {
             return null;
         }
@@ -215,9 +222,16 @@ class HubBackupService
         }
 
         $hub = $this->hubs->current();
-        $token = (string) ($hub->backup_token ?: config('services.hub_backup.secret', ''));
+        $token = (string) ($uploadToken
+            ?: $hub->backup_token
+            ?: config('services.hub_backup.secret', ''));
         if ($token === '') {
             throw new RuntimeException('Backup token is not configured for this hub.');
+        }
+
+        $slug = (string) ($hubSlug ?: $hub->slug);
+        if ($slug === '') {
+            throw new RuntimeException('Hub slug is missing; cannot upload backup to Central.');
         }
 
         $verify = (bool) config('services.http_tls_verify', true);
@@ -225,11 +239,11 @@ class HubBackupService
             ->timeout((int) config('services.hub_backup.upload_timeout', 600))
             ->withHeaders([
                 'X-Hub-Backup-Key' => $token,
-                'X-Hub-Slug' => $hub->slug,
+                'X-Hub-Slug' => $slug,
             ])
             ->attach('archive', file_get_contents($absolute), $backup->filename ?: 'backup.zip')
             ->post($centralUrl, [
-                'hub_slug' => $hub->slug,
+                'hub_slug' => $slug,
                 'checksum' => $backup->checksum,
                 'triggered_by' => $backup->triggered_by,
                 'includes_database' => $backup->includes_database ? '1' : '0',
@@ -383,6 +397,7 @@ class HubBackupService
                     ->post($apiUrl.'/internal/hub-backups/run', [
                         'triggered_by' => HubBackup::TRIGGER_SCHEDULE,
                         'central_receive_url' => $receiveUrl,
+                        'hub_slug' => $hub->slug,
                     ]);
 
                 if ($response->successful()) {

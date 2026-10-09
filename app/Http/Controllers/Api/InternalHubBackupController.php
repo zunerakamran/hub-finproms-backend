@@ -42,10 +42,19 @@ class InternalHubBackupController extends Controller
             $uploadError = null;
             $receiveUrl = $request->input('central_receive_url')
                 ?: $request->header('X-Central-Receive-Url');
+            // Reuse the key + registry slug Central used to authorize /run so the
+            // upload matches Central's hubs.backup_token even if this deploy's
+            // HUB_SLUG / local token drifted from the Central registry.
+            $uploadToken = (string) $request->header('X-Hub-Backup-Key', '');
+            $uploadSlug = (string) ($request->header('X-Hub-Slug')
+                ?: $request->input('hub_slug', '')
+                ?: $this->hubs->current()->slug);
             try {
                 $centralPayload = $this->backups->uploadLocalBackupToCentral(
                     $local,
-                    is_string($receiveUrl) ? $receiveUrl : null
+                    is_string($receiveUrl) ? $receiveUrl : null,
+                    $uploadToken !== '' ? $uploadToken : null,
+                    $uploadSlug !== '' ? $uploadSlug : null,
                 );
             } catch (Throwable $e) {
                 report($e);
@@ -76,10 +85,21 @@ class InternalHubBackupController extends Controller
         }
 
         $slug = (string) ($request->header('X-Hub-Slug') ?: $request->input('hub_slug', ''));
-        if ($slug === '' || ! $this->authorizeIncoming($request, $slug)) {
-            Log::warning('hub backup receive: unauthorized', ['ip' => $request->ip(), 'slug' => $slug]);
+        if (! $this->authorizeIncoming($request, $slug)) {
+            Log::warning('hub backup receive: unauthorized', [
+                'ip' => $request->ip(),
+                'slug' => $slug,
+                'key_present' => $request->header('X-Hub-Backup-Key') !== null
+                    && $request->header('X-Hub-Backup-Key') !== '',
+            ]);
 
             return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        $registryHub = $this->resolveIncomingHub($request, $slug);
+        $storeSlug = $registryHub?->slug ?: $slug;
+        if ($storeSlug === '') {
+            return response()->json(['message' => 'Could not resolve hub for backup receive.'], 422);
         }
 
         if (! $request->hasFile('archive')) {
@@ -98,7 +118,7 @@ class InternalHubBackupController extends Controller
         $file->move(dirname($tmp), basename($tmp));
 
         try {
-            $backup = $this->backups->receiveOnCentral($slug, $tmp, [
+            $backup = $this->backups->receiveOnCentral($storeSlug, $tmp, [
                 'checksum' => $request->input('checksum'),
                 'triggered_by' => $request->input('triggered_by', HubBackup::TRIGGER_RECEIVE),
                 'includes_database' => $request->input('includes_database', true),
@@ -185,8 +205,47 @@ class InternalHubBackupController extends Controller
             return true;
         }
 
+        // Token matches a registered hub (content HUB_SLUG can differ from Central slug).
+        $matched = Hub::query()
+            ->whereNotNull('backup_token')
+            ->where('backup_token', '!=', '')
+            ->get()
+            ->first(fn (Hub $row) => hash_equals((string) $row->backup_token, $provided));
+        if ($matched) {
+            Log::info('hub backup receive: authorized by token match', [
+                'provided_slug' => $slug,
+                'matched_slug' => $matched->slug,
+            ]);
+
+            return true;
+        }
+
         $shared = (string) config('services.hub_backup.secret', '');
 
         return $shared !== '' && hash_equals($shared, $provided);
+    }
+
+    /**
+     * Resolve the Central registry hub for a received archive (slug, else token).
+     */
+    public function resolveIncomingHub(Request $request, string $slug): ?Hub
+    {
+        if ($slug !== '') {
+            $bySlug = Hub::query()->where('slug', $slug)->first();
+            if ($bySlug) {
+                return $bySlug;
+            }
+        }
+
+        $provided = (string) $request->header('X-Hub-Backup-Key', '');
+        if ($provided === '') {
+            return null;
+        }
+
+        return Hub::query()
+            ->whereNotNull('backup_token')
+            ->where('backup_token', '!=', '')
+            ->get()
+            ->first(fn (Hub $row) => hash_equals((string) $row->backup_token, $provided));
     }
 }
