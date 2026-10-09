@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Hub;
 use App\Models\HubBackup;
 use App\Models\User;
+use App\Support\ZipSupport;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -13,12 +14,12 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Throwable;
-use ZipArchive;
 
 class HubBackupService
 {
     public function __construct(
         private readonly HubService $hubs,
+        private readonly ZipSupport $zip,
     ) {}
 
     /**
@@ -449,12 +450,7 @@ class HubBackupService
         $this->ensureDirectory($workDir);
 
         try {
-            $zip = new ZipArchive;
-            if ($zip->open($zipAbsolutePath) !== true) {
-                throw new RuntimeException('Could not open backup archive.');
-            }
-            $zip->extractTo($workDir);
-            $zip->close();
+            $this->zip->extract($zipAbsolutePath, $workDir);
 
             $sql = $workDir.DIRECTORY_SEPARATOR.'database.sql';
             if (is_file($sql)) {
@@ -804,29 +800,7 @@ class HubBackupService
 
     private function zipDirectory(string $sourceDir, string $zipPath): void
     {
-        $zip = new ZipArchive;
-        if ($zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
-            throw new RuntimeException('Could not create zip archive.');
-        }
-
-        $sourceDir = realpath($sourceDir) ?: $sourceDir;
-        $files = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($sourceDir, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::SELF_FIRST
-        );
-
-        foreach ($files as $file) {
-            $path = $file->getRealPath();
-            $relative = substr($path, strlen($sourceDir) + 1);
-            $relative = str_replace('\\', '/', $relative);
-            if ($file->isDir()) {
-                $zip->addEmptyDir($relative);
-            } else {
-                $zip->addFile($path, $relative);
-            }
-        }
-
-        $zip->close();
+        $this->zip->zipDirectory($sourceDir, $zipPath);
     }
 
     private function copyDirectory(string $src, string $dest): void
