@@ -2562,6 +2562,40 @@ class Hub extends Model
     }
 
     /**
+     * Absolute URL for a file on this deploy's public disk via /api/media/{path}.
+     * Prefer this over /storage/… — PublicStorageController works without the symlink.
+     */
+    public function absoluteStoredMediaUrl(?string $path): ?string
+    {
+        if (! filled($path)) {
+            return null;
+        }
+
+        $path = trim((string) $path);
+        if ($path === '') {
+            return null;
+        }
+
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            return $path;
+        }
+
+        $relative = ltrim(str_replace('\\', '/', $path), '/');
+        foreach (['storage/', 'api/media/', 'media/'] as $prefix) {
+            if (str_starts_with(strtolower($relative), $prefix)) {
+                $relative = substr($relative, strlen($prefix));
+                break;
+            }
+        }
+        $relative = ltrim($relative, '/');
+        if ($relative === '') {
+            return null;
+        }
+
+        return rtrim((string) config('app.url'), '/').'/api/media/'.$relative;
+    }
+
+    /**
      * From address for transactional mail; falls back to mail config when unset.
      */
     public function mailFromAddress(): string
@@ -2667,10 +2701,10 @@ class Hub extends Model
 
         $poweredByLogo = trim((string) ($resolved['home']['footer_powered_by_logo'] ?? ''));
         if ($poweredByLogo !== '') {
-            // Host-absolute like branding logos — relative /storage/… breaks on the Vite frontend.
-            $resolved['home']['footer_powered_by_logo'] = $this->absoluteAssetUrl(
-                $this->publicAssetUrl($poweredByLogo)
-            ) ?? $poweredByLogo;
+            // Host-absolute via /api/media (same as avatars) so Vite + white-label
+            // deploys can load the control-plane file without a public/storage symlink.
+            $resolved['home']['footer_powered_by_logo'] = $this->absoluteStoredMediaUrl($poweredByLogo)
+                ?? $poweredByLogo;
         }
 
         return $resolved;

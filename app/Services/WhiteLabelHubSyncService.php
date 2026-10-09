@@ -49,6 +49,17 @@ class WhiteLabelHubSyncService
                 // Logos/favicons are uploaded on the shared control-plane disk.
                 // Push absolute URLs so the white-labelled deploy can load them
                 // (relative storage paths would 404 on the tenant host).
+                $pageContent = is_array($hub->page_content) ? $hub->page_content : null;
+                if (is_array($pageContent)) {
+                    $poweredByLogo = $pageContent['home']['footer_powered_by_logo'] ?? null;
+                    if (is_string($poweredByLogo) && $poweredByLogo !== '') {
+                        $absolute = $hub->absoluteStoredMediaUrl($poweredByLogo);
+                        if (is_string($absolute) && $absolute !== '') {
+                            $pageContent['home']['footer_powered_by_logo'] = $absolute;
+                        }
+                    }
+                }
+
                 $payload = [
                     'name' => $hub->name,
                     'type' => $hub->isShared() ? Hub::TYPE_SHARED : Hub::TYPE_WHITE_LABEL,
@@ -56,7 +67,7 @@ class WhiteLabelHubSyncService
                     'primary_color' => $hub->primary_color,
                     'secondary_color' => $hub->secondary_color,
                     'accent_color' => $hub->accent_color,
-                    'page_content' => json_encode(is_array($hub->page_content) ? $hub->page_content : null),
+                    'page_content' => json_encode($pageContent),
                     'dashboard_nav' => json_encode(is_array($hub->dashboard_nav) ? $hub->dashboard_nav : null),
                     'logo_url' => $hub->logoAbsoluteUrl(),
                     'white_logo_url' => $hub->whiteLogoAbsoluteUrl(),

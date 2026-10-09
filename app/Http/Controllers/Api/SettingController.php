@@ -216,13 +216,18 @@ class SettingController extends Controller
             ) {
                 $incomingLogo = trim((string) ($incoming['home']['footer_powered_by_logo'] ?? ''));
                 $previousPublic = Storage::disk('public')->url($previousPoweredByLogo);
-                $previousAbsolute = rtrim((string) config('app.url'), '/').'/'.ltrim($previousPublic, '/');
-                if (
-                    $incomingLogo === ''
+                $previousMedia = $hub->absoluteStoredMediaUrl($previousPoweredByLogo);
+                $previousAbsolute = str_starts_with($previousPublic, 'http://') || str_starts_with($previousPublic, 'https://')
+                    ? $previousPublic
+                    : rtrim((string) config('app.url'), '/').'/'.ltrim($previousPublic, '/');
+                $echoesStored = $incomingLogo === ''
                     || $incomingLogo === $previousPoweredByLogo
                     || $incomingLogo === $previousPublic
                     || $incomingLogo === $previousAbsolute
-                ) {
+                    || $incomingLogo === $previousMedia
+                    || str_ends_with($incomingLogo, '/'.$previousPoweredByLogo)
+                    || str_ends_with($incomingLogo, $previousPoweredByLogo);
+                if ($echoesStored) {
                     $merged['home']['footer_powered_by_logo'] = $previousPoweredByLogo;
                 }
             }

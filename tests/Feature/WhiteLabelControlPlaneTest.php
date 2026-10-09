@@ -231,6 +231,12 @@ class WhiteLabelControlPlaneTest extends TestCase
         $hub->logo_url = 'hubs/logos/brand-logo.png';
         $hub->white_logo_url = 'hubs/white-logos/brand-logo-white.png';
         $hub->favicon_url = 'hubs/favicons/brand.ico';
+        $hub->page_content = [
+            'home' => [
+                'footer_powered_by_logo' => 'hubs/powered-by-logos/bypass.png',
+                'footer_powered_by_name' => 'Bypass',
+            ],
+        ];
         $hub->save();
 
         app(\App\Services\WhiteLabelHubSyncService::class)->pushSettings($hub->fresh());
@@ -251,6 +257,13 @@ class WhiteLabelControlPlaneTest extends TestCase
             $this->assertSame(
                 'https://sharedhub.fin-proms.com/api/media/hubs/favicons/brand.ico',
                 $row->favicon_url
+            );
+
+            $remotePageContent = json_decode((string) $row->page_content, true);
+            $this->assertIsArray($remotePageContent);
+            $this->assertSame(
+                'https://sharedhub.fin-proms.com/api/media/hubs/powered-by-logos/bypass.png',
+                $remotePageContent['home']['footer_powered_by_logo'] ?? null
             );
         } finally {
             $remote->disconnect($hub);
@@ -773,6 +786,7 @@ class WhiteLabelControlPlaneTest extends TestCase
             $table->string('logo_url')->nullable();
             $table->string('white_logo_url')->nullable();
             $table->string('favicon_url')->nullable();
+            $table->json('page_content')->nullable();
             $table->string('from_email')->nullable();
             $table->string('frontend_url')->nullable();
             $table->json('checklist')->nullable();
