@@ -1216,6 +1216,13 @@ class Hub extends Model
             'default_shared' => true,
             'default_white_label' => true,
         ],
+        'dashboard_manage_cookies' => [
+            'label' => 'Manage cookie notice',
+            'description' => 'Edit the Cookie Notice shown in the site banner (essential cookies / PECR). Available on Shared, White-label, and Central hubs. Updating the text bumps the version so visitors see the banner again.',
+            'group' => self::GROUP_DASHBOARD_HUB,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
         'dashboard_manage_gdpr' => [
             'label' => 'Manage GDPR / data requests',
             'description' => 'Search users and export a UK GDPR subject-access (DSAR) JSON package of their personal data on this hub. Available on Shared, White-label, and Central hubs.',
@@ -1661,6 +1668,7 @@ class Hub extends Model
         'email_templates',
         'terms_and_conditions',
         'privacy_policy',
+        'cookie_notice',
         'page_content',
         'dashboard_nav',
         'advisor_billing_renew_day',
@@ -1700,6 +1708,7 @@ class Hub extends Model
             'email_templates' => 'array',
             'terms_and_conditions' => 'array',
             'privacy_policy' => 'array',
+            'cookie_notice' => 'array',
             'page_content' => 'array',
             'dashboard_nav' => 'array',
             'advisor_billing_renew_day' => 'integer',
@@ -2697,7 +2706,7 @@ class Hub extends Model
                 'login_otp_per_user' => true,
                 'terms' => $this->termsPublicPayload(),
                 'privacy' => $this->privacyPublicPayload(),
-                'cookies' => \App\Support\CookieNoticeDefaults::publicPayload(),
+                'cookies' => $this->cookiesPublicPayload(),
             ],
         ];
     }
@@ -2829,6 +2838,53 @@ class Hub extends Model
             'version' => $privacy['version'],
             'content' => $privacy['content'],
             'updated_at' => $privacy['updated_at'],
+        ];
+    }
+
+    /**
+     * Resolved Cookie Notice for this hub (stored custom or type default).
+     *
+     * @return array{content: string, version: int, updated_at: ?string, is_custom: bool}
+     */
+    public function resolvedCookieNotice(): array
+    {
+        $stored = is_array($this->cookie_notice) ? $this->cookie_notice : [];
+        $content = isset($stored['content']) ? trim((string) $stored['content']) : '';
+        $isCustom = $content !== '';
+
+        if (! $isCustom) {
+            $content = \App\Support\CookieNoticeDefaults::forType((string) $this->type);
+        }
+
+        $version = max(1, (int) ($stored['version'] ?? 1));
+        $updatedAt = isset($stored['updated_at']) ? (string) $stored['updated_at'] : null;
+
+        return [
+            'content' => $content,
+            'version' => $version,
+            'updated_at' => $updatedAt,
+            'is_custom' => $isCustom,
+        ];
+    }
+
+    public function cookieNoticeVersion(): int
+    {
+        return $this->resolvedCookieNotice()['version'];
+    }
+
+    /**
+     * @return array{essential_only: bool, required: bool, version: int, content: string, updated_at: ?string}
+     */
+    public function cookiesPublicPayload(): array
+    {
+        $cookies = $this->resolvedCookieNotice();
+
+        return [
+            'essential_only' => true,
+            'required' => trim($cookies['content']) !== '',
+            'version' => $cookies['version'],
+            'content' => $cookies['content'],
+            'updated_at' => $cookies['updated_at'],
         ];
     }
 

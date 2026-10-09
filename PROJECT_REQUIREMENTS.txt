@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-09 (UK GDPR Phases 5–6 cookies notice + incident log)
+Last updated: 2026-10-09 (Removed GDPR incident log — use Support Tickets)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -201,6 +201,24 @@ Deploy rule:
 - Remove or shorten the generic “Privacy” subsection inside default Terms so
   it points to the Privacy Policy instead of duplicating it.
 - See section 6E for the full UK GDPR roadmap (DSAR, erasure, retention, etc.).
+
+2.2e Cookie Notice (all hub types) — UK GDPR / PECR Phase 5
+- Separate from Terms and Privacy. Banner informs visitors about essential
+  cookies (session + CSRF); not a full consent preference centre while no
+  non-essential cookies exist.
+- Capability matrix key: `dashboard_manage_cookies` (“Manage cookie notice”)
+  in Hub operations. Same default pattern as Terms / Privacy.
+- Hub stores rich HTML Cookie Notice (`hubs.cookie_notice` JSON: content,
+  version, updated_at). Defaults per hub type (Shared / White-label / Central).
+  Capable users edit via rich-text editor; Save/Reset bumps version.
+- Public GET /hub includes `auth.cookies`
+  { essential_only, required, version, content, updated_at }.
+- APIs: GET/PUT /api/client-admin/cookies, POST /api/client-admin/cookies/reset
+  (hub_can:dashboard_manage_cookies).
+- Frontend: /my-dashboard/cookies admin page; CookieBanner shows when
+  localStorage version ≠ current hub version (OK dismisses until next bump).
+- No authenticated accept-gate (unlike Terms/Privacy) — PECR transparency
+  banner is sufficient for essential-only cookies.
 
 2.3 Content metrics
 - Each post/reel tracks:
@@ -1387,33 +1405,34 @@ Phase 4 — Retention & minimisation
 Phase 5 — Cookies / marketing (only if product needs them)
   [x] Essential-cookies notice only (session + CSRF) — no analytics/marketing
       cookies in the current product (PECR / UK GDPR)
-  [x] GET /hub `auth.cookies` payload + frontend CookieBanner (dismissible;
-      localStorage version key); Privacy Policy defaults include Cookies section
+  [x] Editable Cookie Notice (hubs.cookie_notice) + dashboard_manage_cookies
+      + defaults per hub type + GET/PUT/reset APIs (same pattern as Terms/Privacy)
+  [x] GET /hub `auth.cookies` from hub storage (fallback to type default) +
+      frontend CookieBanner (dismissible; localStorage version key) +
+      /my-dashboard/cookies editor
+  [x] Privacy Policy defaults include Cookies section
   [ ] Full cookie preference centre — only when non-essential cookies/analytics
       are added later
   [ ] Marketing opt-in/out fields — only if FinProms adds marketing email
 
 Phase 6 — Breach & accountability (mostly ops; light product)
-  [x] Breach / incident runbook embedded in GDPR admin API + UI (detect →
-      assess → ICO ≤72h if required → notify individuals if high risk)
-  [x] Admin incident log: `gdpr_incidents` table + GET/POST/PUT
-      …/gdpr/incidents (hub_can:dashboard_manage_gdpr)
-  [x] Staff guidance in runbook: SAR/erasure owners = dashboard_manage_gdpr;
-      DPAs with processors are commercial/legal outside the app; DPO only if
-      legal thresholds met
+  [x] No separate in-app breach incident log — use Support Tickets (and ops
+      process) instead of a duplicate ticket-style GDPR incident module
+  [x] SAR/erasure owners = dashboard_manage_gdpr; DPAs/DPO remain legal/ops
   [ ] Formal processor DPAs (Stripe, email, host) — legal/commercial, not code
   [ ] DPO appointment decision — legal counsel
 
 --------------------------------------------------------------------------------
-6E.3 Breach runbook (ops checklist)
+6E.3 Breach runbook (ops checklist — not a product feature)
 --------------------------------------------------------------------------------
 1. Detect & contain the incident (revoke access, rotate secrets, isolate).
 2. Assess personal-data risk (what data, how many people, harm likelihood).
 3. If notification required, report to the ICO without undue delay and within
    72 hours of becoming aware: https://ico.org.uk/for-organisations/report-a-breach/
 4. If high risk to individuals, inform them without undue delay.
-5. Log the incident under GDPR / data requests → Breach / incident log.
-6. Handle related SARs / erasure via the same GDPR page.
+5. Track the work in Support Tickets (or your ops tracker) — do not maintain a
+   second in-app “GDPR incident” queue.
+6. Handle related SARs / erasure via GDPR / data requests.
 7. Review lessons learned; confirm processor DPAs remain current.
 
 --------------------------------------------------------------------------------
@@ -1752,9 +1771,11 @@ UK GDPR / DATA PROTECTION (section 2.2d + 6E) — Phase 1 backend done
     POST …/gdpr/users/{user}/erase; frontend erase + gdpr.erase log
 [x] Phase 4: Retention prune (`gdpr:prune-retention`, config/gdpr.php,
     daily 02:30); GET gdpr/retention + frontend policy panel
-[x] Phase 5: Essential cookie notice (auth.cookies + CookieBanner); no
+[x] Phase 5: Editable Cookie Notice (dashboard_manage_cookies +
+    hubs.cookie_notice + /my-dashboard/cookies + CookieBanner); no
     marketing/analytics cookies; preference centre deferred until needed
-[x] Phase 6: gdpr_incidents log + runbook in GDPR UI; formal DPAs/DPO remain
+[x] Phase 6: breach handling via Support Tickets / ops (no duplicate
+    gdpr_incidents module); formal DPAs/DPO remain
     legal/ops outside code
 
 ================================================================================

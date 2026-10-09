@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\GdprIncident;
 use App\Models\Hub;
 use App\Models\User;
 use App\Services\HubService;
@@ -36,10 +35,10 @@ class GdprPhase5And6Test extends TestCase
             ->assertJsonPath('hub.auth.cookies.essential_only', true)
             ->assertJsonPath('hub.auth.cookies.version', 1);
 
-        $this->assertStringContainsString('essential cookies', CookieNoticeDefaults::content());
+        $this->assertStringContainsString('essential cookies', CookieNoticeDefaults::shared());
     }
 
-    public function test_admin_can_log_and_update_incident(): void
+    public function test_capable_admin_can_update_cookie_notice_and_bump_version(): void
     {
         $admin = User::factory()->create([
             'role' => User::ROLE_FINPROMS_ADMIN,
@@ -47,29 +46,24 @@ class GdprPhase5And6Test extends TestCase
         ]);
         Sanctum::actingAs($admin);
 
-        $create = $this->postJson('/api/client-admin/gdpr/incidents', [
-            'title' => 'Suspected mailbox compromise',
-            'summary' => 'Staff reported unexpected password reset emails.',
-            'severity' => GdprIncident::SEVERITY_MEDIUM,
-            'status' => GdprIncident::STATUS_INVESTIGATING,
-            'discovered_at' => now()->toIso8601String(),
-        ])->assertCreated();
+        Hub::query()->where('slug', 'shared')->update([
+            'cookie_notice' => [
+                'content' => CookieNoticeDefaults::shared(),
+                'version' => 1,
+                'updated_at' => now()->toIso8601String(),
+            ],
+        ]);
+        app(HubService::class)->forgetCurrentCache();
 
-        $id = (int) $create->json('incident.id');
-        $this->assertGreaterThan(0, $id);
-
-        $this->putJson('/api/client-admin/gdpr/incidents/'.$id, [
-            'status' => GdprIncident::STATUS_CONTAINED,
-            'ico_notified' => true,
-            'actions_taken' => 'Reset credentials; reviewed access logs.',
+        $this->putJson('/api/client-admin/cookies', [
+            'content' => '<p>Updated essential cookie notice for testing.</p>',
         ])
             ->assertOk()
-            ->assertJsonPath('incident.status', GdprIncident::STATUS_CONTAINED)
-            ->assertJsonPath('incident.ico_notified', true);
+            ->assertJsonPath('cookies.version', 2);
 
-        $this->getJson('/api/client-admin/gdpr/incidents')
+        $this->getJson('/api/hub')
             ->assertOk()
-            ->assertJsonPath('meta.total', 1)
-            ->assertJsonStructure(['runbook' => ['steps', 'ico_url', 'sar_owners']]);
+            ->assertJsonPath('hub.auth.cookies.version', 2)
+            ->assertJsonPath('hub.auth.cookies.content', '<p>Updated essential cookie notice for testing.</p>');
     }
 }
