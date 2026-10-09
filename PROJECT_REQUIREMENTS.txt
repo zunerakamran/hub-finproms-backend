@@ -815,10 +815,15 @@ Notes:
       DB: any type, category, and tag used on the Central post is created on
       the target if missing (or refreshed if a matching name already exists),
       then the post copy is inserted with the same type/categories/tags values.
+    - Central Manage categories create/update/delete also syncs immediately to
+      every eligible content hub (Receive content from Central + remote DB
+      wired): name/slug/icons upsert; renames rewrite remote post category
+      lists; deletes remove unused remote rows. Soft-fails per hub so Central
+      CRUD always succeeds; response includes `hub_sync` summary.
     - This is a copy/upsert, not a live link back to Central. Each Shared /
       White-label hub keeps its own taxonomy tables; local-only types/
       categories/tags on a hub are left alone unless a distributed post
-      carries that name.
+      carries that name (or Central category sync upserts that name).
     - While the hub switcher is on a Shared / White-label hub, Manage types /
       categories / tags writes only to THAT hub’s DB (for local catalog work),
       not Central’s.
@@ -1309,6 +1314,7 @@ STEP 1 — Shared hub core (content hub)
 [x] Content type (post, reel, etc.) — separate from category
 [x] Category — separate from type and tags
 [x] Category icons (font-icon picker + image upload; shown on home categories)
+[x] Central category create/update/delete syncs to eligible content hubs
 [x] Tags — separate from type and category
 [x] Reel play button on listing page
 [x] Reel video upload (when type is Reel) + video_url / is_video API

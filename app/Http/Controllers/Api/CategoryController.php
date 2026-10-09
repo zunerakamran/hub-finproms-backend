@@ -6,15 +6,21 @@ use App\Http\Controllers\Api\Concerns\CreatesOnActingWhiteLabelHub;
 use App\Http\Controllers\Controller;
 use App\Models\Category;
 use App\Models\Post;
+use App\Services\ContentPushService;
 use App\Support\CategoryIconOptions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Throwable;
 
 class CategoryController extends Controller
 {
     use CreatesOnActingWhiteLabelHub;
+
+    public function __construct(
+        private readonly ContentPushService $contentPush
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -64,10 +70,13 @@ class CategoryController extends Controller
         ]);
 
         $this->applyIconUpload($request, $category);
+        $fresh = $category->fresh();
+        $hubSync = $this->safeSyncCategoryToHubs($fresh);
 
         return response()->json([
             'message' => 'Category created successfully.',
-            'category' => $category->fresh()->toApiArray(0),
+            'category' => $fresh->toApiArray(0),
+            'hub_sync' => $hubSync,
         ], 201);
     }
 
@@ -116,6 +125,10 @@ class CategoryController extends Controller
         }
 
         $fresh = $model->fresh();
+        $hubSync = $this->safeSyncCategoryToHubs(
+            $fresh,
+            $oldName !== $fresh->name ? $oldName : null
+        );
 
         return response()->json([
             'message' => 'Category updated successfully.',
@@ -125,6 +138,7 @@ class CategoryController extends Controller
                     ->whereJsonContains('categories', $fresh->name)
                     ->count()
             ),
+            'hub_sync' => $hubSync,
         ]);
     }
 
@@ -143,11 +157,62 @@ class CategoryController extends Controller
             ], 422);
         }
 
+        $name = $model->name;
         $model->delete();
+        $hubSync = $this->safeDeleteCategoryFromHubs($name);
 
         return response()->json([
             'message' => 'Category deleted successfully.',
+            'hub_sync' => $hubSync,
         ]);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function safeSyncCategoryToHubs(Category $category, ?string $previousName = null): ?array
+    {
+        try {
+            return $this->contentPush->syncCategoryToEligibleHubs($category, $previousName);
+        } catch (Throwable $e) {
+            report($e);
+
+            return [
+                'synced' => 0,
+                'failed' => 1,
+                'skipped' => 0,
+                'results' => [[
+                    'hub_id' => 0,
+                    'hub_name' => 'all',
+                    'status' => 'failed',
+                    'message' => $e->getMessage(),
+                ]],
+            ];
+        }
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function safeDeleteCategoryFromHubs(string $categoryName): ?array
+    {
+        try {
+            return $this->contentPush->deleteCategoryFromEligibleHubs($categoryName);
+        } catch (Throwable $e) {
+            report($e);
+
+            return [
+                'deleted' => 0,
+                'failed' => 1,
+                'skipped' => 0,
+                'results' => [[
+                    'hub_id' => 0,
+                    'hub_name' => 'all',
+                    'status' => 'failed',
+                    'message' => $e->getMessage(),
+                ]],
+            ];
+        }
     }
 
     /**

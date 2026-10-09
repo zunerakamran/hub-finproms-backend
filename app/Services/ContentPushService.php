@@ -59,6 +59,192 @@ class ContentPushService
     }
 
     /**
+     * Push one Central category (create/update/rename + icons) to every eligible
+     * content hub. Soft-fails per hub so Central CRUD is never blocked.
+     *
+     * @return array{synced: int, failed: int, skipped: int, results: list<array{hub_id: int, hub_name: string, status: string, message: string}>}
+     */
+    public function syncCategoryToEligibleHubs(Category $category, ?string $previousName = null): array
+    {
+        $results = [];
+        $synced = 0;
+        $failed = 0;
+        $skipped = 0;
+
+        $targets = Hub::query()
+            ->whereIn('type', [Hub::TYPE_SHARED, Hub::TYPE_WHITE_LABEL])
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get();
+
+        foreach ($targets as $hub) {
+            if (! $hub->can('receive_content_from_shared')) {
+                $skipped++;
+                $results[] = [
+                    'hub_id' => $hub->id,
+                    'hub_name' => $hub->name,
+                    'status' => 'skipped',
+                    'message' => 'Receive content from Central Hub is off.',
+                ];
+
+                continue;
+            }
+
+            if (! $hub->hasRemoteDatabaseConfigured()) {
+                $skipped++;
+                $results[] = [
+                    'hub_id' => $hub->id,
+                    'hub_name' => $hub->name,
+                    'status' => 'skipped',
+                    'message' => 'Remote database not configured.',
+                ];
+
+                continue;
+            }
+
+            try {
+                $connection = $this->remoteDb->connect($hub);
+                try {
+                    $remoteId = $this->upsertCategoryOnRemote($connection, $category, $previousName);
+                    $synced++;
+                    $results[] = [
+                        'hub_id' => $hub->id,
+                        'hub_name' => $hub->name,
+                        'status' => 'synced',
+                        'message' => 'Category synced (remote #'.$remoteId.').',
+                    ];
+                } finally {
+                    $this->remoteDb->disconnect($hub);
+                }
+            } catch (Throwable $e) {
+                $failed++;
+                $results[] = [
+                    'hub_id' => $hub->id,
+                    'hub_name' => $hub->name,
+                    'status' => 'failed',
+                    'message' => $e->getMessage(),
+                ];
+            }
+        }
+
+        return [
+            'synced' => $synced,
+            'failed' => $failed,
+            'skipped' => $skipped,
+            'results' => $results,
+        ];
+    }
+
+    /**
+     * Remove a Central category from eligible content hubs when unused remotely.
+     *
+     * @return array{deleted: int, failed: int, skipped: int, results: list<array{hub_id: int, hub_name: string, status: string, message: string}>}
+     */
+    public function deleteCategoryFromEligibleHubs(string $categoryName): array
+    {
+        $results = [];
+        $deleted = 0;
+        $failed = 0;
+        $skipped = 0;
+        $name = trim($categoryName);
+
+        if ($name === '') {
+            return compact('deleted', 'failed', 'skipped') + ['results' => []];
+        }
+
+        $targets = Hub::query()
+            ->whereIn('type', [Hub::TYPE_SHARED, Hub::TYPE_WHITE_LABEL])
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get();
+
+        foreach ($targets as $hub) {
+            if (! $hub->can('receive_content_from_shared') || ! $hub->hasRemoteDatabaseConfigured()) {
+                $skipped++;
+                $results[] = [
+                    'hub_id' => $hub->id,
+                    'hub_name' => $hub->name,
+                    'status' => 'skipped',
+                    'message' => 'Hub not eligible for Central taxonomy sync.',
+                ];
+
+                continue;
+            }
+
+            try {
+                $connection = $this->remoteDb->connect($hub);
+                try {
+                    $row = DB::connection($connection)->table('categories')->where('name', $name)->first();
+                    if (! $row) {
+                        $skipped++;
+                        $results[] = [
+                            'hub_id' => $hub->id,
+                            'hub_name' => $hub->name,
+                            'status' => 'skipped',
+                            'message' => 'Category not present on this hub.',
+                        ];
+
+                        continue;
+                    }
+
+                    $this->ensurePostCategoriesColumn($connection);
+                    $inUse = false;
+                    $posts = DB::connection($connection)->table('posts')->get(['categories']);
+                    foreach ($posts as $post) {
+                        $categories = $post->categories;
+                        if (is_string($categories)) {
+                            $decoded = json_decode($categories, true);
+                            $categories = is_array($decoded) ? $decoded : [];
+                        }
+                        if (is_array($categories) && in_array($name, $categories, true)) {
+                            $inUse = true;
+                            break;
+                        }
+                    }
+
+                    if ($inUse) {
+                        $skipped++;
+                        $results[] = [
+                            'hub_id' => $hub->id,
+                            'hub_name' => $hub->name,
+                            'status' => 'skipped',
+                            'message' => 'Category is used by posts on this hub.',
+                        ];
+
+                        continue;
+                    }
+
+                    DB::connection($connection)->table('categories')->where('id', $row->id)->delete();
+                    $deleted++;
+                    $results[] = [
+                        'hub_id' => $hub->id,
+                        'hub_name' => $hub->name,
+                        'status' => 'deleted',
+                        'message' => 'Category removed from hub.',
+                    ];
+                } finally {
+                    $this->remoteDb->disconnect($hub);
+                }
+            } catch (Throwable $e) {
+                $failed++;
+                $results[] = [
+                    'hub_id' => $hub->id,
+                    'hub_name' => $hub->name,
+                    'status' => 'failed',
+                    'message' => $e->getMessage(),
+                ];
+            }
+        }
+
+        return [
+            'deleted' => $deleted,
+            'failed' => $failed,
+            'skipped' => $skipped,
+            'results' => $results,
+        ];
+    }
+
+    /**
      * @param  list<int>  $ids
      * @param  list<int>  $hubIds
      * @return array{results: list<array<string, mixed>>, pushed: int, failed: int, skipped: int}
@@ -509,18 +695,30 @@ class ContentPushService
         return (int) DB::connection($connection)->table('posts')->insertGetId($insert);
     }
 
-    private function upsertCategoryOnRemote(string $connection, Category $category): int
-    {
+    /**
+     * Upsert a category on a remote hub. When $previousName differs from the
+     * current name, rename the remote row and rewrite post category lists.
+     */
+    private function upsertCategoryOnRemote(
+        string $connection,
+        Category $category,
+        ?string $previousName = null
+    ): int {
         $this->ensureRemoteCategoryIconColumns($connection);
+        $this->ensurePostCategoriesColumn($connection);
+
+        $newName = trim((string) $category->name);
+        $previousName = filled($previousName) ? trim($previousName) : null;
+        $renaming = $previousName !== null && $previousName !== '' && $previousName !== $newName;
 
         $iconPath = null;
         if (filled($category->icon_path)) {
             $iconPath = $category->iconPublicUrl() ?: (string) $category->icon_path;
         }
 
-        $existing = DB::connection($connection)->table('categories')->where('name', $category->name)->first();
         $updates = [
-            'slug' => $category->slug ?: Str::slug($category->name),
+            'name' => $newName,
+            'slug' => $category->slug ?: Str::slug($newName),
             'updated_at' => now(),
         ];
         $schema = Schema::connection($connection);
@@ -531,19 +729,71 @@ class ContentPushService
             $updates['icon_path'] = $iconPath;
         }
 
-        if ($existing) {
-            DB::connection($connection)->table('categories')->where('id', $existing->id)->update($updates);
+        $byNewName = DB::connection($connection)->table('categories')->where('name', $newName)->first();
+        $byPrevious = $renaming
+            ? DB::connection($connection)->table('categories')->where('name', $previousName)->first()
+            : null;
 
-            return (int) $existing->id;
+        if ($renaming && $byPrevious && $byNewName && (int) $byPrevious->id !== (int) $byNewName->id) {
+            // Target name already exists: refresh icons on that row, move posts, drop old name.
+            $mergeUpdates = [
+                'slug' => $updates['slug'],
+                'updated_at' => $updates['updated_at'],
+            ];
+            if ($schema->hasColumn('categories', 'icon')) {
+                $mergeUpdates['icon'] = $updates['icon'] ?? null;
+            }
+            if ($schema->hasColumn('categories', 'icon_path')) {
+                $mergeUpdates['icon_path'] = $updates['icon_path'] ?? null;
+            }
+            DB::connection($connection)->table('categories')->where('id', $byNewName->id)->update($mergeUpdates);
+            $this->rewriteRemotePostCategoryName($connection, $previousName, $newName);
+            DB::connection($connection)->table('categories')->where('id', $byPrevious->id)->delete();
+
+            return (int) $byNewName->id;
+        }
+
+        if ($renaming && $byPrevious) {
+            DB::connection($connection)->table('categories')->where('id', $byPrevious->id)->update($updates);
+            $this->rewriteRemotePostCategoryName($connection, $previousName, $newName);
+
+            return (int) $byPrevious->id;
+        }
+
+        if ($byNewName) {
+            DB::connection($connection)->table('categories')->where('id', $byNewName->id)->update($updates);
+
+            return (int) $byNewName->id;
         }
 
         $now = now();
-        $insert = array_merge($updates, [
-            'name' => $category->name,
-            'created_at' => $now,
-        ]);
 
-        return (int) DB::connection($connection)->table('categories')->insertGetId($insert);
+        return (int) DB::connection($connection)->table('categories')->insertGetId(array_merge($updates, [
+            'created_at' => $now,
+        ]));
+    }
+
+    private function rewriteRemotePostCategoryName(string $connection, string $oldName, string $newName): void
+    {
+        $posts = DB::connection($connection)->table('posts')->get(['id', 'categories']);
+        foreach ($posts as $post) {
+            $categories = $post->categories;
+            if (is_string($categories)) {
+                $decoded = json_decode($categories, true);
+                $categories = is_array($decoded) ? $decoded : [];
+            }
+            if (! is_array($categories) || ! in_array($oldName, $categories, true)) {
+                continue;
+            }
+            $categories = array_values(array_unique(array_map(
+                fn ($c) => $c === $oldName ? $newName : $c,
+                $categories
+            )));
+            DB::connection($connection)->table('posts')->where('id', $post->id)->update([
+                'categories' => json_encode($categories),
+                'updated_at' => now(),
+            ]);
+        }
     }
 
     private function ensureRemoteCategoryIconColumns(string $connection): void
@@ -651,7 +901,8 @@ class ContentPushService
             if ($categoryName === '') {
                 continue;
             }
-            $category = new Category(['name' => $categoryName, 'slug' => Str::slug($categoryName)]);
+            $category = Category::query()->where('name', $categoryName)->first()
+                ?: new Category(['name' => $categoryName, 'slug' => Str::slug($categoryName)]);
             $this->upsertCategoryOnRemote($connection, $category);
         }
 
