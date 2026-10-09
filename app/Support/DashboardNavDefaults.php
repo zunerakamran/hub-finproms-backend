@@ -104,6 +104,7 @@ class DashboardNavDefaults
             '/my-dashboard/hubs' => 'platform',
             '/my-dashboard/checklist' => 'platform',
             '/my-dashboard/capabilities' => 'platform',
+            '/my-dashboard/hub-backups' => 'platform',
         ];
     }
 
@@ -213,6 +214,7 @@ class DashboardNavDefaults
                 '/my-dashboard/hubs' => 'Hubs',
                 '/my-dashboard/checklist' => 'Functionalities',
                 '/my-dashboard/capabilities' => 'Capabilities',
+                '/my-dashboard/hub-backups' => 'Hub backups',
             ],
             'section_order' => self::defaultSectionOrder(),
             'item_groups' => self::defaultItemGroups(),
