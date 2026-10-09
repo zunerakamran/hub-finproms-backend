@@ -225,6 +225,7 @@ class WhiteLabelUserService
             'has_unlimited_credits' => $unlimited,
             'is_suspended' => (bool) $user->is_suspended,
             'is_discontinued' => (bool) $user->is_discontinued,
+            'gdpr_erased_at' => $user->gdpr_erased_at?->toIso8601String(),
             'firm_id' => $user->firm_id ? (int) $user->firm_id : null,
             'firm' => $this->serializeFirm($user),
             'modules' => $this->serializeModules($user, $hub),

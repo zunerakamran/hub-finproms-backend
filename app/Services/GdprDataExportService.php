@@ -88,6 +88,7 @@ class GdprDataExportService
             'is_suspended' => (bool) $user->is_suspended,
             'is_discontinued' => (bool) $user->is_discontinued,
             'discontinued_at' => $user->discontinued_at?->toIso8601String(),
+            'gdpr_erased_at' => $user->gdpr_erased_at?->toIso8601String(),
             'credits' => $user->credits,
             'has_unlimited_credits' => (bool) $user->has_unlimited_credits,
             'modules' => $user->modules,

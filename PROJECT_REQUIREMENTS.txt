@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-09 (UK GDPR Phase 2 DSAR export — backend + frontend)
+Last updated: 2026-10-09 (UK GDPR Phase 3 erasure / anonymisation)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -1351,21 +1351,27 @@ Phase 2 — Subject access / portability (DSAR)
   [x] Ops note in UI: aim to fulfil SARs within 30 days
 
 Phase 3 — Rectification + erasure / anonymisation
-  [ ] Rectify via existing profile update + admin path for SAR corrections
-      (including WC contact_details when that user/advisor owns them)
-  [ ] Erasure service (NOT only hard-delete):
-      - Clear / anonymise PII on users (or soft-retire account)
+  [x] Rectify via existing profile update (admin can correct before erase);
+      WC contact_details cleared on erase for that advisor’s requests
+  [x] Erasure service (NOT hard-delete) — `GdprErasureService`:
+      - Anonymise user row (`Deleted user #id`, erased-*@erased.invalid),
+        set suspended+discontinued, `gdpr_erased_at`, wipe avatar/tokens/
+        sessions/OTP/reset tokens, clear Stripe IDs locally
       - Scrub denormalised name/email/IP on activity_logs +
-        compliance_audit_events for that user
-      - Delete avatar files; scrub uploader display names where safe
-      - Remove or anonymise advisor-import batch entries for that email
-      - Stripe: delete/detach customer when appropriate (document edge cases)
+        compliance_audit_events (keep event rows)
+      - Scrub invoice billing name/email; support ticket/comment text;
+        uploader display names; advisor-import batch mentions
+      - Clear WC template-request contact_details
       - Keep anonymised audit events for FCA integrity
-  [ ] Hub backups: document that historical dumps may retain PII until
-      retention prune; do not invent per-user backup rewrite in v1
-  [ ] API: POST …/gdpr/users/{user}/erase (hub_can:dashboard_manage_gdpr)
+  [x] Hub backups: documented residual risk (UI + erase notes); no per-user
+      backup rewrite in v1
+  [x] API: POST …/gdpr/users/{user}/erase (confirm required;
+      hub_can:dashboard_manage_gdpr; remote acting supported)
+  [x] Frontend: erase action on /my-dashboard/gdpr (type ERASE to confirm)
+  [x] Activity log: `gdpr.erase`
   [ ] Optional later: self-service “delete my account” (Shared Hub) with
       confirmation + cool-off
+  [ ] Optional later: live Stripe customer delete via API when configured
 
 Phase 4 — Retention & minimisation
   [ ] Configurable retention (hub settings or config) for:
@@ -1718,8 +1724,9 @@ UK GDPR / DATA PROTECTION (section 2.2d + 6E) — Phase 1 backend done
 [x] Phase 2: DSAR export (dashboard_manage_gdpr) — GET gdpr/users +
     gdpr/users/{id}/export JSON; GdprDataExportService; frontend
     /my-dashboard/gdpr; activity log gdpr.export
-[ ] Phase 3: Erasure / anonymise service (scrub logs + avatar + import rows;
-    keep anonymised compliance audit events); POST …/gdpr/users/{user}/erase
+[x] Phase 3: Erasure / anonymise (GdprErasureService + gdpr_erased_at;
+    scrub logs/invoices/tickets/WC/import rows; keep audit events);
+    POST …/gdpr/users/{user}/erase; frontend erase + gdpr.erase log
 [ ] Phase 4: Retention prune jobs (activity_logs, expired tokens/sessions,
     import files, old support tickets) — separate from hub backup retention
 [ ] Phase 5 (if needed): cookie consent / marketing opt-in

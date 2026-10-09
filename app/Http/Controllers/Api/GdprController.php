@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Services\ActingHubService;
 use App\Services\ActivityLogService;
 use App\Services\GdprDataExportService;
+use App\Services\GdprErasureService;
 use App\Services\WhiteLabelDatabaseService;
 use App\Services\WhiteLabelUserService;
 use Illuminate\Http\JsonResponse;
@@ -24,6 +25,7 @@ class GdprController extends Controller
         private readonly WhiteLabelUserService $whiteLabelUsers,
         private readonly WhiteLabelDatabaseService $remoteDb,
         private readonly GdprDataExportService $exports,
+        private readonly GdprErasureService $erasures,
         private readonly ActivityLogService $activityLogs
     ) {}
 
@@ -144,6 +146,72 @@ class GdprController extends Controller
     }
 
     /**
+     * Anonymise a user (UK GDPR erasure) while keeping audit event rows.
+     */
+    public function erase(Request $request, int $user): JsonResponse
+    {
+        /** @var User $actor */
+        $actor = $request->user();
+
+        $request->validate([
+            'confirm' => ['required', 'accepted'],
+        ]);
+
+        if ($remoteHub = $this->actingContentHub($request)) {
+            try {
+                $result = $this->remoteDb->run($remoteHub, function (string $connection) use ($user, $remoteHub, $actor) {
+                    $subject = User::on($connection)->find($user);
+                    if (! $subject) {
+                        throw new HttpException(404, 'User not found on the selected hub.');
+                    }
+
+                    return $this->erasures->erase($subject, $remoteHub, $actor);
+                });
+            } catch (HttpException $e) {
+                return response()->json(['message' => $e->getMessage()], $e->getStatusCode());
+            } catch (InvalidArgumentException $e) {
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
+
+            $this->logErase($request, $actor, $result, $remoteHub, true);
+
+            return response()->json([
+                'message' => ! empty($result['already_erased'])
+                    ? 'User was already erased.'
+                    : 'User personal data anonymised (UK GDPR erasure).',
+                'result' => $result,
+                'acting_remotely' => true,
+            ]);
+        }
+
+        $hub = $this->targetHub($request);
+        if (! $hub) {
+            return response()->json(['message' => 'Hub not available.'], 422);
+        }
+
+        $subject = User::query()->find($user);
+        if (! $subject) {
+            return response()->json(['message' => 'User not found.'], 404);
+        }
+
+        try {
+            $result = $this->erasures->erase($subject, $hub, $actor);
+        } catch (InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $this->logErase($request, $actor, $result, $hub, false);
+
+        return response()->json([
+            'message' => ! empty($result['already_erased'])
+                ? 'User was already erased.'
+                : 'User personal data anonymised (UK GDPR erasure).',
+            'result' => $result,
+            'acting_remotely' => false,
+        ]);
+    }
+
+    /**
      * @param  array<string, mixed>  $package
      */
     private function downloadJson(array $package, Hub $hub): StreamedResponse
@@ -190,6 +258,39 @@ class GdprController extends Controller
                 'properties' => [
                     'subject_user_id' => $subjectId,
                     'subject_email' => $email,
+                    'hub_id' => $hub->id,
+                    'hub_slug' => $hub->slug,
+                    'acting_remotely' => $remote,
+                ],
+            ]);
+        } catch (\Throwable) {
+            //
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $result
+     */
+    private function logErase(Request $request, User $actor, array $result, Hub $hub, bool $remote): void
+    {
+        $subjectId = (int) ($result['user_id'] ?? 0);
+
+        try {
+            $this->activityLogs->log([
+                'action' => 'gdpr.erase',
+                'description' => 'GDPR erasure for user #'.$subjectId
+                    .' on hub '.$hub->slug
+                    .($remote ? ' (remote)' : '')
+                    .(! empty($result['already_erased']) ? ' (already erased)' : ''),
+                'user' => $actor,
+                'request' => $request,
+                'status_code' => 200,
+                'properties' => [
+                    'subject_user_id' => $subjectId,
+                    'anonymised_email' => $result['anonymised_email'] ?? null,
+                    'previous_email' => $result['previous_email'] ?? null,
+                    'already_erased' => (bool) ($result['already_erased'] ?? false),
+                    'scrubbed' => $result['scrubbed'] ?? [],
                     'hub_id' => $hub->id,
                     'hub_slug' => $hub->slug,
                     'acting_remotely' => $remote,

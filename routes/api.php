@@ -502,6 +502,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:dashboard_manage_gdpr')->group(function () {
             Route::get('/gdpr/users', [GdprController::class, 'users']);
             Route::get('/gdpr/users/{user}/export', [GdprController::class, 'export'])->whereNumber('user');
+            Route::post('/gdpr/users/{user}/erase', [GdprController::class, 'erase'])->whereNumber('user');
         });
 
         Route::middleware('hub_can:dashboard_manage_compliance_status_display_names')->group(function () {

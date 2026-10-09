@@ -110,6 +110,7 @@ class User extends Authenticatable
         'terms_accepted_version',
         'privacy_accepted_at',
         'privacy_accepted_version',
+        'gdpr_erased_at',
         'two_factor_enabled',
         'avatar_path',
     ];
@@ -134,6 +135,7 @@ class User extends Authenticatable
             'terms_accepted_version' => 'integer',
             'privacy_accepted_at' => 'datetime',
             'privacy_accepted_version' => 'integer',
+            'gdpr_erased_at' => 'datetime',
             'password' => 'hashed',
             'credits' => 'integer',
             'is_advisor' => 'boolean',
@@ -225,6 +227,11 @@ class User extends Authenticatable
     public function isDiscontinued(): bool
     {
         return (bool) $this->is_discontinued;
+    }
+
+    public function isGdprErased(): bool
+    {
+        return $this->gdpr_erased_at !== null;
     }
 
     /**
