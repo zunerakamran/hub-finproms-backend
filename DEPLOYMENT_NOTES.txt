@@ -448,8 +448,9 @@ Hub backups (dual store):
   - Content hubs: set api_url in deploy wiring (.../api) so Central can trigger
     backup/restore callbacks; optional CENTRAL_API_URL on content hubs for
     independent upload when their own cron runs
-  - Archives: storage/app/backups/{slug}/ (local) and on Central
-    storage/app/backups/central/{slug}/
+  - Archives: content hubs use storage/app/backups/{slug}/ (local) + upload to
+    Central storage/app/backups/central/{slug}/. Central itself keeps one copy
+    under storage/app/backups/central/{slug}/ only.
   - After deploy on all hubs: php artisan migrate
   - PHP zip: prefer enabling the php-zip extension on every hub
     (cPanel → Select PHP Version → Extensions → zip). Backups also fall back

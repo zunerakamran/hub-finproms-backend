@@ -66,9 +66,30 @@ class HubBackupTest extends TestCase
         $backup = app(HubBackupService::class)->createLocalBackup($hub, HubBackup::TRIGGER_MANUAL);
 
         $this->assertSame(HubBackup::STATUS_COMPLETED, $backup->status);
-        $this->assertSame(HubBackup::LOCATION_LOCAL, $backup->location);
+        // Control-plane deploy stores a single Central copy (no local duplicate).
+        $this->assertSame(HubBackup::LOCATION_CENTRAL, $backup->location);
         $this->assertNotEmpty($backup->disk_path);
+        $this->assertStringContainsString('backups/central/', (string) $backup->disk_path);
         $this->assertFileExists($backup->absolutePath());
+    }
+
+    public function test_central_backup_now_creates_single_copy(): void
+    {
+        $hub = Hub::query()->create([
+            'name' => 'Central',
+            'slug' => 'central',
+            'type' => Hub::TYPE_CENTRAL,
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs(User::factory()->powerAdmin()->create());
+
+        $this->postJson("/api/power-admin/hubs/{$hub->id}/backups", [])
+            ->assertCreated()
+            ->assertJsonPath('backup.location', HubBackup::LOCATION_CENTRAL)
+            ->assertJsonMissingPath('local_backup');
+
+        $this->assertSame(1, HubBackup::query()->where('status', HubBackup::STATUS_COMPLETED)->count());
     }
 
     public function test_backup_routes_require_capability(): void

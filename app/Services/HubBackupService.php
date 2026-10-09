@@ -33,7 +33,8 @@ class HubBackupService
      *   retention_central: int,
      *   last_run_at: string|null,
      *   token_set: bool,
-     *   due_now: bool
+     *   due_now: bool,
+     *   single_store: bool
      * }
      */
     public function schedulePayload(Hub $hub): array
@@ -49,6 +50,8 @@ class HubBackupService
             'last_run_at' => $hub->backup_last_run_at?->toIso8601String(),
             'token_set' => filled($hub->backup_token),
             'due_now' => $this->isDue($hub),
+            // Central backs itself up once on this server (no local+central duplicate).
+            'single_store' => $hub->isControlPlane(),
         ];
     }
 
@@ -110,7 +113,10 @@ class HubBackupService
     }
 
     /**
-     * Create a local backup archive for THIS deploy (DB + storage files).
+     * Create a backup archive for THIS deploy (DB + storage files).
+     *
+     * Content hubs store under backups/{slug}/ (local). Central Hub Controller
+     * stores a single copy under backups/central/{slug}/ (same server — no duplicate).
      */
     public function createLocalBackup(
         ?Hub $hub = null,
@@ -119,15 +125,19 @@ class HubBackupService
     ): HubBackup {
         $hub ??= $this->hubs->current();
         $slug = (string) $hub->slug;
+        $singleStore = (bool) config('hub.is_control_plane');
+        $location = $singleStore ? HubBackup::LOCATION_CENTRAL : HubBackup::LOCATION_LOCAL;
         $workDir = storage_path('app/backups/tmp/'.Str::lower(Str::random(12)));
-        $backupsDir = storage_path('app/backups/'.$slug);
+        $backupsDir = $singleStore
+            ? storage_path('app/backups/central/'.$slug)
+            : storage_path('app/backups/'.$slug);
         $this->ensureDirectory($workDir);
         $this->ensureDirectory($backupsDir);
 
         $record = HubBackup::query()->create([
             'hub_id' => $hub->id,
             'hub_slug' => $slug,
-            'location' => HubBackup::LOCATION_LOCAL,
+            'location' => $location,
             'triggered_by' => $triggeredBy,
             'status' => HubBackup::STATUS_RUNNING,
             'includes_database' => true,
@@ -148,7 +158,9 @@ class HubBackupService
             $zipAbsolute = $backupsDir.DIRECTORY_SEPARATOR.$filename;
             $this->zipDirectory($workDir, $zipAbsolute);
 
-            $relative = 'backups/'.$slug.'/'.$filename;
+            $relative = $singleStore
+                ? 'backups/central/'.$slug.'/'.$filename
+                : 'backups/'.$slug.'/'.$filename;
             $size = filesize($zipAbsolute) ?: 0;
             $checksum = hash_file('sha256', $zipAbsolute) ?: null;
 
@@ -166,7 +178,11 @@ class HubBackupService
                 $hub->forceFill(['backup_last_run_at' => now()])->save();
             }
 
-            $this->pruneLocal($hub);
+            if ($singleStore) {
+                $this->pruneCentral($hub);
+            } else {
+                $this->pruneLocal($hub);
+            }
             $this->removeDirectory($workDir);
 
             return $record->fresh();
@@ -324,22 +340,17 @@ class HubBackupService
         $created = $this->createLocalBackup($hub, HubBackup::TRIGGER_SCHEDULE);
         $results = [$created];
 
-        try {
-            $this->uploadLocalBackupToCentral($created);
-        } catch (Throwable $e) {
-            report($e);
-            Log::warning('hub backup: upload to Central failed', [
-                'hub' => $hub->slug,
-                'error' => $e->getMessage(),
-            ]);
-        }
-
-        // On Central, also mirror the local archive into the central/ folder for unified listing.
-        if (config('hub.is_control_plane')) {
+        // Content hubs upload a second copy to Central. Central itself already
+        // stores a single copy under backups/central/ — do not mirror again.
+        if (! config('hub.is_control_plane')) {
             try {
-                $results[] = $this->mirrorLocalToCentralStore($created, $hub);
+                $this->uploadLocalBackupToCentral($created);
             } catch (Throwable $e) {
                 report($e);
+                Log::warning('hub backup: upload to Central failed', [
+                    'hub' => $hub->slug,
+                    'error' => $e->getMessage(),
+                ]);
             }
         }
 

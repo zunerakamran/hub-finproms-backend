@@ -1146,11 +1146,12 @@ Notes:
 --------------------------------------------------------------------------------
 6B. HUB BACKUP & RESTORE
 --------------------------------------------------------------------------------
-- Dual storage: each scheduled/manual backup is saved on the hub's own server
-  (storage/app/backups/{slug}/) AND a copy is stored on Central
+- Dual storage (content hubs): each scheduled/manual backup is saved on the hub's
+  own server (storage/app/backups/{slug}/) AND a copy is stored on Central
   (storage/app/backups/central/{slug}/).
-- Central Hub also backs itself up (local + Central store on the same server);
-  Power Admin can download Central archives. Prefer off-server copies for DR.
+- Central Hub backs itself up once on the same server
+  (storage/app/backups/central/{slug}/ only — no local+central duplicate).
+  Power Admin can download / restore. Prefer a true off-server copy for DR.
 - Schedule is per hub, set from Central (Power Admin + pa_manage_hub_backups):
   enabled, time (HH:MM), timezone, daily|weekly (+ weekday), retention local /
   Central. Settings sync to content hubs via remote DB push when wired.

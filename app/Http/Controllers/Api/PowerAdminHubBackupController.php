@@ -89,17 +89,18 @@ class PowerAdminHubBackupController extends Controller
         // create on Central from this control-plane DB only if hub IS current (rare).
         try {
             if ($hub->isControlPlane() || $hub->slug === $this->hubs->current()->slug) {
-                $local = $this->backups->createLocalBackup(
+                // Central (or this deploy): one archive only — no local+central duplicate.
+                $backup = $this->backups->createLocalBackup(
                     $hub,
                     HubBackup::TRIGGER_MANUAL,
                     $request->user()
                 );
-                $central = $this->backups->mirrorLocalToCentralStore($local, $hub);
 
                 return response()->json([
-                    'message' => 'Backup created on this server (local + Central store).',
-                    'backup' => $central->toAdminArray(),
-                    'local_backup' => $local->toAdminArray(),
+                    'message' => $hub->isControlPlane()
+                        ? 'Backup created on Central (single copy).'
+                        : 'Backup created on this server.',
+                    'backup' => $backup->toAdminArray(),
                 ], 201);
             }
 
