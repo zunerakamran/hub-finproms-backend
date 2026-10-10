@@ -45,6 +45,7 @@ use App\Http\Controllers\Api\PostController;
 use App\Http\Controllers\Api\PowerAdminAdvisorPricingController;
 use App\Http\Controllers\Api\PowerAdminCapabilityController;
 use App\Http\Controllers\Api\AppVersionController;
+use App\Http\Controllers\Api\InternalCodeUpdateController;
 use App\Http\Controllers\Api\PowerAdminHubController;
 use App\Http\Controllers\Api\PowerAdminHubBackupController;
 use App\Http\Controllers\Api\PowerAdminHubReleaseController;
@@ -116,6 +117,11 @@ Route::get('/website-compliance/scheduler/publish-scheduled', [WcSchedulerContro
 Route::post('/internal/hub-backups/run', [InternalHubBackupController::class, 'run']);
 Route::post('/internal/hub-backups/receive', [InternalHubBackupController::class, 'receive']);
 Route::post('/internal/hub-backups/restore', [InternalHubBackupController::class, 'restore']);
+
+// Code update apply / artifact download (per-hub code_update_token or backup_token)
+Route::post('/internal/code-updates/apply', [InternalCodeUpdateController::class, 'apply']);
+Route::get('/internal/code-updates/artifacts/{release}/{kind}', [InternalCodeUpdateController::class, 'artifact'])
+    ->where('kind', 'backend|frontend');
 
 // Hub iframe preview of live advisor sites (bypasses X-Frame-Options on cPanel).
 // Optional /h/{hubId}/ prefix: Central Hub remotes into a content-hub deployment DB.
@@ -817,9 +823,11 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/hubs', [PowerAdminHubController::class, 'store']);
             Route::put('/hubs/{hub}', [PowerAdminHubController::class, 'update']);
 
-            // Code update tracking (Phase 1): publish latest release + poll hub versions
+            // Code updates: publish release, upload zips, poll versions, apply to selected hubs
             Route::get('/releases', [PowerAdminHubReleaseController::class, 'index']);
             Route::post('/releases', [PowerAdminHubReleaseController::class, 'store']);
+            Route::post('/releases/apply', [PowerAdminHubReleaseController::class, 'apply']);
+            Route::post('/releases/{release}/artifacts', [PowerAdminHubReleaseController::class, 'storeArtifacts']);
             Route::post('/hubs/refresh-versions', [PowerAdminHubReleaseController::class, 'refreshAll']);
             Route::post('/hubs/{hub}/refresh-version', [PowerAdminHubReleaseController::class, 'refreshHub']);
             Route::post('/hubs/{hub}/mark-version', [PowerAdminHubReleaseController::class, 'markHub']);

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Hub;
+use App\Models\HubRelease;
 use App\Services\HubCodeUpdateService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -28,10 +29,19 @@ class PowerAdminHubReleaseController extends Controller
             'backend_version' => ['nullable', 'string', 'max:64'],
             'frontend_version' => ['nullable', 'string', 'max:64'],
             'notes' => ['nullable', 'string', 'max:5000'],
+            'backend_zip' => ['nullable', 'file', 'mimes:zip', 'max:512000'],
+            'frontend_zip' => ['nullable', 'file', 'mimes:zip', 'max:512000'],
         ]);
 
         try {
             $release = $this->codeUpdates->publishRelease($validated, $request->user());
+            if ($request->hasFile('backend_zip') || $request->hasFile('frontend_zip')) {
+                $release = $this->codeUpdates->storeArtifacts(
+                    $release,
+                    $request->file('backend_zip'),
+                    $request->file('frontend_zip'),
+                );
+            }
         } catch (InvalidArgumentException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         } catch (Throwable $e) {
@@ -47,6 +57,77 @@ class PowerAdminHubReleaseController extends Controller
             'release' => $release->toAdminArray(),
             'overview' => $this->codeUpdates->overviewPayload(),
         ], 201);
+    }
+
+    public function storeArtifacts(Request $request, HubRelease $release): JsonResponse
+    {
+        $request->validate([
+            'backend_zip' => ['nullable', 'file', 'mimes:zip', 'max:512000'],
+            'frontend_zip' => ['nullable', 'file', 'mimes:zip', 'max:512000'],
+        ]);
+
+        if (! $request->hasFile('backend_zip') && ! $request->hasFile('frontend_zip')) {
+            return response()->json(['message' => 'Attach backend_zip and/or frontend_zip.'], 422);
+        }
+
+        try {
+            $release = $this->codeUpdates->storeArtifacts(
+                $release,
+                $request->file('backend_zip'),
+                $request->file('frontend_zip'),
+            );
+        } catch (Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => 'Could not store artifacts: '.$e->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'message' => 'Artifacts saved for release '.$release->version.'.',
+            'release' => $release->toAdminArray(),
+            'overview' => $this->codeUpdates->overviewPayload(),
+        ]);
+    }
+
+    public function apply(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'release_id' => ['nullable', 'integer', 'exists:hub_releases,id'],
+            'hub_ids' => ['required', 'array', 'min:1'],
+            'hub_ids.*' => ['integer', 'exists:hubs,id'],
+        ]);
+
+        $release = isset($validated['release_id'])
+            ? HubRelease::query()->findOrFail($validated['release_id'])
+            : $this->codeUpdates->latestRelease();
+
+        if (! $release) {
+            return response()->json(['message' => 'Publish a release before applying.'], 422);
+        }
+
+        try {
+            $result = $this->codeUpdates->applyReleaseToHubs($release, $validated['hub_ids']);
+        } catch (InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        } catch (Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => 'Apply failed: '.$e->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'message' => 'Applied '.$release->version.' to '.$result['applied']
+                .' hub(s); '.$result['failed'].' failed.',
+            'release' => $release->toAdminArray(),
+            'applied' => $result['applied'],
+            'failed' => $result['failed'],
+            'results' => $result['results'],
+            'overview' => $this->codeUpdates->overviewPayload(),
+        ]);
     }
 
     public function refreshAll(): JsonResponse

@@ -5,7 +5,9 @@ namespace App\Services;
 use App\Models\Hub;
 use App\Models\HubRelease;
 use App\Models\User;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -27,8 +29,18 @@ class HubCodeUpdateService
 
     public const SOURCE_MANUAL = 'manual';
 
+    public const APPLY_IDLE = 'idle';
+
+    public const APPLY_UPDATING = 'updating';
+
+    public const APPLY_APPLIED = 'applied';
+
+    public const APPLY_FAILED = 'failed';
+
     public function __construct(
         private readonly HubService $hubs,
+        private readonly HubCodeApplyService $applier,
+        private readonly WhiteLabelHubSyncService $whiteLabelSync,
     ) {}
 
     /**
@@ -46,8 +58,9 @@ class HubCodeUpdateService
     public function localVersionPayload(): array
     {
         $hub = $this->hubs->current();
-        $version = $this->normalizeVersion((string) config('hub.version', '0.0.0'));
-        $frontend = $this->normalizeVersion((string) config('hub.frontend_version', $version));
+        // Prefer live files/marker (Phase 2 apply updates these without a full reboot).
+        $version = $this->readLiveVersion();
+        $frontend = $this->readLiveFrontendVersion($version);
 
         return [
             'version' => $version,
@@ -57,6 +70,42 @@ class HubCodeUpdateService
             'type' => $hub->type,
             'is_control_plane' => (bool) config('hub.is_control_plane', false),
         ];
+    }
+
+    private function readLiveVersion(): string
+    {
+        $markerPath = storage_path('app/private/code-update-version.json');
+        if (is_file($markerPath)) {
+            $marker = json_decode((string) file_get_contents($markerPath), true);
+            if (is_array($marker) && filled($marker['version'] ?? null)) {
+                return $this->normalizeVersion((string) $marker['version']);
+            }
+        }
+
+        $versionFile = base_path('VERSION');
+        if (is_file($versionFile)) {
+            $fromFile = $this->normalizeVersion((string) file_get_contents($versionFile));
+            if ($fromFile !== '') {
+                return $fromFile;
+            }
+        }
+
+        return $this->normalizeVersion((string) config('hub.version', '0.0.0')) ?: '0.0.0';
+    }
+
+    private function readLiveFrontendVersion(string $fallback): string
+    {
+        $markerPath = storage_path('app/private/code-update-version.json');
+        if (is_file($markerPath)) {
+            $marker = json_decode((string) file_get_contents($markerPath), true);
+            if (is_array($marker) && filled($marker['frontend_version'] ?? null)) {
+                return $this->normalizeVersion((string) $marker['frontend_version']);
+            }
+        }
+
+        $fromEnv = $this->normalizeVersion((string) config('hub.frontend_version', ''));
+
+        return $fromEnv !== '' ? $fromEnv : $fallback;
     }
 
     public function latestRelease(): ?HubRelease
@@ -112,6 +161,290 @@ class HubCodeUpdateService
         $this->recomputeAllStatuses();
 
         return $release->fresh();
+    }
+
+    public function storeArtifacts(
+        HubRelease $release,
+        ?UploadedFile $backendZip = null,
+        ?UploadedFile $frontendZip = null,
+    ): HubRelease {
+        $dir = 'releases/'.$release->version;
+        Storage::disk('local')->makeDirectory($dir);
+
+        if ($backendZip) {
+            if ($release->backend_artifact_path) {
+                Storage::disk('local')->delete($release->backend_artifact_path);
+            }
+            $path = $backendZip->storeAs($dir, 'backend.zip', 'local');
+            $release->backend_artifact_path = $path;
+        }
+
+        if ($frontendZip) {
+            if ($release->frontend_artifact_path) {
+                Storage::disk('local')->delete($release->frontend_artifact_path);
+            }
+            $path = $frontendZip->storeAs($dir, 'frontend.zip', 'local');
+            $release->frontend_artifact_path = $path;
+        }
+
+        $release->save();
+
+        return $release->fresh();
+    }
+
+    public function ensureUpdateToken(Hub $hub): string
+    {
+        if (filled($hub->code_update_token)) {
+            return (string) $hub->code_update_token;
+        }
+
+        // Prefer existing backup token so content hubs authorize without a second sync.
+        if (filled($hub->backup_token)) {
+            $hub->forceFill(['code_update_token' => $hub->backup_token])->save();
+
+            return (string) $hub->backup_token;
+        }
+
+        $token = Str::random(64);
+        $hub->forceFill(['code_update_token' => $token])->save();
+
+        return $token;
+    }
+
+    public function absoluteArtifactPath(HubRelease $release, string $kind): ?string
+    {
+        $relative = $kind === 'frontend'
+            ? $release->frontend_artifact_path
+            : $release->backend_artifact_path;
+        if (! filled($relative)) {
+            return null;
+        }
+
+        return Storage::disk('local')->path($relative);
+    }
+
+    public function artifactDownloadUrl(HubRelease $release, string $kind): ?string
+    {
+        $relative = $kind === 'frontend'
+            ? $release->frontend_artifact_path
+            : $release->backend_artifact_path;
+        if (! filled($relative)) {
+            return null;
+        }
+
+        return rtrim((string) config('app.url'), '/').'/api/internal/code-updates/artifacts/'
+            .$release->id.'/'.$kind;
+    }
+
+    /**
+     * Apply a release to selected hubs from Central.
+     *
+     * @param  list<int>  $hubIds
+     * @return array{applied: int, failed: int, results: list<array<string, mixed>>}
+     */
+    public function applyReleaseToHubs(HubRelease $release, array $hubIds): array
+    {
+        if (! filled($release->backend_artifact_path) && ! filled($release->frontend_artifact_path)) {
+            throw new \InvalidArgumentException(
+                'Upload a backend and/or frontend zip on this release before applying.'
+            );
+        }
+
+        $results = [];
+        $applied = 0;
+        $failed = 0;
+
+        $hubs = Hub::query()->whereIn('id', $hubIds)->orderBy('id')->get();
+        foreach ($hubs as $hub) {
+            $row = $this->applyReleaseToHub($release, $hub);
+            $results[] = $row;
+            if (($row['ok'] ?? false) === true) {
+                $applied++;
+            } else {
+                $failed++;
+            }
+        }
+
+        return [
+            'applied' => $applied,
+            'failed' => $failed,
+            'results' => $results,
+        ];
+    }
+
+    /**
+     * @return array{hub_id: int, slug: string, ok: bool, message: string, code_update: array<string, mixed>}
+     */
+    public function applyReleaseToHub(HubRelease $release, Hub $hub): array
+    {
+        $token = $this->ensureUpdateToken($hub);
+        $hub->refresh();
+
+        $hub->forceFill([
+            'code_apply_status' => self::APPLY_UPDATING,
+            'code_target_version' => $release->version,
+            'code_apply_error' => null,
+        ])->save();
+
+        // Push token + frontend path so the remote hub can authorize / apply.
+        if (! $hub->isControlPlane() && $hub->hasRemoteDatabaseConfigured()) {
+            try {
+                $this->whiteLabelSync->pushSettings($hub);
+            } catch (Throwable $e) {
+                report($e);
+            }
+        }
+
+        $current = $this->hubs->current();
+        $backendUrl = $this->artifactDownloadUrl($release, 'backend');
+        $frontendUrl = $this->artifactDownloadUrl($release, 'frontend');
+        $frontendPath = filled($hub->code_frontend_path)
+            ? (string) $hub->code_frontend_path
+            : (string) config('hub.code_update_frontend_path', '');
+
+        try {
+            if ($hub->isControlPlane() || $hub->slug === $current->slug) {
+                // Local apply on Central: use files on disk (avoid HTTP self-call).
+                $result = $this->applier->applyFromPayload([
+                    'version' => $release->version,
+                    'backend_local_path' => $this->absoluteArtifactPath($release, 'backend'),
+                    'frontend_local_path' => $this->absoluteArtifactPath($release, 'frontend'),
+                    'frontend_path' => $frontendPath !== '' ? $frontendPath : null,
+                ]);
+            } else {
+                $apiUrl = rtrim((string) ($hub->api_url ?: ''), '/');
+                if ($apiUrl === '') {
+                    throw new \RuntimeException('Set api_url in deploy wiring before applying updates.');
+                }
+                if ($backendUrl === null && $frontendUrl === null) {
+                    throw new \RuntimeException('Release has no downloadable artifacts.');
+                }
+
+                $verify = (bool) config('services.http_tls_verify', true);
+                $timeout = (int) config('services.hub_code_update.apply_timeout', 600);
+                $response = Http::withOptions(['verify' => $verify])
+                    ->timeout($timeout)
+                    ->withHeaders([
+                        'X-Hub-Code-Update-Key' => $token,
+                        'X-Hub-Slug' => $hub->slug,
+                        'Accept' => 'application/json',
+                    ])
+                    ->post($apiUrl.'/internal/code-updates/apply', [
+                        'version' => $release->version,
+                        'backend_download_url' => $backendUrl,
+                        'frontend_download_url' => $frontendUrl,
+                        'frontend_path' => $frontendPath !== '' ? $frontendPath : null,
+                        'auth_token' => $token,
+                    ]);
+
+                if (! $response->successful()) {
+                    throw new \RuntimeException(
+                        'Remote apply failed: HTTP '.$response->status().' '
+                        .Str::limit($response->body(), 500)
+                    );
+                }
+
+                $result = $response->json() ?: [];
+            }
+
+            $hub->forceFill([
+                'code_apply_status' => self::APPLY_APPLIED,
+                'code_applied_at' => now(),
+                'code_apply_error' => null,
+                'code_target_version' => $release->version,
+            ])->save();
+
+            // Re-read reported version (local marker / remote /version).
+            $this->refreshHub($hub->fresh());
+
+            return [
+                'hub_id' => $hub->id,
+                'slug' => $hub->slug,
+                'ok' => true,
+                'message' => (string) ($result['message'] ?? 'Applied '.$release->version),
+                'code_update' => $this->codeUpdatePayload($hub->fresh()),
+            ];
+        } catch (Throwable $e) {
+            report($e);
+            $hub->forceFill([
+                'code_apply_status' => self::APPLY_FAILED,
+                'code_apply_error' => Str::limit($e->getMessage(), 2000),
+            ])->save();
+
+            return [
+                'hub_id' => $hub->id,
+                'slug' => $hub->slug,
+                'ok' => false,
+                'message' => $e->getMessage(),
+                'code_update' => $this->codeUpdatePayload($hub->fresh()),
+            ];
+        }
+    }
+
+    /**
+     * Local apply used by InternalCodeUpdateController on content hubs.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    public function applyLocally(array $payload): array
+    {
+        return $this->applier->applyFromPayload($payload);
+    }
+
+    public function authorizeUpdateKey(string $provided): bool
+    {
+        if ($provided === '') {
+            return false;
+        }
+
+        $hub = $this->hubs->current();
+        foreach ([(string) ($hub->code_update_token ?: ''), (string) ($hub->backup_token ?: '')] as $expected) {
+            if ($expected !== '' && hash_equals($expected, $provided)) {
+                return true;
+            }
+        }
+
+        $shared = (string) config('services.hub_code_update.secret', '');
+
+        return $shared !== '' && hash_equals($shared, $provided);
+    }
+
+    public function authorizeArtifactDownload(string $provided): bool
+    {
+        if ($provided === '') {
+            return false;
+        }
+
+        if (! config('hub.is_control_plane')) {
+            return false;
+        }
+
+        $matched = Hub::query()
+            ->where(function ($q) {
+                $q->whereNotNull('code_update_token')->where('code_update_token', '!=', '')
+                    ->orWhere(function ($q2) {
+                        $q2->whereNotNull('backup_token')->where('backup_token', '!=', '');
+                    });
+            })
+            ->get()
+            ->first(function (Hub $row) use ($provided) {
+                foreach ([(string) ($row->code_update_token ?: ''), (string) ($row->backup_token ?: '')] as $expected) {
+                    if ($expected !== '' && hash_equals($expected, $provided)) {
+                        return true;
+                    }
+                }
+
+                return false;
+            });
+
+        if ($matched) {
+            return true;
+        }
+
+        $shared = (string) config('services.hub_code_update.secret', '');
+
+        return $shared !== '' && hash_equals($shared, $provided);
     }
 
     /**
@@ -275,6 +608,8 @@ class HubCodeUpdateService
         $latest = $this->latestRelease();
         $status = $hub->code_version_status ?: self::STATUS_UNKNOWN;
 
+        $applyStatus = $hub->code_apply_status ?: self::APPLY_IDLE;
+
         return [
             'reported_version' => $hub->code_version,
             'backend_version' => $hub->code_backend_version,
@@ -286,7 +621,25 @@ class HubCodeUpdateService
             'error' => $hub->code_version_check_error,
             'latest_version' => $latest?->version,
             'is_latest' => $status === self::STATUS_UP_TO_DATE,
+            'apply_status' => $applyStatus,
+            'apply_status_label' => $this->applyStatusLabel($applyStatus),
+            'target_version' => $hub->code_target_version,
+            'applied_at' => $hub->code_applied_at?->toIso8601String(),
+            'apply_error' => $hub->code_apply_error,
+            'frontend_path' => $hub->code_frontend_path,
+            'update_token_set' => filled($hub->code_update_token) || filled($hub->backup_token),
+            'can_apply' => filled($hub->api_url) || $hub->isControlPlane(),
         ];
+    }
+
+    private function applyStatusLabel(string $status): string
+    {
+        return match ($status) {
+            self::APPLY_UPDATING => 'Updating…',
+            self::APPLY_APPLIED => 'Last apply OK',
+            self::APPLY_FAILED => 'Last apply failed',
+            default => 'Idle',
+        };
     }
 
     public function recomputeStatus(Hub $hub): void

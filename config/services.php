@@ -77,4 +77,15 @@ return [
         'upload_timeout' => (int) env('HUB_BACKUP_UPLOAD_TIMEOUT', 600),
     ],
 
+    /*
+    | Hub code updates (Phase 2): Central pushes release zips to selected hubs.
+    | HUB_CODE_UPDATE_SECRET = shared fallback when per-hub code_update_token
+    | and backup_token are empty. Download timeout for large artifacts.
+    */
+    'hub_code_update' => [
+        'secret' => env('HUB_CODE_UPDATE_SECRET', env('HUB_BACKUP_SECRET')),
+        'download_timeout' => (int) env('HUB_CODE_UPDATE_DOWNLOAD_TIMEOUT', 600),
+        'apply_timeout' => (int) env('HUB_CODE_UPDATE_APPLY_TIMEOUT', 600),
+    ],
+
 ];

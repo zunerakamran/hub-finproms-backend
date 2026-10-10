@@ -3,7 +3,19 @@
 $versionFile = is_file(base_path('VERSION'))
     ? trim((string) file_get_contents(base_path('VERSION')))
     : '';
-$defaultVersion = $versionFile !== '' ? $versionFile : '0.0.0';
+$markerPath = storage_path('app/private/code-update-version.json');
+$markerVersion = '';
+$markerFrontend = '';
+if (is_file($markerPath)) {
+    $marker = json_decode((string) file_get_contents($markerPath), true);
+    if (is_array($marker)) {
+        $markerVersion = trim((string) ($marker['version'] ?? ''));
+        $markerFrontend = trim((string) ($marker['frontend_version'] ?? ''));
+    }
+}
+$defaultVersion = $markerVersion !== '' ? $markerVersion
+    : ($versionFile !== '' ? $versionFile : '0.0.0');
+$defaultFrontend = $markerFrontend !== '' ? $markerFrontend : $defaultVersion;
 
 return [
 
@@ -14,12 +26,20 @@ return [
     |
     | Bump VERSION in the repo (or set APP_VERSION / FRONTEND_VERSION in .env)
     | whenever you ship a release. Central Hub polls GET /api/version on each
-    | hub to track who is on the latest release.
+    | hub to track who is on the latest release. Phase 2 apply also writes
+    | storage/app/private/code-update-version.json.
     |
     */
     'version' => env('APP_VERSION', $defaultVersion),
 
-    'frontend_version' => env('FRONTEND_VERSION', env('APP_VERSION', $defaultVersion)),
+    'frontend_version' => env('FRONTEND_VERSION', env('APP_VERSION', $defaultFrontend)),
+
+    /*
+    | Absolute or base_path-relative folder where frontend dist zip extracts
+    | on this server (e.g. ../public_html or /home/user/public_html).
+    | Per-hub override: hubs.code_frontend_path on Central registry.
+    */
+    'code_update_frontend_path' => env('CODE_UPDATE_FRONTEND_PATH'),
 
     /*
     |--------------------------------------------------------------------------

@@ -1695,6 +1695,12 @@ class Hub extends Model
         'code_version_source',
         'code_version_checked_at',
         'code_version_check_error',
+        'code_apply_status',
+        'code_target_version',
+        'code_applied_at',
+        'code_apply_error',
+        'code_update_token',
+        'code_frontend_path',
     ];
 
     protected $hidden = [
@@ -1702,6 +1708,7 @@ class Hub extends Model
         'stripe_webhook_secret',
         'db_password',
         'backup_token',
+        'code_update_token',
     ];
 
     protected function casts(): array
@@ -1728,6 +1735,7 @@ class Hub extends Model
             'backup_retention_central' => 'integer',
             'backup_last_run_at' => 'datetime',
             'code_version_checked_at' => 'datetime',
+            'code_applied_at' => 'datetime',
             'stripe_secret' => \App\Casts\SafeEncrypted::class,
             'stripe_webhook_secret' => \App\Casts\SafeEncrypted::class,
             'db_password' => \App\Casts\SafeEncrypted::class,

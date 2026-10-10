@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-10 (Hub code update tracking — Phase 1 version visibility)
+Last updated: 2026-10-10 (Hub code updates Phase 2 — apply release zips to selected hubs)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -76,8 +76,8 @@ Deploy rule:
   7) Remote control / hub switcher — act on a Shared or White-label hub's own
      database (content, types, categories, tags, bundles, settings, etc.) when
      wiring + receive_content / remote-control flags allow
-  8) Code update tracking (Phase 1) — publish a latest release version, refresh
-     each hub's reported code version, see who is up to date / behind
+  8) Code updates — publish release (+ optional zips), refresh versions, select
+     hubs and apply packages (Phase 1 tracking + Phase 2 apply)
 - Spawning a new hub (Shared or White-label):
   - Ops copies the SAME codebase to another cPanel (or hosting).
   - New instance gets its OWN DB + .env (HUB_SLUG, DB_*, URLs).
@@ -125,11 +125,48 @@ Central registry:
 - Hub admin payloads include code_update { reported_version, status,
   status_label, latest_version, … }.
 
-Ops workflow (Phase 1):
+Ops workflow (Phase 1 — track only):
   1) Ship code (git pull backend; build + FTP frontend) on chosen hubs.
   2) Ensure APP_VERSION / FRONTEND_VERSION (or VERSION file) matches the release.
   3) On Central: Publish release (e.g. 1.2.0) → Refresh versions → see badges.
-Phase 2 (later): one-click apply of a release package to selected hubs.
+
+--------------------------------------------------------------------------------
+1C. CODE UPDATES ACROSS HUBS (PHASE 2 — APPLY TO SELECTED HUBS)
+--------------------------------------------------------------------------------
+Purpose: from Central, choose which existing hubs receive a release package
+(backend zip and/or frontend dist zip). Still not new-hub spawn.
+
+Release artifacts (stored on Central disk: storage/app/private/releases/{ver}/):
+- On publish (multipart) or POST /api/power-admin/releases/{id}/artifacts:
+  backend_zip, frontend_zip (optional each; at least one required to apply).
+- backend zip = Laravel app tree (prefer include vendor/). Never overwrites
+  .env, storage/app|framework|logs, bootstrap/cache, .git.
+- frontend zip = Vite dist (dist / dist-shared / … root stripped). Extracted to
+  hub.code_frontend_path (Central registry) or CODE_UPDATE_FRONTEND_PATH on that
+  server.
+
+Apply:
+- POST /api/power-admin/releases/apply { release_id?, hub_ids: [] }
+- Central marks hub code_apply_status=updating, ensures code_update_token
+  (reuses backup_token when present), pushes token + code_frontend_path via
+  white-label DB sync when remote DB wired.
+- Content hub: POST {api_url}/internal/code-updates/apply with
+  X-Hub-Code-Update-Key; hub downloads artifacts from Central
+  GET /api/internal/code-updates/artifacts/{release}/{backend|frontend},
+  extracts, writes VERSION + storage marker, runs migrate --force, clears caches.
+- Central self-apply uses local artifact files (no HTTP loopback).
+- Auth: code_update_token OR backup_token OR HUB_CODE_UPDATE_SECRET /
+  HUB_BACKUP_SECRET.
+- Per hub: apply_status (idle|updating|applied|failed), target_version,
+  applied_at, apply_error; then refresh reported version.
+
+UI (Central Hubs page): upload zips with publish, multi-select hubs, Apply to
+selected. Hub detail: code_frontend_path field for frontend extract location.
+
+Packaging tips:
+- Backend: zip the backend repo (exclude .env / storage contents); include vendor
+  if target cPanel has no composer.
+- Frontend: zip the contents of dist-* after npm run build:shared / build:myhub.
 
 
 --------------------------------------------------------------------------------

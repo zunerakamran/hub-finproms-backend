@@ -91,6 +91,8 @@ class WhiteLabelHubSyncService
                     'backup_retention_local' => $hub->backup_retention_local ?: 3,
                     'backup_retention_central' => $hub->backup_retention_central ?: 14,
                     'backup_token' => $hub->backup_token,
+                    'code_update_token' => $hub->code_update_token ?: $hub->backup_token,
+                    'code_frontend_path' => $hub->code_frontend_path,
                     'updated_at' => $now,
                 ];
 

@@ -255,6 +255,7 @@ class PowerAdminHubController extends Controller
             'frontend_url' => ['nullable', 'string', 'max:2048', 'url'],
             'api_url' => ['nullable', 'string', 'max:2048', 'url'],
             'deploy_notes' => ['nullable', 'string', 'max:5000'],
+            'code_frontend_path' => ['nullable', 'string', 'max:1024'],
             'db_driver' => ['nullable', 'string', Rule::in(['mysql', 'pgsql', 'sqlsrv'])],
             'db_host' => ['nullable', 'string', 'max:255'],
             'db_port' => ['nullable', 'integer', 'min:1', 'max:65535'],

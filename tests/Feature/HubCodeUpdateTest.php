@@ -175,4 +175,148 @@ class HubCodeUpdateTest extends TestCase
             ->assertJsonPath('hubs.0.code_update.reported_version', '1.0.0')
             ->assertJsonPath('hubs.0.code_update.status', 'up_to_date');
     }
+
+    public function test_publish_release_with_backend_zip_and_apply_locally(): void
+    {
+        $hub = Hub::query()->create([
+            'name' => 'Central',
+            'slug' => 'central',
+            'type' => Hub::TYPE_CENTRAL,
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs(User::factory()->powerAdmin()->create());
+
+        $versionBefore = is_file(base_path('VERSION'))
+            ? (string) file_get_contents(base_path('VERSION'))
+            : "1.0.0\n";
+        $markerPath = storage_path('app/private/code-update-version.json');
+
+        $zipPath = storage_path('framework/testing/backend-release.zip');
+        if (! is_dir(dirname($zipPath))) {
+            mkdir(dirname($zipPath), 0755, true);
+        }
+        $zip = new \ZipArchive;
+        $this->assertTrue($zip->open($zipPath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE));
+        $zip->addFromString('VERSION', "2.0.0\n");
+        $zip->addFromString('app/.code-update-probe', 'ok');
+        $zip->close();
+
+        try {
+            $this->post('/api/power-admin/releases', [
+                'version' => '2.0.0',
+                'backend_zip' => new \Illuminate\Http\UploadedFile(
+                    $zipPath,
+                    'backend.zip',
+                    'application/zip',
+                    null,
+                    true
+                ),
+            ], [
+                'Accept' => 'application/json',
+            ])->assertCreated()
+                ->assertJsonPath('release.backend_artifact', true)
+                ->assertJsonPath('release.ready_to_apply', true);
+
+            $this->postJson('/api/power-admin/releases/apply', [
+                'hub_ids' => [$hub->id],
+            ])->assertOk()
+                ->assertJsonPath('applied', 1)
+                ->assertJsonPath('failed', 0);
+
+            $hub->refresh();
+            $this->assertSame('applied', $hub->code_apply_status);
+            $this->assertSame('2.0.0', $hub->code_target_version);
+            $this->assertFileExists(base_path('app/.code-update-probe'));
+        } finally {
+            @unlink(base_path('app/.code-update-probe'));
+            file_put_contents(base_path('VERSION'), $versionBefore);
+            @unlink($markerPath);
+        }
+    }
+
+    public function test_apply_requires_artifacts(): void
+    {
+        $hub = Hub::query()->create([
+            'name' => 'Central',
+            'slug' => 'central',
+            'type' => Hub::TYPE_CENTRAL,
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs(User::factory()->powerAdmin()->create());
+        $this->postJson('/api/power-admin/releases', ['version' => '3.0.0'])->assertCreated();
+
+        $this->postJson('/api/power-admin/releases/apply', [
+            'hub_ids' => [$hub->id],
+        ])->assertStatus(422);
+    }
+
+    public function test_remote_apply_posts_to_hub_api(): void
+    {
+        Hub::query()->create([
+            'name' => 'Central',
+            'slug' => 'central',
+            'type' => Hub::TYPE_CENTRAL,
+            'is_active' => true,
+        ]);
+
+        $wl = Hub::query()->create([
+            'name' => 'Client Hub',
+            'slug' => 'client-hub',
+            'type' => Hub::TYPE_WHITE_LABEL,
+            'is_active' => true,
+            'api_url' => 'https://api.client-hub.test',
+            'frontend_url' => 'https://client-hub.test',
+            'backup_token' => 'test-update-token',
+        ]);
+
+        Sanctum::actingAs(User::factory()->powerAdmin()->create());
+
+        $zipPath = storage_path('framework/testing/backend-release-remote.zip');
+        if (! is_dir(dirname($zipPath))) {
+            mkdir(dirname($zipPath), 0755, true);
+        }
+        $zip = new \ZipArchive;
+        $this->assertTrue($zip->open($zipPath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE));
+        $zip->addFromString('VERSION', "2.1.0\n");
+        $zip->close();
+
+        $this->post('/api/power-admin/releases', [
+            'version' => '2.1.0',
+            'backend_zip' => new \Illuminate\Http\UploadedFile(
+                $zipPath,
+                'backend.zip',
+                'application/zip',
+                null,
+                true
+            ),
+        ], [
+            'Accept' => 'application/json',
+        ])->assertCreated();
+
+        Http::fake([
+            'https://api.client-hub.test/internal/code-updates/apply' => Http::response([
+                'version' => '2.1.0',
+                'backend_applied' => true,
+                'frontend_applied' => false,
+                'migrated' => true,
+                'message' => 'Release 2.1.0 applied on this hub.',
+            ], 200),
+            'https://api.client-hub.test/version' => Http::response([
+                'version' => '2.1.0',
+                'backend_version' => '2.1.0',
+                'frontend_version' => '2.1.0',
+            ], 200),
+        ]);
+
+        $this->postJson('/api/power-admin/releases/apply', [
+            'hub_ids' => [$wl->id],
+        ])->assertOk()
+            ->assertJsonPath('applied', 1);
+
+        $wl->refresh();
+        $this->assertSame('applied', $wl->code_apply_status);
+        $this->assertSame('2.1.0', $wl->code_version);
+    }
 }
