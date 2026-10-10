@@ -494,6 +494,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:dashboard_manage_dashboard_nav')->group(function () {
             Route::get('/dashboard-nav', [DashboardNavController::class, 'show']);
             Route::match(['put', 'post'], '/dashboard-nav', [DashboardNavController::class, 'update']);
+            Route::get('/dashboard-nav/import-sources', [DashboardNavController::class, 'importSources']);
+            Route::post('/dashboard-nav/import', [DashboardNavController::class, 'import']);
         });
 
         Route::middleware('hub_can:dashboard_manage_role_display_names')->group(function () {

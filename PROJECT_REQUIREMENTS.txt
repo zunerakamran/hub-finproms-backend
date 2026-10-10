@@ -765,6 +765,10 @@ Notes:
   3) Dashboard menu — `dashboard_manage_dashboard_nav`
      (`/my-dashboard/dashboard-menu`, API GET/PUT `/client-admin/dashboard-nav`):
      sidebar separators, menu item names, order, and grouping.
+     Import from another hub: GET `/client-admin/dashboard-nav/import-sources`
+     + POST `/client-admin/dashboard-nav/import` `{ source_hub_id }` copies that
+     hub’s menu onto the current (acting) hub — useful when configuring many
+     white-labelled hubs the same way.
   Values are returned on public GET /hub under branding / page_content /
   dashboard_nav and applied in the UI. Who may open each page is controlled
   independently on the Capabilities matrix.
