@@ -825,6 +825,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
             // Code updates: publish release, upload zips, poll versions, apply to selected hubs
             Route::get('/releases', [PowerAdminHubReleaseController::class, 'index']);
+            Route::get('/releases/history', [PowerAdminHubReleaseController::class, 'history']);
             Route::post('/releases', [PowerAdminHubReleaseController::class, 'store']);
             Route::post('/releases/apply', [PowerAdminHubReleaseController::class, 'apply']);
             Route::post('/releases/{release}/artifacts', [PowerAdminHubReleaseController::class, 'storeArtifacts']);

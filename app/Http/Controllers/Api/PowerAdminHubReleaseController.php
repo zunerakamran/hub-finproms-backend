@@ -108,7 +108,11 @@ class PowerAdminHubReleaseController extends Controller
         }
 
         try {
-            $result = $this->codeUpdates->applyReleaseToHubs($release, $validated['hub_ids']);
+            $result = $this->codeUpdates->applyReleaseToHubs(
+                $release,
+                $validated['hub_ids'],
+                $request->user()
+            );
         } catch (InvalidArgumentException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         } catch (Throwable $e) {
@@ -127,6 +131,21 @@ class PowerAdminHubReleaseController extends Controller
             'failed' => $result['failed'],
             'results' => $result['results'],
             'overview' => $this->codeUpdates->overviewPayload(),
+        ]);
+    }
+
+    public function history(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'hub_id' => ['nullable', 'integer', 'exists:hubs,id'],
+            'limit' => ['nullable', 'integer', 'min:1', 'max:200'],
+        ]);
+
+        return response()->json([
+            'history' => $this->codeUpdates->listHistory(
+                $validated['hub_id'] ?? null,
+                (int) ($validated['limit'] ?? 100)
+            ),
         ]);
     }
 
@@ -164,7 +183,7 @@ class PowerAdminHubReleaseController extends Controller
         ]);
 
         try {
-            $codeUpdate = $this->codeUpdates->markManual($hub, $validated);
+            $codeUpdate = $this->codeUpdates->markManual($hub, $validated, $request->user());
         } catch (InvalidArgumentException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }

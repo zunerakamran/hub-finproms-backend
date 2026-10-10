@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-10 (Hub code updates Phase 2 — apply release zips to selected hubs)
+Last updated: 2026-10-10 (Hub code update history log on Central Hubs page)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -161,7 +161,15 @@ Apply:
   applied_at, apply_error; then refresh reported version.
 
 UI (Central Hubs page): upload zips with publish, multi-select hubs, Apply to
-selected. Hub detail: code_frontend_path field for frontend extract location.
+selected; Update history table (filter by hub). Hub detail: code_frontend_path.
+
+Update history (append-only on Central):
+- Table hub_code_update_events: hub, release, version, action (apply|
+  mark_manual), status (success|failed), message, backend/frontend/migrated
+  flags, triggered_by, finished_at.
+- Written on every Apply and manual “mark version”.
+- GET /api/power-admin/releases/history?hub_id=&limit=
+- Also included as overview.history on GET /api/power-admin/releases.
 
 Packaging tips:
 - Backend: zip the backend repo (exclude .env / storage contents); include vendor

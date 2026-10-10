@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Hub;
+use App\Models\HubCodeUpdateEvent;
 use App\Models\HubRelease;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
@@ -242,7 +243,7 @@ class HubCodeUpdateService
      * @param  list<int>  $hubIds
      * @return array{applied: int, failed: int, results: list<array<string, mixed>>}
      */
-    public function applyReleaseToHubs(HubRelease $release, array $hubIds): array
+    public function applyReleaseToHubs(HubRelease $release, array $hubIds, ?User $actor = null): array
     {
         if (! filled($release->backend_artifact_path) && ! filled($release->frontend_artifact_path)) {
             throw new \InvalidArgumentException(
@@ -256,7 +257,7 @@ class HubCodeUpdateService
 
         $hubs = Hub::query()->whereIn('id', $hubIds)->orderBy('id')->get();
         foreach ($hubs as $hub) {
-            $row = $this->applyReleaseToHub($release, $hub);
+            $row = $this->applyReleaseToHub($release, $hub, $actor);
             $results[] = $row;
             if (($row['ok'] ?? false) === true) {
                 $applied++;
@@ -275,7 +276,7 @@ class HubCodeUpdateService
     /**
      * @return array{hub_id: int, slug: string, ok: bool, message: string, code_update: array<string, mixed>}
      */
-    public function applyReleaseToHub(HubRelease $release, Hub $hub): array
+    public function applyReleaseToHub(HubRelease $release, Hub $hub, ?User $actor = null): array
     {
         $token = $this->ensureUpdateToken($hub);
         $hub->refresh();
@@ -357,11 +358,25 @@ class HubCodeUpdateService
             // Re-read reported version (local marker / remote /version).
             $this->refreshHub($hub->fresh());
 
+            $message = (string) ($result['message'] ?? 'Applied '.$release->version);
+            $this->recordEvent([
+                'hub' => $hub,
+                'release' => $release,
+                'version' => $release->version,
+                'action' => HubCodeUpdateEvent::ACTION_APPLY,
+                'status' => HubCodeUpdateEvent::STATUS_SUCCESS,
+                'message' => $message,
+                'backend_applied' => (bool) ($result['backend_applied'] ?? false),
+                'frontend_applied' => (bool) ($result['frontend_applied'] ?? false),
+                'migrated' => (bool) ($result['migrated'] ?? false),
+                'actor' => $actor,
+            ]);
+
             return [
                 'hub_id' => $hub->id,
                 'slug' => $hub->slug,
                 'ok' => true,
-                'message' => (string) ($result['message'] ?? 'Applied '.$release->version),
+                'message' => $message,
                 'code_update' => $this->codeUpdatePayload($hub->fresh()),
             ];
         } catch (Throwable $e) {
@@ -370,6 +385,19 @@ class HubCodeUpdateService
                 'code_apply_status' => self::APPLY_FAILED,
                 'code_apply_error' => Str::limit($e->getMessage(), 2000),
             ])->save();
+
+            $this->recordEvent([
+                'hub' => $hub,
+                'release' => $release,
+                'version' => $release->version,
+                'action' => HubCodeUpdateEvent::ACTION_APPLY,
+                'status' => HubCodeUpdateEvent::STATUS_FAILED,
+                'message' => Str::limit($e->getMessage(), 2000),
+                'backend_applied' => false,
+                'frontend_applied' => false,
+                'migrated' => false,
+                'actor' => $actor,
+            ]);
 
             return [
                 'hub_id' => $hub->id,
@@ -549,7 +577,7 @@ class HubCodeUpdateService
      * @param  array{version: string, backend_version?: ?string, frontend_version?: ?string}  $data
      * @return array<string, mixed>
      */
-    public function markManual(Hub $hub, array $data): array
+    public function markManual(Hub $hub, array $data, ?User $actor = null): array
     {
         $version = $this->normalizeVersion($data['version'] ?? '');
         if ($version === '') {
@@ -564,7 +592,41 @@ class HubCodeUpdateService
 
         $this->storeReportedVersions($hub, $payload, self::SOURCE_MANUAL, null);
 
+        $this->recordEvent([
+            'hub' => $hub,
+            'release' => null,
+            'version' => $version,
+            'action' => HubCodeUpdateEvent::ACTION_MARK_MANUAL,
+            'status' => HubCodeUpdateEvent::STATUS_SUCCESS,
+            'message' => 'Manually recorded version '.$version,
+            'backend_applied' => null,
+            'frontend_applied' => null,
+            'migrated' => null,
+            'actor' => $actor,
+        ]);
+
         return $this->codeUpdatePayload($hub->fresh());
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function listHistory(?int $hubId = null, int $limit = 100): array
+    {
+        $query = HubCodeUpdateEvent::query()
+            ->with('actor:id,name')
+            ->orderByDesc('id');
+
+        if ($hubId) {
+            $query->where('hub_id', $hubId);
+        }
+
+        return $query
+            ->limit($limit)
+            ->get()
+            ->map(fn (HubCodeUpdateEvent $event) => $event->toAdminArray())
+            ->values()
+            ->all();
     }
 
     /**
@@ -595,7 +657,47 @@ class HubCodeUpdateService
             'this_deploy' => $this->localVersionPayload(),
             'counts' => $counts,
             'releases' => $this->listReleases(),
+            'history' => $this->listHistory(null, 50),
         ];
+    }
+
+    /**
+     * @param  array{
+     *   hub: Hub,
+     *   release: ?HubRelease,
+     *   version: string,
+     *   action: string,
+     *   status: string,
+     *   message: ?string,
+     *   backend_applied: ?bool,
+     *   frontend_applied: ?bool,
+     *   migrated: ?bool,
+     *   actor: ?User
+     * }  $data
+     */
+    private function recordEvent(array $data): void
+    {
+        try {
+            /** @var Hub $hub */
+            $hub = $data['hub'];
+            HubCodeUpdateEvent::query()->create([
+                'hub_id' => $hub->id,
+                'hub_slug' => $hub->slug,
+                'hub_name' => $hub->name,
+                'hub_release_id' => $data['release']?->id,
+                'version' => $data['version'],
+                'action' => $data['action'],
+                'status' => $data['status'],
+                'message' => $data['message'],
+                'backend_applied' => $data['backend_applied'],
+                'frontend_applied' => $data['frontend_applied'],
+                'migrated' => $data['migrated'],
+                'triggered_by' => $data['actor']?->id,
+                'finished_at' => now(),
+            ]);
+        } catch (Throwable $e) {
+            report($e);
+        }
     }
 
     /**

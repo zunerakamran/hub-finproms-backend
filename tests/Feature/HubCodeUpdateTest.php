@@ -319,4 +319,63 @@ class HubCodeUpdateTest extends TestCase
         $this->assertSame('applied', $wl->code_apply_status);
         $this->assertSame('2.1.0', $wl->code_version);
     }
+
+    public function test_apply_writes_history_events(): void
+    {
+        $hub = Hub::query()->create([
+            'name' => 'Central',
+            'slug' => 'central',
+            'type' => Hub::TYPE_CENTRAL,
+            'is_active' => true,
+        ]);
+
+        Sanctum::actingAs(User::factory()->powerAdmin()->create());
+
+        $zipPath = storage_path('framework/testing/backend-release-history.zip');
+        if (! is_dir(dirname($zipPath))) {
+            mkdir(dirname($zipPath), 0755, true);
+        }
+        $zip = new \ZipArchive;
+        $this->assertTrue($zip->open($zipPath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE));
+        $zip->addFromString('VERSION', "4.0.0\n");
+        $zip->close();
+
+        $versionBefore = is_file(base_path('VERSION'))
+            ? (string) file_get_contents(base_path('VERSION'))
+            : "1.0.0\n";
+        $markerPath = storage_path('app/private/code-update-version.json');
+
+        try {
+            $this->post('/api/power-admin/releases', [
+                'version' => '4.0.0',
+                'backend_zip' => new \Illuminate\Http\UploadedFile(
+                    $zipPath,
+                    'backend.zip',
+                    'application/zip',
+                    null,
+                    true
+                ),
+            ], [
+                'Accept' => 'application/json',
+            ])->assertCreated();
+
+            $this->postJson('/api/power-admin/releases/apply', [
+                'hub_ids' => [$hub->id],
+            ])->assertOk();
+
+            $this->getJson('/api/power-admin/releases/history')
+                ->assertOk()
+                ->assertJsonPath('history.0.version', '4.0.0')
+                ->assertJsonPath('history.0.hub_slug', 'central')
+                ->assertJsonPath('history.0.status', 'success')
+                ->assertJsonPath('history.0.action', 'apply');
+
+            $this->getJson('/api/power-admin/releases')
+                ->assertOk()
+                ->assertJsonPath('history.0.version', '4.0.0');
+        } finally {
+            file_put_contents(base_path('VERSION'), $versionBefore);
+            @unlink($markerPath);
+        }
+    }
 }
