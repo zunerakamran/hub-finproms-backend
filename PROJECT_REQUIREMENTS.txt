@@ -761,7 +761,10 @@ Notes:
   2) Website content — `dashboard_manage_page_content`
      (`/my-dashboard/page-content`, API GET/PUT `/client-admin/page-content`):
      public Home / Posts·Reels catalog / post detail copy + footer powered-by
-     logo upload.
+     logo upload. Import from another hub: GET
+     `/client-admin/page-content/import-sources` + POST
+     `/client-admin/page-content/import` `{ source_hub_id }` copies that hub’s
+     page copy onto the current (acting) hub.
   3) Dashboard menu — `dashboard_manage_dashboard_nav`
      (`/my-dashboard/dashboard-menu`, API GET/PUT `/client-admin/dashboard-nav`):
      sidebar separators, menu item names, order, and grouping.

@@ -489,6 +489,8 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/page-content', [PageContentController::class, 'show']);
             // POST accepts multipart footer powered-by logo uploads.
             Route::match(['put', 'post'], '/page-content', [PageContentController::class, 'update']);
+            Route::get('/page-content/import-sources', [PageContentController::class, 'importSources']);
+            Route::post('/page-content/import', [PageContentController::class, 'import']);
         });
 
         Route::middleware('hub_can:dashboard_manage_dashboard_nav')->group(function () {
