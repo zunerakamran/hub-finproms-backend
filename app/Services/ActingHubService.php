@@ -373,6 +373,8 @@ class ActingHubService
                 'branding' => $acting->brandingPayload(),
                 'role_labels' => $acting->resolvedRoleLabels(),
                 'compliance_status_labels' => $acting->resolvedComplianceStatusLabels(),
+                // Sidebar separators / menu labels follow the selected hub.
+                'dashboard_nav' => $acting->resolvedDashboardNav(),
             ],
             'is_acting_on_white_label' => $acting->isWhiteLabel(),
             'is_acting_on_shared' => $acting->isShared() && $actingRemotely,
@@ -392,6 +394,7 @@ class ActingHubService
             'effective_capabilities' => $this->effectiveCapabilities($user),
             'role_labels' => $acting->resolvedRoleLabels(),
             'compliance_status_labels' => $acting->resolvedComplianceStatusLabels(),
+            'dashboard_nav' => $acting->resolvedDashboardNav(),
         ];
     }
 

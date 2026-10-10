@@ -46,15 +46,18 @@ class HubController extends Controller
             }
             if ($switcher !== null) {
                 $payload['hub_switcher'] = $switcher;
-                // Dashboard menus should follow the acting hub's effective caps.
+                // Dashboard menus should follow the acting hub's effective caps
+                // and that hub's Settings → dashboard menu labels / separators.
                 $payload['effective_capabilities'] = $switcher['effective_capabilities'];
                 $payload['acting_hub'] = $switcher['acting_hub'];
                 $payload['role_labels'] = $switcher['role_labels'] ?? $payload['role_labels'];
                 $payload['compliance_status_labels'] = $switcher['compliance_status_labels']
                     ?? $payload['compliance_status_labels'];
+                $payload['dashboard_nav'] = $switcher['dashboard_nav'] ?? $payload['dashboard_nav'];
                 try {
                     $acting = $this->actingHubs->actingHub($user);
                     $payload['acting_checklist'] = $acting->resolvedChecklist();
+                    $payload['dashboard_nav'] = $acting->resolvedDashboardNav();
                     $payload['firm_document_rights'] = app(\App\Services\FirmDocumentAccessService::class)
                         ->effectiveRightsSummary($user, $acting);
                 } catch (\Throwable) {

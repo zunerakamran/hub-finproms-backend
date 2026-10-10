@@ -891,10 +891,12 @@ Notes:
   switcher at the top of the Central Hub dashboard.
 - Selecting Central Hub context → platform tools only (registry, checklists, etc.).
 - Selecting a Shared or White-label hub → dashboard menus/tools follow THAT
-  hub’s Capabilities matrix for the user’s role (e.g. View posts). Creating
-  posts / types / categories / tags is Central-only (Central content library);
-  while a content hub is selected those pages are list-only. Bundles and other
-  hub tools still write to THAT hub’s own database when enabled.
+  hub’s Capabilities matrix for the user’s role (e.g. View posts). Authenticated
+  GET /hub also overlays that hub’s `dashboard_nav` (sidebar separators + menu
+  item names from Settings) so Central’s menu labels match the selected hub.
+  Creating posts / types / categories / tags is Central-only (Central content
+  library); while a content hub is selected those pages are list-only. Bundles
+  and other hub tools still write to THAT hub’s own database when enabled.
 - Dashboard “Website” / “Back to website” always opens THIS deploy’s public
   site (`/`), gated by `member_view_site_pages` on the control-plane (Central)
   matrix for that user. It must NOT open the selected Shared / White-label
