@@ -55,6 +55,8 @@ use App\Http\Controllers\Api\PowerAdminUserController;
 use App\Http\Controllers\Api\InternalHubBackupController;
 use App\Http\Controllers\Api\PurchaseController;
 use App\Http\Controllers\Api\SettingController;
+use App\Http\Controllers\Api\PageContentController;
+use App\Http\Controllers\Api\DashboardNavController;
 use App\Http\Controllers\Api\RoleDisplayNameController;
 use App\Http\Controllers\Api\EmailTemplateController;
 use App\Http\Controllers\Api\CookieNoticeController;
@@ -481,6 +483,17 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/settings', [SettingController::class, 'index']);
             // POST accepts multipart logo / favicon uploads (PHP does not populate files on PUT).
             Route::match(['put', 'post'], '/settings', [SettingController::class, 'update']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_page_content')->group(function () {
+            Route::get('/page-content', [PageContentController::class, 'show']);
+            // POST accepts multipart footer powered-by logo uploads.
+            Route::match(['put', 'post'], '/page-content', [PageContentController::class, 'update']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_dashboard_nav')->group(function () {
+            Route::get('/dashboard-nav', [DashboardNavController::class, 'show']);
+            Route::match(['put', 'post'], '/dashboard-nav', [DashboardNavController::class, 'update']);
         });
 
         Route::middleware('hub_can:dashboard_manage_role_display_names')->group(function () {

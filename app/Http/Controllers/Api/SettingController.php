@@ -8,13 +8,15 @@ use App\Models\Setting;
 use App\Services\ActingHubService;
 use App\Services\HubService;
 use App\Services\WhiteLabelHubSyncService;
-use App\Support\DashboardNavDefaults;
-use App\Support\PageContentDefaults;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use InvalidArgumentException;
 
+/**
+ * General hub settings (branding / colours / logos).
+ * Website content and dashboard menu are separate pages + capabilities.
+ */
 class SettingController extends Controller
 {
     public function __construct(
@@ -41,6 +43,12 @@ class SettingController extends Controller
 
     public function update(Request $request): JsonResponse
     {
+        if ($request->exists('page_content') || $request->exists('dashboard_nav')) {
+            return response()->json([
+                'message' => 'Website content and dashboard menu are separate settings pages. Use /client-admin/page-content or /client-admin/dashboard-nav.',
+            ], 422);
+        }
+
         $validated = $request->validate([
             'new_banner_days' => ['sometimes', 'integer', 'min:0', 'max:365'],
             'application_name' => ['sometimes', 'string', 'max:255'],
@@ -61,10 +69,6 @@ class SettingController extends Controller
             'primary_color' => ['nullable', 'string', 'max:32'],
             'secondary_color' => ['nullable', 'string', 'max:32'],
             'accent_color' => ['nullable', 'string', 'max:32'],
-            'page_content' => ['sometimes'],
-            'dashboard_nav' => ['sometimes'],
-            'footer_powered_by_logo' => ['sometimes', 'file', 'image', 'max:5120'],
-            'remove_footer_powered_by_logo' => ['sometimes', 'boolean'],
         ]);
 
         if (array_key_exists('new_banner_days', $validated)) {
@@ -170,164 +174,6 @@ class SettingController extends Controller
             $hubDirty = true;
         }
 
-        $previousPoweredByLogo = is_array($hub->page_content)
-            ? ($hub->page_content['home']['footer_powered_by_logo'] ?? null)
-            : null;
-        $removePoweredByLogo = filter_var(
-            $request->input('remove_footer_powered_by_logo'),
-            FILTER_VALIDATE_BOOLEAN
-        );
-
-        if ($request->exists('page_content')) {
-            $raw = $request->input('page_content');
-            if (is_string($raw)) {
-                $decoded = json_decode($raw, true);
-                $raw = is_array($decoded) ? $decoded : [];
-            }
-            if (! is_array($raw)) {
-                $raw = [];
-            }
-
-            $incoming = PageContentDefaults::sanitize($raw);
-            $defaults = PageContentDefaults::all();
-            $merged = [];
-
-            foreach ($defaults as $section => $fields) {
-                $sectionIncoming = $incoming[$section] ?? [];
-                foreach (array_keys($fields) as $key) {
-                    if (! array_key_exists($key, $sectionIncoming)) {
-                        continue;
-                    }
-                    $value = $sectionIncoming[$key];
-                    // Empty or equal to default → no override stored.
-                    if ($value === '' || $value === $fields[$key]) {
-                        continue;
-                    }
-                    $merged[$section][$key] = $value;
-                }
-            }
-
-            // Keep the storage path when the UI echoes back the resolved public URL.
-            if (
-                ! $request->hasFile('footer_powered_by_logo')
-                && ! $removePoweredByLogo
-                && is_string($previousPoweredByLogo)
-                && str_starts_with($previousPoweredByLogo, 'hubs/powered-by-logos/')
-            ) {
-                $incomingLogo = trim((string) ($incoming['home']['footer_powered_by_logo'] ?? ''));
-                $previousPublic = Storage::disk('public')->url($previousPoweredByLogo);
-                $previousMedia = $hub->absoluteStoredMediaUrl($previousPoweredByLogo);
-                $previousAbsolute = str_starts_with($previousPublic, 'http://') || str_starts_with($previousPublic, 'https://')
-                    ? $previousPublic
-                    : rtrim((string) config('app.url'), '/').'/'.ltrim($previousPublic, '/');
-                $echoesStored = $incomingLogo === ''
-                    || $incomingLogo === $previousPoweredByLogo
-                    || $incomingLogo === $previousPublic
-                    || $incomingLogo === $previousAbsolute
-                    || $incomingLogo === $previousMedia
-                    || str_ends_with($incomingLogo, '/'.$previousPoweredByLogo)
-                    || str_ends_with($incomingLogo, $previousPoweredByLogo);
-                if ($echoesStored) {
-                    $merged['home']['footer_powered_by_logo'] = $previousPoweredByLogo;
-                }
-            }
-
-            $hub->page_content = $merged === [] ? null : $merged;
-            $hubDirty = true;
-        }
-
-        if ($removePoweredByLogo && ! $request->hasFile('footer_powered_by_logo')) {
-            $this->deleteStoredAsset(
-                is_string($previousPoweredByLogo) ? $previousPoweredByLogo : null,
-                'hubs/powered-by-logos/'
-            );
-            $pageContent = is_array($hub->page_content) ? $hub->page_content : [];
-            unset($pageContent['home']['footer_powered_by_logo']);
-            if (($pageContent['home'] ?? null) === []) {
-                unset($pageContent['home']);
-            }
-            $hub->page_content = $pageContent === [] ? null : $pageContent;
-            $hubDirty = true;
-        }
-
-        if ($request->hasFile('footer_powered_by_logo')) {
-            $pageContent = is_array($hub->page_content) ? $hub->page_content : [];
-            $old = $pageContent['home']['footer_powered_by_logo'] ?? $previousPoweredByLogo;
-            $this->deleteStoredAsset(is_string($old) ? $old : null, 'hubs/powered-by-logos/');
-            $path = $request->file('footer_powered_by_logo')->store('hubs/powered-by-logos', 'public');
-            $pageContent['home']['footer_powered_by_logo'] = $path;
-            $hub->page_content = $pageContent;
-            $hubDirty = true;
-        }
-
-        if ($request->exists('dashboard_nav')) {
-            $raw = $request->input('dashboard_nav');
-            if (is_string($raw)) {
-                $decoded = json_decode($raw, true);
-                $raw = is_array($decoded) ? $decoded : [];
-            }
-            if (! is_array($raw)) {
-                $raw = [];
-            }
-
-            $incoming = DashboardNavDefaults::sanitize($raw);
-            $defaults = DashboardNavDefaults::all();
-            $merged = [];
-
-            foreach (['sections', 'items'] as $bucket) {
-                $bucketIncoming = $incoming[$bucket] ?? [];
-                foreach (array_keys($defaults[$bucket]) as $key) {
-                    if (! array_key_exists($key, $bucketIncoming)) {
-                        continue;
-                    }
-                    $value = $bucketIncoming[$key];
-                    if ($value === '' || $value === $defaults[$bucket][$key]) {
-                        continue;
-                    }
-                    $merged[$bucket][$key] = $value;
-                }
-            }
-
-            // Always persist custom separator labels.
-            foreach (($incoming['sections'] ?? []) as $key => $value) {
-                if (! DashboardNavDefaults::isCustomSectionId((string) $key)) {
-                    continue;
-                }
-                $label = trim((string) $value);
-                $merged['sections'][$key] = $label !== '' ? $label : 'Custom section';
-            }
-
-            $customIds = DashboardNavDefaults::extractCustomSectionIds(
-                $incoming['sections'] ?? null,
-                $incoming['section_order'] ?? null
-            );
-            if (($incoming['section_order'] ?? []) !== []
-                && (($incoming['section_order'] ?? null) !== ($defaults['section_order'] ?? null) || $customIds !== [])) {
-                $merged['section_order'] = $incoming['section_order'];
-            }
-
-            if (($incoming['item_groups'] ?? []) !== []) {
-                $groupDiff = [];
-                foreach ($defaults['item_groups'] as $path => $defaultGroup) {
-                    $value = $incoming['item_groups'][$path] ?? null;
-                    if ($value !== null && $value !== '' && $value !== $defaultGroup) {
-                        $groupDiff[$path] = $value;
-                    }
-                }
-                if ($groupDiff !== []) {
-                    $merged['item_groups'] = $groupDiff;
-                }
-            }
-
-            if (($incoming['item_order'] ?? []) !== []
-                && ($incoming['item_order'] ?? null) !== ($defaults['item_order'] ?? null)) {
-                $merged['item_order'] = $incoming['item_order'];
-            }
-
-            $hub->dashboard_nav = $merged === [] ? null : $merged;
-            $hubDirty = true;
-        }
-
         if ($hubDirty) {
             $hub->save();
             $this->hubs->forgetCurrentCache();
@@ -341,7 +187,7 @@ class SettingController extends Controller
         }
 
         return response()->json([
-            'message' => 'Settings updated successfully.',
+            'message' => 'General settings updated successfully.',
             'settings' => $this->settingsPayload($request),
             'hub' => $this->targetHub($request)->toPublicArray(),
         ]);
@@ -367,9 +213,6 @@ class SettingController extends Controller
                 'secondary' => $hub->secondary_color,
                 'accent' => $hub->accent_color,
             ],
-            // Resolved (defaults + overrides) so the settings form shows effective copy.
-            'page_content' => $hub->resolvedPageContent(),
-            'dashboard_nav' => $hub->resolvedDashboardNav(),
         ];
     }
 

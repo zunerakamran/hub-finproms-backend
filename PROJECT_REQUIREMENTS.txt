@@ -752,10 +752,22 @@ Notes:
   - Public page content (Home / Posts·Reels catalog / post detail copy)
   - Dashboard menu labels (sidebar separators + menu item names)
   - Other tenant-specific settings as needed
-- Hub admins with `dashboard_manage_settings` can edit these branding fields
-  (plus NEW banner days, page content, and dashboard menu labels) for the
-  current hub via client-admin settings; they are returned on public GET /hub
-  under branding / page_content / dashboard_nav and applied in the UI.
+- Hub settings are split into three capability-gated dashboard pages (same
+  pattern as Privacy / Cookies):
+  1) General settings — `dashboard_manage_settings`
+     (`/my-dashboard/settings`, API GET/PUT `/client-admin/settings`):
+     application name, from-email, NEW banner days, logos, favicon, auth
+     background, colour scheme.
+  2) Website content — `dashboard_manage_page_content`
+     (`/my-dashboard/page-content`, API GET/PUT `/client-admin/page-content`):
+     public Home / Posts·Reels catalog / post detail copy + footer powered-by
+     logo upload.
+  3) Dashboard menu — `dashboard_manage_dashboard_nav`
+     (`/my-dashboard/dashboard-menu`, API GET/PUT `/client-admin/dashboard-nav`):
+     sidebar separators, menu item names, order, and grouping.
+  Values are returned on public GET /hub under branding / page_content /
+  dashboard_nav and applied in the UI. Who may open each page is controlled
+  independently on the Capabilities matrix.
 - Page content is stored on `hubs.page_content` (JSON). Defaults live in
   `App\Support\PageContentDefaults`. Posts and Reels share one catalog page
   (`/posts?type=post|reel`) so catalog copy is shared, with separate
@@ -1135,8 +1147,12 @@ Notes:
     create the option manually, then mark Approved — or reject (review note
     required).
   - Manage subscription plans — same roles
-  - Manage settings (NEW banner, logo upload, color scheme, application name,
-    Home/Posts/detail page content) — same roles
+  - Manage general settings (`dashboard_manage_settings`) — NEW banner, logos,
+    colour scheme, application name — same roles
+  - Manage website content (`dashboard_manage_page_content`) — Home / Posts /
+    detail page copy — same roles
+  - Manage dashboard menu (`dashboard_manage_dashboard_nav`) — sidebar
+    separators + menu item names / order — same roles
   - Confirm bank transfers — same roles
   - Import advisors (Excel/CSV) — same roles
   - Download import Excel template (`advisor_excel_template`) — download the
@@ -1640,6 +1656,9 @@ STEP 1 — Shared hub core (content hub)
     (LEGACY host: Shared Hub — target: Central Hub; include Shared hubs as targets)
 [x] Acting-hub content create/list on white-label DB (posts, types, categories, tags, bundles)
 [x] Public GET /hub returns current hub branding + checklist
+[x] Settings split into General / Website content / Dashboard menu pages
+    with dashboard_manage_settings, dashboard_manage_page_content,
+    dashboard_manage_dashboard_nav capabilities + client-admin APIs
 [x] Checklist gates: public register, self-serve subscribe, one-off purchase, unlimited credits
 [x] Shared Hub self-registration requires email verification before login
     (verify-email + resend; welcome mail after verify; admin/import users auto-verified)

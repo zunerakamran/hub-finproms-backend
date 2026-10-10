@@ -110,7 +110,7 @@ class DashboardNavActingHubTest extends TestCase
             'acting_hub_id' => $hub->id,
         ]));
 
-        $update = $this->putJson('/api/client-admin/settings', [
+        $update = $this->putJson('/api/client-admin/dashboard-nav', [
             'dashboard_nav' => [
                 'sections' => [
                     'content' => 'Custom SM Section',
@@ -122,11 +122,11 @@ class DashboardNavActingHubTest extends TestCase
         ])->assertOk();
         $this->assertSame(
             'Custom SM Section',
-            data_get($update->json(), 'settings.dashboard_nav.sections.content')
+            data_get($update->json(), 'dashboard_nav.sections.content')
         );
         $this->assertSame(
             'Custom Posts Label',
-            data_get($update->json(), 'settings.dashboard_nav.items./my-dashboard/posts')
+            data_get($update->json(), 'dashboard_nav.items./my-dashboard/posts')
         );
 
         $hubResponse = $this->getJson('/api/hub')->assertOk();
