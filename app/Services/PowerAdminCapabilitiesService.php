@@ -19,7 +19,7 @@ class PowerAdminCapabilitiesService
         ],
         'pa_manage_hubs' => [
             'label' => 'Manage hubs',
-            'description' => 'Create and edit shared / white-labelled hubs and branding.',
+            'description' => 'Create and edit shared / white-labelled hubs, deploy wiring, and code update tracking (publish releases, refresh hub versions).',
             'default' => true,
         ],
         'pa_manage_hub_checklists' => [

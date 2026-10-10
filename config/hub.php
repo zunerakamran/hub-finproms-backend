@@ -1,6 +1,25 @@
 <?php
 
+$versionFile = is_file(base_path('VERSION'))
+    ? trim((string) file_get_contents(base_path('VERSION')))
+    : '';
+$defaultVersion = $versionFile !== '' ? $versionFile : '0.0.0';
+
 return [
+
+    /*
+    |--------------------------------------------------------------------------
+    | Deployed code version (this instance)
+    |--------------------------------------------------------------------------
+    |
+    | Bump VERSION in the repo (or set APP_VERSION / FRONTEND_VERSION in .env)
+    | whenever you ship a release. Central Hub polls GET /api/version on each
+    | hub to track who is on the latest release.
+    |
+    */
+    'version' => env('APP_VERSION', $defaultVersion),
+
+    'frontend_version' => env('FRONTEND_VERSION', env('APP_VERSION', $defaultVersion)),
 
     /*
     |--------------------------------------------------------------------------

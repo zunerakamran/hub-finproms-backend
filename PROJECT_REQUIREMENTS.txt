@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-09 (Removed GDPR incident log — use Support Tickets)
+Last updated: 2026-10-10 (Hub code update tracking — Phase 1 version visibility)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -76,6 +76,8 @@ Deploy rule:
   7) Remote control / hub switcher — act on a Shared or White-label hub's own
      database (content, types, categories, tags, bundles, settings, etc.) when
      wiring + receive_content / remote-control flags allow
+  8) Code update tracking (Phase 1) — publish a latest release version, refresh
+     each hub's reported code version, see who is up to date / behind
 - Spawning a new hub (Shared or White-label):
   - Ops copies the SAME codebase to another cPanel (or hosting).
   - New instance gets its OWN DB + .env (HUB_SLUG, DB_*, URLs).
@@ -87,9 +89,47 @@ Deploy rule:
   Content catalogs for those hubs live in EACH hub's own database — Central
   does NOT share those databases.
 - Registry "ready" = active + frontend_url + remote DB credentials set.
-  Hub list badges: Wiring ready / Needs wiring.
+  Hub list badges: Wiring ready / Needs wiring; also code version badges
+  (Up to date / Behind latest / Unknown / Check failed).
 - Central Hub itself is NOT a substitute Shared catalog; member browse/buy
   flows belong on Shared / White-label instances.
+
+
+--------------------------------------------------------------------------------
+1B. CODE UPDATES ACROSS HUBS (PHASE 1 — TRACKING)
+--------------------------------------------------------------------------------
+Purpose: update the product once, then from Central see which existing Shared /
+White-label hubs are on that release. This is NOT new-hub spawn (copy code to a
+new cPanel). Spawn stays manual; Phase 1 only tracks versions after you deploy
+via Git (backend) and Git/FTP build (frontend).
+
+Version identity (every deploy — Central, Shared, WL):
+- Root file VERSION (default) and/or .env APP_VERSION / FRONTEND_VERSION.
+- Public GET /api/version → { version, backend_version, frontend_version, slug,
+  type, is_control_plane }. Also exposed on GET /api/hub as hub.code.
+- After each ship: bump VERSION (or set APP_VERSION on that hub's .env) and set
+  FRONTEND_VERSION to match the frontend build you FTPed.
+
+Central registry:
+- hub_releases table: publish version + optional backend/frontend versions + notes;
+  one row marked is_latest.
+- Per hub row: code_version*, code_version_status (up_to_date|behind|ahead|
+  unknown|error), source (local|remote_api|manual), checked_at, error.
+- Power Admin (pa_manage_hubs):
+  - GET/POST /api/power-admin/releases — list / publish latest
+  - POST /api/power-admin/hubs/refresh-versions — poll all hubs
+  - POST /api/power-admin/hubs/{hub}/refresh-version — poll one
+    (Central = local config; content hub = GET {api_url}/version)
+  - POST /api/power-admin/hubs/{hub}/mark-version — manual record when API
+    unreachable
+- Hub admin payloads include code_update { reported_version, status,
+  status_label, latest_version, … }.
+
+Ops workflow (Phase 1):
+  1) Ship code (git pull backend; build + FTP frontend) on chosen hubs.
+  2) Ensure APP_VERSION / FRONTEND_VERSION (or VERSION file) matches the release.
+  3) On Central: Publish release (e.g. 1.2.0) → Refresh versions → see badges.
+Phase 2 (later): one-click apply of a release package to selected hubs.
 
 
 --------------------------------------------------------------------------------

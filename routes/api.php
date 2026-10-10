@@ -44,8 +44,10 @@ use App\Http\Controllers\Api\MyDashboardController;
 use App\Http\Controllers\Api\PostController;
 use App\Http\Controllers\Api\PowerAdminAdvisorPricingController;
 use App\Http\Controllers\Api\PowerAdminCapabilityController;
+use App\Http\Controllers\Api\AppVersionController;
 use App\Http\Controllers\Api\PowerAdminHubController;
 use App\Http\Controllers\Api\PowerAdminHubBackupController;
+use App\Http\Controllers\Api\PowerAdminHubReleaseController;
 use App\Http\Controllers\Api\PowerAdminModulePricingController;
 use App\Http\Controllers\Api\PowerAdminPaymentMethodController;
 use App\Http\Controllers\Api\PowerAdminUserController;
@@ -93,6 +95,7 @@ Route::prefix('auth')->group(function () {
 Route::post('/stripe/webhook', StripeWebhookController::class);
 
 Route::get('/hub', [HubController::class, 'current']);
+Route::get('/version', [AppVersionController::class, 'show']);
 Route::get('/settings', [SettingController::class, 'publicIndex']);
 
 // Public uploads (logos/favicons) — works without public/storage symlink
@@ -813,6 +816,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('pa_can:pa_manage_hubs')->group(function () {
             Route::post('/hubs', [PowerAdminHubController::class, 'store']);
             Route::put('/hubs/{hub}', [PowerAdminHubController::class, 'update']);
+
+            // Code update tracking (Phase 1): publish latest release + poll hub versions
+            Route::get('/releases', [PowerAdminHubReleaseController::class, 'index']);
+            Route::post('/releases', [PowerAdminHubReleaseController::class, 'store']);
+            Route::post('/hubs/refresh-versions', [PowerAdminHubReleaseController::class, 'refreshAll']);
+            Route::post('/hubs/{hub}/refresh-version', [PowerAdminHubReleaseController::class, 'refreshHub']);
+            Route::post('/hubs/{hub}/mark-version', [PowerAdminHubReleaseController::class, 'markHub']);
         });
 
         Route::middleware('pa_can:pa_manage_hub_checklists')->group(function () {

@@ -1688,6 +1688,13 @@ class Hub extends Model
         'backup_retention_central',
         'backup_last_run_at',
         'backup_token',
+        'code_version',
+        'code_backend_version',
+        'code_frontend_version',
+        'code_version_status',
+        'code_version_source',
+        'code_version_checked_at',
+        'code_version_check_error',
     ];
 
     protected $hidden = [
@@ -1720,6 +1727,7 @@ class Hub extends Model
             'backup_retention_local' => 'integer',
             'backup_retention_central' => 'integer',
             'backup_last_run_at' => 'datetime',
+            'code_version_checked_at' => 'datetime',
             'stripe_secret' => \App\Casts\SafeEncrypted::class,
             'stripe_webhook_secret' => \App\Casts\SafeEncrypted::class,
             'db_password' => \App\Casts\SafeEncrypted::class,
@@ -2470,7 +2478,7 @@ class Hub extends Model
             ],
             [
                 'key' => 'api_url',
-                'label' => 'API URL recorded (needed for remote backup/restore callbacks)',
+                'label' => 'API URL recorded (needed for remote backup/restore and version checks)',
                 'done' => $hasApi,
                 'required' => false,
             ],
@@ -2485,6 +2493,12 @@ class Hub extends Model
                 'label' => 'Content hub .env points at its OWN database (not Central)',
                 'done' => true,
                 'required' => $needsRemoteDb,
+            ],
+            [
+                'key' => 'app_version',
+                'label' => 'After each code update set APP_VERSION / FRONTEND_VERSION (or bump VERSION file)',
+                'done' => filled($this->code_version),
+                'required' => false,
             ],
             [
                 'key' => 'deploy_notes',
@@ -2515,6 +2529,8 @@ class Hub extends Model
             'HUB_SLUG='.$this->slug,
             $frontendLine,
             $apiLine,
+            'APP_VERSION='.(string) config('hub.version', '1.0.0'),
+            'FRONTEND_VERSION='.(string) config('hub.frontend_version', config('hub.version', '1.0.0')),
             'DB_CONNECTION='.($database['driver'] ?: 'mysql'),
             'DB_HOST='.$dbHost,
             'DB_PORT='.$dbPort,
@@ -2707,6 +2723,10 @@ class Hub extends Model
                 'terms' => $this->termsPublicPayload(),
                 'privacy' => $this->privacyPublicPayload(),
                 'cookies' => $this->cookiesPublicPayload(),
+            ],
+            'code' => [
+                'version' => (string) config('hub.version', '0.0.0'),
+                'frontend_version' => (string) config('hub.frontend_version', config('hub.version', '0.0.0')),
             ],
         ];
     }
@@ -3010,6 +3030,7 @@ class Hub extends Model
                 'last_run_at' => $this->backup_last_run_at?->toIso8601String(),
                 'token_set' => filled($this->backup_token),
             ],
+            'code_update' => app(\App\Services\HubCodeUpdateService::class)->codeUpdatePayload($this),
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
         ];
