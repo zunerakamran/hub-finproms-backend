@@ -286,7 +286,7 @@ class EmailTemplateCatalog
                 ],
                 'defaults' => [
                     self::AUDIENCE_USER => [
-                        'subject' => 'Welcome to {{site_name}} — your advisor access',
+                        'subject' => 'Welcome to {{site_name}} - your advisor access',
                         'eyebrow' => 'Advisor invite',
                         'heading' => "You're invited to {{site_name}}",
                         'intro' => "Hi {{user_name}},\n\nAn advisor account has been created for you on {{site_name}}.",
@@ -565,7 +565,7 @@ class EmailTemplateCatalog
             ],
 
             'smc_request_submitted' => [
-                'label' => 'Social media compliance — request submitted',
+                'label' => 'Social media compliance - request submitted',
                 'description' => 'Admin notification when a social media compliance request is submitted.',
                 'group' => 'Social Media Compliance',
                 'requires_any' => null,
@@ -592,7 +592,7 @@ class EmailTemplateCatalog
             ],
 
             'smc_approver_assigned' => [
-                'label' => 'Social media compliance — assigned for review',
+                'label' => 'Social media compliance - assigned for review',
                 'description' => 'Sent to the approver when a request is assigned.',
                 'group' => 'Social Media Compliance',
                 'requires_any' => null,
@@ -618,7 +618,7 @@ class EmailTemplateCatalog
             ],
 
             'smc_status_updated' => [
-                'label' => 'Social media compliance — status updated',
+                'label' => 'Social media compliance - status updated',
                 'description' => 'Sent to the subscriber when a review decision is made.',
                 'group' => 'Social Media Compliance',
                 'requires_any' => null,
@@ -646,7 +646,7 @@ class EmailTemplateCatalog
             ],
 
             'smc_request_resubmitted' => [
-                'label' => 'Social media compliance — resubmitted',
+                'label' => 'Social media compliance - resubmitted',
                 'description' => 'Sent to the approver when a request is resubmitted.',
                 'group' => 'Social Media Compliance',
                 'requires_any' => null,
@@ -673,7 +673,7 @@ class EmailTemplateCatalog
             ],
 
             'gc_request_submitted' => [
-                'label' => 'General compliance — request submitted',
+                'label' => 'General compliance - request submitted',
                 'description' => 'Admin notification when a general compliance request is submitted.',
                 'group' => 'General Compliance',
                 'requires_any' => null,
@@ -700,7 +700,7 @@ class EmailTemplateCatalog
             ],
 
             'gc_approver_assigned' => [
-                'label' => 'General compliance — assigned for review',
+                'label' => 'General compliance - assigned for review',
                 'description' => 'Sent to the approver when a request is assigned.',
                 'group' => 'General Compliance',
                 'requires_any' => null,
@@ -726,7 +726,7 @@ class EmailTemplateCatalog
             ],
 
             'gc_status_updated' => [
-                'label' => 'General compliance — status updated',
+                'label' => 'General compliance - status updated',
                 'description' => 'Sent to the subscriber when a review decision is made.',
                 'group' => 'General Compliance',
                 'requires_any' => null,
@@ -754,7 +754,7 @@ class EmailTemplateCatalog
             ],
 
             'gc_request_resubmitted' => [
-                'label' => 'General compliance — resubmitted',
+                'label' => 'General compliance - resubmitted',
                 'description' => 'Sent to the approver when a request is resubmitted.',
                 'group' => 'General Compliance',
                 'requires_any' => null,

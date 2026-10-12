@@ -23,7 +23,7 @@ class PrivacyPolicyDefaults
     public static function shared(): string
     {
         return <<<'HTML'
-<h2>Privacy Policy — Shared Hub</h2>
+<h2>Privacy Policy - Shared Hub</h2>
 <p>This Privacy Policy explains how personal data is processed when you use this FinProms Shared Hub. It applies under UK GDPR and the Data Protection Act 2018. A hub administrator may update this text; you may be asked to acknowledge the latest version again.</p>
 <h3>1. Who is responsible</h3>
 <p>The hub operator (as identified on this hub or in your contract) is the data controller for personal data processed on this hub. For questions, contact the hub administrator using the support contact shown on this hub. You may also complain to the Information Commissioner’s Office (ICO) at <a href="https://ico.org.uk" rel="noopener noreferrer" target="_blank">ico.org.uk</a>.</p>
@@ -31,10 +31,10 @@ class PrivacyPolicyDefaults
 <p>Depending on how you use the hub, this may include: name, email address, password (stored as a hash), profile avatar, account role and firm membership, subscription and billing details (including billing name/email and payment references via Stripe where used), support ticket content and attachments, activity and security logs (which may include IP address and browser information), and any content or documents you upload.</p>
 <h3>3. Purposes and lawful bases</h3>
 <ul>
-<li><strong>Account, authentication, and security</strong> — to provide access and protect the service (contract and/or legitimate interests).</li>
-<li><strong>Subscriptions, credits, purchases, and invoices</strong> — to fulfil your orders and keep financial records (contract and/or legal obligation).</li>
-<li><strong>Support and administration</strong> — to respond to tickets and operate the hub (legitimate interests / contract).</li>
-<li><strong>Audit and activity logs</strong> — security, abuse prevention, and operational accountability (legitimate interests).</li>
+<li><strong>Account, authentication, and security</strong> - to provide access and protect the service (contract and/or legitimate interests).</li>
+<li><strong>Subscriptions, credits, purchases, and invoices</strong> - to fulfil your orders and keep financial records (contract and/or legal obligation).</li>
+<li><strong>Support and administration</strong> - to respond to tickets and operate the hub (legitimate interests / contract).</li>
+<li><strong>Audit and activity logs</strong> - security, abuse prevention, and operational accountability (legitimate interests).</li>
 </ul>
 <p>Where we rely on consent (for example non-essential cookies or marketing, if enabled later), you can withdraw it at any time.</p>
 <h3>4. Recipients and processors</h3>
@@ -57,7 +57,7 @@ HTML;
     public static function whiteLabel(): string
     {
         return <<<'HTML'
-<h2>Privacy Policy — White-labelled Hub</h2>
+<h2>Privacy Policy - White-labelled Hub</h2>
 <p>This Privacy Policy explains how personal data is processed on this private white-labelled hub under UK GDPR and the Data Protection Act 2018. Access is typically limited to invited advisors and authorised staff. A hub administrator may update this text; you may need to acknowledge updates when you next sign in.</p>
 <h3>1. Who is responsible</h3>
 <p>The hub operator (usually the firm or client organisation operating this hub, as identified in your invitation or contract) is the data controller for personal data on this hub. Contact your hub administrator for privacy questions. You may also complain to the ICO at <a href="https://ico.org.uk" rel="noopener noreferrer" target="_blank">ico.org.uk</a>.</p>
@@ -65,11 +65,11 @@ HTML;
 <p>This may include: name, email, password hash, avatar, role and firm membership, module entitlements, billing and invoice details where advisor or module billing applies, compliance workflow submissions and attachments (social media, website, or general content), website template request contact details (phone, email, address) where used, firm documents you upload or access, support tickets, and activity / compliance audit logs (which may include IP address and browser information).</p>
 <h3>3. Purposes and lawful bases</h3>
 <ul>
-<li><strong>Providing hub access and security</strong> — contract and/or legitimate interests.</li>
-<li><strong>Firm and advisor administration</strong> — including imports and role assignment (contract / legitimate interests).</li>
-<li><strong>Compliance pre-approval workflows</strong> — to operate firm content review processes (legitimate interests / contract; may also support legal or regulatory obligations of the operator).</li>
-<li><strong>Billing</strong> — where configured (contract / legal obligation).</li>
-<li><strong>Audit trails</strong> — accountability for approvals and security (legitimate interests / legal obligation where applicable).</li>
+<li><strong>Providing hub access and security</strong> - contract and/or legitimate interests.</li>
+<li><strong>Firm and advisor administration</strong> - including imports and role assignment (contract / legitimate interests).</li>
+<li><strong>Compliance pre-approval workflows</strong> - to operate firm content review processes (legitimate interests / contract; may also support legal or regulatory obligations of the operator).</li>
+<li><strong>Billing</strong> - where configured (contract / legal obligation).</li>
+<li><strong>Audit trails</strong> - accountability for approvals and security (legitimate interests / legal obligation where applicable).</li>
 </ul>
 <h3>4. Recipients and processors</h3>
 <p>Data may be processed by hosting, email, Stripe (if payments are enabled), file storage, and (where website publishing is enabled) cPanel or similar hosting APIs for live sites. Central Hub may hold encrypted remote-DB credentials and backup copies under the platform operator’s arrangements.</p>
@@ -91,17 +91,17 @@ HTML;
     public static function central(): string
     {
         return <<<'HTML'
-<h2>Privacy Policy — Central Hub Controller</h2>
+<h2>Privacy Policy - Central Hub Controller</h2>
 <p>This Privacy Policy explains how personal data is processed on the FinProms Central Hub Controller under UK GDPR and the Data Protection Act 2018. Central Hub is the platform control plane for Shared and White-labelled hubs. Administrators with the appropriate capability may update this text.</p>
 <h3>1. Who is responsible</h3>
 <p>The platform operator is the data controller for personal data processed on Central Hub (operator accounts, hub registry metadata, and control-plane tooling). Contact your platform administrator for privacy questions. Complaints may be made to the ICO at <a href="https://ico.org.uk" rel="noopener noreferrer" target="_blank">ico.org.uk</a>.</p>
 <h3>2. Personal data we process</h3>
-<p>This may include: operator name and email, password hash, avatar, role and capabilities, activity and security logs (IP address / user agent), platform billing settings, and hub registry / deploy wiring (including encrypted remote database credentials). When acting on a content hub, operators may view or change that hub’s personal data according to wiring and Capabilities — that processing is governed by that hub’s Privacy Policy and the operator’s instructions.</p>
+<p>This may include: operator name and email, password hash, avatar, role and capabilities, activity and security logs (IP address / user agent), platform billing settings, and hub registry / deploy wiring (including encrypted remote database credentials). When acting on a content hub, operators may view or change that hub’s personal data according to wiring and Capabilities - that processing is governed by that hub’s Privacy Policy and the operator’s instructions.</p>
 <h3>3. Purposes and lawful bases</h3>
 <ul>
-<li><strong>Platform administration and remote control</strong> — legitimate interests / contract.</li>
-<li><strong>Security and access control</strong> — legitimate interests.</li>
-<li><strong>Hub backups stored on Central</strong> — legitimate interests / contract (supporting tenant continuity); backups may contain personal data from content hubs.</li>
+<li><strong>Platform administration and remote control</strong> - legitimate interests / contract.</li>
+<li><strong>Security and access control</strong> - legitimate interests.</li>
+<li><strong>Hub backups stored on Central</strong> - legitimate interests / contract (supporting tenant continuity); backups may contain personal data from content hubs.</li>
 </ul>
 <h3>4. Recipients and processors</h3>
 <p>Hosting, email delivery, and (where used) Stripe for platform payments. Backup storage on Central holds copies received from content hubs under configured retention.</p>

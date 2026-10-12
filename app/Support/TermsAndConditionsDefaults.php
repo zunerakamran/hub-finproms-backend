@@ -22,7 +22,7 @@ class TermsAndConditionsDefaults
     public static function shared(): string
     {
         return <<<'HTML'
-<h2>Terms &amp; Conditions — Shared Hub</h2>
+<h2>Terms &amp; Conditions - Shared Hub</h2>
 <p>Welcome to this FinProms Shared Hub. By creating an account or signing in, you agree to these Terms &amp; Conditions. Please read them carefully. A hub administrator may update this text at any time; you may be asked to accept the latest version again.</p>
 <h3>1. Purpose of this hub</h3>
 <p>This Shared Hub provides access to a content catalogue (such as social media posts and reels), subscription plans, credits, and related downloads for authorised members.</p>
@@ -44,7 +44,7 @@ HTML;
     public static function whiteLabel(): string
     {
         return <<<'HTML'
-<h2>Terms &amp; Conditions — White-labelled Hub</h2>
+<h2>Terms &amp; Conditions - White-labelled Hub</h2>
 <p>Welcome to this private white-labelled hub. Access is typically limited to invited advisors and authorised staff. By signing in, you agree to these Terms &amp; Conditions. A hub administrator may edit this content; you may need to accept updates when you next sign in.</p>
 <h3>1. Purpose of this hub</h3>
 <p>This hub provides firm- or client-specific content, tools, and workflows (which may include catalogue access, compliance pre-approval, website templates, and related dashboards) under the branding and rules set by the hub operator.</p>
@@ -68,7 +68,7 @@ HTML;
     public static function central(): string
     {
         return <<<'HTML'
-<h2>Terms &amp; Conditions — Central Hub Controller</h2>
+<h2>Terms &amp; Conditions - Central Hub Controller</h2>
 <p>This Central Hub Controller is the platform control plane for managing Shared and White-labelled hubs. By signing in, you agree to these Terms &amp; Conditions. Administrators with the appropriate capability may update this text.</p>
 <h3>1. Purpose</h3>
 <p>Central Hub is used for hub registry, deploy wiring, Functionalities and Capabilities configuration, platform payment methods, remote control of content hubs, and related Power Admin tools. It is not a member content catalogue unless explicitly enabled.</p>

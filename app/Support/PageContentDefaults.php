@@ -19,9 +19,9 @@ class PageContentDefaults
     {
         return [
             'home' => [
-                // Hero (section 1 — already built)
+                // Hero (section 1 - already built)
                 'title' => '*Transform* your social media in minutes with ready-made *templates*',
-                'lead' => 'Discover **fully editable** posts and reels designed to simplify your creative process — compliant content, ready to publish.',
+                'lead' => 'Discover **fully editable** posts and reels designed to simplify your creative process - compliant content, ready to publish.',
                 'cta_browse_posts' => 'Browse posts',
                 'cta_browse_reels' => 'Browse reels',
                 'cta_get_started' => 'Get started',
@@ -29,18 +29,18 @@ class PageContentDefaults
                 'guest_hint' => 'Browse the home showcase freely. Sign in to open posts, bundles, and plans.',
                 'catalog_disabled' => 'Catalog browsing is not enabled on this hub.',
                 'empty_posts' => 'Posts will appear here once published.',
-                // Section 3 — Browse by Categories
+                // Section 3 - Browse by Categories
                 'categories_title' => 'Browse by Categories',
                 'categories_lead' => 'Explore content collections available on this hub.',
                 'categories_empty' => 'Categories will appear here once published on this hub.',
                 'categories_view_all' => 'View all',
-                // Section 4 — Website templates (up to 4)
+                // Section 4 - Website templates (up to 4)
                 'templates_title' => 'Website templates',
                 'templates_lead' => 'Showcase website templates available on this hub.',
                 'templates_empty' => 'Website templates are not available on this hub yet.',
                 'templates_cta' => 'View template',
                 'templates_view_all' => 'Browse templates',
-                // Section 5 — Tickets (3 tabs)
+                // Section 5 - Tickets (3 tabs)
                 'tickets_title' => 'Support tickets',
                 'tickets_lead' => 'Check ticket status, browse your tickets, or raise a new one.',
                 'tickets_tab_overview' => 'Tickets',
@@ -56,7 +56,7 @@ class PageContentDefaults
                 'tickets_empty' => 'You have no tickets yet.',
                 'tickets_guest_hint' => 'Sign in to view your tickets and raise a new one.',
                 'tickets_disabled' => 'Support tickets are not enabled on this hub.',
-                // Section 6 — Documents (two-column promo + stacked previews)
+                // Section 6 - Documents (two-column promo + stacked previews)
                 'documents_title' => 'Discover our documents, guides & checklists',
                 'documents_lead' => 'Stay organized and achieve your goals with:',
                 'documents_body' => 'Open the document library to read more and download what you need.',
@@ -68,9 +68,9 @@ class PageContentDefaults
                 'documents_image_2' => '',
                 'documents_image_3' => '',
                 'documents_disabled' => 'Documents are not enabled on this hub.',
-                // Section 7 — Compliance features (4 cards)
+                // Section 7 - Compliance features (4 cards)
                 'features_title' => 'Why choose compliant content?',
-                'features_lead' => 'Everything you need to publish with confidence — templates, editing, and compliance in one hub.',
+                'features_lead' => 'Everything you need to publish with confidence - templates, editing, and compliance in one hub.',
                 'features_card1_title' => 'SM Templates and compliance',
                 'features_card1_text' => 'Browse ready-made social media templates that stay aligned with your hub compliance workflow.',
                 'features_card1_url' => '/my-dashboard/social-media-compliance',
@@ -148,7 +148,7 @@ class PageContentDefaults
                 'back_posts' => '← Back to posts',
                 'back_reels' => '← Back to reels',
                 'login_required' => 'Login required',
-                'locked_lead' => 'Sign in to preview this post and buy it with credits — no subscription required.',
+                'locked_lead' => 'Sign in to preview this post and buy it with credits - no subscription required.',
                 'step1_title' => 'Create an account',
                 'step1_body' => 'Register or log in to browse the full catalog.',
                 'step2_title' => 'Get credits',
