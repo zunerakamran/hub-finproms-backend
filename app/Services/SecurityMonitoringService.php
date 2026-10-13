@@ -905,12 +905,17 @@ class SecurityMonitoringService
      */
     private function executeComposerAudit(): array
     {
-        // Must use CLI PHP — web SAPIs (cgi/fpm) abort Composer when register_argc_argv=On.
+        // Must use CLI PHP. Do NOT set register_argc_argv=0 — that strips argv so
+        // Composer never sees "audit" and only prints the help banner.
         $php = $this->phpCliBinary();
         $composerPhar = base_path('composer.phar');
+        $auditArgs = ['audit', '--format=json', '--no-dev', '--no-ansi', '-n'];
 
         if (is_file($composerPhar)) {
-            $cmd = [$php, '-d', 'register_argc_argv=0', $composerPhar, 'audit', '--format=json', '--no-dev'];
+            $cmd = array_merge(
+                [$php, '-d', 'register_argc_argv=1', $composerPhar],
+                $auditArgs
+            );
         } else {
             $which = $this->findComposerBinary();
             if (! $which) {
@@ -920,10 +925,9 @@ class SecurityMonitoringService
                     'advisories' => 0,
                 ];
             }
-            // Prefer driving the phar/binary via CLI php when the wrapper is a .phar.
             $cmd = str_ends_with(strtolower($which), '.phar')
-                ? [$php, '-d', 'register_argc_argv=0', $which, 'audit', '--format=json', '--no-dev']
-                : [$which, 'audit', '--format=json', '--no-dev'];
+                ? array_merge([$php, '-d', 'register_argc_argv=1', $which], $auditArgs)
+                : array_merge([$which], $auditArgs);
         }
 
         [$raw, $exit] = $this->runComposerCommand($cmd);
