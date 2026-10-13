@@ -49,8 +49,8 @@ class GeneralComplianceRequestAttachment extends Model
     }
 
     /**
-     * True only for rows uploaded during the short-lived encrypted-file experiment.
-     * New uploads are public-disk plaintext again (is_encrypted=false).
+     * True when bytes are stored encrypted (gc_encrypted disk / enc/ path).
+     * Legacy public-disk rows remain readable via the same download endpoint.
      */
     public function isStoredEncrypted(): bool
     {
@@ -66,9 +66,15 @@ class GeneralComplianceRequestAttachment extends Model
 
     public function resolvedFileUrl(): ?string
     {
-        // Legacy encrypted rows: authenticated download endpoint.
+        // Encrypted (and preferred) path: authenticated API download — never /storage/...
         if ($this->id && $this->isStoredEncrypted()) {
-            return '/api/gc/file/'.$this->id;
+            return url('/api/gc/file/'.$this->id);
+        }
+
+        // Legacy plaintext public-disk rows: still serve via auth download so the UI
+        // can use one fetch-with-token pattern for all GC files.
+        if ($this->id && filled($this->file_path)) {
+            return url('/api/gc/file/'.$this->id);
         }
 
         if (filled($this->file_url)) {

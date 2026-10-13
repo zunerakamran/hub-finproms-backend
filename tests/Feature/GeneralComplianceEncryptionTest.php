@@ -12,10 +12,12 @@ use App\Models\User;
 use App\Services\CapabilitiesMatrixService;
 use App\Services\GeneralComplianceService;
 use App\Services\HubService;
+use App\Support\GeneralComplianceEncryptedFiles;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class GeneralComplianceEncryptionTest extends TestCase
@@ -86,8 +88,9 @@ class GeneralComplianceEncryptionTest extends TestCase
         $this->assertSame('Remedial note with personal details', $version->feedback);
     }
 
-    public function test_gc_attachments_use_public_disk_like_before(): void
+    public function test_gc_attachments_are_encrypted_at_rest_and_downloadable(): void
     {
+        Storage::fake('gc_encrypted');
         Storage::fake('public');
 
         $hub = $this->createHub();
@@ -110,7 +113,7 @@ class GeneralComplianceEncryptionTest extends TestCase
         ]);
 
         $compliance = app(GeneralComplianceService::class)->submit($hub, $submitter, [
-            'description' => 'Has public file',
+            'description' => 'Has encrypted file',
             'content_type' => 'Brochure',
             'attachments' => [
                 UploadedFile::fake()->createWithContent('notes.pdf', 'PLAINTEXT-BYTES'),
@@ -119,12 +122,63 @@ class GeneralComplianceEncryptionTest extends TestCase
 
         $attachment = $compliance->currentVersionRow->attachments->first();
         $this->assertNotNull($attachment);
-        $this->assertFalse((bool) $attachment->is_encrypted);
-        $this->assertTrue(str_starts_with((string) $attachment->file_path, 'general-compliance/'));
-        $this->assertNotNull($attachment->file_url);
-        $this->assertFalse(str_contains((string) $attachment->file_url, '/api/gc/file/'));
-        Storage::disk('public')->assertExists($attachment->file_path);
-        $this->assertSame('PLAINTEXT-BYTES', Storage::disk('public')->get($attachment->file_path));
+        $this->assertTrue((bool) $attachment->is_encrypted);
+        $this->assertTrue(str_starts_with((string) $attachment->file_path, 'enc/'));
+        $this->assertNull($attachment->file_url);
+        $this->assertStringContainsString('/api/gc/file/'.$attachment->id, (string) $attachment->resolvedFileUrl());
+
+        Storage::disk('gc_encrypted')->assertExists($attachment->file_path);
+        $onDisk = Storage::disk('gc_encrypted')->get($attachment->file_path);
+        $this->assertNotSame('PLAINTEXT-BYTES', $onDisk);
+        $this->assertTrue(str_starts_with($onDisk, GeneralComplianceEncryptedFiles::MAGIC));
+        $this->assertSame(
+            'PLAINTEXT-BYTES',
+            GeneralComplianceEncryptedFiles::readPlaintext($attachment->file_path, true)
+        );
+
+        Sanctum::actingAs($submitter);
+        $response = $this->get('/api/gc/file/'.$attachment->id);
+        $response->assertOk();
+        $this->assertSame('PLAINTEXT-BYTES', $response->getContent());
+        $response->assertHeader('Content-Disposition');
+    }
+
+    public function test_gc_file_download_requires_authentication(): void
+    {
+        Storage::fake('gc_encrypted');
+
+        $hub = $this->createHub();
+        $caps = is_array($hub->role_capabilities) ? $hub->role_capabilities : [];
+        $caps[User::ROLE_USER]['gc_submit_request'] = true;
+        $caps[User::ROLE_USER]['gc_view_own_requests'] = true;
+        $hub->role_capabilities = $caps;
+        $hub->save();
+        app(HubService::class)->forgetCurrentCache();
+
+        GeneralComplianceContentType::query()->create(['name' => 'Brochure']);
+
+        $firm = Firm::query()->create([
+            'name' => 'Firm Enc',
+            'compliance_visible_to_own' => true,
+        ]);
+        $submitter = User::factory()->create([
+            'role' => User::ROLE_USER,
+            'firm_id' => $firm->id,
+        ]);
+
+        $compliance = app(GeneralComplianceService::class)->submit($hub, $submitter, [
+            'description' => 'Auth required',
+            'content_type' => 'Brochure',
+            'attachments' => [
+                UploadedFile::fake()->createWithContent('secret.pdf', 'SECRET'),
+            ],
+        ]);
+
+        $attachment = $compliance->currentVersionRow->attachments->first();
+        $this->assertNotNull($attachment);
+
+        $this->getJson('/api/gc/file/'.$attachment->id)
+            ->assertUnauthorized();
     }
 
     public function test_legacy_plaintext_gc_fields_remain_readable(): void
