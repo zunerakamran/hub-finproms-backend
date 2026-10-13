@@ -234,7 +234,48 @@ class GeneralComplianceEncryptionTest extends TestCase
         $api = $attachment->toApiArray();
         $this->assertTrue($api['is_encrypted']);
         $this->assertNull($api['file_path']);
-        $this->assertStringContainsString('/api/general-compliance/attachments/'.$attachment->id.'/download', $api['file_url']);
+        $this->assertSame(
+            '/api/general-compliance/attachments/'.$attachment->id.'/download',
+            $api['file_url']
+        );
+    }
+
+    public function test_gc_attachment_download_returns_401_when_unauthenticated(): void
+    {
+        Storage::fake('local');
+
+        $hub = $this->createHub();
+        $caps = is_array($hub->role_capabilities) ? $hub->role_capabilities : [];
+        $caps[User::ROLE_USER]['gc_submit_request'] = true;
+        $caps[User::ROLE_USER]['gc_view_own_requests'] = true;
+        $hub->role_capabilities = $caps;
+        $hub->save();
+        app(HubService::class)->forgetCurrentCache();
+
+        GeneralComplianceContentType::query()->create(['name' => 'Brochure']);
+
+        $firm = Firm::query()->create([
+            'name' => 'Firm Enc',
+            'compliance_visible_to_own' => true,
+        ]);
+        $submitter = User::factory()->create([
+            'role' => User::ROLE_USER,
+            'firm_id' => $firm->id,
+        ]);
+
+        $compliance = app(GeneralComplianceService::class)->submit($hub, $submitter, [
+            'description' => 'Needs auth to download',
+            'content_type' => 'Brochure',
+            'attachments' => [
+                UploadedFile::fake()->createWithContent('a.txt', 'secret'),
+            ],
+        ]);
+
+        $attachment = $compliance->currentVersionRow->attachments->first();
+
+        // Bare navigation without session used to 500 on null $user — must be 401.
+        $this->getJson('/api/general-compliance/attachments/'.$attachment->id.'/download')
+            ->assertUnauthorized();
     }
 
     public function test_gc_attachment_download_decrypts_for_owner(): void

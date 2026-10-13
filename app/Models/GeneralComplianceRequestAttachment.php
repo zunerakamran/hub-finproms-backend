@@ -8,7 +8,6 @@ use App\Support\GeneralComplianceEncryptedFiles;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\URL;
 
 class GeneralComplianceRequestAttachment extends Model
 {
@@ -62,13 +61,17 @@ class GeneralComplianceRequestAttachment extends Model
     }
 
     /**
-     * Authenticated download URL for encrypted (and preferred for all) GC files.
+     * Authenticated download path for encrypted (and preferred for all) GC files.
+     *
+     * Returns a same-origin relative /api/... path so the SPA can fetch with
+     * credentials (cookie session). Absolute APP_URL links break when opened in
+     * a bare tab without auth and caused 500s on null user.
      * Legacy public URLs remain as a fallback until backfill.
      */
     public function resolvedFileUrl(): ?string
     {
         if ($this->id && ($this->isStoredEncrypted() || ! filled($this->file_url))) {
-            return URL::to('/api/general-compliance/attachments/'.$this->id.'/download');
+            return '/api/general-compliance/attachments/'.$this->id.'/download';
         }
 
         if (filled($this->file_url)) {

@@ -167,15 +167,29 @@ class GeneralComplianceController extends Controller
 
     /**
      * Stream a GC attachment / supporting file (decrypts at rest when encrypted).
+     *
+     * Must be called with the same session/credentials as other GC APIs — opening
+     * the URL in a bare new tab without auth used to 500 on a null user.
      */
     public function downloadAttachment(
         Request $request,
         GeneralComplianceRequestAttachment $gcAttachment
     ): StreamedResponse|JsonResponse {
-        /** @var User $user */
         $user = $request->user();
+        if (! $user instanceof User) {
+            return response()->json(['message' => 'Unauthenticated.'], 401);
+        }
+
         $hub = $this->gcHub($user);
-        $this->compliance->assertModuleEnabled($hub);
+
+        try {
+            $this->compliance->assertModuleEnabled($hub);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => $e->getMessage() ?: 'General Compliance is not enabled for this hub.',
+                'errors' => $e->errors(),
+            ], 422);
+        }
 
         $attachment = $gcAttachment;
         $attachment->loadMissing(['version.request.user:id,firm_id']);
@@ -194,15 +208,19 @@ class GeneralComplianceController extends Controller
         try {
             $bytes = GeneralComplianceEncryptedFiles::readPlaintext(
                 $path,
-                (bool) $attachment->is_encrypted
+                (bool) $attachment->is_encrypted || $attachment->isStoredEncrypted()
             );
         } catch (Throwable $e) {
+            report($e);
+
             return response()->json([
                 'message' => $e->getMessage() ?: 'Unable to read attachment.',
             ], 404);
         }
 
-        $filename = $attachment->original_name ?: ('gc-file-'.$attachment->id);
+        $filename = $this->safeDownloadFilename(
+            $attachment->original_name ?: ('gc-file-'.$attachment->id)
+        );
         $mime = $attachment->mime_type ?: 'application/octet-stream';
 
         return response()->streamDownload(function () use ($bytes) {
@@ -211,7 +229,22 @@ class GeneralComplianceController extends Controller
             'Content-Type' => $mime,
             'X-Content-Type-Options' => 'nosniff',
             'Cache-Control' => 'private, no-store',
+            // Allow the SPA to open/preview the decrypted file in a new tab/iframe.
+            'Content-Security-Policy' => "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: blob:; object-src 'self' blob:; frame-ancestors 'self'",
+            'X-Frame-Options' => 'SAMEORIGIN',
         ]);
+    }
+
+    private function safeDownloadFilename(string $name): string
+    {
+        $name = str_replace(["\0", '/', '\\'], '-', $name);
+        $name = trim($name);
+        if ($name === '' || $name === '.' || $name === '..') {
+            return 'download.bin';
+        }
+
+        // Keep ASCII fallback for Content-Disposition quirks; preserve unicode when possible.
+        return mb_substr($name, 0, 180);
     }
 
     public function store(Request $request): JsonResponse
