@@ -935,11 +935,11 @@ class SecurityMonitoringService
         }
 
         if (! is_array($decoded)) {
-            // Treat missing composer / empty as unknown rather than hard fail in local/dev.
-            if ($exit === 0 || trim($raw) === '') {
+            // Empty / unparseable output means the audit did not run — not a green pass.
+            if (trim($raw) === '') {
                 return [
-                    'status' => 'pass',
-                    'summary' => 'Composer audit completed with no reported advisories (or audit unavailable in this environment).',
+                    'status' => 'unavailable',
+                    'summary' => 'Composer audit could not run in this environment (no output from composer). Check PHP CLI path and that composer.phar is executable.',
                     'advisories' => 0,
                 ];
             }
