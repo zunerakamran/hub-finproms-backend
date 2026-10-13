@@ -236,6 +236,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::get('/general-compliance/requests/mine', [GeneralComplianceController::class, 'mine']);
         Route::get('/general-compliance/requests/{generalComplianceRequest}', [GeneralComplianceController::class, 'show']);
+        Route::get('/general-compliance/attachments/{gcAttachment}/download', [GeneralComplianceController::class, 'downloadAttachment']);
     });
 
     // Support Tickets — member / role-gated by st_* capabilities.
@@ -709,6 +710,7 @@ Route::middleware('auth:sanctum')->group(function () {
                 Route::get('/general-compliance/requests', [GeneralComplianceController::class, 'index']);
                 Route::get('/general-compliance/queue', [GeneralComplianceController::class, 'index']);
                 Route::get('/general-compliance/requests/{generalComplianceRequest}', [GeneralComplianceController::class, 'show']);
+                Route::get('/general-compliance/attachments/{gcAttachment}/download', [GeneralComplianceController::class, 'downloadAttachment']);
             });
             Route::middleware('hub_can:gc_review_requests')->group(function () {
                 Route::post('/general-compliance/requests/{generalComplianceRequest}/review', [GeneralComplianceController::class, 'review']);
@@ -1160,6 +1162,7 @@ Route::middleware('auth:sanctum')->group(function () {
                 Route::get('/general-compliance/requests', [GeneralComplianceController::class, 'index']);
                 Route::get('/general-compliance/queue', [GeneralComplianceController::class, 'index']);
                 Route::get('/general-compliance/requests/{generalComplianceRequest}', [GeneralComplianceController::class, 'show']);
+                Route::get('/general-compliance/attachments/{gcAttachment}/download', [GeneralComplianceController::class, 'downloadAttachment']);
             });
             Route::middleware('hub_can:gc_review_requests')->group(function () {
                 Route::post('/general-compliance/requests/{generalComplianceRequest}/review', [GeneralComplianceController::class, 'review']);

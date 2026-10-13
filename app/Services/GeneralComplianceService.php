@@ -11,11 +11,11 @@ use App\Models\GeneralComplianceRequestVersion;
 use App\Models\Hub;
 use App\Models\User;
 use App\Support\ComplianceSupportingFiles;
+use App\Support\GeneralComplianceEncryptedFiles;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
 class GeneralComplianceService
@@ -775,11 +775,11 @@ class GeneralComplianceService
             'from_status' => $fromStatus,
             'to_status' => $status,
             'version_number' => $compliance->current_version,
+            // Do not store remedial / future feedback plaintext in audit metadata —
+            // those fields are encrypted at rest on the version row (NFR-GC-ENC).
             'metadata' => [
                 'has_feedback' => $feedback !== '',
-                'feedback' => $feedback !== '' ? $feedback : null,
                 'has_future_feedback' => $futureFeedback !== '',
-                'future_feedback' => $futureFeedback !== '' ? $futureFeedback : null,
                 'supporting_file_count' => count($supportingFiles),
             ],
         ]);
@@ -1287,15 +1287,16 @@ class GeneralComplianceService
         $attribution = ComplianceSupportingFiles::attributionPayload($uploader, $source);
 
         foreach (array_values($files) as $index => $file) {
-            $path = $file->store('general-compliance', 'public');
+            $stored = GeneralComplianceEncryptedFiles::storeUpload($file);
             GeneralComplianceRequestAttachment::query()->create([
                 'version_id' => $version->id,
                 'kind' => $kind,
                 'original_name' => $file->getClientOriginalName(),
-                'file_path' => $path,
-                'file_url' => Storage::disk('public')->url($path),
+                'file_path' => $stored['file_path'],
+                'file_url' => $stored['file_url'],
                 'mime_type' => $file->getClientMimeType() ?: $file->getMimeType(),
-                'size_bytes' => (int) $file->getSize(),
+                'size_bytes' => $stored['size_bytes'],
+                'is_encrypted' => $stored['is_encrypted'],
                 'sort_order' => $baseOrder + $index,
                 'uploaded_by_user_id' => $attribution['uploaded_by_user_id'],
                 'uploaded_by_name' => $attribution['uploaded_by_name'],
@@ -1332,6 +1333,7 @@ class GeneralComplianceService
                 'file_url' => $file->file_url,
                 'mime_type' => $file->mime_type,
                 'size_bytes' => $file->size_bytes,
+                'is_encrypted' => (bool) $file->is_encrypted,
                 'sort_order' => $file->sort_order ?? $index,
                 'uploaded_by_user_id' => $file->uploaded_by_user_id,
                 'uploaded_by_name' => $file->uploaded_by_name,
@@ -1360,11 +1362,12 @@ class GeneralComplianceService
         }
         if (! empty($filters['q'])) {
             $q = '%'.$filters['q'].'%';
+            // description / feedback are encrypted at rest — cannot LIKE-search ciphertext.
             $query->where(function ($inner) use ($q) {
                 $inner->where('name', 'like', $q)
                     ->orWhereHas('currentVersionRow', function ($v) use ($q) {
-                        $v->where('description', 'like', $q)
-                            ->orWhere('reviewed_by', 'like', $q);
+                        $v->where('reviewed_by', 'like', $q)
+                            ->orWhere('content_type', 'like', $q);
                     });
             });
         }

@@ -4,9 +4,11 @@ namespace App\Models;
 
 use App\Models\WebsiteCompliance\UsesWcDatabaseContext;
 use App\Support\ComplianceSupportingFiles;
+use App\Support\GeneralComplianceEncryptedFiles;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 
 class GeneralComplianceRequestAttachment extends Model
 {
@@ -26,6 +28,7 @@ class GeneralComplianceRequestAttachment extends Model
         'file_url',
         'mime_type',
         'size_bytes',
+        'is_encrypted',
         'sort_order',
         'uploaded_by_user_id',
         'uploaded_by_name',
@@ -38,6 +41,7 @@ class GeneralComplianceRequestAttachment extends Model
             'size_bytes' => 'integer',
             'sort_order' => 'integer',
             'uploaded_by_user_id' => 'integer',
+            'is_encrypted' => 'boolean',
         ];
     }
 
@@ -46,8 +50,27 @@ class GeneralComplianceRequestAttachment extends Model
         return $this->belongsTo(GeneralComplianceRequestVersion::class, 'version_id');
     }
 
+    public function isStoredEncrypted(): bool
+    {
+        if ($this->is_encrypted) {
+            return true;
+        }
+
+        $path = (string) ($this->file_path ?? '');
+
+        return str_starts_with($path, GeneralComplianceEncryptedFiles::DIR.'/');
+    }
+
+    /**
+     * Authenticated download URL for encrypted (and preferred for all) GC files.
+     * Legacy public URLs remain as a fallback until backfill.
+     */
     public function resolvedFileUrl(): ?string
     {
+        if ($this->id && ($this->isStoredEncrypted() || ! filled($this->file_url))) {
+            return URL::to('/api/general-compliance/attachments/'.$this->id.'/download');
+        }
+
         if (filled($this->file_url)) {
             return $this->file_url;
         }
@@ -72,14 +95,17 @@ class GeneralComplianceRequestAttachment extends Model
     {
         $source = $this->source;
         $kind = $this->kind ?: self::KIND_ATTACHMENT;
+        $encrypted = $this->isStoredEncrypted();
 
         return [
             'id' => $this->id,
             'version_id' => $this->version_id,
             'kind' => $kind,
             'original_name' => $this->original_name,
-            'file_path' => $this->file_path,
+            // Do not expose private storage paths for encrypted files.
+            'file_path' => $encrypted ? null : $this->file_path,
             'file_url' => $this->resolvedFileUrl(),
+            'is_encrypted' => $encrypted,
             'mime_type' => $this->mime_type,
             'size_bytes' => $this->size_bytes,
             'sort_order' => $this->sort_order,

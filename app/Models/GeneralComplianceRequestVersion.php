@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\SafeEncrypted;
 use App\Models\WebsiteCompliance\UsesWcDatabaseContext;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -34,6 +35,10 @@ class GeneralComplianceRequestVersion extends Model
             'version_number' => 'integer',
             'submitted_at' => 'datetime',
             'reviewed_at' => 'datetime',
+            // Sensitive free-form GC body + reviewer notes — encrypted at rest (APP_KEY).
+            'description' => SafeEncrypted::class,
+            'feedback' => SafeEncrypted::class,
+            'future_feedback' => SafeEncrypted::class,
         ];
     }
 

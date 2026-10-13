@@ -494,6 +494,18 @@ Notes:
 - Activity logs use `gc.*` actions.
 - Same **compliance audit trail** as SMC (`module=gc`) on every lifecycle event;
   reports and request detail include full history with actor name/email/role.
+- **Encryption at rest (NFR-GC-ENC) — primary: files:** attachments and
+  supporting files are stored encrypted on the private disk (`local`, under
+  `general-compliance/enc/`) with `APP_KEY`. They are NOT on the public disk /
+  public URL. Download only via authenticated
+  `GET /api/general-compliance/attachments/{id}/download` (same authz as
+  viewing the request). API `file_url` points at that endpoint;
+  `is_encrypted=true`; storage path is hidden from JSON.
+- **Also encrypted:** version text — `description`, `feedback`,
+  `future_feedback` via `SafeEncrypted`. List search (`q`) matches name /
+  content type / reviewer only. Audit metadata stores feedback presence flags
+  only (never plaintext). Backfill text + files:
+  `php artisan security:encrypt-general-compliance [--dry-run]`.
 
 3.3e Support Tickets (error / bug reporting)
 - Power Admin enables **Support Tickets** as a hub Functionalities flag
@@ -1451,6 +1463,9 @@ Existing foundations that ALREADY help (do not rebuild):
 - Access control: role × Capabilities matrix
 - Audit: activity_logs + compliance_audit_events (FCA-style workflow trail)
 - Secret encryption at rest (Stripe, hub DB, cPanel); SecurityHeaders
+- Generic Compliance sensitive files + text encrypted at rest (attachments /
+  supporting files on private disk; description / feedback / future_feedback —
+  NFR-GC-ENC / section 9.3)
 - Terms accept gate (section 2.2c) — contractual, not a privacy notice
 - Admin hard-delete of users (Power Admin / white-label remote) — not erasure
 
@@ -1583,8 +1598,9 @@ Phase 6 — Breach & accountability (mostly ops; light product)
 --------------------------------------------------------------------------------
 6E.2 Out of scope for v1 (explicit)
 --------------------------------------------------------------------------------
-- Field-level encryption of name/email (hashed passwords + secret encryption
-  already exist)
+- Field-level encryption of user name/email (hashed passwords + secret
+  encryption already exist; GC files + submission body/feedback ARE encrypted —
+  see NFR-GC-ENC / section 9.3)
 - Rewriting historical hub_backup SQL dumps per erasure request
 - Full RoPA UI inside the product (keep RoPA as an ops spreadsheet/doc)
 - AI / analytics processors not currently integrated
@@ -1965,7 +1981,8 @@ STEP 1 — Shared hub core (content hub)
 [ ] In-app post editing for buyers (later)
 [x] Social Media Compliance check flow (module + APIs)
 [x] General Compliance module + APIs (description + optional attachments and
-    separate supporting files)
+    separate supporting files); sensitive files + text encrypted at rest
+    (NFR-GC-ENC)
 [x] Website Template Library module + APIs (templates, request form, manual cPanel deploy)
 [x] Website templates: Power Admin colour schemes on register/edit; request form
     scheme picker + optional custom colours (`wc_templates.color_schemes`)
@@ -2031,6 +2048,22 @@ SECURITY HARDENING (phase 1 — 2026-10-04)
 [x] Artisan: php artisan security:encrypt-stored-secrets [--dry-run]
 [x] Frontend: do not echo/prefill cPanel secrets; leave blank to keep; 401 clears
     session; referrer / nosniff meta on index.html
+
+--------------------------------------------------------------------------------
+NFR-GC-ENC — Generic Compliance data encryption at rest (2026-10-13)
+--------------------------------------------------------------------------------
+[x] Encrypt GC attachment + supporting-file bytes on private disk (APP_KEY;
+    GCENC1 payload); leave public disk; authenticated download endpoint
+[x] Attachment API returns download URL + is_encrypted; hides private path
+[x] Encrypt GC version `description`, `feedback`, `future_feedback` via
+    SafeEncrypted (APP_KEY); legacy plaintext still readable until backfill
+[x] Do not persist feedback plaintext in compliance_audit_events metadata
+    (flags only: has_feedback / has_future_feedback)
+[x] List search `q` uses name / content_type / reviewed_by (not encrypted body)
+[x] Artisan: php artisan security:encrypt-general-compliance [--dry-run]
+    (text fields + migrate legacy public files → encrypted private disk)
+[x] Feature tests: file ciphertext on disk, owner download, forbidden stranger,
+    text ciphertext + Eloquent round-trip + legacy plaintext
 
 --------------------------------------------------------------------------------
 SECURITY HARDENING (phase 2 — 2026-10-04)
@@ -2144,6 +2177,63 @@ Related but distinct
 - NFR-AUDIT — Activity logs + compliance audit trail (sections 6A / 6C).
 (Add new NFR-xxx subsections here when working on further non-functional
  requirements; keep functional module detail in sections 3–6.)
+
+--------------------------------------------------------------------------------
+9.3 NFR-GC-ENC — Encryption of Generic Compliance data at rest
+--------------------------------------------------------------------------------
+Statement
+- Generic Compliance submissions are sensitive. The platform SHALL encrypt
+  that data at rest so filesystem access or a database dump does not expose
+  plaintext. **Primary focus: uploaded files** (attachments + supporting
+  files); version free-text is also encrypted.
+
+Scope — files (primary)
+- `general_compliance_request_attachments` for both `kind=attachment` and
+  `kind=supporting_file`
+- Bytes stored on private `local` disk under `general-compliance/enc/` as
+  `GCENC1:` + Laravel `Crypt` ciphertext (`APP_KEY`)
+- Column `is_encrypted=true`; public-disk URLs must not be used for new files
+- Download only through authenticated API (same view authorisation as the
+  parent request): `GET …/general-compliance/attachments/{id}/download`
+
+Scope — text columns
+- `general_compliance_request_versions.description`
+- `general_compliance_request_versions.feedback` (remedial feedback / notes)
+- `general_compliance_request_versions.future_feedback`
+
+Not in scope
+- content_type, status, reviewer display name, request `name` (denormalised
+  submitter name), original_name / mime metadata (needed for UI)
+
+Mechanism
+- Files: `App\Support\GeneralComplianceEncryptedFiles` on upload; decrypt on
+  authorised download only.
+- Text: `SafeEncrypted` cast (legacy plaintext readable until backfill;
+  wrong-key ciphertext → null).
+- Audit trail MUST NOT duplicate feedback plaintext in `metadata` (flags only).
+- Text search across encrypted body is not supported; `q` uses non-encrypted
+  fields only.
+
+Ops
+- After deploy: `php artisan security:encrypt-general-compliance`
+  (optional `--dry-run` first). Encrypts text rows and migrates legacy
+  public-disk files → encrypted private disk (deletes public copy).
+- Protect and back up `APP_KEY`; losing the key makes ciphertext
+  unrecoverable.
+
+Acceptance criteria (for “done”)
+  [x] New GC uploads store file bytes encrypted on private disk (not public)
+  [x] Authorised users can download decrypted files; unauthorised get 403
+  [x] API exposes download URL + is_encrypted; hides private storage path
+  [x] New / updated GC versions store description & feedback as ciphertext
+  [x] Legacy plaintext text/files remain readable; backfill encrypts them
+  [x] Audit metadata does not store feedback plaintext
+  [x] Documented in section 3.3b + section 8 checklist
+
+Related but distinct
+- Secret encryption (Stripe / hub DB / cPanel) — SECURITY HARDENING phase 1
+- NFR-SEC / Security Monitoring (section 9.1) — threat detection, not field crypto
+- NFR-PRIV / UK GDPR (section 6E) — broader personal-data programme
 
 ================================================================================
 END OF REQUIREMENTS

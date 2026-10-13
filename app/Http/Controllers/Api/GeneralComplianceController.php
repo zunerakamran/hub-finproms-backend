@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\GeneralComplianceRequest;
+use App\Models\GeneralComplianceRequestAttachment;
 use App\Models\Hub;
 use App\Models\User;
 use App\Services\ActingAdvisorService;
@@ -15,9 +16,11 @@ use App\Services\GeneralComplianceService;
 use App\Services\HubService;
 use App\Support\ComplianceSupportingFiles;
 use App\Support\DateFormat;
+use App\Support\GeneralComplianceEncryptedFiles;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\StreamedResponse;
+use Throwable;
 
 class GeneralComplianceController extends Controller
 {
@@ -159,6 +162,55 @@ class GeneralComplianceController extends Controller
                 'user.firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
                 'onBehalfBy:id,name,email',
             ])->toApiArray(includeVersions: true),
+        ]);
+    }
+
+    /**
+     * Stream a GC attachment / supporting file (decrypts at rest when encrypted).
+     */
+    public function downloadAttachment(
+        Request $request,
+        GeneralComplianceRequestAttachment $gcAttachment
+    ): StreamedResponse|JsonResponse {
+        /** @var User $user */
+        $user = $request->user();
+        $hub = $this->gcHub($user);
+        $this->compliance->assertModuleEnabled($hub);
+
+        $attachment = $gcAttachment;
+        $attachment->loadMissing(['version.request.user:id,firm_id']);
+        $compliance = $attachment->version?->request;
+        if (! $compliance) {
+            return response()->json(['message' => 'Attachment not found.'], 404);
+        }
+
+        $this->authorizeView($hub, $user, $compliance);
+
+        $path = (string) ($attachment->file_path ?? '');
+        if ($path === '') {
+            return response()->json(['message' => 'Attachment file is missing.'], 404);
+        }
+
+        try {
+            $bytes = GeneralComplianceEncryptedFiles::readPlaintext(
+                $path,
+                (bool) $attachment->is_encrypted
+            );
+        } catch (Throwable $e) {
+            return response()->json([
+                'message' => $e->getMessage() ?: 'Unable to read attachment.',
+            ], 404);
+        }
+
+        $filename = $attachment->original_name ?: ('gc-file-'.$attachment->id);
+        $mime = $attachment->mime_type ?: 'application/octet-stream';
+
+        return response()->streamDownload(function () use ($bytes) {
+            echo $bytes;
+        }, $filename, [
+            'Content-Type' => $mime,
+            'X-Content-Type-Options' => 'nosniff',
+            'Cache-Control' => 'private, no-store',
         ]);
     }
 
