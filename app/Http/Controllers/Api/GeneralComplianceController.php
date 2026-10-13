@@ -19,6 +19,7 @@ use App\Support\DateFormat;
 use App\Support\GeneralComplianceEncryptedFiles;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Throwable;
 
@@ -166,85 +167,117 @@ class GeneralComplianceController extends Controller
     }
 
     /**
-     * Stream a GC attachment / supporting file (decrypts at rest when encrypted).
+     * Download a GC attachment / supporting file (decrypts at rest when encrypted).
      *
-     * Must be called with the same session/credentials as other GC APIs — opening
-     * the URL in a bare new tab without auth used to 500 on a null user.
+     * Uses numeric {id} (not a long route-model name) — Symfony rejects param names
+     * longer than 32 chars, which previously 500'd this URL on production.
      */
-    public function downloadAttachment(
-        Request $request,
-        GeneralComplianceRequestAttachment $gcAttachment
-    ): StreamedResponse|JsonResponse {
-        $user = $request->user();
-        if (! $user instanceof User) {
-            return response()->json(['message' => 'Unauthenticated.'], 401);
-        }
-
-        $hub = $this->gcHub($user);
-
+    public function downloadAttachment(Request $request, int|string $id): Response|JsonResponse
+    {
         try {
-            $this->compliance->assertModuleEnabled($hub);
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            return response()->json([
-                'message' => $e->getMessage() ?: 'General Compliance is not enabled for this hub.',
-                'errors' => $e->errors(),
-            ], 422);
-        }
+            $user = $request->user();
+            if (! $user instanceof User) {
+                return $this->downloadError($request, 'Unauthenticated.', 401);
+            }
 
-        $attachment = $gcAttachment;
-        $attachment->loadMissing(['version.request.user:id,firm_id']);
-        $compliance = $attachment->version?->request;
-        if (! $compliance) {
-            return response()->json(['message' => 'Attachment not found.'], 404);
-        }
+            $hub = $this->gcHub($user);
 
-        $this->authorizeView($hub, $user, $compliance);
+            try {
+                $this->compliance->assertModuleEnabled($hub);
+            } catch (\Illuminate\Validation\ValidationException $e) {
+                return $this->downloadError(
+                    $request,
+                    $e->getMessage() ?: 'General Compliance is not enabled for this hub.',
+                    422
+                );
+            }
 
-        $path = (string) ($attachment->file_path ?? '');
-        if ($path === '') {
-            return response()->json(['message' => 'Attachment file is missing.'], 404);
-        }
+            $attachment = GeneralComplianceRequestAttachment::query()->find((int) $id);
+            if (! $attachment) {
+                return $this->downloadError($request, 'Attachment not found.', 404);
+            }
 
-        try {
-            $bytes = GeneralComplianceEncryptedFiles::readPlaintext(
-                $path,
-                (bool) $attachment->is_encrypted || $attachment->isStoredEncrypted()
+            $attachment->loadMissing(['version.request.user:id,firm_id']);
+            $compliance = $attachment->version?->request;
+            if (! $compliance) {
+                return $this->downloadError($request, 'Attachment not found.', 404);
+            }
+
+            try {
+                $this->authorizeView($hub, $user, $compliance);
+            } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
+                return $this->downloadError($request, 'You do not have permission to view this file.', $e->getStatusCode() ?: 403);
+            } catch (\Illuminate\Http\Exceptions\HttpResponseException $e) {
+                return $e->getResponse();
+            }
+
+            $path = (string) ($attachment->file_path ?? '');
+            if ($path === '') {
+                return $this->downloadError($request, 'Attachment file is missing.', 404);
+            }
+
+            $encrypted = (bool) ($attachment->getAttributes()['is_encrypted'] ?? false)
+                || $attachment->isStoredEncrypted();
+
+            $bytes = GeneralComplianceEncryptedFiles::readPlaintext($path, $encrypted);
+            $filename = $this->safeDownloadFilename(
+                (string) ($attachment->original_name ?: ('gc-file-'.$attachment->id))
             );
+            $mime = (string) ($attachment->mime_type ?: 'application/octet-stream');
+
+            // Plain Response (not StreamedResponse) — more reliable on LiteSpeed/shared hosts.
+            return response($bytes, 200, [
+                'Content-Type' => $mime,
+                'Content-Length' => (string) strlen($bytes),
+                'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+                'X-Content-Type-Options' => 'nosniff',
+                'Cache-Control' => 'private, no-store',
+                'Content-Security-Policy' => "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: blob:; object-src 'self' blob:; frame-ancestors 'self'",
+                'X-Frame-Options' => 'SAMEORIGIN',
+            ]);
         } catch (Throwable $e) {
             report($e);
 
-            return response()->json([
-                'message' => $e->getMessage() ?: 'Unable to read attachment.',
-            ], 404);
+            return $this->downloadError(
+                $request,
+                'Unable to download attachment: '.$e->getMessage(),
+                500
+            );
+        }
+    }
+
+    /**
+     * Browser navigations (file click / new tab) send Accept: text/html — return plain
+     * text so they never get a blank Laravel HTML exception page.
+     */
+    private function downloadError(Request $request, string $message, int $status): Response|JsonResponse
+    {
+        $wantsHtml = ! $request->expectsJson()
+            && str_contains((string) $request->header('Accept', ''), 'text/html');
+
+        if ($wantsHtml) {
+            return response($message, $status, [
+                'Content-Type' => 'text/plain; charset=UTF-8',
+                'Cache-Control' => 'private, no-store',
+            ]);
         }
 
-        $filename = $this->safeDownloadFilename(
-            $attachment->original_name ?: ('gc-file-'.$attachment->id)
-        );
-        $mime = $attachment->mime_type ?: 'application/octet-stream';
-
-        return response()->streamDownload(function () use ($bytes) {
-            echo $bytes;
-        }, $filename, [
-            'Content-Type' => $mime,
-            'X-Content-Type-Options' => 'nosniff',
-            'Cache-Control' => 'private, no-store',
-            // Allow the SPA to open/preview the decrypted file in a new tab/iframe.
-            'Content-Security-Policy' => "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: blob:; object-src 'self' blob:; frame-ancestors 'self'",
-            'X-Frame-Options' => 'SAMEORIGIN',
-        ]);
+        return response()->json(['message' => $message], $status);
     }
 
     private function safeDownloadFilename(string $name): string
     {
-        $name = str_replace(["\0", '/', '\\'], '-', $name);
+        $name = str_replace(["\0", '"', "\r", "\n", '/', '\\'], '-', $name);
         $name = trim($name);
         if ($name === '' || $name === '.' || $name === '..') {
             return 'download.bin';
         }
 
-        // Keep ASCII fallback for Content-Disposition quirks; preserve unicode when possible.
-        return mb_substr($name, 0, 180);
+        if (function_exists('mb_substr')) {
+            return mb_substr($name, 0, 180);
+        }
+
+        return substr($name, 0, 180);
     }
 
     public function store(Request $request): JsonResponse

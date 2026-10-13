@@ -42,9 +42,16 @@ class GeneralComplianceEncryptedFiles
             throw new RuntimeException('Unable to read uploaded Generic Compliance file.');
         }
 
+        $disk = Storage::disk(self::DISK_ENCRYPTED);
+        if (! $disk->exists(self::DIR)) {
+            $disk->makeDirectory(self::DIR);
+        }
+
         $path = self::DIR.'/'.Str::uuid()->toString().'.enc';
         $payload = self::MAGIC.Crypt::encryptString($plain);
-        Storage::disk(self::DISK_ENCRYPTED)->put($path, $payload);
+        if (! $disk->put($path, $payload)) {
+            throw new RuntimeException('Unable to write encrypted Generic Compliance file to private storage.');
+        }
 
         return [
             'file_path' => $path,

@@ -316,7 +316,7 @@ class GeneralComplianceEncryptionTest extends TestCase
             ->get('/api/general-compliance/attachments/'.$attachment->id.'/download');
 
         $response->assertOk();
-        $this->assertSame('owner-can-read-this', $response->streamedContent());
+        $this->assertSame('owner-can-read-this', $response->getContent());
     }
 
     public function test_gc_attachment_download_forbidden_for_other_user(): void
