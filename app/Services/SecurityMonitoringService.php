@@ -905,15 +905,13 @@ class SecurityMonitoringService
      */
     private function executeComposerAudit(): array
     {
-        $composer = base_path('composer.phar');
-        $cmd = is_file($composer)
-            ? 'php '.escapeshellarg($composer).' audit --format=json --no-dev 2>&1'
-            : 'composer audit --format=json --no-dev 2>&1';
+        $composerPhar = base_path('composer.phar');
+        $php = PHP_BINARY ?: 'php';
+        $cmd = is_file($composerPhar)
+            ? [$php, $composerPhar, 'audit', '--format=json', '--no-dev']
+            : ['composer', 'audit', '--format=json', '--no-dev'];
 
-        $output = [];
-        $exit = 0;
-        @exec($cmd, $output, $exit);
-        $raw = implode("\n", $output);
+        [$raw, $exit] = $this->runComposerCommand($cmd);
 
         $jsonStart = strpos($raw, '{');
         $decoded = null;
@@ -923,7 +921,7 @@ class SecurityMonitoringService
 
         if (! is_array($decoded)) {
             // Treat missing composer / empty as unknown rather than hard fail in local/dev.
-            if ($exit === 0 || $raw === '') {
+            if ($exit === 0 || trim($raw) === '') {
                 return [
                     'status' => 'pass',
                     'summary' => 'Composer audit completed with no reported advisories (or audit unavailable in this environment).',
@@ -963,6 +961,80 @@ class SecurityMonitoringService
             'summary' => 'Composer audit passed with no known advisories.',
             'advisories' => 0,
         ];
+    }
+
+    /**
+     * Run Composer with HOME/COMPOSER_HOME set (web workers often lack both).
+     *
+     * @param  list<string>  $cmd
+     * @return array{0: string, 1: int}
+     */
+    private function runComposerCommand(array $cmd): array
+    {
+        $home = $this->composerHomeDirectory();
+        $env = array_merge($_ENV, $_SERVER, [
+            'HOME' => $home,
+            'COMPOSER_HOME' => $home,
+            // Windows / IIS workers often only expose USERPROFILE.
+            'USERPROFILE' => $home,
+            'COMPOSER_DISABLE_XDEBUG_WARN' => '1',
+        ]);
+
+        $descriptor = [
+            0 => ['pipe', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+
+        $process = @proc_open(
+            $cmd,
+            $descriptor,
+            $pipes,
+            base_path(),
+            $env
+        );
+
+        if (! is_resource($process)) {
+            // Fallback for hosts that reject array-form proc_open.
+            $shell = implode(' ', array_map('escapeshellarg', $cmd));
+            $process = @proc_open(
+                $shell,
+                $descriptor,
+                $pipes,
+                base_path(),
+                $env
+            );
+        }
+
+        if (! is_resource($process)) {
+            return ['', 1];
+        }
+
+        fclose($pipes[0]);
+        $stdout = stream_get_contents($pipes[1]) ?: '';
+        $stderr = stream_get_contents($pipes[2]) ?: '';
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $exit = proc_close($process);
+
+        $raw = trim($stdout.($stderr !== '' ? "\n".$stderr : ''));
+
+        return [$raw, (int) $exit];
+    }
+
+    private function composerHomeDirectory(): string
+    {
+        $existing = getenv('COMPOSER_HOME') ?: getenv('HOME') ?: getenv('USERPROFILE');
+        if (is_string($existing) && $existing !== '' && is_dir($existing) && is_writable($existing)) {
+            return $existing;
+        }
+
+        $dir = storage_path('app/composer-home');
+        if (! is_dir($dir)) {
+            @mkdir($dir, 0755, true);
+        }
+
+        return $dir;
     }
 
     private function scanIsOverdue(SecurityMonitoringSetting $settings): bool
