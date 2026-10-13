@@ -53,6 +53,8 @@ class Hub extends Model
 
     public const GROUP_SUPPORT_TICKETS = 'support_tickets';
 
+    public const GROUP_SECURITY_MONITORING = 'security_monitoring';
+
     public const GROUP_WEBSITE_COMPLIANCE = 'website_compliance';
 
     public const GROUP_WEBSITE_TEMPLATE_LIBRARY = 'website_template_library';
@@ -96,6 +98,7 @@ class Hub extends Model
         self::GROUP_SOCIAL_MEDIA_COMPLIANCE => 'Social Media Pre Approval',
         self::GROUP_GENERAL_COMPLIANCE => 'Generic Content Pre Approval',
         self::GROUP_SUPPORT_TICKETS => 'Support Tickets',
+        self::GROUP_SECURITY_MONITORING => 'Security Monitoring',
         self::GROUP_WEBSITE_TEMPLATE_LIBRARY => 'Website Template Library',
         self::GROUP_WEBSITE_COMPLIANCE => 'Website Content Pre Approval',
         self::GROUP_MODULE_PRICING => 'Modules pricing',
@@ -117,6 +120,7 @@ class Hub extends Model
         self::GROUP_SOCIAL_MEDIA_COMPLIANCE,
         self::GROUP_GENERAL_COMPLIANCE,
         self::GROUP_SUPPORT_TICKETS,
+        self::GROUP_SECURITY_MONITORING,
         self::GROUP_WEBSITE_TEMPLATE_LIBRARY,
         self::GROUP_WEBSITE_COMPLIANCE,
         self::GROUP_MODULE_PRICING,
@@ -161,6 +165,7 @@ class Hub extends Model
         self::GROUP_SOCIAL_MEDIA_COMPLIANCE,
         self::GROUP_GENERAL_COMPLIANCE,
         self::GROUP_SUPPORT_TICKETS,
+        self::GROUP_SECURITY_MONITORING,
         self::GROUP_WEBSITE_TEMPLATE_LIBRARY,
         self::GROUP_WEBSITE_COMPLIANCE,
         self::GROUP_MODULE_PRICING,
@@ -625,6 +630,18 @@ class Hub extends Model
     ];
 
     /**
+     * Security Monitoring capabilities — inactive while Functionalities → security_monitoring is off.
+     *
+     * @var list<string>
+     */
+    public const SECURITY_MONITORING_CAPABILITY_KEYS = [
+        'secmon_view_events',
+        'secmon_view_report',
+        'secmon_manage_incidents',
+        'secmon_manage_alerts',
+    ];
+
+    /**
      * Website Template Library (showcase) capabilities — inactive while the module is off.
      *
      * @var list<string>
@@ -834,6 +851,13 @@ class Hub extends Model
         'support_tickets' => [
             'label' => 'Support Tickets',
             'description' => 'When on, Support Tickets capabilities become available on the matrix so users can report system errors (module area, description, screenshots) and capable roles can manage the queue / change status. Available on Shared, White-label, and Central Hub.',
+            'group' => self::GROUP_BEHAVIOUR,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'security_monitoring' => [
+            'label' => 'Security Monitoring',
+            'description' => 'When on, Security Monitoring capabilities become available so capable roles can view security events / incidents, open the monitoring report (when / what / status), manage investigations, and configure alert thresholds. Available on Shared, White-label, and Central Hub. Not a Modules-page billable packaging module.',
             'group' => self::GROUP_BEHAVIOUR,
             'default_shared' => false,
             'default_white_label' => false,
@@ -1507,6 +1531,36 @@ class Hub extends Model
             'default_white_label' => false,
         ],
 
+        // --- Security Monitoring (blurred while Functionalities → security_monitoring is off) ---
+        'secmon_view_events' => [
+            'label' => 'View security events',
+            'description' => 'Open the Security Monitoring events feed and event detail (when it happened, what happened, severity, source).',
+            'group' => self::GROUP_SECURITY_MONITORING,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'secmon_view_report' => [
+            'label' => 'View security monitoring report',
+            'description' => 'Open aggregated security monitoring report (counts by severity / category / day, open criticals, last dependency scan).',
+            'group' => self::GROUP_SECURITY_MONITORING,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'secmon_manage_incidents' => [
+            'label' => 'Manage security incidents',
+            'description' => 'Acknowledge, investigate, resolve, or close security incidents; declare manual incidents; add investigation notes.',
+            'group' => self::GROUP_SECURITY_MONITORING,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'secmon_manage_alerts' => [
+            'label' => 'Manage security alert settings',
+            'description' => 'Configure Security Monitoring alert thresholds, failed-login window, and notification recipients.',
+            'group' => self::GROUP_SECURITY_MONITORING,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+
         // --- Website Template Library (blurred while module_website_template_library is off) ---
         'wc_manage_templates' => [
             'label' => 'Manage website templates',
@@ -1930,6 +1984,12 @@ class Hub extends Model
             || ((self::CHECKLIST_DEFINITIONS[$key]['group'] ?? null) === self::GROUP_SUPPORT_TICKETS);
     }
 
+    public static function isSecurityMonitoringCapability(string $key): bool
+    {
+        return in_array($key, self::SECURITY_MONITORING_CAPABILITY_KEYS, true)
+            || ((self::CHECKLIST_DEFINITIONS[$key]['group'] ?? null) === self::GROUP_SECURITY_MONITORING);
+    }
+
     public static function isWebsiteTemplateLibraryCapability(string $key): bool
     {
         return in_array($key, self::WEBSITE_TEMPLATE_LIBRARY_CAPABILITY_KEYS, true)
@@ -2014,6 +2074,11 @@ class Hub extends Model
         return (bool) ($this->resolvedChecklist()['support_tickets'] ?? false);
     }
 
+    public function hasSecurityMonitoringFunctionality(): bool
+    {
+        return (bool) ($this->resolvedChecklist()['security_monitoring'] ?? false);
+    }
+
     public function hasWebsiteTemplateLibraryModule(): bool
     {
         return $this->moduleEffectivelyEnabled('module_website_template_library');
@@ -2094,6 +2159,7 @@ class Hub extends Model
             $defaults['module_website_compliance'] = false;
             $defaults['module_general_compliance'] = false;
             $defaults['support_tickets'] = false;
+            $defaults['security_monitoring'] = false;
             $defaults['charge_amount_per_module'] = false;
             $defaults['charge_recurring_per_module'] = false;
             $defaults['one_off_purchase'] = false;

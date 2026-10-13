@@ -33,3 +33,7 @@ Schedule::command('hubs:run-due-backups')
 Schedule::command('gdpr:prune-retention')
     ->dailyAt('02:30')
     ->withoutOverlapping();
+
+// Security Monitoring has no daily schedule — events are recorded in real time.
+// Capable users run an on-demand check via POST …/security-monitoring/scan-now
+// (or optionally: php artisan security:monitor).

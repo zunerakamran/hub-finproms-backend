@@ -22,6 +22,7 @@ use App\Http\Controllers\Api\SocialMediaComplianceController;
 use App\Http\Controllers\Api\GeneralComplianceController;
 use App\Http\Controllers\Api\GeneralComplianceContentTypeController;
 use App\Http\Controllers\Api\SupportTicketController;
+use App\Http\Controllers\Api\SecurityMonitoringController;
 use App\Http\Controllers\Api\TaxonomyAddRequestController;
 use App\Http\Controllers\Api\WebsiteCompliance\ChangeRequestController as WcChangeRequestController;
 use App\Http\Controllers\Api\WebsiteCompliance\PageController as WcPageController;
@@ -618,6 +619,31 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/activity-logs/report', [ActivityLogController::class, 'report']);
         });
 
+        // Security Monitoring — events / incidents / report / alert settings
+        Route::middleware('acting_wl_wc_db')->group(function () {
+            Route::middleware('hub_can:secmon_view_events')->group(function () {
+                Route::get('/security-monitoring/options', [SecurityMonitoringController::class, 'options']);
+                Route::get('/security-monitoring/events', [SecurityMonitoringController::class, 'events']);
+                Route::get('/security-monitoring/events/{securityEvent}', [SecurityMonitoringController::class, 'showEvent']);
+                Route::get('/security-monitoring/incidents', [SecurityMonitoringController::class, 'incidents']);
+                Route::get('/security-monitoring/incidents/{securityIncident}', [SecurityMonitoringController::class, 'showIncident']);
+            });
+            Route::middleware('hub_can:secmon_view_report')->group(function () {
+                Route::get('/security-monitoring/report', [SecurityMonitoringController::class, 'report']);
+            });
+            Route::middleware('hub_can:secmon_view_report,secmon_manage_alerts')->group(function () {
+                Route::post('/security-monitoring/scan-now', [SecurityMonitoringController::class, 'scanNow']);
+            });
+            Route::middleware('hub_can:secmon_manage_incidents')->group(function () {
+                Route::post('/security-monitoring/incidents', [SecurityMonitoringController::class, 'declareIncident']);
+                Route::patch('/security-monitoring/incidents/{securityIncident}', [SecurityMonitoringController::class, 'updateIncident']);
+            });
+            Route::middleware('hub_can:secmon_manage_alerts')->group(function () {
+                Route::get('/security-monitoring/alert-settings', [SecurityMonitoringController::class, 'alertSettings']);
+                Route::put('/security-monitoring/alert-settings', [SecurityMonitoringController::class, 'updateAlertSettings']);
+            });
+        });
+
         Route::middleware('hub_can:dashboard_manage_active_sessions')->group(function () {
             Route::get('/active-sessions', [ActiveSessionController::class, 'index']);
             Route::post('/active-sessions/{userId}/force-logout', [ActiveSessionController::class, 'forceLogout'])
@@ -1045,6 +1071,31 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:dashboard_view_activity_logs')->group(function () {
             Route::get('/activity-logs', [ActivityLogController::class, 'index']);
             Route::get('/activity-logs/report', [ActivityLogController::class, 'report']);
+        });
+
+        // Security Monitoring — events / incidents / report / alert settings
+        Route::middleware('acting_wl_wc_db')->group(function () {
+            Route::middleware('hub_can:secmon_view_events')->group(function () {
+                Route::get('/security-monitoring/options', [SecurityMonitoringController::class, 'options']);
+                Route::get('/security-monitoring/events', [SecurityMonitoringController::class, 'events']);
+                Route::get('/security-monitoring/events/{securityEvent}', [SecurityMonitoringController::class, 'showEvent']);
+                Route::get('/security-monitoring/incidents', [SecurityMonitoringController::class, 'incidents']);
+                Route::get('/security-monitoring/incidents/{securityIncident}', [SecurityMonitoringController::class, 'showIncident']);
+            });
+            Route::middleware('hub_can:secmon_view_report')->group(function () {
+                Route::get('/security-monitoring/report', [SecurityMonitoringController::class, 'report']);
+            });
+            Route::middleware('hub_can:secmon_view_report,secmon_manage_alerts')->group(function () {
+                Route::post('/security-monitoring/scan-now', [SecurityMonitoringController::class, 'scanNow']);
+            });
+            Route::middleware('hub_can:secmon_manage_incidents')->group(function () {
+                Route::post('/security-monitoring/incidents', [SecurityMonitoringController::class, 'declareIncident']);
+                Route::patch('/security-monitoring/incidents/{securityIncident}', [SecurityMonitoringController::class, 'updateIncident']);
+            });
+            Route::middleware('hub_can:secmon_manage_alerts')->group(function () {
+                Route::get('/security-monitoring/alert-settings', [SecurityMonitoringController::class, 'alertSettings']);
+                Route::put('/security-monitoring/alert-settings', [SecurityMonitoringController::class, 'updateAlertSettings']);
+            });
         });
 
         Route::middleware('hub_can:dashboard_manage_active_sessions')->group(function () {

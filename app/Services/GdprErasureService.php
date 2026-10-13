@@ -95,6 +95,8 @@ class GdprErasureService
             $scrubbed['support_tickets'] = $this->scrubSupportTickets($connection, $userId);
             $scrubbed['support_ticket_comments'] = $this->scrubSupportTicketComments($connection, $userId, $anonymousName);
             $scrubbed['support_ticket_attachments'] = $this->scrubUploaderNames($connection, 'support_ticket_attachments', $userId, $anonymousName);
+            $scrubbed['security_events'] = $this->scrubSecurityEvents($connection, $userId, $anonymousName, $anonymousEmail);
+            $scrubbed['security_incident_notes'] = $this->scrubSecurityIncidentNotes($connection, $userId, $anonymousName);
             $scrubbed['smc_attachments'] = $this->scrubUploaderNames($connection, 'social_media_compliance_request_attachments', $userId, $anonymousName);
             $scrubbed['gc_attachments'] = $this->scrubUploaderNames($connection, 'general_compliance_request_attachments', $userId, $anonymousName);
             $scrubbed['wc_attachments'] = $this->scrubUploaderNames($connection, 'wc_change_request_attachments', $userId, $anonymousName);
@@ -222,6 +224,36 @@ class GdprErasureService
                 'page_url' => null,
                 'browser_info' => null,
                 'status_note' => null,
+            ]);
+    }
+
+    private function scrubSecurityEvents(string $connection, int $userId, string $name, string $email): int
+    {
+        if (! $this->tableExists($connection, 'security_events')) {
+            return 0;
+        }
+
+        return \App\Models\SecurityEvent::on($connection)
+            ->where('actor_user_id', $userId)
+            ->update([
+                'actor_name' => $name,
+                'actor_email' => $email,
+                'source_ip' => null,
+                'user_agent' => null,
+            ]);
+    }
+
+    private function scrubSecurityIncidentNotes(string $connection, int $userId, string $name): int
+    {
+        if (! $this->tableExists($connection, 'security_incident_notes')) {
+            return 0;
+        }
+
+        return \App\Models\SecurityIncidentNote::on($connection)
+            ->where('user_id', $userId)
+            ->update([
+                'author_name' => $name,
+                'body' => '[Erased]',
             ]);
     }
 

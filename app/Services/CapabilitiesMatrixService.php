@@ -123,11 +123,12 @@ class CapabilitiesMatrixService
             || $group === Hub::GROUP_SOCIAL_MEDIA_COMPLIANCE
             || $group === Hub::GROUP_GENERAL_COMPLIANCE
             || $group === Hub::GROUP_SUPPORT_TICKETS
+            || $group === Hub::GROUP_SECURITY_MONITORING
             || $group === Hub::GROUP_WEBSITE_TEMPLATE_LIBRARY
             || $group === Hub::GROUP_WEBSITE_COMPLIANCE
             || $group === Hub::GROUP_MODULE_PRICING
         ) {
-            // User-facing / compliance / support caps apply to every role column so
+            // User-facing / compliance / support / security caps apply to every role column so
             // Power Admin can enable them for staff and users alike (no hard role lock-in).
             return $this->allMatrixRoles();
         }
@@ -215,6 +216,7 @@ class CapabilitiesMatrixService
         $smcModuleOn = $hub->hasSocialMediaComplianceModule();
         $gcModuleOn = $hub->hasGeneralComplianceModule();
         $stOn = $hub->hasSupportTicketsFunctionality();
+        $secmonOn = $hub->hasSecurityMonitoringFunctionality();
         $wcModuleOn = $hub->hasWebsiteComplianceModule();
         $wtlModuleOn = $hub->hasWebsiteTemplateLibraryModule();
         $smtlModuleOn = $hub->hasSocialMediaTemplateLibraryModule();
@@ -245,6 +247,7 @@ class CapabilitiesMatrixService
             $requiresSmcModule = Hub::isSocialMediaComplianceCapability($key);
             $requiresGcModule = Hub::isGeneralComplianceCapability($key);
             $requiresSupportTickets = Hub::isSupportTicketsCapability($key);
+            $requiresSecurityMonitoring = Hub::isSecurityMonitoringCapability($key);
             $requiresWcModule = Hub::isWebsiteComplianceCapability($key);
             $requiresWtlModule = Hub::isWebsiteTemplateLibraryCapability($key);
             $requiresSmtlModule = Hub::isSocialMediaTemplateLibraryCapability($key);
@@ -256,8 +259,8 @@ class CapabilitiesMatrixService
             // editable — Central has no SMTL product module, but Power Admin may
             // still enable a public site shell and content tools via the matrix
             // (enforced in roleCan the same way Shared/WL honour checked cells).
-            // Support Tickets / Firm documents are Functionalities — available on
-            // Central when those flags are on.
+            // Support Tickets / Security Monitoring / Firm documents are Functionalities —
+            // available on Central when those flags are on.
             $inactive = false;
             if ($isCentralHub) {
                 if ($requiresSmcModule
@@ -267,6 +270,7 @@ class CapabilitiesMatrixService
                     || ($requiresModulePricing && ! $modulePricingOn)
                     || ($requiresFirmDocuments && ! $firmDocumentsOn)
                     || ($requiresSupportTickets && ! $stOn)
+                    || ($requiresSecurityMonitoring && ! $secmonOn)
                 ) {
                     $inactive = true;
                 }
@@ -276,6 +280,7 @@ class CapabilitiesMatrixService
                     || ($requiresSmcModule && ! $smcModuleOn)
                     || ($requiresGcModule && ! $gcModuleOn)
                     || ($requiresSupportTickets && ! $stOn)
+                    || ($requiresSecurityMonitoring && ! $secmonOn)
                     || ($requiresWcModule && ! $wcModuleOn)
                     || ($requiresWtlModule && ! $wtlModuleOn)
                     || ($requiresSmtlModule && ! $smtlModuleOn)
@@ -302,6 +307,8 @@ class CapabilitiesMatrixService
                     $inactiveReason = 'module_general_compliance_off';
                 } elseif ($requiresSupportTickets && ! $stOn) {
                     $inactiveReason = 'support_tickets_off';
+                } elseif ($requiresSecurityMonitoring && ! $secmonOn) {
+                    $inactiveReason = 'security_monitoring_off';
                 } elseif ($requiresWtlModule && ! $wtlModuleOn) {
                     $inactiveReason = 'module_website_template_library_off';
                 } elseif ($requiresWcModule && ! $wcModuleOn) {
@@ -361,6 +368,8 @@ class CapabilitiesMatrixService
                 $requiresModule = 'module_general_compliance';
             } elseif ($requiresSupportTickets) {
                 $requiresModule = 'support_tickets';
+            } elseif ($requiresSecurityMonitoring) {
+                $requiresModule = 'security_monitoring';
             } elseif ($requiresWtlModule) {
                 $requiresModule = 'module_website_template_library';
             } elseif ($requiresWcModule) {
@@ -432,6 +441,7 @@ class CapabilitiesMatrixService
                 'module_website_compliance' => $wcModuleOn,
                 'module_general_compliance' => $gcModuleOn,
                 'support_tickets' => $stOn,
+                'security_monitoring' => $secmonOn,
                 'charge_amount_per_module' => $hub->can('charge_amount_per_module'),
                 'charge_recurring_per_module' => $hub->can('charge_recurring_per_module'),
                 'module_pricing_enabled' => $modulePricingOn,
@@ -450,6 +460,7 @@ class CapabilitiesMatrixService
             'social_media_compliance_capability_keys' => Hub::SOCIAL_MEDIA_COMPLIANCE_CAPABILITY_KEYS,
             'general_compliance_capability_keys' => Hub::GENERAL_COMPLIANCE_CAPABILITY_KEYS,
             'support_tickets_capability_keys' => Hub::SUPPORT_TICKETS_CAPABILITY_KEYS,
+            'security_monitoring_capability_keys' => Hub::SECURITY_MONITORING_CAPABILITY_KEYS,
             'website_template_library_capability_keys' => Hub::WEBSITE_TEMPLATE_LIBRARY_CAPABILITY_KEYS,
             'website_compliance_capability_keys' => Hub::WEBSITE_COMPLIANCE_CAPABILITY_KEYS,
             'module_pricing_capability_keys' => Hub::MODULE_PRICING_CAPABILITY_KEYS,
@@ -866,6 +877,7 @@ class CapabilitiesMatrixService
 
         // Remaining roles (approver / advisor / admin-staff / user): dashboard & admin-email tools off by default.
         // Power Admin enables them per hub in the Capabilities matrix.
+        // Security Monitoring also defaults OFF for these roles (hub-admin style ON via checklist defaults).
         foreach ([User::ROLE_APPROVER, User::ROLE_ADVISOR, User::ROLE_ADMIN_STAFF, User::ROLE_USER] as $role) {
             foreach (array_keys($matrix[$role] ?? []) as $key) {
                 $meta = Hub::CHECKLIST_DEFINITIONS[$key] ?? null;
@@ -873,6 +885,7 @@ class CapabilitiesMatrixService
                 if (Hub::isDashboardCapabilityGroup($group)
                     || $group === Hub::GROUP_ADMIN_EMAILS
                     || $group === Hub::GROUP_MODULE_PRICING
+                    || $group === Hub::GROUP_SECURITY_MONITORING
                 ) {
                     $matrix[$role][$key] = false;
                 }
@@ -902,6 +915,15 @@ class CapabilitiesMatrixService
             foreach (Hub::SUPPORT_TICKETS_CAPABILITY_KEYS as $key) {
                 if (isset($matrix[$role])) {
                     $matrix[$role][$key] = false;
+                }
+            }
+        }
+
+        // Security Monitoring: hub-admin style roles ON by default; others already forced OFF above.
+        foreach ([User::ROLE_POWER_ADMIN, User::ROLE_FINPROMS_ADMIN, User::ROLE_CLIENT_ADMIN, User::ROLE_MANAGER] as $role) {
+            foreach (Hub::SECURITY_MONITORING_CAPABILITY_KEYS as $key) {
+                if (isset($matrix[$role][$key])) {
+                    $matrix[$role][$key] = true;
                 }
             }
         }
@@ -947,6 +969,7 @@ class CapabilitiesMatrixService
                 && $group !== Hub::GROUP_SOCIAL_MEDIA_COMPLIANCE
                 && $group !== Hub::GROUP_GENERAL_COMPLIANCE
                 && $group !== Hub::GROUP_SUPPORT_TICKETS
+                && $group !== Hub::GROUP_SECURITY_MONITORING
                 && $group !== Hub::GROUP_WEBSITE_COMPLIANCE
                 && $key !== 'dashboard_manage_email_templates'
             ) {
@@ -1158,6 +1181,11 @@ class CapabilitiesMatrixService
 
         // Support Tickets caps are inactive while Functionalities → Support Tickets is off.
         if (Hub::isSupportTicketsCapability($flag) && ! $hub->hasSupportTicketsFunctionality()) {
+            return false;
+        }
+
+        // Security Monitoring caps are inactive while Functionalities → Security Monitoring is off.
+        if (Hub::isSecurityMonitoringCapability($flag) && ! $hub->hasSecurityMonitoringFunctionality()) {
             return false;
         }
 

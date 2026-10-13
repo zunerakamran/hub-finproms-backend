@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-10 (Hub code update history log on Central Hubs page)
+Last updated: 2026-10-13 (Security Monitoring module implemented)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -522,6 +522,25 @@ Notes:
 - Activity logs: `st.submit` / `st.change_status` / `st.comment`
 - Frontend: `/my-dashboard/support-tickets` (my / new / queue / detail)
 
+3.3f Security Monitoring (regular security monitoring & incident reports)
+- Power Admin enables **Security Monitoring** as a hub Functionalities flag
+  (`security_monitoring`) — a SEPARATE product module/feature, NOT one of the
+  6 Modules-page billable packaging modules (those stay unchanged). Available
+  on Shared, White-label, and Central Hub. Full spec: section 6F + NFR-SEC
+  (section 9.1).
+- Purpose: continuous security monitoring with a detailed in-app report so
+  capable users can see, for each event: **when** it happened, **what**
+  happened, severity, source (IP / user / route), and remediation status.
+- Distinct from:
+  - Activity logs (6A) — general audit of user/API actions
+  - Compliance audit trail (6C) — SMC/GC/WC workflow lifecycle
+  - Support Tickets (3.3e) — human-reported bugs / access issues
+  - GDPR breach ICO runbook (6E.3) — legal/ops notification process (may
+    reference Security Monitoring incidents for evidence)
+- Capabilities (`secmon_*`, blurred while Functionalities → Security Monitoring
+  is off) — see section 6F.
+- Frontend: `/my-dashboard/security-monitoring` (events feed + detail + report)
+
 3.3c Website Content Pre Approval supporting files
 - Change requests accept optional supporting files on submit (advisor/editor),
   approve / reject / approve-with-feedback / schedule (approver), and
@@ -1030,6 +1049,10 @@ Notes:
   - Support Tickets — `support_tickets` (default OFF). When on, Support Tickets
     capabilities (`st_*`) become available on the matrix (section 3.3e). Not a
     Modules-page product module.
+  - Security Monitoring — `security_monitoring` (default OFF). When on, Security
+    Monitoring capabilities (`secmon_*`) become available on the matrix
+    (sections 3.3f / 6F). Separate feature module for regular security
+    monitoring + incident reports; NOT a Modules-page billable packaging module.
 - Each content hub (each Shared + each White-label) has its own configuration.
 - Edited ONLY from Hub Functionalities / hub checklist screens on Central Hub
   — not from the Capabilities matrix (no duplication).
@@ -1171,6 +1194,14 @@ Notes:
     Import Users
   - View activity logs / report — who can open the audit trail and activity
     report for the hub — same roles
+  - Security Monitoring (blurred while Functionalities → Security Monitoring
+    is off — section 6F):
+    - `secmon_view_events` — view security event feed & event detail
+    - `secmon_view_report` — open aggregated security monitoring report
+    - `secmon_manage_incidents` — acknowledge / investigate / resolve / close
+      security incidents; add investigation notes
+    - `secmon_manage_alerts` — configure alert thresholds / notification
+      recipients (hub-admin style roles only by default)
   - Manage active sessions — see currently logged-in users and force-logout
     any user (ends all of their API sessions on this hub) — same roles
   - View hub users (`dashboard_view_hub_users`) — list all users on the current
@@ -1526,8 +1557,10 @@ Phase 5 — Cookies / marketing (only if product needs them)
   [ ] Marketing opt-in/out fields — only if FinProms adds marketing email
 
 Phase 6 — Breach & accountability (mostly ops; light product)
-  [x] No separate in-app breach incident log — use Support Tickets (and ops
-      process) instead of a duplicate ticket-style GDPR incident module
+  [ ] Security Monitoring module (section 6F / NFR-SEC) records security
+      events and incidents in-app for capable users (detect / evidence).
+      Personal-data breach *legal* tracking may still use Support Tickets or
+      an external ops tracker; do NOT duplicate a second GDPR-only ticket queue.
   [x] SAR/erasure owners = dashboard_manage_gdpr; DPAs/DPO remain legal/ops
   [ ] Formal processor DPAs (Stripe, email, host) — legal/commercial, not code
   [ ] DPO appointment decision — legal counsel
@@ -1536,12 +1569,14 @@ Phase 6 — Breach & accountability (mostly ops; light product)
 6E.3 Breach runbook (ops checklist — not a product feature)
 --------------------------------------------------------------------------------
 1. Detect & contain the incident (revoke access, rotate secrets, isolate).
+   Prefer Security Monitoring (6F) for detection evidence when enabled.
 2. Assess personal-data risk (what data, how many people, harm likelihood).
 3. If notification required, report to the ICO without undue delay and within
    72 hours of becoming aware: https://ico.org.uk/for-organisations/report-a-breach/
 4. If high risk to individuals, inform them without undue delay.
-5. Track the work in Support Tickets (or your ops tracker) — do not maintain a
-   second in-app “GDPR incident” queue.
+5. Record the technical security event/incident in Security Monitoring (6F)
+   when the functionality is on. Track legal/ops GDPR follow-up in Support
+   Tickets (or your ops tracker) — do not invent a second GDPR-only queue.
 6. Handle related SARs / erasure via GDPR / data requests.
 7. Review lessons learned; confirm processor DPAs remain current.
 
@@ -1553,6 +1588,150 @@ Phase 6 — Breach & accountability (mostly ops; light product)
 - Rewriting historical hub_backup SQL dumps per erasure request
 - Full RoPA UI inside the product (keep RoPA as an ops spreadsheet/doc)
 - AI / analytics processors not currently integrated
+
+
+--------------------------------------------------------------------------------
+6F. SECURITY MONITORING MODULE (REGULAR MONITORING + INCIDENT REPORTS)
+--------------------------------------------------------------------------------
+Status: IMPLEMENTED (backend + frontend) — see section 8 + NFR-SEC.
+Cross-refs: section 3.3f (overview), 5.1 (Functionality flag), 5.2 (capabilities),
+section 9.1 (NFR-SEC).
+
+Purpose
+- Provide **regular, detailed security monitoring** on each hub so capable
+  users can open a dedicated report and see security events / breaches such as:
+  “At 2026-10-13 14:22 UTC a security event was detected: repeated failed
+  logins from IP x.x.x.x against user Y — status Investigating.”
+- This is a **separate module/feature** from Activity logs, Compliance audit
+  trail, and Support Tickets. It answers security questions (threats,
+  anomalies, incidents), not general product usage or compliance workflow.
+
+Enablement
+- Hub Functionalities flag: `security_monitoring` (default OFF).
+- NOT a Modules-page billable packaging module (the 6 product modules stay
+  unchanged). Optional future catalogue pricing is out of scope unless
+  explicitly added later.
+- Available on Central Hub, Shared hubs, and White-label hubs (per-hub flag).
+- While off: `secmon_*` capabilities are blurred / unavailable; nav hidden;
+  APIs return 403 / feature-disabled.
+
+Who can see what (Capabilities — Hub operations group)
+- `secmon_view_events` — open Security Monitoring → Events feed + detail
+- `secmon_view_report` — open Security Monitoring → Report (aggregates)
+- `secmon_manage_incidents` — acknowledge / investigate / resolve / close;
+  add investigation notes; link related activity-log rows
+- `secmon_manage_alerts` — configure thresholds, channels, recipients
+- Defaults: ON for hub-admin style roles (power_admin when acting, 
+  finproms_admin, client_admin, manager); OFF for approver / advisor /
+  admin-staff / user until Power Admin enables them.
+- Power Admin toggles these per hub / role on the Capabilities matrix
+  (Central Hub). Only users with the relevant capability see the UI.
+
+What is monitored (detailed event catalogue)
+Each recorded item is a **security event**. Related events may be rolled into
+a **security incident** for investigation. Minimum event types:
+
+  A) Authentication & access
+     - Failed login (wrong password / OTP)
+     - Blocked login (suspended / discontinued / invite-only / unverified)
+     - Brute-force / repeated failures threshold crossed (same IP or user)
+     - Force-logout by admin; mass session revocation
+     - Password reset requested abnormally often
+     - Privilege / role change on a user (especially elevation)
+
+  B) Authorization & API abuse
+     - HTTP 401 / 403 spikes on protected routes
+     - Rate-limit trips (`auth`, `imports`, `wc-publish`, others)
+     - Access denied to Security Monitoring / GDPR / Capabilities / secrets
+
+  C) Data & secrets
+     - Attempts to read or mutate encrypted secrets (Stripe, hub DB, cPanel)
+       when rejected or suspicious
+     - Unusual export volume (GDPR export, hub backup download, advisor Excel)
+     - Upload of disallowed / suspicious file types (when mime allowlists exist)
+
+  D) Platform / dependency health (ops-facing, still shown in the module)
+     - Last successful dependency vulnerability scan result (composer audit /
+       npm audit / CI) — pass / fail / overdue
+     - Security hardening check reminders (e.g. SESSION_ENCRYPT, HTTPS,
+       TLS verify) when detectable from config
+     - Scheduler / monitoring heartbeat missed (optional)
+
+  E) Manual / declared incidents
+     - Capable user declares “Security incident” (title, description, severity)
+       when something was found outside automated detectors
+
+Event / incident record fields (report detail — REQUIRED)
+  - `id`, `hub_id` / hub slug
+  - `occurred_at` (precise timestamp, timezone displayed in UI)
+  - `detected_at` (when the system recorded it)
+  - `category` (auth | authorization | data | dependency | manual | other)
+  - `event_type` (machine key, e.g. `auth.failed_login_threshold`)
+  - `severity` (info | low | medium | high | critical)
+  - `title` (human short summary)
+  - `description` (what happened — detailed, plain language)
+  - `status` (open | acknowledged | investigating | resolved | closed |
+    false_positive)
+  - `actor` (user id/name/email/role when known; else “anonymous / unknown”)
+  - `source_ip`, `user_agent` (when available; redacted per GDPR retention)
+  - `route` / `action` / request id (when API-related)
+  - `related_refs` (activity_log ids, support_ticket id, user id, etc.)
+  - `investigation_notes[]` (author, timestamp, note) — manage_incidents only
+  - `resolved_at`, `resolved_by`, `resolution_summary`
+- Sensitive values (passwords, tokens, raw secrets, card data) are NEVER stored
+  in security event payloads — redact / truncate like activity_logs.
+
+Report UI (what capable users see)
+- Page: `/my-dashboard/security-monitoring`
+  - Tab **Events** — newest-first feed; filters: severity, category, status,
+    date range, user, IP, free-text search
+  - Tab **Incidents** — rolled-up investigations with linked events
+  - Tab **Report** — aggregates: counts by day / severity / category / status;
+    top source IPs; top targeted users; open critical/high count; last scan
+    status. Export CSV/JSON for capable roles (`secmon_view_report`)
+  - **Detail drawer/page** — full field set above so a reviewer can answer:
+    when did it happen, what happened, who/what was involved, current status
+- Nav label: “Security monitoring” under Hub operations; visible only when
+  `security_monitoring` is ON and the viewer has at least one `secmon_*` cap.
+- Empty / healthy state: show last check time and “No open high/critical
+  incidents” rather than a blank page.
+
+APIs (hub_can matching capability; also under /power-admin/* when acting)
+  - GET  /api/…/security-monitoring/events
+  - GET  /api/…/security-monitoring/events/{id}
+  - GET  /api/…/security-monitoring/incidents
+  - GET  /api/…/security-monitoring/incidents/{id}
+  - POST /api/…/security-monitoring/incidents          (manual declare)
+  - PATCH /api/…/security-monitoring/incidents/{id}    (status / notes)
+  - GET  /api/…/security-monitoring/report
+  - GET  /api/…/security-monitoring/alert-settings
+  - PUT  /api/…/security-monitoring/alert-settings
+- Activity logs for mutations: `secmon.incident_declare` /
+  `secmon.incident_update` / `secmon.alert_settings_update`
+
+Detection & cadence (regular monitoring)
+- Automated detectors write events as they happen (middleware / auth hooks /
+  rate-limiter listeners / artisan commands).
+- No daily scheduler for Security Monitoring — auth / rate-limit / force-logout
+  events are recorded continuously in real time.
+- Capable users run an on-demand check via POST …/security-monitoring/scan-now
+  (“Monitor now” in the UI) or optionally `php artisan security:monitor`.
+  That refreshes the dependency-scan summary on the Report tab.
+- Optional alerts (email / existing notification channel) when severity ≥ high
+  or when an incident is declared — gated by `secmon_manage_alerts`.
+
+Retention & GDPR
+- Security events support legitimate interests / security (see 6E).
+- Configurable retention in `config/gdpr.php` (or `config/security_monitoring.php`)
+  with prune job; anonymise actor PII on GDPR erasure while keeping event
+  rows needed for security accountability (same pattern as compliance trail).
+- Do not use this module as a substitute for ICO notification — see 6E.3.
+
+Out of scope for v1 of this module
+- Full SIEM / IDS / WAF product replacement
+- Network packet capture
+- Automatic exploit patching without human review
+- Customer-facing public status page
 
 
 --------------------------------------------------------------------------------
@@ -1580,6 +1759,9 @@ Phase 6 — Breach & accountability (mostly ops; light product)
 - UK GDPR tooling (section 6E): privacy notice separate from Terms; DSAR
   export; anonymising erasure that preserves FCA-style audit integrity;
   retention prune jobs. Build in the phased order in 6E.1.
+- Security Monitoring (section 6F / NFR-SEC): separate functionality module for
+  regular security event detection and capable-user reports — distinct from
+  activity logs and compliance audit trail.
 - Settings that vary (e.g. NEW-banner duration) come from the database.
 
 
@@ -1887,9 +2069,81 @@ UK GDPR / DATA PROTECTION (section 2.2d + 6E) — Phase 1 backend done
 [x] Phase 5: Editable Cookie Notice (dashboard_manage_cookies +
     hubs.cookie_notice + /my-dashboard/cookies + CookieBanner); no
     marketing/analytics cookies; preference centre deferred until needed
-[x] Phase 6: breach handling via Support Tickets / ops (no duplicate
-    gdpr_incidents module); formal DPAs/DPO remain
-    legal/ops outside code
+[x] Phase 6 (partial): SAR/erasure owners + ops DPAs/DPO outside code;
+    Security Monitoring module ships technical incident evidence (6F)
+[x] Security Monitoring module (section 6F): Functionalities flag
+    `security_monitoring`; `secmon_*` capabilities; events / incidents /
+    report APIs + `/my-dashboard/security-monitoring` UI; detectors
+    (failed/blocked login, force-logout, rate-limit, threshold escalation)
+    + on-demand “Monitor now” / scan-now (no daily schedule); GDPR scrub on erase
+[ ] NFR-SEC operational pipeline: Dependabot/Renovate + CI `composer audit`
+    / `npm audit` in GitHub Actions; documented patch SLA (scan status is
+    surfaced in Security Monitoring report via on-demand Monitor now)
+
+================================================================================
+9. NON-FUNCTIONAL REQUIREMENTS (NFRs)
+================================================================================
+This section collects NFRs separately from functional product specs.
+Update checkboxes in section 8 as each NFR is evidenced in code / ops.
+
+--------------------------------------------------------------------------------
+9.1 NFR-SEC — Regular security monitoring and updates accordingly
+--------------------------------------------------------------------------------
+Statement
+- The platform SHALL perform regular security monitoring and apply updates
+  accordingly. Capable users SHALL be able to view a detailed security
+  monitoring report showing when a security event/breach-related incident
+  occurred and what happened.
+
+Product fulfilment (in-app module)
+- Delivered by the **Security Monitoring** module (sections 3.3f and 6F):
+  event feed, incident lifecycle, and aggregate report for roles with
+  `secmon_*` capabilities when Functionalities → `security_monitoring` is ON.
+- Report detail MUST include at least: timestamp, severity, category,
+  human-readable description of what happened, actor/source where known,
+  and current status.
+
+Operational fulfilment (updates accordingly)
+- Dependencies (Composer + npm) SHALL be monitored for known vulnerabilities
+  on a regular cadence (CI audit and/or Dependabot/Renovate).
+- Critical/high findings SHALL be triaged and patched within an agreed SLA
+  (document in ops runbook; default target: critical within 7 days, high
+  within 14 days, unless risk-accepted in writing).
+- Last scan result / overdue status SHALL appear on the Security Monitoring
+  Report tab when the module is enabled.
+- Application security hardening already shipped (SECURITY HARDENING phases)
+  remains in force; this NFR adds continuous monitoring + update cadence,
+  not a replacement for hardening.
+
+Acceptance criteria (for “done”)
+  [x] `security_monitoring` flag + `secmon_*` matrix keys exist and gate UI/API
+  [x] Automated detectors record failed-auth / rate-limit / blocked-login
+      (minimum set) with occurred_at + description
+  [x] Capable user can open report and answer: when / what / status
+  [x] Incident acknowledge → investigate → resolve flow works
+  [x] On-demand `scan-now` / “Monitor now” (composer audit); no daily schedule
+  [x] Scan status visible in Security Monitoring report after Monitor now
+  [ ] CI Dependabot still optional
+  [x] GDPR anonymisation on erase for security_events / incident notes
+      (dedicated retention prune env keys optional later)
+
+Related but distinct
+- Activity logs (6A) — general audit; not security-incident focused
+- Compliance audit trail (6C) — FCA-style workflow; not threat monitoring
+- Support Tickets (3.3e) — human bug reports
+- GDPR ICO breach notification (6E.3) — legal duty; uses Security Monitoring
+  for evidence when enabled
+
+--------------------------------------------------------------------------------
+9.2 Other NFRs (placeholders — expand as product owners add them)
+--------------------------------------------------------------------------------
+- NFR-PERF — Concurrent performance / responsiveness under multi-user load
+  (phases already tracked under section 8 Concurrent performance [x]).
+- NFR-AVAIL — Backup & restore / deploy resilience (section 6B).
+- NFR-PRIV — UK GDPR / data protection (section 6E).
+- NFR-AUDIT — Activity logs + compliance audit trail (sections 6A / 6C).
+(Add new NFR-xxx subsections here when working on further non-functional
+ requirements; keep functional module detail in sections 3–6.)
 
 ================================================================================
 END OF REQUIREMENTS

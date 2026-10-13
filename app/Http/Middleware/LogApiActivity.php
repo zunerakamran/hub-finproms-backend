@@ -28,13 +28,18 @@ class LogApiActivity
         }
 
         try {
-            dispatch(function () use ($request, $status) {
-                try {
-                    app(ActivityLogService::class)->logApiRequest($request, $status);
-                } catch (\Throwable) {
-                    // Never break the main request because logging failed.
-                }
-            })->afterResponse();
+            // In tests, run inline — capturing Request in a queued closure serializes PDO.
+            if (app()->runningUnitTests()) {
+                $this->activityLogs->logApiRequest($request, $status);
+            } else {
+                dispatch(function () use ($request, $status) {
+                    try {
+                        app(ActivityLogService::class)->logApiRequest($request, $status);
+                    } catch (\Throwable) {
+                        // Never break the main request because logging failed.
+                    }
+                })->afterResponse();
+            }
         } catch (\Throwable) {
             // Queue/cache misconfig must not turn a successful API response into 500.
         }

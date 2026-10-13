@@ -142,60 +142,87 @@ return new class extends Migration
             return;
         }
 
-        $indexes = collect(DB::select('SHOW INDEX FROM firm_document_member_rights'));
-        $indexNames = $indexes->pluck('Key_name')->unique()->values()->all();
+        $indexNames = $this->indexNamesOn('firm_document_member_rights');
         $uniqueName = 'firm_document_member_rights_firm_id_user_id_unique';
 
-        $hasNonUniqueFirmIdLeadingIndex = $indexes->contains(
-            fn ($idx) => $idx->Column_name === 'firm_id'
-                && (int) $idx->Seq_in_index === 1
-                && $idx->Key_name !== $uniqueName
-        );
-        $hasUserIdLeadingIndex = $indexes->contains(
-            fn ($idx) => $idx->Column_name === 'user_id' && (int) $idx->Seq_in_index === 1
-        );
-
-        if (! $hasNonUniqueFirmIdLeadingIndex && ! in_array('firm_doc_member_rights_firm_id_idx', $indexNames, true)) {
-            Schema::table('firm_document_member_rights', function (Blueprint $table) {
-                $table->index('firm_id', 'firm_doc_member_rights_firm_id_idx');
-            });
+        if (! in_array('firm_doc_member_rights_firm_id_idx', $indexNames, true)) {
+            try {
+                Schema::table('firm_document_member_rights', function (Blueprint $table) {
+                    $table->index('firm_id', 'firm_doc_member_rights_firm_id_idx');
+                });
+            } catch (\Throwable) {
+                //
+            }
         }
 
-        if (! $hasUserIdLeadingIndex && ! in_array('firm_doc_member_rights_user_id_idx', $indexNames, true)) {
-            Schema::table('firm_document_member_rights', function (Blueprint $table) {
-                $table->index('user_id', 'firm_doc_member_rights_user_id_idx');
-            });
+        if (! in_array('firm_doc_member_rights_user_id_idx', $indexNames, true)) {
+            try {
+                Schema::table('firm_document_member_rights', function (Blueprint $table) {
+                    $table->index('user_id', 'firm_doc_member_rights_user_id_idx');
+                });
+            } catch (\Throwable) {
+                //
+            }
         }
 
-        $indexNames = collect(DB::select('SHOW INDEX FROM firm_document_member_rights'))
-            ->pluck('Key_name')
-            ->unique()
-            ->values()
-            ->all();
+        $indexNames = $this->indexNamesOn('firm_document_member_rights');
 
         if (in_array($uniqueName, $indexNames, true)) {
-            Schema::table('firm_document_member_rights', function (Blueprint $table) use ($uniqueName) {
-                $table->dropUnique($uniqueName);
-            });
+            try {
+                Schema::table('firm_document_member_rights', function (Blueprint $table) use ($uniqueName) {
+                    $table->dropUnique($uniqueName);
+                });
+            } catch (\Throwable) {
+                //
+            }
         }
 
-        $indexNames = collect(DB::select('SHOW INDEX FROM firm_document_member_rights'))
-            ->pluck('Key_name')
-            ->unique()
-            ->values()
-            ->all();
+        $indexNames = $this->indexNamesOn('firm_document_member_rights');
 
         if (! in_array('firm_doc_member_rights_doc_user_idx', $indexNames, true)
             && Schema::hasColumn('firm_document_member_rights', 'firm_document_id')) {
-            Schema::table('firm_document_member_rights', function (Blueprint $table) {
-                $table->index(['firm_document_id', 'user_id'], 'firm_doc_member_rights_doc_user_idx');
-            });
+            try {
+                Schema::table('firm_document_member_rights', function (Blueprint $table) {
+                    $table->index(['firm_document_id', 'user_id'], 'firm_doc_member_rights_doc_user_idx');
+                });
+            } catch (\Throwable) {
+                //
+            }
         }
 
         if (! in_array('firm_doc_member_rights_firm_user_idx', $indexNames, true)) {
-            Schema::table('firm_document_member_rights', function (Blueprint $table) {
-                $table->index(['firm_id', 'user_id'], 'firm_doc_member_rights_firm_user_idx');
-            });
+            try {
+                Schema::table('firm_document_member_rights', function (Blueprint $table) {
+                    $table->index(['firm_id', 'user_id'], 'firm_doc_member_rights_firm_user_idx');
+                });
+            } catch (\Throwable) {
+                //
+            }
+        }
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function indexNamesOn(string $table): array
+    {
+        try {
+            if (Schema::getConnection()->getDriverName() === 'mysql') {
+                return collect(DB::select('SHOW INDEX FROM '.$table))
+                    ->pluck('Key_name')
+                    ->unique()
+                    ->values()
+                    ->all();
+            }
+
+            return collect(Schema::getIndexes($table))
+                ->pluck('name')
+                ->filter()
+                ->unique()
+                ->values()
+                ->all();
+        } catch (\Throwable) {
+            return [];
         }
     }
 
@@ -227,10 +254,7 @@ return new class extends Migration
                 ]);
             }
 
-            $indexNames = collect(DB::select('SHOW INDEX FROM firm_document_member_rights'))
-                ->pluck('Key_name')
-                ->unique()
-                ->all();
+            $indexNames = $this->indexNamesOn('firm_document_member_rights');
 
             Schema::table('firm_document_member_rights', function (Blueprint $table) use ($indexNames) {
                 if (in_array('firm_doc_member_rights_doc_user_idx', $indexNames, true)) {

@@ -38,5 +38,26 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        $exceptions->reportable(function (\Illuminate\Http\Exceptions\ThrottleRequestsException $e): void {
+            try {
+                $request = request();
+                $limiter = 'unknown';
+                if ($request && str_contains((string) $request->path(), 'auth')) {
+                    $limiter = 'auth';
+                } elseif ($request && str_contains((string) $request->path(), 'import')) {
+                    $limiter = 'imports';
+                } elseif ($request && str_contains((string) $request->path(), 'website-compliance')) {
+                    $limiter = 'wc-publish';
+                }
+
+                app(\App\Services\SecurityMonitoringService::class)
+                    ->recordRateLimitHit(
+                        app(\App\Services\HubService::class)->current(),
+                        $limiter,
+                        $request
+                    );
+            } catch (\Throwable) {
+                // Never break rate-limit responses for monitoring.
+            }
+        });
     })->create();

@@ -15,6 +15,7 @@ class ActiveSessionService
         private readonly ActingHubService $actingHubs,
         private readonly WhiteLabelDatabaseService $remoteDb,
         private readonly ActivityLogService $activityLogs,
+        private readonly SecurityMonitoringService $securityMonitoring,
     ) {}
 
     /**
@@ -235,6 +236,15 @@ class ActiveSessionService
                     'hub_id' => $hub->id,
                     'hub_slug' => $hub->slug,
                 ],
+            ]);
+        } catch (\Throwable) {
+            //
+        }
+
+        try {
+            $this->securityMonitoring->recordForceLogout($hub, $actor, $user, [
+                'tokens_revoked' => $tokensRevoked,
+                'sessions_revoked' => $sessionsRevoked,
             ]);
         } catch (\Throwable) {
             //

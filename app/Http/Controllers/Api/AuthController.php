@@ -11,6 +11,7 @@ use App\Services\FunctionalMailService;
 use App\Services\HubService;
 use App\Services\LoginOtpService;
 use App\Services\PowerAdminCapabilitiesService;
+use App\Services\SecurityMonitoringService;
 use App\Services\WelcomeMailService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -30,6 +31,7 @@ class AuthController extends Controller
         private readonly HubService $hubs,
         private readonly PowerAdminCapabilitiesService $powerCapabilities,
         private readonly ActivityLogService $activityLogs,
+        private readonly SecurityMonitoringService $securityMonitoring,
         private readonly WelcomeMailService $welcomeMail,
         private readonly AdminNewUserRegistrationMailService $adminNewUserMail,
         private readonly FunctionalMailService $functionalMail,
@@ -221,6 +223,12 @@ class AuthController extends Controller
                 // Never block login on audit logging.
             }
 
+            try {
+                $this->securityMonitoring->recordFailedLogin($this->hubs->current(), $credentials['email'], $request);
+            } catch (\Throwable) {
+                //
+            }
+
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials are incorrect.'],
             ]);
@@ -236,6 +244,12 @@ class AuthController extends Controller
                     'status_code' => 403,
                     'properties' => ['reason' => 'suspended'],
                 ]);
+            } catch (\Throwable) {
+                //
+            }
+
+            try {
+                $this->securityMonitoring->recordBlockedLogin($this->hubs->current(), $user, 'suspended', $request);
             } catch (\Throwable) {
                 //
             }
@@ -259,6 +273,12 @@ class AuthController extends Controller
                 //
             }
 
+            try {
+                $this->securityMonitoring->recordBlockedLogin($this->hubs->current(), $user, 'discontinued', $request);
+            } catch (\Throwable) {
+                //
+            }
+
             return response()->json([
                 'message' => 'This advisor account has been discontinued. Contact your hub administrator.',
             ], 403);
@@ -274,6 +294,12 @@ class AuthController extends Controller
                     'status_code' => 403,
                     'properties' => ['reason' => 'email_unverified'],
                 ]);
+            } catch (\Throwable) {
+                //
+            }
+
+            try {
+                $this->securityMonitoring->recordBlockedLogin($this->hubs->current(), $user, 'email_unverified', $request);
             } catch (\Throwable) {
                 //
             }
@@ -295,6 +321,12 @@ class AuthController extends Controller
                     'status_code' => 403,
                     'properties' => ['reason' => 'invite_only'],
                 ]);
+            } catch (\Throwable) {
+                //
+            }
+
+            try {
+                $this->securityMonitoring->recordBlockedLogin($this->hubs->current(), $user, 'invite_only', $request);
             } catch (\Throwable) {
                 //
             }
