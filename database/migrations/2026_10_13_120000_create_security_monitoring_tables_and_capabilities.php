@@ -14,8 +14,10 @@ return new class extends Migration
             Schema::create('security_events', function (Blueprint $table) {
                 $table->id();
                 $table->foreignId('hub_id')->nullable()->constrained('hubs')->nullOnDelete();
-                $table->timestamp('occurred_at');
-                $table->timestamp('detected_at');
+                // dateTime (not timestamp): MySQL rejects NOT NULL timestamp without default
+                // under strict sql_mode (error 1067 Invalid default value).
+                $table->dateTime('occurred_at');
+                $table->dateTime('detected_at');
                 $table->string('category', 40);
                 $table->string('event_type', 120);
                 $table->string('severity', 20)->default('info');
@@ -57,7 +59,7 @@ return new class extends Migration
                 $table->unsignedBigInteger('resolved_by_user_id')->nullable();
                 $table->string('resolved_by_name')->nullable();
                 $table->text('resolution_summary')->nullable();
-                $table->timestamp('resolved_at')->nullable();
+                $table->dateTime('resolved_at')->nullable();
                 $table->timestamps();
 
                 $table->index(['status', 'severity', 'created_at'], 'secmon_inc_status_sev_created_idx');
@@ -86,7 +88,7 @@ return new class extends Migration
                 $table->json('alert_emails')->nullable();
                 $table->unsignedSmallInteger('failed_login_threshold')->default(5);
                 $table->unsignedSmallInteger('failed_login_window_minutes')->default(15);
-                $table->timestamp('last_dependency_scan_at')->nullable();
+                $table->dateTime('last_dependency_scan_at')->nullable();
                 $table->string('last_dependency_scan_status', 40)->nullable();
                 $table->text('last_dependency_scan_summary')->nullable();
                 $table->timestamps();
