@@ -38,6 +38,15 @@ return [
             'report' => false,
         ],
 
+        // Generic Compliance encrypted uploads (APP_KEY ciphertext). Not web-accessible.
+        // Prefer this over "local"/private — cPanel often cannot read storage/app/private.
+        'gc_encrypted' => [
+            'driver' => 'local',
+            'root' => storage_path('app/gc-encrypted'),
+            'throw' => true,
+            'report' => false,
+        ],
+
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),

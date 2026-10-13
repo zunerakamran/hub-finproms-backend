@@ -186,6 +186,7 @@ class GeneralComplianceEncryptionTest extends TestCase
 
     public function test_gc_attachment_files_are_encrypted_on_private_disk(): void
     {
+        Storage::fake('gc_encrypted');
         Storage::fake('local');
         Storage::fake('public');
 
@@ -222,7 +223,7 @@ class GeneralComplianceEncryptionTest extends TestCase
         $this->assertTrue(str_starts_with((string) $attachment->file_path, GeneralComplianceEncryptedFiles::DIR.'/'));
         $this->assertNull($attachment->file_url);
 
-        $onDisk = Storage::disk('local')->get($attachment->file_path);
+        $onDisk = Storage::disk('gc_encrypted')->get($attachment->file_path);
         $this->assertTrue(str_starts_with($onDisk, GeneralComplianceEncryptedFiles::MAGIC));
         $this->assertStringNotContainsString('PLAINTEXT-GC-SECRET-BYTES', $onDisk);
 
@@ -239,7 +240,7 @@ class GeneralComplianceEncryptionTest extends TestCase
 
     public function test_gc_attachment_download_returns_401_when_unauthenticated(): void
     {
-        Storage::fake('local');
+        Storage::fake('gc_encrypted');
 
         $hub = $this->createHub();
         $caps = is_array($hub->role_capabilities) ? $hub->role_capabilities : [];
@@ -277,7 +278,7 @@ class GeneralComplianceEncryptionTest extends TestCase
 
     public function test_gc_attachment_download_decrypts_for_owner(): void
     {
-        Storage::fake('local');
+        Storage::fake('gc_encrypted');
 
         $hub = $this->createHub();
         $caps = is_array($hub->role_capabilities) ? $hub->role_capabilities : [];
@@ -318,7 +319,7 @@ class GeneralComplianceEncryptionTest extends TestCase
 
     public function test_gc_attachment_download_forbidden_for_other_user(): void
     {
-        Storage::fake('local');
+        Storage::fake('gc_encrypted');
 
         $hub = $this->createHub();
         $caps = is_array($hub->role_capabilities) ? $hub->role_capabilities : [];

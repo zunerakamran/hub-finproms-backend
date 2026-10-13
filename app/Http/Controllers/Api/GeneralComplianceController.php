@@ -209,14 +209,25 @@ class GeneralComplianceController extends Controller
 
             $path = (string) ($attachment->file_path ?? '');
             if ($path === '') {
-                return $this->downloadError($request, 'Attachment file is missing.', 404);
+                return $this->downloadError($request, 'Attachment #'.$attachment->id.' has an empty file_path in the database.', 404);
             }
 
             $attrs = $attachment->getAttributes();
             $encrypted = (! empty($attrs['is_encrypted']))
                 || $attachment->isStoredEncrypted();
 
-            $bytes = GeneralComplianceEncryptedFiles::readPlaintext($path, $encrypted);
+            try {
+                $bytes = GeneralComplianceEncryptedFiles::readPlaintext($path, $encrypted);
+            } catch (Throwable $e) {
+                try {
+                    report($e);
+                } catch (Throwable) {
+                }
+
+                // 404 with a concrete reason (not a blank framework page).
+                return $this->downloadError($request, $e->getMessage(), 404);
+            }
+
             $filename = $this->safeDownloadFilename(
                 (string) ($attachment->original_name ?: ('gc-file-'.$attachment->id))
             );

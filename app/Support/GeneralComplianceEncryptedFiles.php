@@ -13,18 +13,21 @@ use Throwable;
 /**
  * Encrypt Generic Compliance attachment / supporting-file bytes at rest (APP_KEY).
  *
- * New uploads go to the private "local" disk with a GCENC1 payload.
- * Legacy public-disk plaintext files remain readable until backfill.
+ * Uses the gc_encrypted disk (storage/app/gc-encrypted) — not Laravel 11's
+ * storage/app/private "local" disk, which is often missing on cPanel.
  */
 class GeneralComplianceEncryptedFiles
 {
     public const MAGIC = 'GCENC1:';
 
-    public const DISK_ENCRYPTED = 'local';
+    public const DISK_ENCRYPTED = 'gc_encrypted';
 
-    public const DISK_LEGACY = 'public';
+    public const DISK_PRIVATE_LEGACY = 'local';
 
-    public const DIR = 'general-compliance/enc';
+    public const DISK_PUBLIC = 'public';
+
+    /** Relative path prefix on gc_encrypted disk. */
+    public const DIR = 'enc';
 
     /**
      * @return array{file_path: string, file_url: null, size_bytes: int, is_encrypted: bool}
@@ -43,14 +46,16 @@ class GeneralComplianceEncryptedFiles
         }
 
         $disk = Storage::disk(self::DISK_ENCRYPTED);
-        if (! $disk->exists(self::DIR)) {
-            $disk->makeDirectory(self::DIR);
-        }
+        $disk->makeDirectory(self::DIR);
 
         $path = self::DIR.'/'.Str::uuid()->toString().'.enc';
         $payload = self::MAGIC.Crypt::encryptString($plain);
-        if (! $disk->put($path, $payload)) {
-            throw new RuntimeException('Unable to write encrypted Generic Compliance file to private storage.');
+        $disk->put($path, $payload);
+
+        if (! $disk->exists($path)) {
+            throw new RuntimeException(
+                'Unable to write encrypted Generic Compliance file to gc_encrypted disk.'
+            );
         }
 
         return [
@@ -62,29 +67,79 @@ class GeneralComplianceEncryptedFiles
     }
 
     /**
-     * Read plaintext bytes for download (decrypts when marked encrypted / magic present).
+     * Read plaintext bytes (decrypts GCENC1 / Laravel ciphertext when present).
      */
-    public static function readPlaintext(string $path, bool $isEncrypted): string
+    public static function readPlaintext(string $path, bool $isEncrypted = false): string
     {
-        $disk = $isEncrypted || str_starts_with($path, self::DIR.'/')
-            ? self::DISK_ENCRYPTED
-            : self::DISK_LEGACY;
-
-        if (! Storage::disk($disk)->exists($path)) {
-            // Legacy rows may still point at public after a partial migrate.
-            if ($disk === self::DISK_ENCRYPTED && Storage::disk(self::DISK_LEGACY)->exists($path)) {
-                $disk = self::DISK_LEGACY;
-            } else {
-                throw new RuntimeException('Generic Compliance file is missing from storage.');
-            }
+        $path = ltrim(str_replace('\\', '/', $path), '/');
+        if ($path === '') {
+            throw new RuntimeException('Generic Compliance file path is empty.');
         }
 
-        $raw = Storage::disk($disk)->get($path);
-        if (! is_string($raw) || $raw === '') {
-            throw new RuntimeException('Generic Compliance file is empty or unreadable.');
+        $raw = self::readRawBytes($path);
+        if ($raw === null) {
+            throw new RuntimeException(
+                'Generic Compliance file is missing from storage (path: '.$path.'). '
+                .'Re-upload the file after deploying the latest API, or run: php artisan security:encrypt-general-compliance'
+            );
+        }
+
+        if ($raw === '') {
+            throw new RuntimeException('Generic Compliance file is empty.');
         }
 
         return self::decryptPayload($raw);
+    }
+
+    private static function readRawBytes(string $path): ?string
+    {
+        $pathTries = array_values(array_unique(array_filter([
+            $path,
+            self::DIR.'/'.basename($path),
+            'general-compliance/'.$path,
+            'general-compliance/enc/'.basename($path),
+            str_starts_with($path, 'general-compliance/') ? $path : null,
+        ])));
+
+        // Flysystem disks first (works with Storage::fake in tests + real disks).
+        foreach ([self::DISK_ENCRYPTED, self::DISK_PRIVATE_LEGACY, self::DISK_PUBLIC] as $diskName) {
+            try {
+                $disk = Storage::disk($diskName);
+            } catch (Throwable) {
+                continue;
+            }
+            foreach ($pathTries as $try) {
+                try {
+                    if ($disk->exists($try)) {
+                        $contents = $disk->get($try);
+                        if (is_string($contents)) {
+                            return $contents;
+                        }
+                    }
+                } catch (Throwable) {
+                    continue;
+                }
+            }
+        }
+
+        // Absolute paths for shared-host quirks / early private-disk uploads.
+        $absoluteTries = [];
+        foreach ($pathTries as $try) {
+            $absoluteTries[] = storage_path('app/gc-encrypted/'.$try);
+            $absoluteTries[] = storage_path('app/private/'.$try);
+            $absoluteTries[] = storage_path('app/public/'.$try);
+            $absoluteTries[] = storage_path('app/'.$try);
+        }
+
+        foreach (array_unique($absoluteTries) as $absolute) {
+            if (is_file($absolute) && is_readable($absolute)) {
+                $contents = file_get_contents($absolute);
+
+                return $contents === false ? null : $contents;
+            }
+        }
+
+        return null;
     }
 
     public static function decryptPayload(string $raw): string
@@ -101,12 +156,11 @@ class GeneralComplianceEncryptedFiles
             }
         }
 
-        // Legacy Laravel ciphertext without magic (if any) or plaintext.
         if (SafeEncrypted::looksLikeLaravelCiphertext($raw)) {
             try {
                 return Crypt::decryptString($raw);
             } catch (Throwable) {
-                // Fall through — treat as plaintext if decrypt fails oddly.
+                // Fall through — treat as plaintext.
             }
         }
 
@@ -123,9 +177,7 @@ class GeneralComplianceEncryptedFiles
     }
 
     /**
-     * Move a legacy public plaintext file onto the encrypted private disk.
-     *
-     * @return array{file_path: string, file_url: null, is_encrypted: bool}|null  null if already encrypted / missing
+     * @return array{file_path: string, file_url: null, is_encrypted: bool}|null
      */
     public static function encryptExistingPublicFile(string $path): ?array
     {
@@ -133,46 +185,40 @@ class GeneralComplianceEncryptedFiles
             return null;
         }
 
-        if (str_starts_with($path, self::DIR.'/')) {
-            if (Storage::disk(self::DISK_ENCRYPTED)->exists($path)) {
-                $raw = (string) Storage::disk(self::DISK_ENCRYPTED)->get($path);
-                if (self::looksEncryptedOnDisk($raw)) {
-                    return null; // already done
-                }
-            }
-        }
-
-        $sourceDisk = Storage::disk(self::DISK_LEGACY)->exists($path)
-            ? self::DISK_LEGACY
-            : (Storage::disk(self::DISK_ENCRYPTED)->exists($path) ? self::DISK_ENCRYPTED : null);
-
-        if ($sourceDisk === null) {
+        $path = ltrim(str_replace('\\', '/', $path), '/');
+        $raw = self::readRawBytes($path);
+        if ($raw === null) {
             return null;
         }
 
-        $raw = (string) Storage::disk($sourceDisk)->get($path);
-        if (self::looksEncryptedOnDisk($raw)) {
-            // Already ciphertext but maybe wrong disk/path bookkeeping.
-            if ($sourceDisk === self::DISK_ENCRYPTED && str_starts_with($path, self::DIR.'/')) {
-                return null;
+        if (self::looksEncryptedOnDisk($raw) && str_starts_with($path, self::DIR.'/')) {
+            try {
+                if (Storage::disk(self::DISK_ENCRYPTED)->exists($path)) {
+                    return null;
+                }
+            } catch (Throwable) {
+                // continue re-encrypt into new disk
             }
-            $plain = self::decryptPayload($raw);
-        } else {
-            $plain = $raw;
         }
+
+        $plain = self::looksEncryptedOnDisk($raw) ? self::decryptPayload($raw) : $raw;
 
         if (! filled(config('app.key'))) {
             throw new RuntimeException('No application encryption key has been specified. Set APP_KEY in .env.');
         }
 
+        $disk = Storage::disk(self::DISK_ENCRYPTED);
+        $disk->makeDirectory(self::DIR);
         $newPath = self::DIR.'/'.Str::uuid()->toString().'.enc';
         $payload = self::MAGIC.Crypt::encryptString($plain);
-        Storage::disk(self::DISK_ENCRYPTED)->put($newPath, $payload);
+        $disk->put($newPath, $payload);
 
-        if ($sourceDisk === self::DISK_LEGACY && $path !== $newPath) {
-            Storage::disk(self::DISK_LEGACY)->delete($path);
-        } elseif ($sourceDisk === self::DISK_ENCRYPTED && $path !== $newPath) {
-            Storage::disk(self::DISK_ENCRYPTED)->delete($path);
+        try {
+            if (Storage::disk(self::DISK_PUBLIC)->exists($path)) {
+                Storage::disk(self::DISK_PUBLIC)->delete($path);
+            }
+        } catch (Throwable) {
+            // ignore
         }
 
         return [

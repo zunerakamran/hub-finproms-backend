@@ -57,7 +57,8 @@ class GeneralComplianceRequestAttachment extends Model
 
         $path = (string) ($this->file_path ?? '');
 
-        return str_starts_with($path, GeneralComplianceEncryptedFiles::DIR.'/');
+        return str_starts_with($path, GeneralComplianceEncryptedFiles::DIR.'/')
+            || str_starts_with($path, 'general-compliance/enc/');
     }
 
     /**
