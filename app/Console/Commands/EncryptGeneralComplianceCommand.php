@@ -3,24 +3,23 @@
 namespace App\Console\Commands;
 
 use App\Casts\SafeEncrypted;
-use App\Models\GeneralComplianceRequestAttachment;
 use App\Models\GeneralComplianceRequestVersion;
-use App\Support\GeneralComplianceEncryptedFiles;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
 /**
- * One-time / idempotent encryption of Generic Compliance sensitive data:
- * - Version text: description, feedback, future_feedback
- * - Attachment / supporting-file bytes on disk
+ * Encrypt Generic Compliance sensitive text fields at rest (description / feedback).
+ *
+ * File-byte encryption was reverted — it broke downloads on shared hosting.
+ * Attachment files remain on the public disk as before.
  */
 class EncryptGeneralComplianceCommand extends Command
 {
     protected $signature = 'security:encrypt-general-compliance {--dry-run : Report only, do not write}';
 
-    protected $description = 'Encrypt Generic Compliance text fields and attachment files at rest (APP_KEY)';
+    protected $description = 'Encrypt Generic Compliance description/feedback text at rest (APP_KEY)';
 
     /** @var list<string> */
     private const TEXT_COLUMNS = ['description', 'feedback', 'future_feedback'];
@@ -28,12 +27,12 @@ class EncryptGeneralComplianceCommand extends Command
     public function handle(): int
     {
         $dry = (bool) $this->option('dry-run');
-        $textUpdated = $this->encryptTextFields($dry);
-        $filesUpdated = $this->encryptFiles($dry);
+        $updated = $this->encryptTextFields($dry);
 
         $this->info($dry
-            ? "Dry-run complete. Would update {$textUpdated} version row(s) and {$filesUpdated} file(s)."
-            : "Done. Updated {$textUpdated} version row(s) and {$filesUpdated} file(s).");
+            ? "Dry-run complete. Would update {$updated} version row(s)."
+            : "Done. Updated {$updated} version row(s).");
+        $this->comment('Note: GC attachment files are NOT encrypted (public-disk storage restored).');
 
         return self::SUCCESS;
     }
@@ -70,67 +69,6 @@ class EncryptGeneralComplianceCommand extends Command
             if (! $dry) {
                 DB::connection($connection)->table($table)->where('id', $row->id)->update($patch);
             }
-            $updated++;
-        }
-
-        return $updated;
-    }
-
-    private function encryptFiles(bool $dry): int
-    {
-        $updated = 0;
-        $model = new GeneralComplianceRequestAttachment;
-        $connection = $model->getConnectionName() ?: config('database.default');
-        $table = $model->getTable();
-
-        $rows = DB::connection($connection)
-            ->table($table)
-            ->orderBy('id')
-            ->get(['id', 'file_path', 'file_url', 'is_encrypted']);
-
-        foreach ($rows as $row) {
-            if ((bool) ($row->is_encrypted ?? false)) {
-                continue;
-            }
-            $path = (string) ($row->file_path ?? '');
-            if ($path === '') {
-                continue;
-            }
-
-            $this->info("GC attachment #{$row->id}: encrypting file {$path}"
-                .($dry ? ' (dry-run)' : ''));
-
-            if ($dry) {
-                $updated++;
-                continue;
-            }
-
-            try {
-                $result = GeneralComplianceEncryptedFiles::encryptExistingPublicFile($path);
-            } catch (Throwable $e) {
-                $this->error("GC attachment #{$row->id}: ".$e->getMessage());
-                continue;
-            }
-
-            if ($result === null) {
-                // Missing on disk, remote URL, or already encrypted under enc/ path.
-                if (str_starts_with($path, GeneralComplianceEncryptedFiles::DIR.'/')) {
-                    DB::connection($connection)->table($table)->where('id', $row->id)->update([
-                        'is_encrypted' => true,
-                        'file_url' => null,
-                    ]);
-                    $updated++;
-                } else {
-                    $this->warn("GC attachment #{$row->id}: skipped (missing or external URL)");
-                }
-                continue;
-            }
-
-            DB::connection($connection)->table($table)->where('id', $row->id)->update([
-                'file_path' => $result['file_path'],
-                'file_url' => $result['file_url'],
-                'is_encrypted' => true,
-            ]);
             $updated++;
         }
 

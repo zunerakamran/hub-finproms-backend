@@ -4,7 +4,6 @@ namespace App\Models;
 
 use App\Models\WebsiteCompliance\UsesWcDatabaseContext;
 use App\Support\ComplianceSupportingFiles;
-use App\Support\GeneralComplianceEncryptedFiles;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Storage;
@@ -49,6 +48,10 @@ class GeneralComplianceRequestAttachment extends Model
         return $this->belongsTo(GeneralComplianceRequestVersion::class, 'version_id');
     }
 
+    /**
+     * True only for rows uploaded during the short-lived encrypted-file experiment.
+     * New uploads are public-disk plaintext again (is_encrypted=false).
+     */
     public function isStoredEncrypted(): bool
     {
         if ($this->is_encrypted) {
@@ -57,22 +60,14 @@ class GeneralComplianceRequestAttachment extends Model
 
         $path = (string) ($this->file_path ?? '');
 
-        return str_starts_with($path, GeneralComplianceEncryptedFiles::DIR.'/')
+        return str_starts_with($path, 'enc/')
             || str_starts_with($path, 'general-compliance/enc/');
     }
 
-    /**
-     * Authenticated download path for encrypted (and preferred for all) GC files.
-     *
-     * Returns a same-origin relative /api/... path so the SPA can fetch with
-     * credentials (cookie session). Absolute APP_URL links break when opened in
-     * a bare tab without auth and caused 500s on null user.
-     * Legacy public URLs remain as a fallback until backfill.
-     */
     public function resolvedFileUrl(): ?string
     {
-        if ($this->id && ($this->isStoredEncrypted() || ! filled($this->file_url))) {
-            // Short path preferred on LiteSpeed / shared hosts (see downloadAttachment).
+        // Legacy encrypted rows: authenticated download endpoint.
+        if ($this->id && $this->isStoredEncrypted()) {
             return '/api/gc/file/'.$this->id;
         }
 
@@ -100,24 +95,21 @@ class GeneralComplianceRequestAttachment extends Model
     {
         $source = $this->source;
         $kind = $this->kind ?: self::KIND_ATTACHMENT;
-        $encrypted = $this->isStoredEncrypted();
 
         return [
             'id' => $this->id,
             'version_id' => $this->version_id,
             'kind' => $kind,
             'original_name' => $this->original_name,
-            // Do not expose private storage paths for encrypted files.
-            'file_path' => $encrypted ? null : $this->file_path,
+            'file_path' => $this->file_path,
             'file_url' => $this->resolvedFileUrl(),
-            'is_encrypted' => $encrypted,
+            'is_encrypted' => $this->isStoredEncrypted(),
             'mime_type' => $this->mime_type,
             'size_bytes' => $this->size_bytes,
             'sort_order' => $this->sort_order,
             'uploaded_by_user_id' => $this->uploaded_by_user_id ? (int) $this->uploaded_by_user_id : null,
             'uploaded_by_name' => $this->uploaded_by_name,
             'source' => $source,
-            // Role label applies to supporting files in version history.
             'uploaded_by_role' => $kind === self::KIND_SUPPORTING_FILE
                 ? ComplianceSupportingFiles::roleForSource($source)
                 : null,

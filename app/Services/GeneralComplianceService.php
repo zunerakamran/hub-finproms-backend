@@ -11,11 +11,11 @@ use App\Models\GeneralComplianceRequestVersion;
 use App\Models\Hub;
 use App\Models\User;
 use App\Support\ComplianceSupportingFiles;
-use App\Support\GeneralComplianceEncryptedFiles;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
 class GeneralComplianceService
@@ -1287,16 +1287,18 @@ class GeneralComplianceService
         $attribution = ComplianceSupportingFiles::attributionPayload($uploader, $source);
 
         foreach (array_values($files) as $index => $file) {
-            $stored = GeneralComplianceEncryptedFiles::storeUpload($file);
+            // Public disk + public URL (pre-encryption behaviour). File-byte encryption
+            // was reverted — it broke downloads on cPanel/LiteSpeed shared hosting.
+            $path = $file->store('general-compliance', 'public');
             GeneralComplianceRequestAttachment::query()->create([
                 'version_id' => $version->id,
                 'kind' => $kind,
                 'original_name' => $file->getClientOriginalName(),
-                'file_path' => $stored['file_path'],
-                'file_url' => $stored['file_url'],
+                'file_path' => $path,
+                'file_url' => Storage::disk('public')->url($path),
                 'mime_type' => $file->getClientMimeType() ?: $file->getMimeType(),
-                'size_bytes' => $stored['size_bytes'],
-                'is_encrypted' => $stored['is_encrypted'],
+                'size_bytes' => (int) $file->getSize(),
+                'is_encrypted' => false,
                 'sort_order' => $baseOrder + $index,
                 'uploaded_by_user_id' => $attribution['uploaded_by_user_id'],
                 'uploaded_by_name' => $attribution['uploaded_by_name'],

@@ -494,18 +494,16 @@ Notes:
 - Activity logs use `gc.*` actions.
 - Same **compliance audit trail** as SMC (`module=gc`) on every lifecycle event;
   reports and request detail include full history with actor name/email/role.
-- **Encryption at rest (NFR-GC-ENC) — primary: files:** attachments and
-  supporting files are stored encrypted on the private disk (`local`, under
-  `general-compliance/enc/`) with `APP_KEY`. They are NOT on the public disk /
-  public URL. Download only via authenticated
-  `GET /api/general-compliance/attachments/{id}/download` (same authz as
-  viewing the request). API `file_url` points at that endpoint;
-  `is_encrypted=true`; storage path is hidden from JSON.
-- **Also encrypted:** version text — `description`, `feedback`,
-  `future_feedback` via `SafeEncrypted`. List search (`q`) matches name /
-  content type / reviewer only. Audit metadata stores feedback presence flags
-  only (never plaintext). Backfill text + files:
+- **Encryption at rest (NFR-GC-ENC):** version text — `description`,
+  `feedback`, `future_feedback` — via `SafeEncrypted` (APP_KEY). List search
+  (`q`) matches name / content type / reviewer only. Audit metadata stores
+  feedback presence flags only. Backfill:
   `php artisan security:encrypt-general-compliance [--dry-run]`.
+- **Attachment files:** remain on the **public** disk with public `file_url`
+  (original working behaviour). File-byte encryption was attempted then
+  **reverted** — it broke downloads on cPanel/LiteSpeed shared hosting.
+  Authenticated `/api/gc/file/{id}` remains only as a fallback for any rows
+  left from that experiment (`is_encrypted=true`).
 
 3.3e Support Tickets (error / bug reporting)
 - Power Admin enables **Support Tickets** as a hub Functionalities flag
@@ -2052,18 +2050,15 @@ SECURITY HARDENING (phase 1 — 2026-10-04)
 --------------------------------------------------------------------------------
 NFR-GC-ENC — Generic Compliance data encryption at rest (2026-10-13)
 --------------------------------------------------------------------------------
-[x] Encrypt GC attachment + supporting-file bytes on private disk (APP_KEY;
-    GCENC1 payload); leave public disk; authenticated download endpoint
-[x] Attachment API returns download URL + is_encrypted; hides private path
 [x] Encrypt GC version `description`, `feedback`, `future_feedback` via
     SafeEncrypted (APP_KEY); legacy plaintext still readable until backfill
 [x] Do not persist feedback plaintext in compliance_audit_events metadata
     (flags only: has_feedback / has_future_feedback)
 [x] List search `q` uses name / content_type / reviewed_by (not encrypted body)
-[x] Artisan: php artisan security:encrypt-general-compliance [--dry-run]
-    (text fields + migrate legacy public files → encrypted private disk)
-[x] Feature tests: file ciphertext on disk, owner download, forbidden stranger,
-    text ciphertext + Eloquent round-trip + legacy plaintext
+[x] Artisan: php artisan security:encrypt-general-compliance [--dry-run] (text)
+[x] Attachment files restored to public-disk + public URL (file-byte encryption
+    reverted — broke cPanel/LiteSpeed downloads)
+[x] Feature tests: text ciphertext + public-disk attachments
 
 --------------------------------------------------------------------------------
 SECURITY HARDENING (phase 2 — 2026-10-04)
@@ -2182,51 +2177,35 @@ Related but distinct
 9.3 NFR-GC-ENC — Encryption of Generic Compliance data at rest
 --------------------------------------------------------------------------------
 Statement
-- Generic Compliance submissions are sensitive. The platform SHALL encrypt
-  that data at rest so filesystem access or a database dump does not expose
-  plaintext. **Primary focus: uploaded files** (attachments + supporting
-  files); version free-text is also encrypted.
-
-Scope — files (primary)
-- `general_compliance_request_attachments` for both `kind=attachment` and
-  `kind=supporting_file`
-- Bytes stored on private `local` disk under `general-compliance/enc/` as
-  `GCENC1:` + Laravel `Crypt` ciphertext (`APP_KEY`)
-- Column `is_encrypted=true`; public-disk URLs must not be used for new files
-- Download only through authenticated API (same view authorisation as the
-  parent request): `GET …/general-compliance/attachments/{id}/download`
+- Generic Compliance free-text (description / reviewer feedback) SHALL be
+  encrypted at rest so a database dump does not expose plaintext.
 
 Scope — text columns
 - `general_compliance_request_versions.description`
 - `general_compliance_request_versions.feedback` (remedial feedback / notes)
 - `general_compliance_request_versions.future_feedback`
 
-Not in scope
-- content_type, status, reviewer display name, request `name` (denormalised
-  submitter name), original_name / mime metadata (needed for UI)
+Out of scope / deferred
+- Encrypting attachment / supporting-file **bytes** on disk — attempted then
+  **reverted** (broke downloads on cPanel/LiteSpeed). Files stay on public
+  disk with public URLs as before. Revisit with object-storage SSE later.
+- content_type, status, reviewer display name, request `name`
 
 Mechanism
-- Files: `App\Support\GeneralComplianceEncryptedFiles` on upload; decrypt on
-  authorised download only.
-- Text: `SafeEncrypted` cast (legacy plaintext readable until backfill;
-  wrong-key ciphertext → null).
+- Text: `SafeEncrypted` cast (legacy plaintext readable until backfill).
 - Audit trail MUST NOT duplicate feedback plaintext in `metadata` (flags only).
 - Text search across encrypted body is not supported; `q` uses non-encrypted
   fields only.
 
 Ops
 - After deploy: `php artisan security:encrypt-general-compliance`
-  (optional `--dry-run` first). Encrypts text rows and migrates legacy
-  public-disk files → encrypted private disk (deletes public copy).
-- Protect and back up `APP_KEY`; losing the key makes ciphertext
-  unrecoverable.
+  (optional `--dry-run` first). Text rows only.
+- Protect and back up `APP_KEY`.
 
 Acceptance criteria (for “done”)
-  [x] New GC uploads store file bytes encrypted on private disk (not public)
-  [x] Authorised users can download decrypted files; unauthorised get 403
-  [x] API exposes download URL + is_encrypted; hides private storage path
   [x] New / updated GC versions store description & feedback as ciphertext
-  [x] Legacy plaintext text/files remain readable; backfill encrypts them
+  [x] Eloquent / API still return readable plaintext to authorised users
+  [x] Attachment upload/open works via public disk + public URL (restored)
   [x] Audit metadata does not store feedback plaintext
   [x] Documented in section 3.3b + section 8 checklist
 
