@@ -47,6 +47,7 @@ use App\Http\Controllers\Api\PowerAdminAdvisorPricingController;
 use App\Http\Controllers\Api\PowerAdminCapabilityController;
 use App\Http\Controllers\Api\AppVersionController;
 use App\Http\Controllers\Api\InternalCodeUpdateController;
+use App\Http\Controllers\Api\InternalGcFileController;
 use App\Http\Controllers\Api\PowerAdminHubController;
 use App\Http\Controllers\Api\PowerAdminHubBackupController;
 use App\Http\Controllers\Api\PowerAdminHubReleaseController;
@@ -120,6 +121,10 @@ Route::get('/website-compliance/scheduler/publish-scheduled', [WcSchedulerContro
 Route::post('/internal/hub-backups/run', [InternalHubBackupController::class, 'run']);
 Route::post('/internal/hub-backups/receive', [InternalHubBackupController::class, 'receive']);
 Route::post('/internal/hub-backups/restore', [InternalHubBackupController::class, 'restore']);
+
+// GC encrypted files: Central ↔ content-hub storage bridge (same auth as backups)
+Route::get('/internal/gc/file/{id}', [InternalGcFileController::class, 'show'])->whereNumber('id');
+Route::post('/internal/gc/file', [InternalGcFileController::class, 'store']);
 
 // Code update apply / artifact download (per-hub code_update_token or backup_token)
 Route::post('/internal/code-updates/apply', [InternalCodeUpdateController::class, 'apply']);

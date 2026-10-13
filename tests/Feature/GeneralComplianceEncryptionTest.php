@@ -13,9 +13,11 @@ use App\Services\CapabilitiesMatrixService;
 use App\Services\GeneralComplianceService;
 use App\Services\HubService;
 use App\Support\GeneralComplianceEncryptedFiles;
+use App\Support\WebsiteCompliance\WcDatabaseContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -179,6 +181,99 @@ class GeneralComplianceEncryptionTest extends TestCase
 
         $this->getJson('/api/gc/file/'.$attachment->id)
             ->assertUnauthorized();
+    }
+
+    public function test_internal_gc_file_endpoint_serves_encrypted_bytes_with_hub_key(): void
+    {
+        Storage::fake('gc_encrypted');
+        config(['services.hub_backup.secret' => 'test-hub-secret']);
+
+        $hub = $this->createHub();
+        $caps = is_array($hub->role_capabilities) ? $hub->role_capabilities : [];
+        $caps[User::ROLE_USER]['gc_submit_request'] = true;
+        $hub->role_capabilities = $caps;
+        $hub->save();
+        app(HubService::class)->forgetCurrentCache();
+
+        GeneralComplianceContentType::query()->create(['name' => 'Brochure']);
+        $firm = Firm::query()->create([
+            'name' => 'Firm Enc',
+            'compliance_visible_to_own' => true,
+        ]);
+        $submitter = User::factory()->create([
+            'role' => User::ROLE_USER,
+            'firm_id' => $firm->id,
+        ]);
+
+        $compliance = app(GeneralComplianceService::class)->submit($hub, $submitter, [
+            'description' => 'Internal bridge',
+            'content_type' => 'Brochure',
+            'attachments' => [
+                UploadedFile::fake()->createWithContent('bridge.pdf', 'BRIDGE-BYTES'),
+            ],
+        ]);
+        $attachment = $compliance->currentVersionRow->attachments->first();
+        $this->assertNotNull($attachment);
+
+        $this->getJson('/api/internal/gc/file/'.$attachment->id)
+            ->assertUnauthorized();
+
+        $this->withHeaders(['X-Hub-Backup-Key' => 'test-hub-secret'])
+            ->get('/api/internal/gc/file/'.$attachment->id)
+            ->assertOk()
+            ->assertSee('BRIDGE-BYTES', false);
+    }
+
+    public function test_central_acting_remotely_fetches_missing_gc_file_from_content_hub(): void
+    {
+        Storage::fake('gc_encrypted');
+
+        $central = Hub::query()->create([
+            'name' => 'Central',
+            'slug' => 'central',
+            'type' => Hub::TYPE_CENTRAL,
+            'is_active' => true,
+            'checklist' => Hub::defaultChecklist(Hub::TYPE_CENTRAL),
+        ]);
+        $shared = Hub::query()->create([
+            'name' => 'Shared',
+            'slug' => 'shared-remote',
+            'type' => Hub::TYPE_SHARED,
+            'is_active' => true,
+            'api_url' => 'https://shared-remote.test/api',
+            'backup_token' => 'shared-backup-token',
+            'checklist' => array_merge(Hub::defaultChecklist(Hub::TYPE_SHARED), [
+                'module_general_compliance' => true,
+            ]),
+        ]);
+        $matrix = app(CapabilitiesMatrixService::class);
+        $caps = $matrix->resolvedRoleCapabilities($shared);
+        $caps[User::ROLE_MANAGER]['gc_view_all_requests'] = true;
+        $shared->role_capabilities = $caps;
+        $shared->save();
+
+        // Point "current" hub at central for capability checks via HubService if needed.
+        unset($central);
+
+        Http::fake([
+            'https://shared-remote.test/api/internal/gc/file/99' => Http::response('REMOTE-FILE-BYTES', 200, [
+                'Content-Type' => 'application/pdf',
+            ]),
+        ]);
+
+        $bytes = WcDatabaseContext::using('sqlite', function () {
+            return GeneralComplianceEncryptedFiles::readPlaintextOrRemote(
+                'enc/missing-on-central.enc',
+                true,
+                99
+            );
+        }, (int) $shared->id);
+
+        $this->assertSame('REMOTE-FILE-BYTES', $bytes);
+        Http::assertSent(function ($request) {
+            return $request->url() === 'https://shared-remote.test/api/internal/gc/file/99'
+                && $request->header('X-Hub-Backup-Key')[0] === 'shared-backup-token';
+        });
     }
 
     public function test_legacy_plaintext_gc_fields_remain_readable(): void

@@ -217,7 +217,13 @@ class GeneralComplianceController extends Controller
                 || $attachment->isStoredEncrypted();
 
             try {
-                $bytes = GeneralComplianceEncryptedFiles::readPlaintext($path, $encrypted);
+                // Local disk first; when Central is acting on a content hub the
+                // encrypted bytes live on that hub — fall back to remote fetch.
+                $bytes = GeneralComplianceEncryptedFiles::readPlaintextOrRemote(
+                    $path,
+                    $encrypted,
+                    (int) $attachment->id
+                );
             } catch (Throwable $e) {
                 try {
                     report($e);
