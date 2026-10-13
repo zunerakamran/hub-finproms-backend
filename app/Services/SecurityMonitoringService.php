@@ -16,6 +16,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\Process\Process;
 
 class SecurityMonitoringService
 {
@@ -905,18 +906,10 @@ class SecurityMonitoringService
      */
     private function executeComposerAudit(): array
     {
-        // Must use CLI PHP. Do NOT set register_argc_argv=0 — that strips argv so
-        // Composer never sees "audit" and only prints the help banner.
         $php = $this->phpCliBinary();
         $composerPhar = base_path('composer.phar');
-        $auditArgs = ['audit', '--format=json', '--no-dev', '--no-ansi', '-n'];
 
-        if (is_file($composerPhar)) {
-            $cmd = array_merge(
-                [$php, '-d', 'register_argc_argv=1', $composerPhar],
-                $auditArgs
-            );
-        } else {
+        if (! is_file($composerPhar)) {
             $which = $this->findComposerBinary();
             if (! $which) {
                 return [
@@ -925,12 +918,44 @@ class SecurityMonitoringService
                     'advisories' => 0,
                 ];
             }
-            $cmd = str_ends_with(strtolower($which), '.phar')
-                ? array_merge([$php, '-d', 'register_argc_argv=1', $which], $auditArgs)
-                : array_merge([$which], $auditArgs);
+            $composerPhar = str_ends_with(strtolower($which), '.phar') ? $which : null;
+            $composerBin = $composerPhar ? null : $which;
+        } else {
+            $composerBin = null;
         }
 
-        [$raw, $exit] = $this->runComposerCommand($cmd);
+        // Try array argv first (Symfony Process escapes spaces). Then a Windows cmd line.
+        $attempts = [];
+        if ($composerPhar) {
+            $attempts[] = [$php, $composerPhar, 'audit', '--format=json', '--no-dev', '--no-ansi', '-n'];
+            $attempts[] = $this->windowsCmdAuditLine($php, $composerPhar);
+        }
+        if ($composerBin) {
+            $attempts[] = [$composerBin, 'audit', '--format=json', '--no-dev', '--no-ansi', '-n'];
+        }
+
+        $raw = '';
+        $exit = 1;
+        $lastRaw = '';
+        $lastExit = 1;
+        foreach ($attempts as $cmd) {
+            if ($cmd === null || $cmd === [] || $cmd === '') {
+                continue;
+            }
+            [$raw, $exit] = $this->runComposerCommand($cmd);
+            $lastRaw = $raw;
+            $lastExit = $exit;
+            // Keep trying until we get real audit JSON (skip help banners / bad quoting errors).
+            if ($this->composerOutputLooksLikeAuditJson($raw)) {
+                break;
+            }
+            $raw = '';
+            $exit = 1;
+        }
+        if ($raw === '') {
+            $raw = $lastRaw;
+            $exit = $lastExit;
+        }
 
         $jsonStart = strpos($raw, '{');
         $decoded = null;
@@ -939,11 +964,18 @@ class SecurityMonitoringService
         }
 
         if (! is_array($decoded)) {
-            // Empty / unparseable output means the audit did not run — not a green pass.
+            if ($this->composerOutputLooksLikeHelpBanner($raw)) {
+                return [
+                    'status' => 'error',
+                    'summary' => 'Composer audit did not run (help banner only — CLI argv not passed). Set PHP_CLI_BINARY in .env to your php.exe path (not php-cgi), e.g. C:\\laragon\\bin\\php\\php-8.3.0\\php.exe',
+                    'advisories' => 0,
+                ];
+            }
+
             if (trim($raw) === '') {
                 return [
                     'status' => 'unavailable',
-                    'summary' => 'Composer audit could not run in this environment (no output from composer). Check PHP CLI path and that composer.phar is executable.',
+                    'summary' => 'Composer audit could not run in this environment (no output). Set PHP_CLI_BINARY in .env to a working CLI php.exe.',
                     'advisories' => 0,
                 ];
             }
@@ -961,7 +993,6 @@ class SecurityMonitoringService
                 $advisories += is_array($pkgAdvisories) ? count($pkgAdvisories) : 1;
             }
         } elseif (isset($decoded['abandoned'])) {
-            // Some composer versions nest differently; count top-level advisory keys.
             $advisories = isset($decoded['advisories']) ? count((array) $decoded['advisories']) : 0;
         }
 
@@ -983,57 +1014,60 @@ class SecurityMonitoringService
     }
 
     /**
-     * Run Composer with HOME/COMPOSER_HOME set (web workers often lack both).
-     *
-     * @param  list<string>  $cmd
+     * @param  list<string>|string  $cmd
      * @return array{0: string, 1: int}
      */
-    private function runComposerCommand(array $cmd): array
+    private function runComposerCommand(array|string $cmd): array
     {
         $home = $this->composerHomeDirectory();
-        // Do not merge $_SERVER — CGI/FPM keys confuse child PHP/Composer.
         $env = $this->composerProcessEnvironment($home);
 
-        $descriptor = [
-            0 => ['pipe', 'r'],
-            1 => ['pipe', 'w'],
-            2 => ['pipe', 'w'],
-        ];
+        try {
+            $process = is_array($cmd)
+                ? new Process($cmd, base_path(), $env, null, 180)
+                : Process::fromShellCommandline($cmd, base_path(), $env, null, 180);
+            $process->run();
 
-        $process = @proc_open(
-            $cmd,
-            $descriptor,
-            $pipes,
-            base_path(),
-            $env
+            $raw = trim($process->getOutput()."\n".$process->getErrorOutput());
+
+            return [$raw, $process->getExitCode() ?? 1];
+        } catch (\Throwable $e) {
+            return [mb_substr($e->getMessage(), 0, 500), 1];
+        }
+    }
+
+    /**
+     * Windows cmd.exe line so argv reaches composer.phar reliably from web SAPIs.
+     */
+    private function windowsCmdAuditLine(string $php, string $composerPhar): ?string
+    {
+        if (DIRECTORY_SEPARATOR !== '\\') {
+            return null;
+        }
+
+        // cmd.exe requires the special ""quoted exe"" form when paths contain spaces.
+        return sprintf(
+            'cmd.exe /C ""%s" "%s" audit --format=json --no-dev --no-ansi -n"',
+            str_replace('"', '', $php),
+            str_replace('"', '', $composerPhar)
         );
+    }
 
-        if (! is_resource($process)) {
-            // Fallback for hosts that reject array-form proc_open.
-            $shell = implode(' ', array_map('escapeshellarg', $cmd));
-            $process = @proc_open(
-                $shell,
-                $descriptor,
-                $pipes,
-                base_path(),
-                $env
-            );
+    private function composerOutputLooksLikeHelpBanner(string $raw): bool
+    {
+        return str_contains($raw, 'Composer version')
+            && (str_contains($raw, 'Usage: command') || str_contains($raw, 'Available commands'));
+    }
+
+    private function composerOutputLooksLikeAuditJson(string $raw): bool
+    {
+        $jsonStart = strpos($raw, '{');
+        if ($jsonStart === false) {
+            return false;
         }
+        $decoded = json_decode(substr($raw, $jsonStart), true);
 
-        if (! is_resource($process)) {
-            return ['', 1];
-        }
-
-        fclose($pipes[0]);
-        $stdout = stream_get_contents($pipes[1]) ?: '';
-        $stderr = stream_get_contents($pipes[2]) ?: '';
-        fclose($pipes[1]);
-        fclose($pipes[2]);
-        $exit = proc_close($process);
-
-        $raw = trim($stdout.($stderr !== '' ? "\n".$stderr : ''));
-
-        return [$raw, (int) $exit];
+        return is_array($decoded) && (array_key_exists('advisories', $decoded) || array_key_exists('abandoned', $decoded));
     }
 
     /**
@@ -1042,14 +1076,9 @@ class SecurityMonitoringService
     private function composerProcessEnvironment(string $home): array
     {
         $env = [];
-        foreach ($_ENV as $key => $value) {
-            if (is_string($key) && is_scalar($value)) {
-                $env[$key] = (string) $value;
-            }
-        }
 
-        // Preserve PATH so CLI php / composer can be resolved.
-        foreach (['PATH', 'Path', 'SystemRoot', 'PATHEXT', 'TMP', 'TEMP', 'APPDATA', 'LOCALAPPDATA'] as $key) {
+        // Keep a minimal inherited PATH — do not dump $_SERVER (CGI pollution).
+        foreach (['PATH', 'Path', 'SystemRoot', 'SYSTEMROOT', 'PATHEXT', 'TMP', 'TEMP', 'APPDATA', 'LOCALAPPDATA', 'ComSpec', 'COMSPEC'] as $key) {
             $val = getenv($key);
             if (is_string($val) && $val !== '') {
                 $env[$key] = $val;
@@ -1066,11 +1095,6 @@ class SecurityMonitoringService
 
     private function composerHomeDirectory(): string
     {
-        $existing = getenv('COMPOSER_HOME') ?: getenv('HOME') ?: getenv('USERPROFILE');
-        if (is_string($existing) && $existing !== '' && is_dir($existing) && is_writable($existing)) {
-            return $existing;
-        }
-
         $dir = storage_path('app/composer-home');
         if (! is_dir($dir)) {
             @mkdir($dir, 0755, true);
@@ -1080,48 +1104,72 @@ class SecurityMonitoringService
     }
 
     /**
-     * Resolve a CLI PHP binary (not php-cgi / php-fpm from the web worker).
+     * Resolve a verified CLI php.exe (never php-cgi).
      */
     private function phpCliBinary(): string
     {
-        if (in_array(PHP_SAPI, ['cli', 'phpdbg'], true) && is_string(PHP_BINARY) && PHP_BINARY !== '') {
-            return PHP_BINARY;
-        }
-
-        $binary = is_string(PHP_BINARY) ? PHP_BINARY : '';
-        $dir = $binary !== '' ? dirname($binary) : '';
         $candidates = [];
-
-        if ($binary !== '' && stripos($binary, 'php-cgi') !== false) {
-            $candidates[] = str_ireplace('php-cgi', 'php', $binary);
-        }
-        if ($dir !== '') {
-            $candidates[] = $dir.DIRECTORY_SEPARATOR.'php.exe';
-            $candidates[] = $dir.DIRECTORY_SEPARATOR.'php';
-        }
 
         $configured = env('PHP_CLI_BINARY') ?: env('PHP_BINARY_CLI');
         if (is_string($configured) && $configured !== '') {
-            array_unshift($candidates, $configured);
+            $candidates[] = $configured;
         }
 
+        $binary = is_string(PHP_BINARY) ? PHP_BINARY : '';
+        if ($binary !== '') {
+            $dir = dirname($binary);
+            if (stripos($binary, 'cgi') !== false) {
+                $candidates[] = preg_replace('/php[\w.-]*cgi/i', 'php', $binary) ?: '';
+                $candidates[] = $dir.DIRECTORY_SEPARATOR.'php.exe';
+                $candidates[] = $dir.DIRECTORY_SEPARATOR.'php';
+            } elseif (in_array(PHP_SAPI, ['cli', 'phpdbg'], true)) {
+                $candidates[] = $binary;
+            } else {
+                // apache2handler etc. — PHP_BINARY may be httpd; look beside common PHP dirs later.
+                $candidates[] = $dir.DIRECTORY_SEPARATOR.'php.exe';
+            }
+        }
+
+        foreach (['php.exe', 'php'] as $name) {
+            $found = $this->whichExecutable($name);
+            if ($found) {
+                $candidates[] = $found;
+            }
+        }
+
+        $candidates[] = 'php.exe';
         $candidates[] = 'php';
 
+        $candidates = array_values(array_unique(array_filter($candidates)));
+
         foreach ($candidates as $candidate) {
-            if ($candidate === 'php') {
-                return 'php';
+            if ($candidate !== 'php' && $candidate !== 'php.exe' && ! is_file($candidate)) {
+                continue;
             }
-            if (is_file($candidate)) {
+            if ($this->isCliPhpBinary($candidate)) {
                 return $candidate;
             }
         }
 
-        return 'php';
+        return $candidates[0] ?? 'php';
+    }
+
+    private function isCliPhpBinary(string $binary): bool
+    {
+        try {
+            $process = new Process([$binary, '-r', 'echo PHP_SAPI;'], base_path(), $this->composerProcessEnvironment($this->composerHomeDirectory()), null, 10);
+            $process->run();
+            $sapi = trim($process->getOutput());
+
+            return in_array($sapi, ['cli', 'phpdbg'], true);
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     private function findComposerBinary(): ?string
     {
-        foreach (['composer.bat', 'composer', 'composer.phar'] as $name) {
+        foreach (['composer.bat', 'composer.cmd', 'composer', 'composer.phar'] as $name) {
             $path = $this->whichExecutable($name);
             if ($path) {
                 return $path;
@@ -1133,17 +1181,21 @@ class SecurityMonitoringService
 
     private function whichExecutable(string $name): ?string
     {
-        $isWin = DIRECTORY_SEPARATOR === '\\';
-        $cmd = $isWin ? 'where '.escapeshellarg($name) : 'command -v '.escapeshellarg($name);
-        $out = [];
-        $code = 1;
-        @exec($cmd, $out, $code);
-        if ($code !== 0 || $out === []) {
+        try {
+            $cmd = DIRECTORY_SEPARATOR === '\\'
+                ? ['cmd', '/C', 'where', $name]
+                : ['sh', '-lc', 'command -v '.escapeshellarg($name)];
+            $process = new Process($cmd, null, $this->composerProcessEnvironment($this->composerHomeDirectory()), null, 10);
+            $process->run();
+            if (! $process->isSuccessful()) {
+                return null;
+            }
+            $path = trim(explode("\n", str_replace("\r", '', $process->getOutput()))[0] ?? '');
+
+            return $path !== '' ? $path : null;
+        } catch (\Throwable) {
             return null;
         }
-        $path = trim((string) $out[0]);
-
-        return $path !== '' && ($isWin || is_file($path)) ? $path : null;
     }
 
     private function scanIsOverdue(SecurityMonitoringSetting $settings): bool
