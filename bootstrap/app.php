@@ -38,6 +38,21 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        // Symfony rejects route param names > 32 chars with DomainException → opaque 500.
+        // Surface a clear message if a stale route:cache still has the old GC attachment param.
+        $exceptions->render(function (\DomainException $e, \Illuminate\Http\Request $request) {
+            if (! str_contains($e->getMessage(), 'cannot be longer than 32 characters')) {
+                return null;
+            }
+
+            return response(
+                'GC file download route is misconfigured (stale route cache). '
+                .'On the server run: php artisan route:clear && php artisan optimize:clear',
+                500,
+                ['Content-Type' => 'text/plain; charset=UTF-8']
+            );
+        });
+
         $exceptions->reportable(function (\Illuminate\Http\Exceptions\ThrottleRequestsException $e): void {
             try {
                 $request = request();

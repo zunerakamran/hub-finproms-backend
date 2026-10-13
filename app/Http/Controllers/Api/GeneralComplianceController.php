@@ -169,8 +169,8 @@ class GeneralComplianceController extends Controller
     /**
      * Download a GC attachment / supporting file (decrypts at rest when encrypted).
      *
-     * Uses numeric {id} (not a long route-model name) — Symfony rejects param names
-     * longer than 32 chars, which previously 500'd this URL on production.
+     * Uses numeric {id} only. Avoid Content-Length (LiteSpeed Brotli rewrites the body
+     * and a mismatched Content-Length becomes an HTTP/2 500). Never let report() throw.
      */
     public function downloadAttachment(Request $request, int|string $id): Response|JsonResponse
     {
@@ -203,12 +203,8 @@ class GeneralComplianceController extends Controller
                 return $this->downloadError($request, 'Attachment not found.', 404);
             }
 
-            try {
-                $this->authorizeView($hub, $user, $compliance);
-            } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e) {
-                return $this->downloadError($request, 'You do not have permission to view this file.', $e->getStatusCode() ?: 403);
-            } catch (\Illuminate\Http\Exceptions\HttpResponseException $e) {
-                return $e->getResponse();
+            if (! $this->actorMayViewCompliance($hub, $user, $compliance)) {
+                return $this->downloadError($request, 'You do not have permission to view this file.', 403);
             }
 
             $path = (string) ($attachment->file_path ?? '');
@@ -216,7 +212,8 @@ class GeneralComplianceController extends Controller
                 return $this->downloadError($request, 'Attachment file is missing.', 404);
             }
 
-            $encrypted = (bool) ($attachment->getAttributes()['is_encrypted'] ?? false)
+            $attrs = $attachment->getAttributes();
+            $encrypted = (! empty($attrs['is_encrypted']))
                 || $attachment->isStoredEncrypted();
 
             $bytes = GeneralComplianceEncryptedFiles::readPlaintext($path, $encrypted);
@@ -225,18 +222,24 @@ class GeneralComplianceController extends Controller
             );
             $mime = (string) ($attachment->mime_type ?: 'application/octet-stream');
 
-            // Plain Response (not StreamedResponse) — more reliable on LiteSpeed/shared hosts.
+            // Do NOT set Content-Length: LiteSpeed may Brotli-compress and then reject
+            // the response (HTTP/2 Content-Length mismatch → opaque 500).
             return response($bytes, 200, [
                 'Content-Type' => $mime,
-                'Content-Length' => (string) strlen($bytes),
                 'Content-Disposition' => 'attachment; filename="'.$filename.'"',
                 'X-Content-Type-Options' => 'nosniff',
-                'Cache-Control' => 'private, no-store',
-                'Content-Security-Policy' => "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: blob:; object-src 'self' blob:; frame-ancestors 'self'",
+                'Cache-Control' => 'private, no-store, no-transform',
+                'Content-Encoding' => 'identity',
+                'X-LiteSpeed-Cache-Control' => 'no-cache',
+                'Content-Security-Policy' => "default-src 'none'; frame-ancestors 'self'",
                 'X-Frame-Options' => 'SAMEORIGIN',
             ]);
         } catch (Throwable $e) {
-            report($e);
+            try {
+                report($e);
+            } catch (Throwable) {
+                // Log disk full / permission denied must not turn into Laravel "Server Error".
+            }
 
             return $this->downloadError(
                 $request,
@@ -244,6 +247,42 @@ class GeneralComplianceController extends Controller
                 500
             );
         }
+    }
+
+    /**
+     * Same rules as authorizeView, but returns bool instead of abort() — safer for
+     * browser document navigations (file clicks).
+     */
+    private function actorMayViewCompliance(Hub $hub, User $user, GeneralComplianceRequest $compliance): bool
+    {
+        $role = $this->matrix->effectiveRoleFor($user);
+        $subject = $this->actingAdvisors->subjectOrNull($user);
+        $isOwner = (int) $compliance->user_id === (int) $user->id
+            || ($subject && (int) $compliance->user_id === (int) $subject->id);
+        $canOwn = $this->matrix->roleCan($hub, $role, 'gc_view_own_requests')
+            || $this->matrix->roleCan($hub, $role, 'gc_submit_request');
+        $canAll = $this->matrix->roleCan($hub, $role, 'gc_view_all_requests')
+            || $this->matrix->roleCan($hub, $role, 'gc_assign_requests')
+            || $this->matrix->roleCan($hub, $role, 'gc_change_request_status');
+        $canReview = $this->matrix->roleCan($hub, $role, 'gc_review_requests');
+        $isAssignee = (int) ($compliance->assigned_to ?? 0) === (int) $user->id;
+        $isUnassigned = empty($compliance->assigned_to);
+
+        $allowed = ($isOwner && $canOwn) || ($canReview && $isAssignee);
+
+        if ($canAll || ($canReview && $isUnassigned)) {
+            if (! $compliance->relationLoaded('user')) {
+                $compliance->load('user:id,firm_id');
+            }
+            $allowed = $allowed || $this->firmVisibility->actorCanViewRequest(
+                $user,
+                (int) $compliance->user_id,
+                $compliance->user?->firm_id ? (int) $compliance->user->firm_id : null,
+                $compliance->assigned_to ? (int) $compliance->assigned_to : null
+            );
+        }
+
+        return (bool) $allowed;
     }
 
     /**
@@ -258,7 +297,8 @@ class GeneralComplianceController extends Controller
         if ($wantsHtml) {
             return response($message, $status, [
                 'Content-Type' => 'text/plain; charset=UTF-8',
-                'Cache-Control' => 'private, no-store',
+                'Cache-Control' => 'private, no-store, no-transform',
+                'Content-Encoding' => 'identity',
             ]);
         }
 

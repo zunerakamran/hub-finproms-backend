@@ -234,10 +234,7 @@ class GeneralComplianceEncryptionTest extends TestCase
         $api = $attachment->toApiArray();
         $this->assertTrue($api['is_encrypted']);
         $this->assertNull($api['file_path']);
-        $this->assertSame(
-            '/api/general-compliance/attachments/'.$attachment->id.'/download',
-            $api['file_url']
-        );
+        $this->assertSame('/api/gc/file/'.$attachment->id, $api['file_url']);
     }
 
     public function test_gc_attachment_download_returns_401_when_unauthenticated(): void
@@ -274,7 +271,7 @@ class GeneralComplianceEncryptionTest extends TestCase
         $attachment = $compliance->currentVersionRow->attachments->first();
 
         // Bare navigation without session used to 500 on null $user — must be 401.
-        $this->getJson('/api/general-compliance/attachments/'.$attachment->id.'/download')
+        $this->getJson('/api/gc/file/'.$attachment->id)
             ->assertUnauthorized();
     }
 
@@ -313,7 +310,7 @@ class GeneralComplianceEncryptionTest extends TestCase
         $attachment = $compliance->currentVersionRow->attachments->first();
 
         $response = $this->actingAs($submitter)
-            ->get('/api/general-compliance/attachments/'.$attachment->id.'/download');
+            ->get('/api/gc/file/'.$attachment->id);
 
         $response->assertOk();
         $this->assertSame('owner-can-read-this', $response->getContent());
@@ -357,7 +354,7 @@ class GeneralComplianceEncryptionTest extends TestCase
         $attachment = $compliance->currentVersionRow->attachments->first();
 
         $this->actingAs($other)
-            ->getJson('/api/general-compliance/attachments/'.$attachment->id.'/download')
+            ->getJson('/api/gc/file/'.$attachment->id)
             ->assertForbidden();
     }
 }

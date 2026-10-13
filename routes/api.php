@@ -238,6 +238,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/general-compliance/requests/{generalComplianceRequest}', [GeneralComplianceController::class, 'show']);
         Route::get('/general-compliance/attachments/{id}/download', [GeneralComplianceController::class, 'downloadAttachment'])
             ->whereNumber('id');
+        // Short alias — avoids any cached long-param route leftovers on shared hosts.
+        Route::get('/gc/file/{id}', [GeneralComplianceController::class, 'downloadAttachment'])
+            ->whereNumber('id');
     });
 
     // Support Tickets — member / role-gated by st_* capabilities.
@@ -713,6 +716,8 @@ Route::middleware('auth:sanctum')->group(function () {
                 Route::get('/general-compliance/requests/{generalComplianceRequest}', [GeneralComplianceController::class, 'show']);
                 Route::get('/general-compliance/attachments/{id}/download', [GeneralComplianceController::class, 'downloadAttachment'])
                     ->whereNumber('id');
+                Route::get('/gc/file/{id}', [GeneralComplianceController::class, 'downloadAttachment'])
+                    ->whereNumber('id');
             });
             Route::middleware('hub_can:gc_review_requests')->group(function () {
                 Route::post('/general-compliance/requests/{generalComplianceRequest}/review', [GeneralComplianceController::class, 'review']);
@@ -1165,6 +1170,8 @@ Route::middleware('auth:sanctum')->group(function () {
                 Route::get('/general-compliance/queue', [GeneralComplianceController::class, 'index']);
                 Route::get('/general-compliance/requests/{generalComplianceRequest}', [GeneralComplianceController::class, 'show']);
                 Route::get('/general-compliance/attachments/{id}/download', [GeneralComplianceController::class, 'downloadAttachment'])
+                    ->whereNumber('id');
+                Route::get('/gc/file/{id}', [GeneralComplianceController::class, 'downloadAttachment'])
                     ->whereNumber('id');
             });
             Route::middleware('hub_can:gc_review_requests')->group(function () {

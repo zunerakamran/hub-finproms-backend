@@ -71,7 +71,8 @@ class GeneralComplianceRequestAttachment extends Model
     public function resolvedFileUrl(): ?string
     {
         if ($this->id && ($this->isStoredEncrypted() || ! filled($this->file_url))) {
-            return '/api/general-compliance/attachments/'.$this->id.'/download';
+            // Short path preferred on LiteSpeed / shared hosts (see downloadAttachment).
+            return '/api/gc/file/'.$this->id;
         }
 
         if (filled($this->file_url)) {
