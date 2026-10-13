@@ -13,7 +13,9 @@ return new class extends Migration
         if (! Schema::hasTable('security_events')) {
             Schema::create('security_events', function (Blueprint $table) {
                 $table->id();
-                $table->foreignId('hub_id')->nullable()->constrained('hubs')->nullOnDelete();
+                // Soft hub reference (no FK): tables are used on remote hub DBs via
+                // acting switcher where hub_id is the Central registry id.
+                $table->unsignedBigInteger('hub_id')->nullable()->index();
                 // dateTime (not timestamp): MySQL rejects NOT NULL timestamp without default
                 // under strict sql_mode (error 1067 Invalid default value).
                 $table->dateTime('occurred_at');
@@ -48,7 +50,7 @@ return new class extends Migration
         if (! Schema::hasTable('security_incidents')) {
             Schema::create('security_incidents', function (Blueprint $table) {
                 $table->id();
-                $table->foreignId('hub_id')->nullable()->constrained('hubs')->nullOnDelete();
+                $table->unsignedBigInteger('hub_id')->nullable()->index();
                 $table->string('title', 255);
                 $table->text('description')->nullable();
                 $table->string('category', 40)->default('manual');
@@ -82,7 +84,7 @@ return new class extends Migration
         if (! Schema::hasTable('security_monitoring_settings')) {
             Schema::create('security_monitoring_settings', function (Blueprint $table) {
                 $table->id();
-                $table->foreignId('hub_id')->nullable()->constrained('hubs')->nullOnDelete();
+                $table->unsignedBigInteger('hub_id')->nullable();
                 $table->string('alert_min_severity', 20)->default('high');
                 $table->boolean('alert_email_enabled')->default(false);
                 $table->json('alert_emails')->nullable();
@@ -94,12 +96,6 @@ return new class extends Migration
                 $table->timestamps();
 
                 $table->unique('hub_id', 'secmon_settings_hub_unique');
-            });
-        }
-
-        if (Schema::hasTable('security_events') && Schema::hasTable('security_incidents')) {
-            Schema::table('security_events', function (Blueprint $table) {
-                // Soft FK only — already indexed; avoid hard FK if incident row may be remote.
             });
         }
 

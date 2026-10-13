@@ -8,10 +8,13 @@ use App\Models\SecurityIncident;
 use App\Models\SecurityIncidentNote;
 use App\Models\SecurityMonitoringSetting;
 use App\Models\User;
+use App\Support\WebsiteCompliance\WcDatabaseContext;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 
 class SecurityMonitoringService
@@ -33,6 +36,8 @@ class SecurityMonitoringService
 
     public function settingsFor(Hub $hub): SecurityMonitoringSetting
     {
+        $this->ensureSchema();
+
         $existing = SecurityMonitoringSetting::query()
             ->where('hub_id', $hub->id)
             ->first();
@@ -41,14 +46,149 @@ class SecurityMonitoringService
             return $existing;
         }
 
-        return SecurityMonitoringSetting::query()->create([
-            'hub_id' => $hub->id,
-            'alert_min_severity' => SecurityEvent::SEVERITY_HIGH,
-            'alert_email_enabled' => false,
-            'alert_emails' => [],
-            'failed_login_threshold' => 5,
-            'failed_login_window_minutes' => 15,
-        ]);
+        // Fallback: single-row settings on a content hub DB (no matching hub_id yet).
+        $fallback = SecurityMonitoringSetting::query()->orderBy('id')->first();
+        if ($fallback && $fallback->hub_id === null) {
+            $fallback->hub_id = $hub->id;
+            $fallback->save();
+
+            return $fallback;
+        }
+
+        try {
+            return SecurityMonitoringSetting::query()->create([
+                'hub_id' => $hub->id,
+                'alert_min_severity' => SecurityEvent::SEVERITY_HIGH,
+                'alert_email_enabled' => false,
+                'alert_emails' => [],
+                'failed_login_threshold' => 5,
+                'failed_login_window_minutes' => 15,
+            ]);
+        } catch (\Throwable) {
+            // Race on unique hub_id, or older schema — return whatever exists.
+            $again = SecurityMonitoringSetting::query()
+                ->where('hub_id', $hub->id)
+                ->first()
+                ?: SecurityMonitoringSetting::query()->orderBy('id')->first();
+
+            if ($again) {
+                return $again;
+            }
+
+            throw new \RuntimeException('Unable to load or create security monitoring settings.');
+        }
+    }
+
+    /**
+     * Ensure security monitoring tables exist on the active (possibly remote) connection.
+     * Power Admin acting on a content hub hits that hub's DB; Central migrations alone are not enough.
+     */
+    public function ensureSchema(): void
+    {
+        $connection = WcDatabaseContext::active()
+            ? WcDatabaseContext::connection()
+            : (string) config('database.default');
+
+        $schema = Schema::connection($connection);
+
+        if (! $schema->hasTable('security_events')) {
+            $schema->create('security_events', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('hub_id')->nullable()->index();
+                $table->dateTime('occurred_at');
+                $table->dateTime('detected_at');
+                $table->string('category', 40);
+                $table->string('event_type', 120);
+                $table->string('severity', 20)->default('info');
+                $table->string('title', 255);
+                $table->text('description');
+                $table->string('status', 40)->default('open');
+                $table->unsignedBigInteger('actor_user_id')->nullable();
+                $table->string('actor_name')->nullable();
+                $table->string('actor_email')->nullable();
+                $table->string('actor_role', 60)->nullable();
+                $table->string('source_ip', 45)->nullable();
+                $table->string('user_agent', 500)->nullable();
+                $table->string('route', 255)->nullable();
+                $table->string('http_action', 40)->nullable();
+                $table->unsignedBigInteger('security_incident_id')->nullable();
+                $table->json('related_refs')->nullable();
+                $table->json('properties')->nullable();
+                $table->timestamps();
+
+                $table->index(['occurred_at', 'severity'], 'secmon_events_occurred_sev_idx');
+                $table->index(['category', 'status'], 'secmon_events_cat_status_idx');
+                $table->index(['event_type', 'occurred_at'], 'secmon_events_type_occurred_idx');
+                $table->index(['source_ip', 'occurred_at'], 'secmon_events_ip_occurred_idx');
+                $table->index(['security_incident_id'], 'secmon_events_incident_idx');
+            });
+        }
+
+        if (! $schema->hasTable('security_incidents')) {
+            $schema->create('security_incidents', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('hub_id')->nullable()->index();
+                $table->string('title', 255);
+                $table->text('description')->nullable();
+                $table->string('category', 40)->default('manual');
+                $table->string('severity', 20)->default('medium');
+                $table->string('status', 40)->default('open');
+                $table->unsignedBigInteger('declared_by_user_id')->nullable();
+                $table->string('declared_by_name')->nullable();
+                $table->unsignedBigInteger('resolved_by_user_id')->nullable();
+                $table->string('resolved_by_name')->nullable();
+                $table->text('resolution_summary')->nullable();
+                $table->dateTime('resolved_at')->nullable();
+                $table->timestamps();
+
+                $table->index(['status', 'severity', 'created_at'], 'secmon_inc_status_sev_created_idx');
+            });
+        }
+
+        if (! $schema->hasTable('security_incident_notes')) {
+            $schema->create('security_incident_notes', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('security_incident_id');
+                $table->unsignedBigInteger('user_id')->nullable();
+                $table->string('author_name')->nullable();
+                $table->text('body');
+                $table->timestamps();
+
+                $table->index(['security_incident_id', 'created_at'], 'secmon_notes_incident_created_idx');
+            });
+        }
+
+        if (! $schema->hasTable('security_monitoring_settings')) {
+            $schema->create('security_monitoring_settings', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('hub_id')->nullable();
+                $table->string('alert_min_severity', 20)->default('high');
+                $table->boolean('alert_email_enabled')->default(false);
+                $table->json('alert_emails')->nullable();
+                $table->unsignedSmallInteger('failed_login_threshold')->default(5);
+                $table->unsignedSmallInteger('failed_login_window_minutes')->default(15);
+                $table->dateTime('last_dependency_scan_at')->nullable();
+                $table->string('last_dependency_scan_status', 40)->nullable();
+                $table->text('last_dependency_scan_summary')->nullable();
+                $table->timestamps();
+
+                $table->unique('hub_id', 'secmon_settings_hub_unique');
+            });
+        }
+
+        // Drop hub_id FKs if an earlier migration created them (breaks remote acting DBs).
+        foreach (['security_events', 'security_incidents', 'security_monitoring_settings'] as $table) {
+            if (! $schema->hasTable($table) || ! $schema->hasColumn($table, 'hub_id')) {
+                continue;
+            }
+            try {
+                $schema->table($table, function (Blueprint $blueprint) {
+                    $blueprint->dropForeign(['hub_id']);
+                });
+            } catch (\Throwable) {
+                // No FK, or already dropped.
+            }
+        }
     }
 
     /**
@@ -117,6 +257,12 @@ class SecurityMonitoringService
      */
     public function recordEvent(?Hub $hub, array $payload): ?SecurityEvent
     {
+        try {
+            $this->ensureSchema();
+        } catch (\Throwable) {
+            return null;
+        }
+
         try {
             if (! $hub) {
                 $hub = $this->hubs->current();
@@ -254,6 +400,8 @@ class SecurityMonitoringService
      */
     public function listEvents(Hub $hub, User $actor, array $filters): LengthAwarePaginator
     {
+        $this->ensureSchema();
+
         $this->assertModuleEnabled($hub);
         $this->assertCan($hub, $actor, 'secmon_view_events');
 
@@ -291,6 +439,8 @@ class SecurityMonitoringService
      */
     public function listIncidents(Hub $hub, User $actor, array $filters): LengthAwarePaginator
     {
+        $this->ensureSchema();
+
         $this->assertModuleEnabled($hub);
         $this->assertCan($hub, $actor, 'secmon_view_events');
 
@@ -488,6 +638,7 @@ class SecurityMonitoringService
     {
         $this->assertModuleEnabled($hub);
         $this->assertCan($hub, $actor, 'secmon_view_report');
+        $this->ensureSchema();
 
         $base = SecurityEvent::query()->where(function ($q) use ($hub) {
             $q->where('hub_id', $hub->id)->orWhereNull('hub_id');
@@ -518,9 +669,10 @@ class SecurityMonitoringService
             ->pluck('total', 'status')
             ->all();
 
+        // Use DATE(...) in GROUP BY for MySQL ONLY_FULL_GROUP_BY compatibility.
         $byDay = (clone $base)
             ->select(DB::raw('DATE(occurred_at) as day'), DB::raw('count(*) as total'))
-            ->groupBy('day')
+            ->groupBy(DB::raw('DATE(occurred_at)'))
             ->orderBy('day')
             ->get()
             ->map(fn ($row) => ['day' => $row->day, 'total' => (int) $row->total])
@@ -538,8 +690,8 @@ class SecurityMonitoringService
 
         $topActors = (clone $base)
             ->whereNotNull('actor_email')
-            ->select('actor_email', 'actor_name', DB::raw('count(*) as total'))
-            ->groupBy('actor_email', 'actor_name')
+            ->select('actor_email', DB::raw('MAX(actor_name) as actor_name'), DB::raw('count(*) as total'))
+            ->groupBy('actor_email')
             ->orderByDesc('total')
             ->limit(10)
             ->get()
