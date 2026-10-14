@@ -7,6 +7,7 @@ use App\Models\HubBackup;
 use App\Models\User;
 use App\Services\HubBackupService;
 use App\Services\PowerAdminCapabilitiesService;
+use App\Support\HubBackupEncryptedArchive;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -18,7 +19,13 @@ class HubBackupTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        config(['hub.current_slug' => 'central', 'hub.type' => 'central', 'hub.is_control_plane' => true]);
+        config([
+            'hub.current_slug' => 'central',
+            'hub.type' => 'central',
+            'hub.is_control_plane' => true,
+            'services.hub_backup.encrypt_at_rest' => true,
+            'services.hub_backup.encryption_key' => 'base64:'.base64_encode(str_repeat('B', 32)),
+        ]);
         app(PowerAdminCapabilitiesService::class)->seedDefaults();
     }
 
@@ -71,6 +78,27 @@ class HubBackupTest extends TestCase
         $this->assertNotEmpty($backup->disk_path);
         $this->assertStringContainsString('backups/central/', (string) $backup->disk_path);
         $this->assertFileExists($backup->absolutePath());
+        $this->assertTrue((bool) $backup->is_encrypted);
+        $this->assertTrue(HubBackupEncryptedArchive::isEncryptedFile((string) $backup->absolutePath()));
+    }
+
+    public function test_encrypted_backup_download_streams_plaintext_zip(): void
+    {
+        $hub = Hub::query()->create([
+            'name' => 'Central',
+            'slug' => 'central',
+            'type' => Hub::TYPE_CENTRAL,
+            'is_active' => true,
+        ]);
+
+        $backup = app(HubBackupService::class)->createLocalBackup($hub, HubBackup::TRIGGER_MANUAL);
+        Sanctum::actingAs(User::factory()->powerAdmin()->create());
+
+        $response = $this->get("/api/power-admin/hubs/{$hub->id}/backups/{$backup->id}/download");
+        $response->assertOk();
+        $body = $response->streamedContent();
+        $this->assertStringStartsWith('PK', $body);
+        $this->assertStringNotContainsString(HubBackupEncryptedArchive::MAGIC, substr($body, 0, 16));
     }
 
     public function test_central_backup_now_creates_single_copy(): void

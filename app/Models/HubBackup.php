@@ -37,6 +37,7 @@ class HubBackup extends Model
         'checksum',
         'includes_database',
         'includes_files',
+        'is_encrypted',
         'error_message',
         'created_by_user_id',
         'completed_at',
@@ -47,6 +48,7 @@ class HubBackup extends Model
         return [
             'includes_database' => 'boolean',
             'includes_files' => 'boolean',
+            'is_encrypted' => 'boolean',
             'size_bytes' => 'integer',
             'completed_at' => 'datetime',
         ];
@@ -85,6 +87,7 @@ class HubBackup extends Model
             'checksum' => $this->checksum,
             'includes_database' => $this->includes_database,
             'includes_files' => $this->includes_files,
+            'is_encrypted' => (bool) $this->is_encrypted,
             'error_message' => $this->error_message,
             'created_by_user_id' => $this->created_by_user_id,
             'completed_at' => $this->completed_at?->toIso8601String(),

@@ -123,6 +123,7 @@ class InternalHubBackupController extends Controller
                 'triggered_by' => $request->input('triggered_by', HubBackup::TRIGGER_RECEIVE),
                 'includes_database' => $request->input('includes_database', true),
                 'includes_files' => $request->input('includes_files', true),
+                'is_encrypted' => $request->input('is_encrypted', false),
                 'size_bytes' => $request->input('size_bytes'),
             ]);
 

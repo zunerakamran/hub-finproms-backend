@@ -172,13 +172,34 @@ class PowerAdminHubBackupController extends Controller
             return response()->json(['message' => 'Backup file missing on disk.'], 404);
         }
 
-        return response()->streamDownload(function () use ($path) {
-            $stream = fopen($path, 'rb');
-            if ($stream) {
-                fpassthru($stream);
-                fclose($stream);
+        try {
+            [$plainPath, $cleanup] = $this->backups->resolvePlaintextArchive($path);
+        } catch (Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => 'Could not decrypt backup for download: '.$e->getMessage(),
+            ], 422);
+        }
+
+        $downloadName = $backup->filename ?: 'backup.zip';
+        if (! str_ends_with(strtolower($downloadName), '.zip')) {
+            $downloadName .= '.zip';
+        }
+
+        return response()->streamDownload(function () use ($plainPath, $cleanup) {
+            try {
+                $stream = fopen($plainPath, 'rb');
+                if ($stream) {
+                    fpassthru($stream);
+                    fclose($stream);
+                }
+            } finally {
+                if (is_callable($cleanup)) {
+                    $cleanup();
+                }
             }
-        }, $backup->filename ?: 'backup.zip', [
+        }, $downloadName, [
             'Content-Type' => 'application/zip',
         ]);
     }

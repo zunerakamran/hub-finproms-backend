@@ -75,6 +75,10 @@ return [
         'central_api_url' => env('CENTRAL_API_URL'),
         'secret' => env('HUB_BACKUP_SECRET'),
         'upload_timeout' => (int) env('HUB_BACKUP_UPLOAD_TIMEOUT', 600),
+        // NFR-BACKUP-ENC: encrypt ZIP archives at rest (AES-256-GCM).
+        // Prefer a shared HUB_BACKUP_ENCRYPTION_KEY on Central + content hubs.
+        'encrypt_at_rest' => filter_var(env('HUB_BACKUP_ENCRYPT_AT_REST', true), FILTER_VALIDATE_BOOLEAN),
+        'encryption_key' => env('HUB_BACKUP_ENCRYPTION_KEY'),
     ],
 
     /*

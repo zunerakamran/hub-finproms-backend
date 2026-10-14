@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Hub;
 use App\Models\HubBackup;
 use App\Models\User;
+use App\Support\HubBackupEncryptedArchive;
 use App\Support\ZipSupport;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -158,6 +159,8 @@ class HubBackupService
             $zipAbsolute = $backupsDir.DIRECTORY_SEPARATOR.$filename;
             $this->zipDirectory($workDir, $zipAbsolute);
 
+            $encrypted = $this->encryptArchiveIfEnabled($zipAbsolute);
+
             $relative = $singleStore
                 ? 'backups/central/'.$slug.'/'.$filename
                 : 'backups/'.$slug.'/'.$filename;
@@ -170,6 +173,7 @@ class HubBackupService
                 'disk_path' => $relative,
                 'size_bytes' => $size,
                 'checksum' => $checksum,
+                'is_encrypted' => $encrypted,
                 'completed_at' => now(),
                 'error_message' => null,
             ]);
@@ -264,6 +268,7 @@ class HubBackupService
                 'triggered_by' => $backup->triggered_by,
                 'includes_database' => $backup->includes_database ? '1' : '0',
                 'includes_files' => $backup->includes_files ? '1' : '0',
+                'is_encrypted' => $backup->is_encrypted ? '1' : '0',
                 'size_bytes' => (string) ($backup->size_bytes ?? 0),
             ]);
 
@@ -299,6 +304,13 @@ class HubBackupService
         }
         @unlink($uploadedAbsolutePath);
 
+        // Already encrypted by the content hub, or encrypt plaintext legacy uploads here.
+        $encrypted = HubBackupEncryptedArchive::isEncryptedFile($dest)
+            || filter_var($meta['is_encrypted'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        if (! $encrypted) {
+            $encrypted = $this->encryptArchiveIfEnabled($dest);
+        }
+
         $relative = 'backups/central/'.$hubSlug.'/'.$filename;
         $size = filesize($dest) ?: (int) ($meta['size_bytes'] ?? 0);
         $checksum = hash_file('sha256', $dest) ?: ($meta['checksum'] ?? null);
@@ -315,6 +327,7 @@ class HubBackupService
             'checksum' => $checksum,
             'includes_database' => filter_var($meta['includes_database'] ?? true, FILTER_VALIDATE_BOOLEAN),
             'includes_files' => filter_var($meta['includes_files'] ?? true, FILTER_VALIDATE_BOOLEAN),
+            'is_encrypted' => $encrypted || HubBackupEncryptedArchive::isEncryptedFile($dest),
             'completed_at' => now(),
         ]);
 
@@ -454,6 +467,8 @@ class HubBackupService
             'checksum' => hash_file('sha256', $dest) ?: $local->checksum,
             'includes_database' => $local->includes_database,
             'includes_files' => $local->includes_files,
+            'is_encrypted' => (bool) $local->is_encrypted
+                || HubBackupEncryptedArchive::isEncryptedFile($dest),
             'created_by_user_id' => $local->created_by_user_id,
             'completed_at' => now(),
         ]);
@@ -472,11 +487,13 @@ class HubBackupService
             throw new RuntimeException('Backup archive not found.');
         }
 
+        [$plainZip, $cleanup] = HubBackupEncryptedArchive::resolvePlaintext($zipAbsolutePath);
+
         $workDir = storage_path('app/backups/tmp/restore_'.Str::lower(Str::random(10)));
         $this->ensureDirectory($workDir);
 
         try {
-            $this->zip->extract($zipAbsolutePath, $workDir);
+            $this->zip->extract($plainZip, $workDir);
 
             $sql = $workDir.DIRECTORY_SEPARATOR.'database.sql';
             if (is_file($sql)) {
@@ -488,8 +505,35 @@ class HubBackupService
                 $this->restoreStorageTrees($files);
             }
         } finally {
+            if (is_callable($cleanup)) {
+                $cleanup();
+            }
             $this->removeDirectory($workDir);
         }
+    }
+
+    /**
+     * Plaintext ZIP path for download/stream. Caller must invoke cleanup when set.
+     *
+     * @return array{0: string, 1: (callable(): void)|null}
+     */
+    public function resolvePlaintextArchive(string $absolutePath): array
+    {
+        return HubBackupEncryptedArchive::resolvePlaintext($absolutePath);
+    }
+
+    /**
+     * @return bool True when the archive on disk is encrypted after this call.
+     */
+    private function encryptArchiveIfEnabled(string $absolutePath): bool
+    {
+        if (! HubBackupEncryptedArchive::enabled()) {
+            return HubBackupEncryptedArchive::isEncryptedFile($absolutePath);
+        }
+
+        HubBackupEncryptedArchive::encryptFileInPlace($absolutePath);
+
+        return true;
     }
 
     /**
@@ -663,28 +707,34 @@ class HubBackupService
             throw new RuntimeException('Could not write database dump.');
         }
 
+        $driver = DB::getDriverName();
         fwrite($handle, "-- FinProms hub backup\n");
-        fwrite($handle, '-- Generated: '.now()->toIso8601String()."\n\n");
-        fwrite($handle, "SET FOREIGN_KEY_CHECKS=0;\n\n");
+        fwrite($handle, '-- Generated: '.now()->toIso8601String()."\n");
+        fwrite($handle, '-- Driver: '.$driver."\n\n");
+        if ($driver === 'mysql') {
+            fwrite($handle, "SET FOREIGN_KEY_CHECKS=0;\n\n");
+        }
 
-        $tables = DB::select('SHOW TABLES');
-        $key = null;
-        foreach ($tables as $row) {
-            $arr = (array) $row;
-            $key ??= array_key_first($arr);
-            $table = (string) $arr[$key];
-            $create = DB::selectOne("SHOW CREATE TABLE `{$table}`");
-            $createSql = ((array) $create)['Create Table'] ?? null;
-            if (! $createSql) {
+        $tables = Schema::getTableListing();
+        foreach ($tables as $table) {
+            $table = (string) $table;
+            if ($table === '') {
                 continue;
             }
-            fwrite($handle, "DROP TABLE IF EXISTS `{$table}`;\n");
-            fwrite($handle, $createSql.";\n\n");
 
-            DB::table($table)->orderByRaw('1')->chunk(200, function ($rows) use ($handle, $table) {
+            $createSql = $this->createTableSql($driver, $table);
+            if ($createSql !== null) {
+                fwrite($handle, 'DROP TABLE IF EXISTS '.$this->quoteIdent($driver, $table).";\n");
+                fwrite($handle, $createSql.";\n\n");
+            }
+
+            DB::table($table)->orderByRaw('1')->chunk(200, function ($rows) use ($handle, $table, $driver) {
                 foreach ($rows as $row) {
                     $data = (array) $row;
-                    $cols = array_map(fn ($c) => '`'.str_replace('`', '``', $c).'`', array_keys($data));
+                    $cols = array_map(
+                        fn ($c) => $this->quoteIdent($driver, (string) $c),
+                        array_keys($data)
+                    );
                     $vals = array_map(function ($v) {
                         if ($v === null) {
                             return 'NULL';
@@ -697,15 +747,49 @@ class HubBackupService
                     }, array_values($data));
                     fwrite(
                         $handle,
-                        'INSERT INTO `'.$table.'` ('.implode(',', $cols).') VALUES ('.implode(',', $vals).");\n"
+                        'INSERT INTO '.$this->quoteIdent($driver, $table)
+                        .' ('.implode(',', $cols).') VALUES ('.implode(',', $vals).");\n"
                     );
                 }
             });
             fwrite($handle, "\n");
         }
 
-        fwrite($handle, "SET FOREIGN_KEY_CHECKS=1;\n");
+        if ($driver === 'mysql') {
+            fwrite($handle, "SET FOREIGN_KEY_CHECKS=1;\n");
+        }
         fclose($handle);
+    }
+
+    private function createTableSql(string $driver, string $table): ?string
+    {
+        if ($driver === 'mysql') {
+            $create = DB::selectOne('SHOW CREATE TABLE '.$this->quoteIdent($driver, $table));
+            $createSql = ((array) $create)['Create Table'] ?? null;
+
+            return is_string($createSql) ? $createSql : null;
+        }
+
+        if ($driver === 'sqlite') {
+            $row = DB::selectOne(
+                'SELECT sql FROM sqlite_master WHERE type = ? AND name = ?',
+                ['table', $table]
+            );
+            $sql = is_object($row) ? ((array) $row)['sql'] ?? null : null;
+
+            return is_string($sql) && $sql !== '' ? $sql : null;
+        }
+
+        return null;
+    }
+
+    private function quoteIdent(string $driver, string $ident): string
+    {
+        if ($driver === 'mysql') {
+            return '`'.str_replace('`', '``', $ident).'`';
+        }
+
+        return '"'.str_replace('"', '""', $ident).'"';
     }
 
     private function importLocalDatabase(string $sqlPath): void

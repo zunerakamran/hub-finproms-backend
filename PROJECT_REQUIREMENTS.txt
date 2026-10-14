@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-14 (NFR-SEC-APP: SQLi/XSS/CSRF/brute-force/malware/DDoS baseline)
+Last updated: 2026-10-14 (NFR-BACKUP-ENC: hub backup archives encrypted at rest)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -1357,6 +1357,16 @@ Notes:
 - Env (optional): CENTRAL_API_URL on content hubs for independent upload;
   HUB_BACKUP_SECRET shared fallback; per-hub backup_token auto-generated.
 - Capability: pa_manage_hub_backups (Power Admin platform checklist).
+- **Encryption at rest (NFR-BACKUP-ENC):** completed ZIP archives are encrypted
+  on disk with streaming AES-256-GCM (`HBENC1` header) when
+  `HUB_BACKUP_ENCRYPT_AT_REST=true` (default). Prefer a shared
+  `HUB_BACKUP_ENCRYPTION_KEY` (base64 32-byte) on Central **and** every content
+  hub so dual-store upload / Central download / remote restore can decrypt.
+  Without that key, a key derived from local `APP_KEY` is used (single-server
+  only). Legacy plaintext archives still restore/download. Download API decrypts
+  to a normal ZIP for the admin. `hub_backups.is_encrypted` records status.
+  Does not rewrite historical dumps per GDPR erasure (still residual for old
+  plaintext files until rotated by retention).
 
 
 --------------------------------------------------------------------------------
@@ -1477,7 +1487,8 @@ Personal-data inventory (controllers must keep this accurate):
   wc_template_requests.contact_details — phone, email, address, website
   firm_documents + SMC/GC/WC/support attachments — files + uploader identity
   advisor_import_batches — Excel + JSON lists of name/email
-  hub_backups — full DB dumps (highest residual risk; retention already in 6B)
+  hub_backups — full DB dumps (encrypted at rest via NFR-BACKUP-ENC; residual
+    risk remains for pre-encryption plaintext files until retention prunes them)
   support_tickets — free text, browser_info, attachments
 
 Lawful bases (document in Privacy Policy; typical for this product):
@@ -2077,6 +2088,9 @@ SECURITY HARDENING (phase 2 — 2026-10-04)
     WhiteLabelDatabaseService PDO/pgsql ssl options)
 [x] Hub backup & restore (section 6B): per-hub schedule from Central, dual store
     (hub local + Central), Backup now / download / restore, pa_manage_hub_backups
+[x] NFR-BACKUP-ENC (section 6B / 9.7): encrypt backup ZIPs at rest (AES-256-GCM
+    HBENC1); shared HUB_BACKUP_ENCRYPTION_KEY; decrypt on download/restore;
+    legacy plaintext still works; hub_backups.is_encrypted
 [ ] Future: TOTP authenticator 2FA for Power Admin (in addition to email OTP)
 [x] NFR-SEC-FW (section 9.5): application-layer IP deny + dangerous upload
     rejection (incl. SVG block) + optional ClamAV; see §8 NFR-SEC-FW + §9.5
@@ -2194,6 +2208,8 @@ Related but distinct
 - NFR-PERF — Concurrent performance / responsiveness under multi-user load
   (phases already tracked under section 8 Concurrent performance [x]).
 - NFR-AVAIL — Backup & restore / deploy resilience (section 6B).
+- NFR-BACKUP-ENC — Hub backup archives encrypted at rest (section 9.7) —
+  IMPLEMENTED (AES-256-GCM; shared HUB_BACKUP_ENCRYPTION_KEY).
 - NFR-PRIV — UK GDPR / data protection (section 6E).
 - NFR-AUDIT — Activity logs + compliance audit trail (sections 6A / 6C).
 - NFR-SEC-NAV — External link / copied-URL / cross-site entry hardening
@@ -2545,7 +2561,46 @@ Related but distinct
 - NFR-SEC (9.1) — monitoring & dependency scan reporting
 - NFR-SEC-NAV (9.4) — external navigation entry hardening
 - NFR-SEC-FW (9.5) — IP deny + upload malware gates
+- NFR-BACKUP-ENC (9.7) — backup archive encryption at rest
 - SECURITY HARDENING phase 1–2 — headers, cookies, secrets
+
+--------------------------------------------------------------------------------
+9.7 NFR-BACKUP-ENC — Hub backup encryption at rest
+--------------------------------------------------------------------------------
+Status: IMPLEMENTED (2026-10-14). Detail lives with section 6B; this NFR is the
+security statement for encrypted archives.
+
+Statement
+- Hub backup ZIP archives SHALL be encrypted at rest on disk so a filesystem
+  copy / hosting compromise does not expose plaintext SQL dumps and uploaded
+  files. Download and restore SHALL decrypt transparently for authorised
+  operators when the correct key is configured.
+
+Mechanism
+- Streaming AES-256-GCM with magic header `HBENC1` (`HubBackupEncryptedArchive`).
+- Config: `HUB_BACKUP_ENCRYPT_AT_REST`, `HUB_BACKUP_ENCRYPTION_KEY` (shared).
+- Create → zip → encrypt in place; receive/mirror preserve ciphertext;
+  restore/download decrypt to temp ZIP.
+- Column `hub_backups.is_encrypted`; legacy plaintext still supported.
+
+Ops
+- Generate one key; set identically on Central + all content hubs.
+- Rotate by setting a new key only after old archives are pruned/expired, or
+  keep the old key available until retention clears ciphertext encrypted with it
+  (v1 has no multi-key ring — rotate carefully).
+- Protect the key like APP_KEY; never commit it.
+
+Acceptance criteria
+  [x] New backups encrypted when encrypt_at_rest enabled + key available
+  [x] Download streams plaintext ZIP to Power Admin
+  [x] Restore works for encrypted and legacy plaintext archives
+  [x] Dual-store upload passes is_encrypted; Central does not double-encrypt
+  [x] Documented in §6B + §8 + this subsection; tests cover round-trip
+
+Related but distinct
+- NFR-GC-ENC — Generic Compliance field/file crypto (not backups)
+- NFR-AVAIL / §6B — schedule, dual store, retention
+- NFR-PRIV — erasure does not rewrite historical backup dumps
 
 ================================================================================
 END OF REQUIREMENTS
