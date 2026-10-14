@@ -31,8 +31,9 @@ return [
     |
     */
 
+    // Home `/` is intentionally omitted for authenticated users (SPA blocks
+    // paste/email of the main URL while logged in). Guests may still open `/`.
     'allowlist_exact' => [
-        '/',
         '/login',
         '/register',
         '/forgot-password',

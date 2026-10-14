@@ -2279,10 +2279,11 @@ When this is NOT (by itself) a high risk
 Product rule (desired behaviour)
   - ALLOW: authenticated user already inside the hub SPA; clicks in-app nav /
     router links / breadcrumbs; relative same-origin transitions.
-  - BLOCK or STEP-UP: first entry into an authenticated route when the
-    navigation context is external (Referer / document.referrer not our
-    origin, or no in-app “session continuity” marker), including:
-      - paste of full URL into address bar / new tab
+  - ALLOW (guests only): public home `/` from outside when not logged in.
+    Logged-in users opening `/` via paste / email / chat / other app → ERROR.
+  - BLOCK: first entry into an authenticated route (and home `/` when logged
+    in) when the navigation context is external, including:
+      - paste of full URL into address bar / new tab (including main home URL)
       - click from email, Slack, WhatsApp, etc.
       - top-level redirect from a third-party origin onto a protected route
   - On BLOCK: do NOT render the sensitive target page. CHOSEN UX = ERROR:
