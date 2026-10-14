@@ -886,6 +886,24 @@ class SecurityMonitoringService
             ],
             'create_incident' => true,
         ]);
+
+        // NFR-SEC-FW: optional temporary application-layer IP block after threshold.
+        if ($ip && config('security_firewall.auto_block_on_failed_login_threshold', false)) {
+            try {
+                app(FirewallService::class)->blockIpTemporarily(
+                    $ip,
+                    null,
+                    $request,
+                    sprintf(
+                        'Auto-blocked after %d failed logins within %d minutes.',
+                        $count,
+                        $window
+                    )
+                );
+            } catch (\Throwable) {
+                // Firewall must not break auth monitoring.
+            }
+        }
     }
 
     private function createIncidentFromEvent(Hub $hub, SecurityEvent $event): SecurityIncident

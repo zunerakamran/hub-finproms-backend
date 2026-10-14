@@ -58,7 +58,8 @@ class SettingController extends Controller
             'white_logo' => ['sometimes', 'file', 'image', 'max:5120'],
             'remove_white_logo' => ['sometimes', 'boolean'],
             // Favicons often use .ico; Laravel's "image" rule rejects that, so use mimes.
-            'favicon' => ['sometimes', 'file', 'mimes:ico,png,jpg,jpeg,gif,webp,svg', 'max:1024'],
+            // NFR-SEC-FW: SVG disallowed (scriptable); global upload middleware also blocks .svg.
+            'favicon' => ['sometimes', 'file', 'mimes:ico,png,jpg,jpeg,gif,webp', 'max:1024'],
             'remove_favicon' => ['sometimes', 'boolean'],
             'auth_bg_image' => ['sometimes', 'file', 'image', 'max:8192'],
             'remove_auth_bg_image' => ['sometimes', 'boolean'],

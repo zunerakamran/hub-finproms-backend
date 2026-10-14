@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-14 (NFR-SEC-NAV: external link / copied-URL navigation hardening)
+Last updated: 2026-10-14 (NFR-SEC-FW: application firewall + upload malware protection)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -1662,7 +1662,9 @@ a **security incident** for investigation. Minimum event types:
      - Attempts to read or mutate encrypted secrets (Stripe, hub DB, cPanel)
        when rejected or suspicious
      - Unusual export volume (GDPR export, hub backup download, advisor Excel)
-     - Upload of disallowed / suspicious file types (when mime allowlists exist)
+     - Upload of disallowed / suspicious file types (NFR-SEC-FW upload scan)
+     - Malware detected in upload / malware scan failure (when ClamAV enabled)
+     - Application firewall IP denied / temporary auto-block (NFR-SEC-FW)
 
   D) Platform / dependency health (ops-facing, still shown in the module)
      - Last successful dependency vulnerability scan result (composer audit /
@@ -1743,6 +1745,8 @@ Retention & GDPR
 
 Out of scope for v1 of this module
 - Full SIEM / IDS / WAF product replacement
+  (application-layer IP deny + upload scanning is NFR-SEC-FW / section 9.5 —
+   complementary, not a network WAF)
 - Network packet capture
 - Automatic exploit patching without human review
 - Customer-facing public status page
@@ -2074,7 +2078,9 @@ SECURITY HARDENING (phase 2 — 2026-10-04)
 [x] Hub backup & restore (section 6B): per-hub schedule from Central, dual store
     (hub local + Central), Backup now / download / restore, pa_manage_hub_backups
 [ ] Future: TOTP authenticator 2FA for Power Admin (in addition to email OTP)
-[ ] Future: mime allowlists on all uploads; disallow/sanitize SVG
+[x] NFR-SEC-FW (section 9.5): application-layer IP deny + dangerous upload
+    rejection (incl. SVG block) + optional ClamAV; see §8 NFR-SEC-FW + §9.5
+    (per-endpoint mime allowlists already exist on major upload routes)
 
 --------------------------------------------------------------------------------
 UK GDPR / DATA PROTECTION (section 2.2d + 6E) — Phase 1 backend done
@@ -2114,6 +2120,13 @@ UK GDPR / DATA PROTECTION (section 2.2d + 6E) — Phase 1 backend done
     navigationContinuity + ProtectedRoute guard; backend
     config/security_navigation.php + SafeFrontendRedirect +
     POST /api/security/external-navigation-blocked (optional secmon)
+[x] NFR-SEC-FW (section 9.5): application firewall + malware / upload
+    protection — DenyBlockedIps + ScanUploadedFiles on API group;
+    config/security_firewall.php; dangerous extension + SVG rejection;
+    optional ClamAV (MALWARE_SCAN_*); optional auto-block after failed-login
+    threshold; secmon events fw.ip_denied / fw.ip_auto_blocked /
+    data.upload_rejected / data.malware_detected; host/cPanel firewall remains
+    ops (not a full WAF product)
 
 ================================================================================
 9. NON-FUNCTIONAL REQUIREMENTS (NFRs)
@@ -2168,6 +2181,8 @@ Related but distinct
 - Support Tickets (3.3e) — human bug reports
 - GDPR ICO breach notification (6E.3) — legal duty; uses Security Monitoring
   for evidence when enabled
+- NFR-SEC-FW (section 9.5) — application firewall + upload malware gates that
+  feed events into this module
 
 --------------------------------------------------------------------------------
 9.2 Other NFRs (placeholders — expand as product owners add them)
@@ -2179,6 +2194,8 @@ Related but distinct
 - NFR-AUDIT — Activity logs + compliance audit trail (sections 6A / 6C).
 - NFR-SEC-NAV — External link / copied-URL / cross-site entry hardening
   (section 9.4) — IMPLEMENTED; product choice = show ERROR page.
+- NFR-SEC-FW — Application-layer firewall + upload malware protection
+  (section 9.5) — IMPLEMENTED (optional ClamAV off by default).
 (Add new NFR-xxx subsections here when working on further non-functional
  requirements; keep functional module detail in sections 3–6.)
 
@@ -2360,6 +2377,81 @@ Related but distinct
   - Login OTP / future TOTP — authentication step-up, complementary
   - Active sessions / force-logout — section 6B
   - Security Monitoring — section 6F / NFR-SEC (detection, not the gate itself)
+  - NFR-SEC-FW (section 9.5) — IP deny + malware/upload gates (not navigation)
+
+--------------------------------------------------------------------------------
+9.5 NFR-SEC-FW — Firewall and malware protection
+--------------------------------------------------------------------------------
+Status: IMPLEMENTED (2026-10-14) — application-layer controls in this backend.
+Optional ClamAV malware scanning is OFF by default (enable when clamscan is
+installed on the host). Host / cPanel / cloud firewall remains an ops duty.
+Cross-refs: section 6F (Security Monitoring events), NFR-SEC (section 9.1),
+SECURITY HARDENING phase 2 (headers / cookies), deferred mime/SVG item closed.
+
+Statement
+- The platform SHALL protect itself with firewall-style access controls and
+  malware / dangerous-upload protections appropriate to a multi-tenant hub
+  on shared hosting (cPanel), without requiring a commercial WAF appliance
+  inside the application repo.
+
+Product fulfilment (in-app / API)
+  A) Application firewall
+     - Deny list of client IPs (and optional CIDR) configured via
+       SECURITY_FIREWALL_DENIED_IPS / config/security_firewall.php.
+     - Middleware DenyBlockedIps on the API group returns HTTP 403 for denied
+       clients before controllers run.
+     - Optional temporary auto-block of an IP when Security Monitoring’s
+       failed-login threshold is crossed (SECURITY_FIREWALL_AUTO_BLOCK=true).
+     - Denied / auto-blocked attempts MAY record Security Monitoring events
+       (`fw.ip_denied`, `fw.ip_auto_blocked`) when the module is ON.
+  B) Malware / upload protection
+     - Middleware ScanUploadedFiles inspects every multipart upload on the API.
+     - Reject dangerous extensions (PHP webshells, executables, scripts, etc.)
+       and filenames that embed those extensions (e.g. invoice.php.jpg).
+     - Reject SVG uploads by default (scriptable); favicon validation no longer
+       allows svg.
+     - Optional ClamAV: when MALWARE_SCAN_ENABLED=true and `clamscan` (or
+       MALWARE_SCAN_BINARY) is available, scan file bytes; infected → reject
+       and record `data.malware_detected` (incident). If scanner missing:
+       refuse only when MALWARE_SCAN_REQUIRED=true; otherwise log and allow
+       (cPanel-friendly default).
+     - Rejected uploads record `data.upload_rejected` (or scan-failure types)
+       when Security Monitoring is enabled.
+  C) Existing complementary controls remain in force
+     - HTTP security headers (SecurityHeaders middleware)
+     - Rate limiters (auth / imports / wc-publish) + secmon rate-limit events
+     - Per-route mime allowlists on major upload endpoints
+
+Operational fulfilment (infra — outside Laravel code)
+- Operators SHALL keep the host firewall / fail2ban / provider WAF (if any)
+  enabled for the public IP and SSH; document in ops runbook.
+- Where ClamAV is required by policy, install and update virus definitions on
+  the server, then set MALWARE_SCAN_ENABLED=true (and REQUIRED if fail-closed
+  is mandated).
+
+Out of scope / explicit non-goals
+- Replacing a full network WAF / IDS / SIEM product (already out of scope in 6F)
+- Guaranteeing zero malware without host AV + patched OS
+- Scanning files already stored on disk from before this NFR (no retroactive
+  bulk re-scan job in v1)
+- Frontend-only changes (backend enforces uploads; SPA needs no gate)
+
+Acceptance criteria (for “done”)
+  [x] Documented in section 9.5 + section 8 checklist
+  [x] config/security_firewall.php + .env.example keys
+  [x] Denied IP receives 403 on API
+  [x] Dangerous extension / SVG / embedded dangerous extension uploads rejected
+  [x] Optional ClamAV wiring present (disabled by default)
+  [x] Optional auto-block after failed-login threshold (disabled by default)
+  [x] Security Monitoring event types documented in section 6F catalogue
+  [x] Feature tests: SecurityFirewallTest
+  [x] Favicon no longer accepts SVG
+
+Related but distinct
+- NFR-SEC / Security Monitoring (9.1) — detection & reporting; this NFR is the gate
+- NFR-SEC-NAV (9.4) — how users enter authenticated SPA pages
+- NFR-GC-ENC (9.3) — field encryption, not malware scanning
+- Host / cPanel firewall — ops, not application code
 
 ================================================================================
 END OF REQUIREMENTS

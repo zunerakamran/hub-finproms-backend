@@ -31,8 +31,10 @@ return Application::configure(basePath: dirname(__DIR__))
             \App\Http\Middleware\UseActingWhiteLabelWcDatabase::class,
         );
 
-        // Record successful mutating API requests (posts, imports, settings, etc.).
+        // NFR-SEC-FW + activity: IP deny, upload scan, headers, activity log.
         $middleware->appendToGroup('api', [
+            \App\Http\Middleware\DenyBlockedIps::class,
+            \App\Http\Middleware\ScanUploadedFiles::class,
             \App\Http\Middleware\SecurityHeaders::class,
             \App\Http\Middleware\LogApiActivity::class,
         ]);
