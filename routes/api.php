@@ -23,6 +23,7 @@ use App\Http\Controllers\Api\GeneralComplianceController;
 use App\Http\Controllers\Api\GeneralComplianceContentTypeController;
 use App\Http\Controllers\Api\SupportTicketController;
 use App\Http\Controllers\Api\SecurityMonitoringController;
+use App\Http\Controllers\Api\SecurityNavigationController;
 use App\Http\Controllers\Api\TaxonomyAddRequestController;
 use App\Http\Controllers\Api\WebsiteCompliance\ChangeRequestController as WcChangeRequestController;
 use App\Http\Controllers\Api\WebsiteCompliance\PageController as WcPageController;
@@ -102,6 +103,10 @@ Route::post('/stripe/webhook', StripeWebhookController::class);
 Route::get('/hub', [HubController::class, 'current']);
 Route::get('/version', [AppVersionController::class, 'show']);
 Route::get('/settings', [SettingController::class, 'publicIndex']);
+
+// NFR-SEC-NAV: SPA reports blocked external / pasted / email entry (optional secmon).
+Route::post('/security/external-navigation-blocked', [SecurityNavigationController::class, 'reportBlocked'])
+    ->middleware('throttle:60,1');
 
 // Public uploads (logos/favicons) — works without public/storage symlink
 Route::get('/media/{path}', [PublicStorageController::class, 'show'])

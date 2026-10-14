@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-13 (Security Monitoring module implemented)
+Last updated: 2026-10-14 (NFR-SEC-NAV: external link / copied-URL navigation hardening)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -2107,6 +2107,13 @@ UK GDPR / DATA PROTECTION (section 2.2d + 6E) — Phase 1 backend done
 [ ] NFR-SEC operational pipeline: Dependabot/Renovate + CI `composer audit`
     / `npm audit` in GitHub Actions; documented patch SLA (scan status is
     surfaced in Security Monitoring report via on-demand Monitor now)
+[x] NFR-SEC-NAV (section 9.4): external link / copied-URL / cross-site entry
+    hardening — in-app nav OK; paste / email / chat / redirect from another
+    (non-hub) app into protected routes shows ERROR page (do not open target);
+    email verify, password reset, Stripe return allowlisted; frontend
+    navigationContinuity + ProtectedRoute guard; backend
+    config/security_navigation.php + SafeFrontendRedirect +
+    POST /api/security/external-navigation-blocked (optional secmon)
 
 ================================================================================
 9. NON-FUNCTIONAL REQUIREMENTS (NFRs)
@@ -2170,6 +2177,8 @@ Related but distinct
 - NFR-AVAIL — Backup & restore / deploy resilience (section 6B).
 - NFR-PRIV — UK GDPR / data protection (section 6E).
 - NFR-AUDIT — Activity logs + compliance audit trail (sections 6A / 6C).
+- NFR-SEC-NAV — External link / copied-URL / cross-site entry hardening
+  (section 9.4) — IMPLEMENTED; product choice = show ERROR page.
 (Add new NFR-xxx subsections here when working on further non-functional
  requirements; keep functional module detail in sections 3–6.)
 
@@ -2213,6 +2222,143 @@ Related but distinct
 - Secret encryption (Stripe / hub DB / cPanel) — SECURITY HARDENING phase 1
 - NFR-SEC / Security Monitoring (section 9.1) — threat detection, not field crypto
 - NFR-PRIV / UK GDPR (section 6E) — broader personal-data programme
+- NFR-SEC-NAV (section 9.4) — how the user *enters* authenticated pages
+  (external link / copied URL), not field encryption
+
+--------------------------------------------------------------------------------
+9.4 NFR-SEC-NAV — External link / copied-URL / cross-site entry hardening
+--------------------------------------------------------------------------------
+Status: IMPLEMENTED (2026-10-14) — frontend guard + error page; backend
+allowlist config, SafeFrontendRedirect helper, optional secmon report API.
+Product choice: SHOW ERROR — do not open the target page when entry is from
+paste / email / chat / redirect from another (non-hub) app.
+Cross-refs: SECURITY HARDENING phase 2 (Sanctum SPA cookies + CSRF), session
+SameSite, section 6F (optional security events).
+
+Problem statement (product ask)
+- Each authenticated page has a shareable / bookmarkable URL.
+- If a user is already logged in and then:
+    (a) copies a hub URL from somewhere else and pastes it into the browser, or
+    (b) clicks a link to our application from an email / chat / third-party site
+        (including phishing emails that use a *real* hub URL), or
+    (c) arrives via a redirected URL that lands on our application from
+        somewhere else,
+  the browser may open that page while the existing session is still active.
+- Product goal: **in-app navigation** (living inside the application and moving
+  page-to-page via menus / in-app links / SPA router) SHALL continue to work
+  normally; **external entry** via pasted URL, email link, or cross-site
+  redirect SHALL NOT silently open the target authenticated page with the
+  existing session.
+
+When this IS a security risk (threat model)
+  R1) Cross-site request forgery (CSRF) — attacker site or email-triggered
+      navigation causes a *state-changing* action while the user is logged in
+      (especially unsafe if any sensitive action is a GET without CSRF).
+      Mitigated today for API mutations by Sanctum SPA CSRF + same-origin
+      cookie auth (SECURITY HARDENING phase 2). Residual risk if any
+      privileged GET endpoints mutate state.
+  R2) Session riding / forced navigation — user is logged in; attacker tricks
+      them into opening a real hub URL (phishing email with legitimate link).
+      Page content may be visible without a fresh login; attacker may combine
+      this with social engineering (“confirm this approval”).
+  R3) Open redirect abuse — our app redirects to an attacker URL after login
+      or after a flow (credential phishing). Separate control: allowlist
+      redirect targets; never trust raw `?redirect=` / `?next=` from outside.
+  R4) Tab / shared-device exposure — pasted deep links reopen sensitive screens
+      on a shared browser that still has a live session.
+  R5) NOT the same as classic phishing of a *fake* login page on another
+      domain — that is user education + brand URL clarity + optional 2FA.
+      NFR-SEC-NAV does not stop fake sites; it hardens entry into *our* app.
+
+When this is NOT (by itself) a high risk
+  - Opening a read-only page via a real URL while cookies are valid is normal
+    browser behaviour if mutations require POST + CSRF and authorisation.
+  - Password-reset, email-verification, Stripe return, and invite links MUST
+    remain reachable from email without being blocked by this NFR (allowlist).
+
+Product rule (desired behaviour)
+  - ALLOW: authenticated user already inside the hub SPA; clicks in-app nav /
+    router links / breadcrumbs; relative same-origin transitions.
+  - BLOCK or STEP-UP: first entry into an authenticated route when the
+    navigation context is external (Referer / document.referrer not our
+    origin, or no in-app “session continuity” marker), including:
+      - paste of full URL into address bar / new tab
+      - click from email, Slack, WhatsApp, etc.
+      - top-level redirect from a third-party origin onto a protected route
+  - On BLOCK: do NOT render the sensitive target page. CHOSEN UX = ERROR:
+      D) Error page (SELECTED) — show a clear security error, e.g.
+         “This page cannot be opened from an external link, email, chat,
+         or another application. Please open the Hub from the official
+         login / dashboard and navigate inside the application.”
+         Do not mount the requested protected view. Provide a safe button
+         to go to login or `/my-dashboard` (same-origin only). Optional:
+         auto-log the attempt when Security Monitoring is ON.
+      (Alternatives kept for reference only — not selected:)
+      A) Soft gate — “Continue into Hub?” interstitial then allow deep link.
+      B) Re-auth — require password and/or login OTP again, then continue.
+      C) Strip deep link — ignore path; send user to `/my-dashboard` silently.
+
+Recommended technical approach (implement in BOTH repos when approved)
+  Backend (hub-finproms-backend)
+  1) Keep / strengthen cookie posture:
+     - Prefer `SESSION_SAME_SITE=strict` (or Sanctum-equivalent) so browsers
+       do NOT send session cookies on cross-site top-level navigations from
+       email/other sites. Same-site in-app use still works.
+     - Keep `httpOnly`, `secure` (HTTPS), Sanctum CSRF for state-changing APIs.
+  2) Never rely on Referer alone (browsers strip it); treat missing Referer
+     as untrusted for *entry policy*, not as proof of legitimacy.
+  3) Allowlist external-entry paths that MUST work from email / payment
+     providers: email verify, password reset, Stripe success/cancel, invite
+     accept, public marketing pages (if any). Document the allowlist in
+     config (e.g. `config/security_navigation.php`).
+  4) Optional: record Security Monitoring events when external entry is
+     blocked / stepped-up (`nav.external_entry_blocked`) when `security_monitoring`
+     is ON (section 6F).
+  5) Open-redirect hardening: validate post-login / return URLs against hub
+     `frontend_url` allowlist only.
+
+  Frontend (hub-finproms-frontend)
+  1) Maintain an in-app “navigation continuity” marker (e.g. sessionStorage
+     flag set after successful login / OTP and refreshed on in-app router
+     transitions). Cleared when the tab/session ends.
+  2) Router guard on protected routes: if continuity marker is absent OR
+     entry looks external (referrer from email/chat/other app, paste into
+     address bar / new tab, redirect from non-hub origin) → show the
+     NFR-SEC-NAV error page (mode D); do not mount the target view.
+  3) In-app `<Link>` / router.push always sets continuity; hard refresh may
+     keep marker (sessionStorage) so F5 inside the app still works — product
+     may optionally treat hard refresh as step-up (stricter).
+  4) Do not store auth tokens in localStorage (already: Sanctum cookies).
+
+Acceptance criteria (for “done” — when implementation is approved)
+  [x] Documented product choice: mode D — show ERROR page (2026-10-14)
+  [x] In-app menu / SPA navigation between authenticated pages works unchanged
+      (continuity marked at login / OTP / verify; F5 keeps sessionStorage)
+  [x] Paste of a protected deep URL shows the security ERROR (target not opened)
+  [x] Click from email / chat / other non-hub app / external redirect into a
+      protected route shows the same ERROR; allowlisted flows still work
+  [x] Error copy explains that pages must be opened by navigating inside the Hub
+  [x] Error page offers only safe same-origin actions (login / dashboard / home)
+  [x] Password reset, email verification, Stripe return still work (allowlist)
+  [x] Session cookies: SameSite strategy documented in .env.example; CSRF still
+      required for mutations
+  [x] Open redirects to non-allowlisted hosts rejected (SafeFrontendRedirect)
+  [x] Section 8 checklist updated; optional secmon event
+      `nav.external_entry_blocked` via report API when module enabled
+  [x] Backend + frontend both updated (separate repos)
+
+Out of scope / explicit non-goals
+  - Making URLs “unshareable” forever (impossible against a determined user
+    who is already inside the app and copies from the address bar after gate).
+  - Stopping phishing sites on *other* domains.
+  - Replacing Capabilities / role checks — authorisation remains mandatory.
+  - Breaking public unauthenticated pages.
+
+Related but distinct
+  - CSRF / Sanctum SPA cookies — SECURITY HARDENING phase 2 (already shipped)
+  - Login OTP / future TOTP — authentication step-up, complementary
+  - Active sessions / force-logout — section 6B
+  - Security Monitoring — section 6F / NFR-SEC (detection, not the gate itself)
 
 ================================================================================
 END OF REQUIREMENTS
