@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-14 (NFR-SEC-FW: application firewall + upload malware protection)
+Last updated: 2026-10-14 (NFR-SEC-APP: SQLi/XSS/CSRF/brute-force/malware/DDoS baseline)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -2127,6 +2127,10 @@ UK GDPR / DATA PROTECTION (section 2.2d + 6E) — Phase 1 backend done
     threshold; secmon events fw.ip_denied / fw.ip_auto_blocked /
     data.upload_rejected / data.malware_detected; host/cPanel firewall remains
     ops (not a full WAF product)
+[x] NFR-SEC-APP (section 9.6): protection against SQL injection, XSS, CSRF,
+    brute-force, malware, and app-layer DDoS/abuse — Eloquent/bindings;
+    SafeHtml on Terms/Privacy/Cookies + SPA DOMPurify; Sanctum CSRF;
+    auth+API rate limiters; NFR-SEC-FW malware; volumetric DDoS = ops/CDN
 
 ================================================================================
 9. NON-FUNCTIONAL REQUIREMENTS (NFRs)
@@ -2196,6 +2200,8 @@ Related but distinct
   (section 9.4) — IMPLEMENTED; product choice = show ERROR page.
 - NFR-SEC-FW — Application-layer firewall + upload malware protection
   (section 9.5) — IMPLEMENTED (optional ClamAV off by default).
+- NFR-SEC-APP — SQLi / XSS / CSRF / brute-force / malware / DDoS baseline
+  (section 9.6) — IMPLEMENTED (network DDoS remains ops/CDN).
 (Add new NFR-xxx subsections here when working on further non-functional
  requirements; keep functional module detail in sections 3–6.)
 
@@ -2451,7 +2457,95 @@ Related but distinct
 - NFR-SEC / Security Monitoring (9.1) — detection & reporting; this NFR is the gate
 - NFR-SEC-NAV (9.4) — how users enter authenticated SPA pages
 - NFR-GC-ENC (9.3) — field encryption, not malware scanning
+- NFR-SEC-APP (9.6) — broader attack-surface baseline (includes malware cross-ref)
 - Host / cPanel firewall — ops, not application code
+
+--------------------------------------------------------------------------------
+9.6 NFR-SEC-APP — Protection against SQLi, XSS, CSRF, brute-force, malware, DDoS
+--------------------------------------------------------------------------------
+Status: IMPLEMENTED (2026-10-14) — formalises existing hardening + closes gaps
+(SafeHtml on save, global API throttle, stronger auth throttle keys).
+Volumetric / network DDoS remains an ops / CDN / host-firewall duty — Laravel
+rate limits are application-layer abuse mitigation only.
+
+Statement
+- The platform SHALL protect against SQL injection, cross-site scripting (XSS),
+  cross-site request forgery (CSRF), brute-force authentication attacks, and
+  malware in uploads, and SHALL apply application-layer throttling against
+  abusive / flood traffic. Network-layer DDoS absorption (CDN, provider WAF,
+  host firewall) SHALL be maintained operationally outside this codebase.
+
+Product fulfilment
+
+  A) SQL injection
+     - All user-influenced queries use Eloquent / query builder parameter
+       binding. Raw SQL (`whereRaw` / `orderByRaw` / `selectRaw`) MUST use
+       placeholders or static fragments only — no string concatenation of
+       request input into SQL.
+     - Validation of inputs before persistence remains mandatory.
+
+  B) XSS (cross-site scripting)
+     - API JSON responses carry restrictive CSP via SecurityHeaders
+       (`default-src 'none'` for non-document APIs).
+     - Stored rich HTML (Terms / Privacy / Cookie notice) is sanitized on
+       save with `App\Support\SafeHtml` (allowlist; strips script / handlers /
+       javascript: URLs) when SECURITY_SANITIZE_RICH_HTML=true.
+     - SPA uses DOMPurify (`sanitizeRichText`) before `dangerouslySetInnerHTML`
+       (CookieBanner + RichTextDisplay). Frontend remains the primary render
+       gate for HTML pages.
+     - Scriptable uploads (SVG, PHP, etc.) blocked by NFR-SEC-FW.
+
+  C) CSRF
+     - Sanctum SPA stateful cookies + CSRF (`statefulApi`, ValidateCsrfToken)
+       for mutating API calls from the first-party frontend (SECURITY
+       HARDENING phase 2). CORS credentials allowlist FRONTEND_URL.
+     - Bearer personal-access tokens (if used) are not CSRF-vulnerable the
+       same way; cookie SPA is the primary browser auth mode.
+     - NFR-SEC-NAV reduces session-riding via external deep links.
+
+  D) Brute-force
+     - Named limiter `auth` (SECURITY_AUTH_RATE_PER_MINUTE, default 20/min)
+       keyed by IP and email when present; applied to login / register /
+       password reset / OTP routes.
+     - Login OTP attempt caps + resend throttle; password-reset broker throttle.
+     - Security Monitoring records failed logins and escalates on threshold;
+       optional SECURITY_FIREWALL_AUTO_BLOCK temporary IP deny (NFR-SEC-FW).
+
+  E) Malware
+     - Delivered by NFR-SEC-FW (section 9.5): upload scan middleware, dangerous
+       extension / SVG rejection, optional ClamAV.
+
+  F) DDoS / flood abuse (application layer)
+     - Global named limiter `api` (SECURITY_API_RATE_PER_MINUTE, default 120/min
+       per user or IP) via `throttleApi('api')`.
+     - Additional tighter limiters: `imports`, `wc-publish`, `auth`.
+     - Stripe webhook excluded from global throttle (burst deliveries).
+     - Rate-limit trips may record `api.rate_limited` in Security Monitoring.
+     - NOT a substitute for CDN / cloud DDoS protection or host firewall.
+
+Operational fulfilment (out of app code)
+- Keep cPanel / host firewall, fail2ban (or equivalent), TLS, and optional
+  CDN/WAF in front of public hosts.
+- Patch OS and run dependency audits (NFR-SEC CI still optional).
+- Install ClamAV on the server if malware fail-closed policy is required.
+
+Acceptance criteria (for “done”)
+  [x] Documented in section 9.6 + section 8 checklist
+  [x] Eloquent / bound-query convention documented (no unbound request SQL)
+  [x] SafeHtml on Terms / Privacy / Cookie updates + unit tests
+  [x] SPA CookieBanner uses DOMPurify sanitizeRichText
+  [x] Sanctum CSRF / stateful API remains enabled (phase 2)
+  [x] Auth throttle keyed by IP (+ email); feature test asserts 429
+  [x] Global API rate limiter + env keys in .env.example
+  [x] Malware covered by cross-ref to NFR-SEC-FW
+  [x] Explicit: volumetric DDoS = ops/CDN, not Laravel alone
+  [x] Security headers present on API responses (feature test)
+
+Related but distinct
+- NFR-SEC (9.1) — monitoring & dependency scan reporting
+- NFR-SEC-NAV (9.4) — external navigation entry hardening
+- NFR-SEC-FW (9.5) — IP deny + upload malware gates
+- SECURITY HARDENING phase 1–2 — headers, cookies, secrets
 
 ================================================================================
 END OF REQUIREMENTS

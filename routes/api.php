@@ -98,7 +98,9 @@ Route::prefix('auth')->group(function () {
     });
 });
 
-Route::post('/stripe/webhook', StripeWebhookController::class);
+// Stripe webhooks must not share the global API throttle (burst deliveries).
+Route::post('/stripe/webhook', StripeWebhookController::class)
+    ->withoutMiddleware([\Illuminate\Routing\Middleware\ThrottleRequests::class]);
 
 Route::get('/hub', [HubController::class, 'current']);
 Route::get('/version', [AppVersionController::class, 'show']);

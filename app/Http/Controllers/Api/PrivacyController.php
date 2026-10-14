@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Hub;
 use App\Services\ActingHubService;
 use App\Support\PrivacyPolicyDefaults;
+use App\Support\SafeHtml;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -39,6 +40,9 @@ class PrivacyController extends Controller
         ]);
 
         $content = trim($validated['content']);
+        if (config('security_app.sanitize_rich_html', true)) {
+            $content = SafeHtml::sanitize($content);
+        }
         if ($content === '' || strip_tags($content) === '') {
             return response()->json([
                 'message' => 'Privacy Policy content cannot be empty.',

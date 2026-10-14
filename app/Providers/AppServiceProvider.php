@@ -27,8 +27,25 @@ class AppServiceProvider extends ServiceProvider
             URL::forceScheme('https');
         }
 
+        // NFR-SEC-APP: brute-force — per IP and per email+IP when email present.
         RateLimiter::for('auth', function (Request $request) {
-            return Limit::perMinute(20)->by($request->ip());
+            $perMinute = max(5, (int) config('security_app.auth_requests_per_minute', 20));
+            $email = strtolower(trim((string) $request->input('email', '')));
+            $by = $email !== ''
+                ? 'auth:'.$request->ip().'|'.$email
+                : 'auth:'.$request->ip();
+
+            return Limit::perMinute($perMinute)->by($by);
+        });
+
+        // NFR-SEC-APP: global API ceiling (app-layer abuse / volumetric mitigation).
+        RateLimiter::for('api', function (Request $request) {
+            $perMinute = max(30, (int) config('security_app.api_requests_per_minute', 120));
+            $key = $request->user()?->id
+                ? 'api:user:'.$request->user()->id
+                : 'api:ip:'.$request->ip();
+
+            return Limit::perMinute($perMinute)->by($key);
         });
 
         RateLimiter::for('imports', function (Request $request) {

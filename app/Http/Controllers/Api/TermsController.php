@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Hub;
 use App\Services\ActingHubService;
+use App\Support\SafeHtml;
 use App\Support\TermsAndConditionsDefaults;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -39,6 +40,9 @@ class TermsController extends Controller
         ]);
 
         $content = trim($validated['content']);
+        if (config('security_app.sanitize_rich_html', true)) {
+            $content = SafeHtml::sanitize($content);
+        }
         if ($content === '' || strip_tags($content) === '') {
             return response()->json([
                 'message' => 'Terms & Conditions content cannot be empty.',

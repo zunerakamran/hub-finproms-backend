@@ -31,6 +31,9 @@ return Application::configure(basePath: dirname(__DIR__))
             \App\Http\Middleware\UseActingWhiteLabelWcDatabase::class,
         );
 
+        // NFR-SEC-APP: global API rate ceiling (Stripe webhook excluded in routes).
+        $middleware->throttleApi('api');
+
         // NFR-SEC-FW + activity: IP deny, upload scan, headers, activity log.
         $middleware->appendToGroup('api', [
             \App\Http\Middleware\DenyBlockedIps::class,
@@ -58,12 +61,14 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->reportable(function (\Illuminate\Http\Exceptions\ThrottleRequestsException $e): void {
             try {
                 $request = request();
-                $limiter = 'unknown';
-                if ($request && str_contains((string) $request->path(), 'auth')) {
+                $path = (string) ($request?->path() ?? '');
+                $limiter = 'api';
+                if (str_contains($path, 'auth')) {
                     $limiter = 'auth';
-                } elseif ($request && str_contains((string) $request->path(), 'import')) {
+                } elseif (str_contains($path, 'import')) {
                     $limiter = 'imports';
-                } elseif ($request && str_contains((string) $request->path(), 'website-compliance')) {
+                } elseif (str_contains($path, 'website-compliance')
+                    && (str_contains($path, 'publish') || str_contains($path, 'approve'))) {
                     $limiter = 'wc-publish';
                 }
 
