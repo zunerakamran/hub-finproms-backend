@@ -3,9 +3,13 @@
 namespace App\Models;
 
 use App\Models\WebsiteCompliance\UsesWcDatabaseContext;
+use App\Services\ActingHubService;
+use App\Services\CapabilitiesMatrixService;
+use App\Services\HubService;
 use App\Support\ComplianceSupportingFiles;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 
 class GeneralComplianceRequestAttachment extends Model
@@ -66,12 +70,12 @@ class GeneralComplianceRequestAttachment extends Model
 
     public function resolvedFileUrl(): ?string
     {
-        // Encrypted (and preferred) path: authenticated API download — never /storage/...
+        // Encrypted (and preferred) path: authenticated API preview — never /storage/...
         if ($this->id && $this->isStoredEncrypted()) {
             return url('/api/gc/file/'.$this->id);
         }
 
-        // Legacy plaintext public-disk rows: still serve via auth download so the UI
+        // Legacy plaintext public-disk rows: still serve via auth endpoint so the UI
         // can use one fetch-with-token pattern for all GC files.
         if ($this->id && filled($this->file_path)) {
             return url('/api/gc/file/'.$this->id);
@@ -95,12 +99,52 @@ class GeneralComplianceRequestAttachment extends Model
     }
 
     /**
+     * Authenticated URL that forces Content-Disposition: attachment (when permitted).
+     */
+    public function resolvedDownloadUrl(): ?string
+    {
+        $preview = $this->resolvedFileUrl();
+        if ($preview === null || ! $this->id) {
+            return null;
+        }
+
+        // Only append for the authenticated GC file endpoint — not legacy public URLs.
+        if (! str_contains($preview, '/api/gc/file/')) {
+            return $preview;
+        }
+
+        return $preview.(str_contains($preview, '?') ? '&' : '?').'download=1';
+    }
+
+    /**
+     * Whether the current actor may force-download this file (hub capability).
+     */
+    public function currentActorMayDownload(): bool
+    {
+        $user = Auth::user();
+        if (! $user instanceof User) {
+            return false;
+        }
+
+        $hub = app(ActingHubService::class)->capabilityHub($user, 'gc_download_attachments');
+        if (! $hub instanceof Hub) {
+            $hub = app(HubService::class)->current();
+        }
+
+        $matrix = app(CapabilitiesMatrixService::class);
+        $role = $matrix->effectiveRoleFor($user);
+
+        return $matrix->roleCan($hub, $role, 'gc_download_attachments');
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function toApiArray(): array
     {
         $source = $this->source;
         $kind = $this->kind ?: self::KIND_ATTACHMENT;
+        $canDownload = $this->currentActorMayDownload();
 
         return [
             'id' => $this->id,
@@ -108,7 +152,10 @@ class GeneralComplianceRequestAttachment extends Model
             'kind' => $kind,
             'original_name' => $this->original_name,
             'file_path' => $this->file_path,
+            // file_url opens as in-hub preview (Content-Disposition: inline).
             'file_url' => $this->resolvedFileUrl(),
+            'download_url' => $canDownload ? $this->resolvedDownloadUrl() : null,
+            'can_download' => $canDownload,
             'is_encrypted' => $this->isStoredEncrypted(),
             'mime_type' => $this->mime_type,
             'size_bytes' => $this->size_bytes,

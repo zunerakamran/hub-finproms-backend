@@ -167,7 +167,11 @@ class GeneralComplianceController extends Controller
     }
 
     /**
-     * Download a GC attachment / supporting file (decrypts at rest when encrypted).
+     * Preview (default) or download a GC attachment / supporting file.
+     *
+     * Decrypts at rest when encrypted. Default Content-Disposition is inline so the
+     * hub UI can iframe / open the file without an immediate Save As. Pass
+     * ?download=1 (requires gc_download_attachments) to force a download.
      *
      * Uses numeric {id} only. Avoid Content-Length (LiteSpeed Brotli rewrites the body
      * and a mismatched Content-Length becomes an HTTP/2 500). Never let report() throw.
@@ -207,6 +211,15 @@ class GeneralComplianceController extends Controller
                 return $this->downloadError($request, 'You do not have permission to view this file.', 403);
             }
 
+            $forceDownload = $request->boolean('download');
+            if ($forceDownload && ! $this->actorMayDownloadGcAttachments($hub, $user)) {
+                return $this->downloadError(
+                    $request,
+                    'Downloading Generic Compliance files is not enabled for your role on this hub.',
+                    403
+                );
+            }
+
             $path = (string) ($attachment->file_path ?? '');
             if ($path === '') {
                 return $this->downloadError($request, 'Attachment #'.$attachment->id.' has an empty file_path in the database.', 404);
@@ -238,12 +251,13 @@ class GeneralComplianceController extends Controller
                 (string) ($attachment->original_name ?: ('gc-file-'.$attachment->id))
             );
             $mime = (string) ($attachment->mime_type ?: 'application/octet-stream');
+            $disposition = $forceDownload ? 'attachment' : 'inline';
 
             // Do NOT set Content-Length: LiteSpeed may Brotli-compress and then reject
             // the response (HTTP/2 Content-Length mismatch → opaque 500).
             return response($bytes, 200, [
                 'Content-Type' => $mime,
-                'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+                'Content-Disposition' => $disposition.'; filename="'.$filename.'"',
                 'X-Content-Type-Options' => 'nosniff',
                 'Cache-Control' => 'private, no-store, no-transform',
                 'Content-Encoding' => 'identity',
@@ -264,6 +278,16 @@ class GeneralComplianceController extends Controller
                 500
             );
         }
+    }
+
+    /**
+     * Whether the actor may force-download GC files (vs in-hub preview only).
+     */
+    private function actorMayDownloadGcAttachments(Hub $hub, User $user): bool
+    {
+        $role = $this->matrix->effectiveRoleFor($user);
+
+        return $this->matrix->roleCan($hub, $role, 'gc_download_attachments');
     }
 
     /**

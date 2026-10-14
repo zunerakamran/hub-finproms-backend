@@ -614,6 +614,7 @@ class Hub extends Model
         'gc_view_all_requests',
         'gc_view_reports',
         'gc_manage_content_types',
+        'gc_download_attachments',
     ];
 
     /**
@@ -1489,6 +1490,13 @@ class Hub extends Model
         'gc_manage_content_types' => [
             'label' => 'Manage general compliance content types',
             'description' => 'Add, edit, and delete content type options shown in the General Compliance submit dropdown.',
+            'group' => self::GROUP_GENERAL_COMPLIANCE,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'gc_download_attachments' => [
+            'label' => 'Download general compliance attachments',
+            'description' => 'Save Generic Compliance attachment / supporting files to the device. Files always open as an in-hub preview first; when this is off the download control is hidden and forced downloads are blocked.',
             'group' => self::GROUP_GENERAL_COMPLIANCE,
             'default_shared' => false,
             'default_white_label' => false,

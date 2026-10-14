@@ -99,6 +99,7 @@ class GeneralComplianceEncryptionTest extends TestCase
         $caps = is_array($hub->role_capabilities) ? $hub->role_capabilities : [];
         $caps[User::ROLE_USER]['gc_submit_request'] = true;
         $caps[User::ROLE_USER]['gc_view_own_requests'] = true;
+        $caps[User::ROLE_USER]['gc_download_attachments'] = true;
         $hub->role_capabilities = $caps;
         $hub->save();
         app(HubService::class)->forgetCurrentCache();
@@ -139,10 +140,71 @@ class GeneralComplianceEncryptionTest extends TestCase
         );
 
         Sanctum::actingAs($submitter);
-        $response = $this->get('/api/gc/file/'.$attachment->id);
-        $response->assertOk();
-        $this->assertSame('PLAINTEXT-BYTES', $response->getContent());
-        $response->assertHeader('Content-Disposition');
+
+        // Default: in-hub preview (inline) — no immediate Save As.
+        $preview = $this->get('/api/gc/file/'.$attachment->id);
+        $preview->assertOk();
+        $this->assertSame('PLAINTEXT-BYTES', $preview->getContent());
+        $preview->assertHeader('Content-Disposition', 'inline; filename="notes.pdf"');
+
+        // Explicit download when capability is on.
+        $download = $this->get('/api/gc/file/'.$attachment->id.'?download=1');
+        $download->assertOk();
+        $this->assertSame('PLAINTEXT-BYTES', $download->getContent());
+        $download->assertHeader('Content-Disposition', 'attachment; filename="notes.pdf"');
+
+        $payload = $attachment->toApiArray();
+        $this->assertTrue($payload['can_download']);
+        $this->assertStringContainsString('download=1', (string) $payload['download_url']);
+    }
+
+    public function test_gc_file_download_blocked_without_capability(): void
+    {
+        Storage::fake('gc_encrypted');
+
+        $hub = $this->createHub();
+        $caps = is_array($hub->role_capabilities) ? $hub->role_capabilities : [];
+        $caps[User::ROLE_USER]['gc_submit_request'] = true;
+        $caps[User::ROLE_USER]['gc_view_own_requests'] = true;
+        $caps[User::ROLE_USER]['gc_download_attachments'] = false;
+        $hub->role_capabilities = $caps;
+        $hub->save();
+        app(HubService::class)->forgetCurrentCache();
+
+        GeneralComplianceContentType::query()->create(['name' => 'Brochure']);
+
+        $firm = Firm::query()->create([
+            'name' => 'Firm Enc',
+            'compliance_visible_to_own' => true,
+        ]);
+        $submitter = User::factory()->create([
+            'role' => User::ROLE_USER,
+            'firm_id' => $firm->id,
+        ]);
+
+        $compliance = app(GeneralComplianceService::class)->submit($hub, $submitter, [
+            'description' => 'Preview only',
+            'content_type' => 'Brochure',
+            'attachments' => [
+                UploadedFile::fake()->createWithContent('secret.pdf', 'SECRET'),
+            ],
+        ]);
+
+        $attachment = $compliance->currentVersionRow->attachments->first();
+        $this->assertNotNull($attachment);
+
+        Sanctum::actingAs($submitter);
+
+        $this->get('/api/gc/file/'.$attachment->id)
+            ->assertOk()
+            ->assertHeader('Content-Disposition', 'inline; filename="secret.pdf"');
+
+        $this->getJson('/api/gc/file/'.$attachment->id.'?download=1')
+            ->assertForbidden();
+
+        $payload = $attachment->toApiArray();
+        $this->assertFalse($payload['can_download']);
+        $this->assertNull($payload['download_url']);
     }
 
     public function test_gc_file_download_requires_authentication(): void

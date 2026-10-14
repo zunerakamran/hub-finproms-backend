@@ -16,7 +16,7 @@ use Throwable;
  *
  * Text: description / feedback / future_feedback on version rows.
  * Files: migrate public-disk attachments onto gc_encrypted disk (GCENC1 ciphertext).
- * Downloads remain via authenticated GET /api/gc/file/{id}.
+ * Preview / download remain via authenticated GET /api/gc/file/{id} (?download=1 to save).
  */
 class EncryptGeneralComplianceCommand extends Command
 {
