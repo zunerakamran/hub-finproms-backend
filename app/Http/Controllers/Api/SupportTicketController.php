@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\ActingHubService;
 use App\Services\HubService;
 use App\Services\SupportTicketService;
+use App\Support\InputSanitizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -121,6 +122,11 @@ class SupportTicketController extends Controller
             ],
         ]);
 
+        $validated = InputSanitizer::plainKeys($validated, [
+            'subject', 'module_area', 'category', 'priority', 'page_url', 'browser_info',
+        ]);
+        $validated = InputSanitizer::richHtmlKeys($validated, ['description']);
+
         $ticket = $this->tickets->submit($hub, $user, [
             'subject' => $validated['subject'],
             'module_area' => $validated['module_area'],
@@ -155,6 +161,8 @@ class SupportTicketController extends Controller
             ],
         ]);
 
+        $validated = InputSanitizer::richHtmlKeys($validated, ['comment']);
+
         $ticket = $this->tickets->changeStatus($hub, $user, $supportTicket, [
             'status' => $validated['status'],
             'comment' => $validated['comment'] ?? null,
@@ -182,6 +190,8 @@ class SupportTicketController extends Controller
                 'max:'.SupportTicketService::MAX_ATTACHMENT_KB,
             ],
         ]);
+
+        $validated = InputSanitizer::richHtmlKeys($validated, ['body']);
 
         $ticket = $this->tickets->addComment($hub, $user, $supportTicket, [
             'body' => $validated['body'],

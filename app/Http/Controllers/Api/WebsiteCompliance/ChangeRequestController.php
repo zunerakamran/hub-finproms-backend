@@ -20,6 +20,7 @@ use App\Services\WebsiteCompliance\CpanelSyncService;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
 use App\Support\ApiListResponse;
 use App\Support\ComplianceSupportingFiles;
+use App\Support\InputSanitizer;
 use App\Support\PlainText;
 use App\Support\WebsiteCompliance\WcDatabaseContext;
 use Carbon\Carbon;
@@ -54,8 +55,8 @@ class ChangeRequestController extends Controller
             $request->validate(array_merge([
                 'section_edits' => 'required|array|min:1',
                 'section_edits.*.section_id' => ['required', Rule::exists(Section::class, 'id')],
-                'section_edits.*.proposed_content' => 'required|string',
-                'section_edits.*.current_content' => 'nullable|string',
+                'section_edits.*.proposed_content' => ['required', 'string', 'max:500000'],
+                'section_edits.*.current_content' => ['nullable', 'string', 'max:500000'],
             ], ComplianceSupportingFiles::optionalUploadRules()));
 
             $supportingFiles = ComplianceSupportingFiles::fromRequest($request);
@@ -104,25 +105,25 @@ class ChangeRequestController extends Controller
             return response()->json($changeRequest->fresh(['editor', 'onBehalfBy', 'section', 'currentVersionRow.supportingFiles', 'versions.supportingFiles'])->toApiArray(includeVersions: true), 201);
         }
 
-        $request->validate(array_merge([
+        $validated = $request->validate(array_merge([
             'section_id' => ['required', Rule::exists(Section::class, 'id')],
-            'proposed_content' => 'required|string',
-            'current_content' => 'nullable|string',
+            'proposed_content' => ['required', 'string', 'max:500000'],
+            'current_content' => ['nullable', 'string', 'max:500000'],
         ], ComplianceSupportingFiles::optionalUploadRules()));
 
         $supportingFiles = ComplianceSupportingFiles::fromRequest($request);
 
         $edits = $this->workflow->prepareAndLockEdits([
             [
-                'section_id' => (int) $request->section_id,
-                'proposed_content' => $request->proposed_content,
-                'current_content' => $request->current_content,
+                'section_id' => (int) $validated['section_id'],
+                'proposed_content' => $validated['proposed_content'],
+                'current_content' => $validated['current_content'] ?? null,
             ],
         ], $subject, $user);
         $proposedContent = json_encode($edits);
 
         $changeRequest = ChangeRequest::create([
-            'section_id' => $request->section_id,
+            'section_id' => $validated['section_id'],
             'editor_id' => $editorId,
             'on_behalf_by_user_id' => $onBehalfById,
             'proposed_content' => $proposedContent,
@@ -712,8 +713,8 @@ class ChangeRequestController extends Controller
 
     public function approveWithFeedback(Request $request, int $id): JsonResponse
     {
-        $request->validate(array_merge([
-            'feedback' => 'required|string|max:10000',
+        $validated = $request->validate(array_merge([
+            'feedback' => ['required', 'string', 'max:10000'],
         ], ComplianceSupportingFiles::optionalUploadRules()));
 
         $user = $request->user();
@@ -723,7 +724,7 @@ class ChangeRequestController extends Controller
         $updated = $this->workflow->approveWithFeedback(
             $changeRequest,
             $user,
-            $request->feedback,
+            InputSanitizer::richHtml($validated['feedback']),
             ComplianceSupportingFiles::fromRequest($request),
             $request
         );
@@ -752,8 +753,8 @@ class ChangeRequestController extends Controller
         $request->validate(array_merge([
             'section_edits' => 'required|array|min:1',
             'section_edits.*.section_id' => ['required', Rule::exists(Section::class, 'id')],
-            'section_edits.*.proposed_content' => 'required|string',
-            'section_edits.*.current_content' => 'nullable|string',
+            'section_edits.*.proposed_content' => ['required', 'string', 'max:500000'],
+            'section_edits.*.current_content' => ['nullable', 'string', 'max:500000'],
         ], ComplianceSupportingFiles::optionalUploadRules()));
 
         $changeRequest = ChangeRequest::findOrFail($id);
@@ -791,8 +792,8 @@ class ChangeRequestController extends Controller
         $request->validate(array_merge([
             'section_edits' => 'nullable|array|min:1',
             'section_edits.*.section_id' => ['required_with:section_edits', Rule::exists(Section::class, 'id')],
-            'section_edits.*.proposed_content' => 'required_with:section_edits|string',
-            'section_edits.*.current_content' => 'nullable|string',
+            'section_edits.*.proposed_content' => ['required_with:section_edits', 'string', 'max:500000'],
+            'section_edits.*.current_content' => ['nullable', 'string', 'max:500000'],
         ], ComplianceSupportingFiles::optionalUploadRules()));
 
         $changeRequest = ChangeRequest::with(['section', 'currentVersionRow'])->findOrFail($id);

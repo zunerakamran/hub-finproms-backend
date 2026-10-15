@@ -3,8 +3,9 @@
 namespace App\Support;
 
 /**
- * NFR-SEC-APP — allowlist sanitizer for stored rich HTML (Terms / Privacy / Cookies).
- * Complements SPA DOMPurify; strips scripts, event handlers, and dangerous URLs.
+ * NFR-SEC-APP / NFR-SEC-VAL — allowlist sanitizer for stored rich HTML.
+ * Used via InputSanitizer::richHtml() for Terms / Privacy / Cookies / GC / SMC /
+ * tickets / WC / posts. Complements SPA DOMPurify.
  */
 final class SafeHtml
 {

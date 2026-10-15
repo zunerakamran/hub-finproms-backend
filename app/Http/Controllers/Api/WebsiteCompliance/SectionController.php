@@ -14,6 +14,7 @@ use App\Services\WebsiteCompliance\AdvisorSectionService;
 use App\Jobs\WebsiteCompliance\SyncAdvisorCpanelJob;
 use App\Jobs\WebsiteCompliance\SyncTemplateRequestCpanelJob;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
+use App\Support\InputSanitizer;
 use App\Support\WebsiteCompliance\HubTemplateCatalog;
 use App\Support\WebsiteCompliance\WcDatabaseContext;
 use Illuminate\Http\JsonResponse;
@@ -151,15 +152,18 @@ class SectionController extends Controller
         $user = $request->user();
         $this->gate->assertCan($user, 'wc_edit_sections');
 
-        $request->validate([
+        $validated = $request->validate([
             'page_id' => ['required', Rule::exists(Page::class, 'id')],
-            'name' => 'required|string',
-            'content' => 'nullable|string',
+            'name' => ['required', 'string', 'max:255'],
+            'content' => ['nullable', 'string', 'max:500000'],
             'template_id' => ['nullable', Rule::exists(Template::class, 'id')],
             'advisor_id' => ['nullable', Rule::exists(User::class, 'id')],
         ]);
 
-        $data = $request->only('page_id', 'name', 'content', 'template_id', 'advisor_id');
+        $validated = InputSanitizer::plainKeys($validated, ['name']);
+        $validated = InputSanitizer::richHtmlKeys($validated, ['content']);
+
+        $data = collect($validated)->only(['page_id', 'name', 'content', 'template_id', 'advisor_id'])->all();
         if (empty($data['advisor_id'])) {
             $websiteAdvisorId = $this->actingAdvisors->websiteAdvisorId($user);
             if ($websiteAdvisorId) {
@@ -236,23 +240,25 @@ class SectionController extends Controller
         $user = $request->user();
         $this->gate->assertCan($user, 'wc_manage_deployment_sections');
 
-        $request->validate([
-            'name' => 'nullable|string|max:255',
-            'display_name' => 'nullable|string|max:255',
-            'is_visible' => 'nullable|boolean',
+        $validated = $request->validate([
+            'name' => ['nullable', 'string', 'max:255'],
+            'display_name' => ['nullable', 'string', 'max:255'],
+            'is_visible' => ['nullable', 'boolean'],
         ]);
+
+        $validated = InputSanitizer::plainKeys($validated, ['name', 'display_name']);
 
         $section = Section::findOrFail($id);
         $updates = [];
 
-        if ($request->has('name') && $request->filled('name')) {
-            $updates['name'] = $request->name;
+        if (array_key_exists('name', $validated) && filled($validated['name'])) {
+            $updates['name'] = $validated['name'];
         }
-        if ($request->has('display_name')) {
-            $updates['display_name'] = $request->display_name ?: null;
+        if (array_key_exists('display_name', $validated)) {
+            $updates['display_name'] = $validated['display_name'] ?: null;
         }
-        if ($request->has('is_visible')) {
-            $updates['is_visible'] = (bool) $request->is_visible;
+        if (array_key_exists('is_visible', $validated)) {
+            $updates['is_visible'] = (bool) $validated['is_visible'];
         }
 
         if (empty($updates)) {

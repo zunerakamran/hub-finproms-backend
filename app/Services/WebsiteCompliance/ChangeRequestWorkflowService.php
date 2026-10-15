@@ -9,6 +9,7 @@ use App\Models\WebsiteCompliance\ChangeRequestAttachment;
 use App\Models\WebsiteCompliance\ChangeRequestVersion;
 use App\Models\WebsiteCompliance\Section;
 use App\Support\ComplianceSupportingFiles;
+use App\Support\InputSanitizer;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use App\Services\ActingAdvisorService;
@@ -56,11 +57,19 @@ class ChangeRequestWorkflowService
 
             $section->update(['is_locked' => true, 'locked_by' => null]);
 
+            $proposed = is_string($edit['proposed_content'] ?? null)
+                ? InputSanitizer::richHtml($edit['proposed_content'])
+                : (string) ($edit['proposed_content'] ?? '');
+            $current = $edit['current_content'] ?? $section->content;
+            if (is_string($current)) {
+                $current = InputSanitizer::richHtml($current);
+            }
+
             $edits[] = [
                 'section_id' => $section->id,
                 'section_name' => $section->name,
-                'current_content' => $edit['current_content'] ?? $section->content,
-                'proposed_content' => $edit['proposed_content'],
+                'current_content' => $current,
+                'proposed_content' => $proposed,
             ];
         }
 

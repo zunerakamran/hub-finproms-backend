@@ -7,6 +7,7 @@ use App\Models\Hub;
 use App\Services\ActingHubService;
 use App\Services\EmailTemplateService;
 use App\Support\EmailTemplateCatalog;
+use App\Support\InputSanitizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use InvalidArgumentException;
@@ -61,6 +62,10 @@ class EmailTemplateController extends Controller
             'intro' => ['sometimes', 'nullable', 'string', 'max:5000'],
             'closing' => ['sometimes', 'nullable', 'string', 'max:2000'],
             'cta_label' => ['sometimes', 'nullable', 'string', 'max:120'],
+        ]);
+
+        $validated = InputSanitizer::plainKeys($validated, [
+            'subject', 'eyebrow', 'heading', 'intro', 'closing', 'cta_label',
         ]);
 
         $hub = $this->targetHub($request);

@@ -23,30 +23,26 @@ class UploadController extends Controller
         $this->gate->assertModuleEnabled($user);
 
         try {
-            if (! $request->hasFile('image')) {
-                return response()->json([
-                    'message' => 'No image file uploaded. Use form field name "image".',
-                ], 400);
-            }
+            $request->validate([
+                'image' => [
+                    'required',
+                    'file',
+                    'max:10240',
+                    'mimes:jpeg,jpg,png,gif,webp,ico',
+                ],
+            ]);
 
             $file = $request->file('image');
-            if (! $file->isValid()) {
-                $error = method_exists($file, 'getErrorMessage')
-                    ? $file->getErrorMessage()
-                    : 'Invalid upload.';
-
-                return response()->json(['message' => $error], 400);
-            }
-
             $extension = strtolower((string) $file->getClientOriginalExtension());
             if ($extension === '') {
                 $extension = 'jpg';
             }
 
-            $allowed = ['jpeg', 'jpg', 'png', 'gif', 'webp', 'svg', 'ico'];
+            // SVG blocked here and by NFR-SEC-FW upload middleware (scriptable).
+            $allowed = ['jpeg', 'jpg', 'png', 'gif', 'webp', 'ico'];
             if (! in_array($extension, $allowed, true)) {
                 return response()->json([
-                    'message' => 'Only jpeg, png, gif, webp, svg, or ico images are allowed.',
+                    'message' => 'Only jpeg, png, gif, webp, or ico images are allowed.',
                 ], 422);
             }
 
@@ -77,6 +73,10 @@ class UploadController extends Controller
                 'filename' => $filename,
             ], 201);
         } catch (Throwable $e) {
+            if ($e instanceof \Illuminate\Validation\ValidationException) {
+                throw $e;
+            }
+
             Log::error('Image upload failed: '.$e->getMessage());
 
             return response()->json([
@@ -95,28 +95,16 @@ class UploadController extends Controller
         $this->gate->assertModuleEnabled($user);
 
         try {
-            if (! $request->hasFile('document')) {
-                return response()->json([
-                    'message' => 'No document uploaded. Use form field name "document".',
-                ], 400);
-            }
+            $request->validate([
+                'document' => [
+                    'required',
+                    'file',
+                    'max:10240',
+                    'mimes:pdf,doc,docx,xls,xlsx,ppt,pptx,txt,rtf,odt,csv',
+                ],
+            ]);
 
             $file = $request->file('document');
-            if (! $file->isValid()) {
-                $error = method_exists($file, 'getErrorMessage')
-                    ? $file->getErrorMessage()
-                    : 'Invalid upload.';
-
-                return response()->json(['message' => $error], 400);
-            }
-
-            $maxKb = 10240;
-            if ($file->getSize() > $maxKb * 1024) {
-                return response()->json([
-                    'message' => 'Document must be 10 MB or smaller.',
-                ], 422);
-            }
-
             $extension = strtolower((string) $file->getClientOriginalExtension());
             $allowed = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'rtf', 'odt', 'csv'];
             if (! in_array($extension, $allowed, true)) {
@@ -154,6 +142,10 @@ class UploadController extends Controller
                 'original_name' => Str::limit($safeOriginal, 200, ''),
             ], 201);
         } catch (Throwable $e) {
+            if ($e instanceof \Illuminate\Validation\ValidationException) {
+                throw $e;
+            }
+
             Log::error('Document upload failed: '.$e->getMessage());
 
             return response()->json([

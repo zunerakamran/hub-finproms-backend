@@ -9,6 +9,7 @@ use App\Services\CapabilitiesMatrixService;
 use App\Services\HubService;
 use App\Services\WhiteLabelContentService;
 use App\Support\CategoryIconOptions;
+use App\Support\InputSanitizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -90,7 +91,7 @@ class HubContentController extends Controller
 
         $validated = $request->validate([
             'title' => ['required', 'string', 'max:255'],
-            'description' => ['nullable', 'string'],
+            'description' => ['nullable', 'string', 'max:100000'],
             'type' => ['required', 'string', 'max:100'],
             'categories' => ['required', 'array', 'min:1'],
             'categories.*' => ['string', 'max:100'],
@@ -102,6 +103,9 @@ class HubContentController extends Controller
             'is_active' => ['sometimes', 'boolean'],
             'attachment' => ['nullable', 'file', 'max:102400'],
         ]);
+
+        $validated = InputSanitizer::plainKeys($validated, ['title', 'type']);
+        $validated = InputSanitizer::richHtmlKeys($validated, ['description']);
 
         if (! isset($validated['categories']) && isset($validated['category'])) {
             $validated['categories'] = [$validated['category']];
@@ -281,13 +285,16 @@ class HubContentController extends Controller
 
         $validated = $request->validate([
             'title' => ['required', 'string', 'max:255'],
-            'description' => ['nullable', 'string'],
+            'description' => ['nullable', 'string', 'max:100000'],
             'credits_cost' => ['required', 'integer', 'min:1'],
             'is_active' => ['sometimes', 'boolean'],
             'post_ids' => ['required', 'array', 'min:1'],
             'post_ids.*' => ['integer'],
             'image' => ['nullable', 'image', 'max:5120', 'mimes:jpg,jpeg,png,gif,webp'],
         ]);
+
+        $validated = InputSanitizer::plainKeys($validated, ['title']);
+        $validated = InputSanitizer::richHtmlKeys($validated, ['description']);
 
         if ($request->hasFile('image')) {
             $path = $request->file('image')->store('bundles', 'public');
@@ -526,7 +533,7 @@ class HubContentController extends Controller
 
         $validated = $request->validate([
             'title' => ['sometimes', 'string', 'max:255'],
-            'description' => ['nullable', 'string'],
+            'description' => ['nullable', 'string', 'max:100000'],
             'credits_cost' => ['sometimes', 'integer', 'min:1'],
             'is_active' => ['sometimes', 'boolean'],
             'post_ids' => ['sometimes', 'array', 'min:1'],
@@ -534,6 +541,9 @@ class HubContentController extends Controller
             'image' => ['nullable', 'image', 'max:5120', 'mimes:jpg,jpeg,png,gif,webp'],
             'remove_image' => ['sometimes', 'boolean'],
         ]);
+
+        $validated = InputSanitizer::plainKeys($validated, ['title']);
+        $validated = InputSanitizer::richHtmlKeys($validated, ['description']);
 
         if ($request->hasFile('image')) {
             $path = $request->file('image')->store('bundles', 'public');

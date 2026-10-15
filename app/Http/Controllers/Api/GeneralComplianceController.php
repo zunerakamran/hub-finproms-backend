@@ -17,6 +17,7 @@ use App\Services\HubService;
 use App\Support\ComplianceSupportingFiles;
 use App\Support\DateFormat;
 use App\Support\GeneralComplianceEncryptedFiles;
+use App\Support\InputSanitizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -378,6 +379,9 @@ class GeneralComplianceController extends Controller
             ],
         ], ComplianceSupportingFiles::optionalUploadRules()));
 
+        $validated = InputSanitizer::richHtmlKeys($validated, ['description']);
+        $validated = InputSanitizer::plainKeys($validated, ['content_type']);
+
         $compliance = $this->compliance->submit($hub, $user, [
             'description' => $validated['description'],
             'content_type' => $validated['content_type'],
@@ -407,6 +411,9 @@ class GeneralComplianceController extends Controller
                 'max:'.GeneralComplianceService::MAX_ATTACHMENT_KB,
             ],
         ], ComplianceSupportingFiles::optionalUploadRules()));
+
+        $validated = InputSanitizer::richHtmlKeys($validated, ['description']);
+        $validated = InputSanitizer::plainKeys($validated, ['content_type']);
 
         $compliance = $this->compliance->resubmit($hub, $user, $generalComplianceRequest, [
             'description' => $validated['description'],
@@ -487,6 +494,7 @@ class GeneralComplianceController extends Controller
             'future_feedback' => ['nullable', 'string', 'max:10000'],
         ], ComplianceSupportingFiles::optionalUploadRules()));
 
+        $validated = InputSanitizer::richHtmlKeys($validated, ['feedback', 'future_feedback']);
         $validated['supporting_files'] = ComplianceSupportingFiles::fromRequest($request);
 
         $compliance = $this->compliance->review($hub, $user, $generalComplianceRequest, $validated, $request);
@@ -508,6 +516,7 @@ class GeneralComplianceController extends Controller
             'comment' => ['nullable', 'string', 'max:10000'],
         ], ComplianceSupportingFiles::optionalUploadRules()));
 
+        $validated = InputSanitizer::richHtmlKeys($validated, ['comment']);
         $validated['supporting_files'] = ComplianceSupportingFiles::fromRequest($request);
 
         $compliance = $this->compliance->changeStatus(

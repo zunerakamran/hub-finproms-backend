@@ -15,6 +15,7 @@ use App\Services\SocialMediaComplianceService;
 use App\Services\HubService;
 use App\Support\ComplianceSupportingFiles;
 use App\Support\DateFormat;
+use App\Support\InputSanitizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -177,6 +178,8 @@ class SocialMediaComplianceController extends Controller
             ],
         ], ComplianceSupportingFiles::optionalUploadRules()));
 
+        $validated = InputSanitizer::richHtmlKeys($validated, ['description']);
+
         $compliance = $this->compliance->submit($hub, $user, [
             'description' => $validated['description'],
             'attachment' => $request->file('attachment'),
@@ -204,6 +207,8 @@ class SocialMediaComplianceController extends Controller
                 'mimes:jpg,jpeg,png,gif,webp,mp4,mov,webm',
             ],
         ], ComplianceSupportingFiles::optionalUploadRules()));
+
+        $validated = InputSanitizer::richHtmlKeys($validated, ['description']);
 
         $compliance = $this->compliance->resubmit($hub, $user, $socialMediaComplianceRequest, [
             'description' => $validated['description'],
@@ -282,6 +287,7 @@ class SocialMediaComplianceController extends Controller
             'feedback' => ['nullable', 'string', 'max:10000'],
         ], ComplianceSupportingFiles::optionalUploadRules()));
 
+        $validated = InputSanitizer::richHtmlKeys($validated, ['feedback']);
         $validated['supporting_files'] = ComplianceSupportingFiles::fromRequest($request);
 
         $compliance = $this->compliance->review($hub, $user, $socialMediaComplianceRequest, $validated, $request);
@@ -303,6 +309,7 @@ class SocialMediaComplianceController extends Controller
             'comment' => ['nullable', 'string', 'max:10000'],
         ], ComplianceSupportingFiles::optionalUploadRules()));
 
+        $validated = InputSanitizer::richHtmlKeys($validated, ['comment']);
         $validated['supporting_files'] = ComplianceSupportingFiles::fromRequest($request);
 
         $compliance = $this->compliance->changeStatus(

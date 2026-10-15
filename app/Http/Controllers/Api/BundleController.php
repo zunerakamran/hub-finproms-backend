@@ -10,6 +10,7 @@ use App\Models\Post;
 use App\Models\Tag;
 use App\Models\User;
 use App\Services\ActingAdvisorService;
+use App\Support\InputSanitizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -145,13 +146,15 @@ class BundleController extends Controller
 
             $validated = $request->validate([
                 'title' => ['required', 'string', 'max:255'],
-                'description' => ['nullable', 'string'],
+                'description' => ['nullable', 'string', 'max:100000'],
                 'credits_cost' => ['required', 'integer', 'min:1'],
                 'is_active' => ['sometimes', 'boolean'],
                 'post_ids' => ['required', 'array', 'min:1'],
                 'post_ids.*' => ['integer'],
                 'image' => ['nullable', 'image', 'max:5120', 'mimes:jpg,jpeg,png,gif,webp'],
             ]);
+            $validated = InputSanitizer::plainKeys($validated, ['title']);
+            $validated = InputSanitizer::richHtmlKeys($validated, ['description']);
 
             if ($path = $this->storeBundleImage($request)) {
                 $validated['image_path'] = $this->publicImageUrl($path);
@@ -217,7 +220,7 @@ class BundleController extends Controller
 
             $validated = $request->validate([
                 'title' => ['sometimes', 'string', 'max:255'],
-                'description' => ['nullable', 'string'],
+                'description' => ['nullable', 'string', 'max:100000'],
                 'credits_cost' => ['sometimes', 'integer', 'min:1'],
                 'is_active' => ['sometimes', 'boolean'],
                 'post_ids' => ['sometimes', 'array', 'min:1'],
@@ -225,6 +228,8 @@ class BundleController extends Controller
                 'image' => ['nullable', 'image', 'max:5120', 'mimes:jpg,jpeg,png,gif,webp'],
                 'remove_image' => ['sometimes', 'boolean'],
             ]);
+            $validated = InputSanitizer::plainKeys($validated, ['title']);
+            $validated = InputSanitizer::richHtmlKeys($validated, ['description']);
 
             if ($path = $this->storeBundleImage($request)) {
                 $validated['image_path'] = $this->publicImageUrl($path);
@@ -351,7 +356,7 @@ class BundleController extends Controller
 
         $validated = $request->validate([
             'title' => [$required, 'string', 'max:255'],
-            'description' => ['nullable', 'string'],
+            'description' => ['nullable', 'string', 'max:100000'],
             'credits_cost' => [$required, 'integer', 'min:1'],
             'is_active' => ['sometimes', 'boolean'],
             'image' => ['nullable', 'image', 'max:5120', 'mimes:jpg,jpeg,png,gif,webp'],
@@ -360,7 +365,7 @@ class BundleController extends Controller
             'post_ids.*' => ['integer', 'distinct', 'exists:posts,id'],
             'new_posts' => ['nullable', 'array'],
             'new_posts.*.title' => ['required_with:new_posts', 'string', 'max:255'],
-            'new_posts.*.description' => ['nullable', 'string'],
+            'new_posts.*.description' => ['nullable', 'string', 'max:100000'],
             'new_posts.*.type' => ['required_with:new_posts', 'string', 'max:100', Rule::exists('content_types', 'name')],
             'new_posts.*.categories' => ['nullable'],
             'new_posts.*.category' => ['sometimes', 'string', 'max:100', Rule::exists('categories', 'name')],
@@ -374,6 +379,20 @@ class BundleController extends Controller
                 'mimes:jpg,jpeg,png,gif,webp,pdf,doc,docx,mp4,mov,webm,zip',
             ],
         ]);
+
+        $validated = InputSanitizer::plainKeys($validated, ['title']);
+        $validated = InputSanitizer::richHtmlKeys($validated, ['description']);
+
+        if (! empty($validated['new_posts']) && is_array($validated['new_posts'])) {
+            foreach ($validated['new_posts'] as $i => $row) {
+                if (! is_array($row)) {
+                    continue;
+                }
+                $row = InputSanitizer::plainKeys($row, ['title', 'type']);
+                $row = InputSanitizer::richHtmlKeys($row, ['description']);
+                $validated['new_posts'][$i] = $row;
+            }
+        }
 
         return $validated;
     }

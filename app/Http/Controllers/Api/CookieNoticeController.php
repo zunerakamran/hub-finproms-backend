@@ -6,7 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Hub;
 use App\Services\ActingHubService;
 use App\Support\CookieNoticeDefaults;
-use App\Support\SafeHtml;
+use App\Support\InputSanitizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -40,10 +40,7 @@ class CookieNoticeController extends Controller
             'content' => ['required', 'string', 'max:100000'],
         ]);
 
-        $content = trim($validated['content']);
-        if (config('security_app.sanitize_rich_html', true)) {
-            $content = SafeHtml::sanitize($content);
-        }
+        $content = InputSanitizer::richHtml($validated['content']);
         if ($content === '' || strip_tags($content) === '') {
             return response()->json([
                 'message' => 'Cookie notice content cannot be empty.',

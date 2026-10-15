@@ -2164,6 +2164,13 @@ UK GDPR / DATA PROTECTION (section 2.2d + 6E) — Phase 1 backend done
     brute-force, malware, and app-layer DDoS/abuse — Eloquent/bindings;
     SafeHtml on Terms/Privacy/Cookies + SPA DOMPurify; Sanctum CSRF;
     auth+API rate limiters; NFR-SEC-FW malware; volumetric DDoS = ops/CDN
+[x] NFR-SEC-VAL (section 9.8): server-side validation and sanitization of all
+    user inputs — every mutating API uses Laravel validate(); API middleware
+    SanitizeRequestInput scrubs null bytes / control chars; InputSanitizer
+    plain()/richHtml() on stored fields (Terms/Privacy/Cookies, GC/SMC,
+    support tickets, WC section/change-request content, post/bundle
+    descriptions, email template copy); SPA sanitizeRichText on submit +
+    render; tests cover wire scrub + rich HTML strip
 
 ================================================================================
 9. NON-FUNCTIONAL REQUIREMENTS (NFRs)
@@ -2237,6 +2244,8 @@ Related but distinct
   (section 9.5) — IMPLEMENTED (optional ClamAV off by default).
 - NFR-SEC-APP — SQLi / XSS / CSRF / brute-force / malware / DDoS baseline
   (section 9.6) — IMPLEMENTED (network DDoS remains ops/CDN).
+- NFR-SEC-VAL — Server-side validation and sanitization of all user inputs
+  (section 9.8) — IMPLEMENTED (validate + wire scrub + field-type sanitize).
 (Add new NFR-xxx subsections here when working on further non-functional
  requirements; keep functional module detail in sections 3–6.)
 
@@ -2590,6 +2599,7 @@ Related but distinct
 - NFR-SEC (9.1) — monitoring & dependency scan reporting
 - NFR-SEC-NAV (9.4) — external navigation entry hardening
 - NFR-SEC-FW (9.5) — IP deny + upload malware gates
+- NFR-SEC-VAL (9.8) — validate + sanitize all user inputs (complements XSS)
 - NFR-BACKUP-ENC (9.7) — backup archive encryption at rest
 - SECURITY HARDENING phase 1–2 — headers, cookies, secrets
 
@@ -2630,6 +2640,76 @@ Related but distinct
 - NFR-GC-ENC — Generic Compliance field/file crypto (not backups)
 - NFR-AVAIL / §6B — schedule, dual store, retention
 - NFR-PRIV — erasure does not rewrite historical backup dumps
+- NFR-SEC-VAL (9.8) — request validation/sanitization (not archive crypto)
+
+--------------------------------------------------------------------------------
+9.8 NFR-SEC-VAL — Server-side validation and sanitization of all user inputs
+--------------------------------------------------------------------------------
+Status: IMPLEMENTED (2026-10-15) — formalises mandatory Laravel validation on
+mutating APIs + global wire scrub + field-type sanitization for stored content.
+Complements NFR-SEC-APP (XSS) and NFR-SEC-FW (upload malware); does not replace
+them.
+
+Statement
+- The platform SHALL validate all user-supplied inputs on the server before
+  business logic persists or acts on them, and SHALL sanitize those inputs to
+  remove dangerous control characters and, for rich-text fields, disallowed
+  HTML. Client-side checks MAY improve UX but MUST NOT be trusted as the only
+  gate.
+
+Product fulfilment
+
+  A) Validation (every mutating API)
+     - POST / PUT / PATCH (and body-bearing DELETE) endpoints SHALL call
+       `$request->validate([...])` (or an equivalent private helper that does)
+       and return HTTP 422 with structured errors on failure.
+     - Rules MUST enforce type, length/max, allowlists (`Rule::in` / `exists`),
+       and file `mimes`/`max` where applicable.
+     - Machine/internal endpoints (hub backup bridge, Stripe webhook) SHALL
+       still authenticate (shared secret / signature) and validate file or
+       payload shape before use.
+     - Query filters on list endpoints SHOULD be validated or cast to safe
+       types (`integer()`, allowlisted enums) — never concatenated into SQL.
+
+  B) Sanitization (defence in depth)
+     - Global API middleware `SanitizeRequestInput` (config
+       `SECURITY_SANITIZE_REQUEST_INPUT`, default true) strips null bytes and
+       C0 control characters (except tab/LF/CR) from every request string
+       before controllers run. Laravel’s built-in TrimStrings /
+       ConvertEmptyStringsToNull remain enabled.
+     - Plain-text fields (names, subjects, email template copy, etc.) use
+       `InputSanitizer::plain()` — strip tags + trim.
+     - Stored rich HTML (Terms / Privacy / Cookie notice, GC/SMC description
+       & feedback, support ticket description/comments, WC section /
+       change-request content, post/bundle descriptions) use
+       `InputSanitizer::richHtml()` → `SafeHtml` allowlist when
+       `SECURITY_SANITIZE_RICH_HTML=true`.
+     - Structured settings payloads continue to use key allowlists
+       (e.g. `PageContentDefaults::sanitize`).
+     - Paths / redirects use `SafeFrontendRedirect` (NFR-SEC-NAV).
+     - Uploads remain gated by NFR-SEC-FW (`ScanUploadedFiles`).
+
+  C) Frontend (complementary, not sufficient alone)
+     - SPA uses `sanitizeRichText` (DOMPurify) before `dangerouslySetInnerHTML`
+       and SHOULD sanitize rich-text payloads on submit before calling the API.
+     - Form-level required/format checks remain for UX; server returns 422.
+
+Acceptance criteria (for “done”)
+  [x] Documented in section 9.8 + section 8 checklist
+  [x] `SanitizeRequestInput` on API middleware group + env key in .env.example
+  [x] `InputSanitizer` (wire / plain / richHtml) + unit tests
+  [x] Rich HTML sanitization extended beyond Terms/Privacy/Cookies to GC, SMC,
+      support tickets, WC content, posts/bundles
+  [x] Upload / internal GC file store use `$request->validate()` for file shape
+  [x] Feature tests: control-char scrub + script strip on a rich-text update
+  [x] Frontend: sanitizeRichText on submit for legal-page editors + page copy
+      HTML helper remains escaped
+
+Related but distinct
+- NFR-SEC-APP (9.6) — broader attack-surface (SQLi/XSS/CSRF/brute-force/…)
+- NFR-SEC-FW (9.5) — IP deny + malware/upload gates
+- NFR-SEC-NAV (9.4) — navigation entry hardening
+- NFR-SEC (9.1) — monitoring & reporting (not the validation gate)
 
 ================================================================================
 END OF REQUIREMENTS

@@ -13,6 +13,7 @@ use App\Services\LoginOtpService;
 use App\Services\PowerAdminCapabilitiesService;
 use App\Services\SecurityMonitoringService;
 use App\Services\WelcomeMailService;
+use App\Support\InputSanitizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -54,6 +55,9 @@ class AuthController extends Controller
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
             'password' => ['required', 'confirmed', Password::defaults()],
         ]);
+
+        $validated['name'] = InputSanitizer::plain($validated['name']);
+        $validated['email'] = strtolower(InputSanitizer::plain($validated['email']));
 
         $user = User::create([
             'name' => $validated['name'],
@@ -748,13 +752,16 @@ class AuthController extends Controller
 
         $changes = [];
 
-        if (array_key_exists('name', $validated) && $validated['name'] !== $user->name) {
-            $user->name = $validated['name'];
-            $changes[] = 'name';
+        if (array_key_exists('name', $validated)) {
+            $validated['name'] = InputSanitizer::plain($validated['name']);
+            if ($validated['name'] !== $user->name) {
+                $user->name = $validated['name'];
+                $changes[] = 'name';
+            }
         }
 
         if ($emailChanging) {
-            $user->email = $validated['email'];
+            $user->email = strtolower(InputSanitizer::plain($validated['email']));
             $user->email_verified_at = null;
             $changes[] = 'email';
         }

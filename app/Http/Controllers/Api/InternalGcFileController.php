@@ -83,10 +83,11 @@ class InternalGcFileController extends Controller
             return response()->json(['message' => 'Unauthorized.'], 401);
         }
 
+        $request->validate([
+            'file' => ['required', 'file', 'max:102400'],
+        ]);
+
         $file = $request->file('file');
-        if (! $file || ! $file->isValid()) {
-            return response()->json(['message' => 'A valid file upload is required.'], 422);
-        }
 
         try {
             $stored = GeneralComplianceEncryptedFiles::storeUpload($file);
@@ -101,7 +102,7 @@ class InternalGcFileController extends Controller
             'file_url' => null,
             'size_bytes' => $stored['size_bytes'],
             'is_encrypted' => true,
-            'original_name' => $file->getClientOriginalName(),
+            'original_name' => $this->safeFilename((string) $file->getClientOriginalName()),
             'mime_type' => $file->getClientMimeType() ?: $file->getMimeType(),
         ], 201);
     }

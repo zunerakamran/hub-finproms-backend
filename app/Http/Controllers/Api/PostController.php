@@ -14,6 +14,7 @@ use App\Models\User;
 use App\Services\ActingAdvisorService;
 use App\Services\ContentPushService;
 use App\Services\HubService;
+use App\Support\InputSanitizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -453,7 +454,7 @@ class PostController extends Controller
 
         $rules = [
             'title' => [$required, 'string', 'max:255'],
-            'description' => ['nullable', 'string'],
+            'description' => ['nullable', 'string', 'max:100000'],
             'type' => [$required, 'string', 'max:100', Rule::exists('content_types', 'name')],
             'categories' => [$updating ? 'sometimes' : 'required', 'array', 'min:1'],
             'categories.*' => ['string', 'max:100', Rule::exists('categories', 'name')],
@@ -471,6 +472,8 @@ class PostController extends Controller
         ];
 
         $validated = $request->validate($rules);
+        $validated = InputSanitizer::plainKeys($validated, ['title', 'type']);
+        $validated = InputSanitizer::richHtmlKeys($validated, ['description']);
 
         if (array_key_exists('canva_link', $validated)) {
             $validated['canva_link'] = $this->normalizeCanvaLink($validated['canva_link']);

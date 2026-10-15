@@ -11,6 +11,7 @@ use App\Services\AccessRestrictionService;
 use App\Services\ActingHubService;
 use App\Services\HubService;
 use App\Services\SecurityMonitoringService;
+use App\Support\InputSanitizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -127,6 +128,9 @@ class SecurityMonitoringController extends Controller
             'event_ids.*' => ['integer', 'min:1'],
         ]);
 
+        $data = InputSanitizer::plainKeys($data, ['title']);
+        $data = InputSanitizer::richHtmlKeys($data, ['description']);
+
         $incident = $this->security->declareIncident($hub, $user, $data, $request);
 
         return response()->json([
@@ -148,6 +152,8 @@ class SecurityMonitoringController extends Controller
             'event_ids' => ['sometimes', 'array'],
             'event_ids.*' => ['integer', 'min:1'],
         ]);
+
+        $data = InputSanitizer::richHtmlKeys($data, ['resolution_summary', 'note']);
 
         $incident = $this->security->updateIncident($hub, $user, $securityIncident, $data, $request);
 

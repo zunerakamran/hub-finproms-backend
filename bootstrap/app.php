@@ -34,10 +34,12 @@ return Application::configure(basePath: dirname(__DIR__))
         // NFR-SEC-APP: global API rate ceiling (Stripe webhook excluded in routes).
         $middleware->throttleApi('api');
 
-        // NFR-SEC-FW + activity: IP deny, upload scan, headers, activity log.
+        // NFR-SEC-FW + NFR-SEC-VAL + activity: IP deny, upload scan, input scrub,
+        // headers, activity log.
         $middleware->appendToGroup('api', [
             \App\Http\Middleware\DenyBlockedIps::class,
             \App\Http\Middleware\ScanUploadedFiles::class,
+            \App\Http\Middleware\SanitizeRequestInput::class,
             \App\Http\Middleware\SecurityHeaders::class,
             \App\Http\Middleware\LogApiActivity::class,
         ]);
