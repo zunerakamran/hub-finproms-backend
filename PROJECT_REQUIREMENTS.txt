@@ -2146,11 +2146,12 @@ UK GDPR / DATA PROTECTION (section 2.2d + 6E) — Phase 1 backend done
     / `npm audit` in GitHub Actions; documented patch SLA (scan status is
     surfaced in Security Monitoring report via on-demand Monitor now)
 [x] NFR-SEC-NAV (section 9.4): external link / copied-URL / cross-site entry
-    hardening — in-app nav OK; paste / email / chat / redirect from another
-    (non-hub) app into protected routes shows ERROR when logged in (do not
-    open target); guests → `/login` (no ERROR); email verify, password reset,
-    Stripe return allowlisted; frontend navigationContinuity + ProtectedRoute
-    guard; backend config/security_navigation.php + SafeFrontendRedirect +
+    hardening — in-app nav OK; home `/` always allowed (tab search /
+    address-bar autocomplete); cross-site referrer into protected routes
+    shows ERROR when logged in; no-referrer deep links soft-land on `/`;
+    guests → `/login` (no ERROR); email verify, password reset, Stripe return
+    allowlisted; frontend navigationContinuity + ProtectedRoute guard; backend
+    config/security_navigation.php + SafeFrontendRedirect +
     POST /api/security/external-navigation-blocked (optional secmon)
 [x] NFR-SEC-FW (section 9.5): application firewall + malware / upload
     protection — DenyBlockedIps + ScanUploadedFiles on API group;
@@ -2336,18 +2337,18 @@ When this is NOT (by itself) a high risk
 Product rule (desired behaviour)
   - ALLOW: authenticated user already inside the hub SPA; clicks in-app nav /
     router links / breadcrumbs; relative same-origin transitions.
-  - ALLOW (guests only): public home `/` from outside when not logged in.
-    Logged-in users opening `/` via paste / email / chat / other app → ERROR.
+  - ALLOW: home `/` from outside for everyone (tab search / address-bar
+    autocomplete of the site URL, paste, email). Authenticated users get
+    navigation continuity so they can continue inside the app.
   - GUESTS on protected routes via external entry: redirect to `/login`
     (do NOT show the security ERROR — they are not authenticated yet).
-  - BLOCK: first entry into an authenticated route (and home `/` when logged
-    in) when the navigation context is external AND the user is logged in,
-    including:
-      - paste of full URL into address bar / new tab (including main home URL)
-      - click from email, Slack, WhatsApp, etc.
-      - top-level redirect from a third-party origin onto a protected route
-  - On BLOCK (authenticated only): do NOT render the sensitive target page.
-    CHOSEN UX = ERROR:
+  - BLOCK (authenticated + cross-site referrer only): first entry into a
+    protected route from webmail / other origin. Show security ERROR.
+  - Soft-land (authenticated + no referrer): address-bar / tab autocomplete /
+    paste of a protected deep URL does NOT open the target and does NOT show
+    the ERROR — redirect to `/` with continuity instead.
+  - On BLOCK (cross-site referrer, authenticated only): do NOT render the
+    sensitive target page. CHOSEN UX = ERROR:
       D) Error page (SELECTED) — show a clear security error, e.g.
          “This page cannot be opened from an external link, email, chat,
          or another application. Please open the Hub from the official
@@ -2398,13 +2399,16 @@ Acceptance criteria (for “done” — when implementation is approved)
   [x] Documented product choice: mode D — show ERROR page (2026-10-14)
   [x] In-app menu / SPA navigation between authenticated pages works unchanged
       (continuity marked at login / OTP / verify; F5 keeps sessionStorage)
-  [x] Paste of a protected deep URL while logged in shows the security ERROR
-      (target not opened); guests are redirected to `/login` instead
-  [x] Click from email / chat / other non-hub app / external redirect into a
-      protected route shows the same ERROR when logged in; guests → login;
+  [x] Tab search / address-bar autocomplete of the site URL works while
+      logged in (home allowed; no-referrer deep links soft-land on `/`)
+  [x] Paste of a protected deep URL while logged in soft-lands on `/`
+      (target not opened, no ERROR); guests → `/login`
+  [x] Click from webmail / other origin (cross-site referrer) into a
+      protected route shows the security ERROR when logged in; guests → login;
       allowlisted flows still work
   [x] Error copy explains that pages must be opened by navigating inside the Hub
-  [x] Error page offers only a safe same-origin action (home);
+  [x] Error page offers one safe same-origin action: home when the hub has
+      a website home (`member_view_site_pages`), otherwise dashboard;
       guests never see the error page (login redirect)
   [x] Password reset, email verification, Stripe return still work (allowlist)
   [x] Session cookies: SameSite strategy documented in .env.example; CSRF still

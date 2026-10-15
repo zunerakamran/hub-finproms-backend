@@ -32,8 +32,8 @@ return [
     |
     */
 
-    // Home `/` is intentionally omitted for authenticated users (SPA blocks
-    // paste/email of the main URL while logged in). Guests may still open `/`.
+    // Home `/` is always allowed in the SPA (tab search / address-bar
+    // autocomplete). It is omitted here because it is handled separately.
     'allowlist_exact' => [
         '/login',
         '/register',
