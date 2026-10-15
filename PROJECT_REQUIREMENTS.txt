@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-15 (hub session timeout controllable via Manage active sessions)
+Last updated: 2026-10-15 (6A.2 Activity Logs anomaly detection implemented backend + frontend)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -542,7 +542,10 @@ Notes:
   capable users can see, for each event: **when** it happened, **what**
   happened, severity, source (IP / user / route), and remediation status.
 - Distinct from:
-  - Activity logs (6A) — general audit of user/API actions
+  - Activity logging + anomaly detection (6A) — general audit of user/API
+    actions (6A.1) plus activity-pattern anomalies under Activity Logs (6A.2);
+    Security Monitoring owns security incidents / threat events, not the
+    Activity Logs UI
   - Compliance audit trail (6C) — SMC/GC/WC workflow lifecycle
   - Support Tickets (3.3e) — human-reported bugs / access issues
   - GDPR breach ICO runbook (6E.3) — legal/ops notification process (may
@@ -1202,8 +1205,9 @@ Notes:
   - Discontinue users — separate capability; permanently end a hub user’s
     access — action lives on Hub → Users (`/my-dashboard/hub-users`), not on
     Import Users
-  - View activity logs / report — who can open the audit trail and activity
-    report for the hub — same roles
+  - View activity logs / report — who can open the audit trail, activity
+    report, and (when 6A.2 ships) Activity Logs anomaly feed for the hub —
+    same roles; distinct from Security Monitoring `secmon_*`
   - Security Monitoring (blurred while Functionalities → Security Monitoring
     is off — section 6F):
     - `secmon_view_events` — view security event feed & event detail
@@ -1371,7 +1375,37 @@ Notes:
 
 
 --------------------------------------------------------------------------------
-6A. ACTIVITY LOGS & ACTIVITY REPORT
+6A. ACTIVITY LOGGING AND ANOMALY DETECTION
+--------------------------------------------------------------------------------
+Status:
+  - Activity logging + activity report: IMPLEMENTED (backend + frontend)
+  - Anomaly detection (Activity Logs module / 6A.2): IMPLEMENTED (backend + frontend)
+Cross-refs: section 6F (Security Monitoring — related but NOT the same),
+NFR-AUDIT (section 9.2), NFR-SEC (section 9.1).
+
+Purpose of this section (combined product requirement)
+- “Activity logging and anomaly detection” is ONE product area with TWO parts:
+  1) Activity logging — record and report what users/APIs did (audit trail)
+  2) Anomaly detection — flag unusual patterns derived from that trail
+- Part 1 is already live. Part 2 is a new submodule under Activity Logs
+  (same nav area / capability family), not a replacement for Security
+  Monitoring (6F).
+
+How this relates to Security Monitoring (6F) — READ THIS
+- Activity Logs (6A) and Security Monitoring (6F) are NOT the same module.
+- Activity Logs = general audit of product usage and mutations (“who did what”).
+- Security Monitoring = dedicated security-threat / incident module (events,
+  incidents, thresholds, “Monitor now”, secmon_* caps, `security_monitoring`
+  Functionality flag). It already detects some security anomalies (e.g.
+  repeated failed logins, rate-limit trips) into `security_events`.
+- Anomaly detection under 6A focuses on unusual *activity-log* behaviour
+  (usage / access patterns) and MAY hand off or link to a Security Monitoring
+  event/incident when the anomaly is security-relevant. Do NOT rebuild 6F
+  inside Activity Logs; do NOT hide 6F behind activity-log UI.
+- Distinct also from Compliance audit trail (6C) and Support Tickets (3.3e).
+
+--------------------------------------------------------------------------------
+6A.1 Activity logging & activity report (IMPLEMENTED)
 --------------------------------------------------------------------------------
 - Every meaningful user activity is recorded in an activity_logs audit trail
   (per hub), including:
@@ -1399,6 +1433,108 @@ Notes:
   - GET /api/client-admin/activity-logs/report (+ /power-admin/…) — aggregates
 - Frontend: Activity logs page under hub-admin and Power Admin shells, shown
   only when the viewer’s role has the capability.
+
+--------------------------------------------------------------------------------
+6A.2 Anomaly detection (Activity Logs submodule)
+--------------------------------------------------------------------------------
+Status: IMPLEMENTED (backend + frontend) — Activity Logs → Anomaly detection tab;
+APIs under /activity-logs/anomalies*; artisan `activity:detect-anomalies`
+every 15 minutes + near-real-time hooks after selected activity_log writes.
+
+Goal
+- Add an **Anomaly detection** module/surface under Activity Logs that reviews
+  `activity_logs` (and related signals) and surfaces unusual patterns so
+  capable users can see: when it looked abnormal, what pattern matched, who /
+  what was involved, and current review status.
+- This is the missing half of “Activity logging and anomaly detection”.
+  Logging alone does not equal anomaly detection.
+
+Scope (v1 — activity-pattern anomalies)
+  Minimum detector set (configurable thresholds where noted):
+  A) Auth / access patterns from activity_logs
+     - Unusual login volume for a user or IP vs recent baseline
+     - Logins from a new / rare IP or user-agent for an established user
+     - Burst of failed / blocked login actions in a short window
+       (complement 6F failed-login threshold; may link to existing secmon event)
+  B) Privilege / admin actions
+     - Spike in high-impact actions (capabilities change, user suspend /
+       discontinue, force-logout, GDPR export/erase, secrets/settings mutate)
+     - Same actor performing many distinct admin actions in a short window
+  C) Data / export volume
+     - Unusual download / export / report-view volume from one user
+  D) API / mutation volume
+     - User or IP far above their own recent action-rate baseline
+  Out of scope for 6A.2 v1 (already owned by 6F / NFR-SEC-*):
+     - Dependency vulnerability scans (“Monitor now”)
+     - Malware / upload firewall gates (NFR-SEC-FW)
+     - Full incident lifecycle UI (acknowledge → investigate → resolve) —
+       prefer linking to Security Monitoring incidents when security-relevant
+     - Network IDS / SIEM replacement
+
+Enablement & permissions
+- Lives under the existing Activity Logs product area (same nav parent).
+- Default gate: same capability `dashboard_view_activity_logs` for viewing
+  anomaly feed / summary (keeps one permission for “see audit + anomalies”).
+- Optional later matrix keys (only if product wants split control):
+  - `dashboard_manage_activity_anomalies` — configure thresholds / dismiss /
+    mark reviewed (if not added in v1, Power Admin / hub-admin style roles
+    that already have view may dismiss via a simple “reviewed” action).
+- Does NOT require the `security_monitoring` Functionality flag to view
+  activity anomalies. When an anomaly is escalated into 6F, that path still
+  requires Security Monitoring ON + relevant `secmon_*` caps.
+
+Data model (suggested)
+- Table e.g. `activity_anomalies` (per hub), or reuse a typed row with:
+  - `id`, `hub_id`, `detected_at`, `window_start`, `window_end`
+  - `anomaly_type` (machine key, e.g. `auth.new_ip_login`, `admin.action_burst`)
+  - `severity` (info | low | medium | high)
+  - `title`, `description` (plain language)
+  - `status` (open | reviewed | dismissed | escalated)
+  - `actor_user_id` / denormalised name/email/role when known
+  - `source_ip`, sample `activity_log` ids in `related_activity_log_ids` (JSON)
+  - `baseline` / `observed` metrics in `properties` (JSON)
+  - Optional `security_event_id` / `security_incident_id` when escalated to 6F
+- Sensitive payloads follow the same redaction rules as activity_logs.
+- GDPR: scrub actor PII on erasure; retention via GDPR_RETENTION_* or a
+  dedicated activity-anomaly retention key (align with activity_logs days).
+
+UI (frontend — both repos)
+- Activity Logs page gains a tab or sibling view **Anomalies** (or a clear
+  “Anomaly detection” section) in addition to the existing feed + report.
+- Anomaly list: newest-first; filters by type, severity, status, date, user/IP.
+- Detail: when detected, pattern explanation, related activity-log rows
+  (deep-link into existing feed), mark reviewed / dismiss; optional
+  “Escalate to Security Monitoring” when 6F is enabled.
+- Empty/healthy state: last detection run time + “No open anomalies”.
+
+APIs (hub_can:dashboard_view_activity_logs unless manage key added)
+  - GET  /api/…/activity-logs/anomalies
+  - GET  /api/…/activity-logs/anomalies/{id}
+  - PATCH /api/…/activity-logs/anomalies/{id}   (status reviewed/dismissed)
+  - POST /api/…/activity-logs/anomalies/{id}/escalate  (optional; creates /
+    links 6F security event when Security Monitoring is ON)
+  - GET  /api/…/activity-logs/anomaly-settings   (optional v1)
+  - PUT  /api/…/activity-logs/anomaly-settings   (optional v1)
+  (+ /power-admin/… mirrors when acting)
+- Activity log mutations for settings / escalate:
+  `activity.anomaly_settings_update`, `activity.anomaly_escalate`,
+  `activity.anomaly_reviewed` (as applicable).
+
+Detection cadence
+- Prefer near-real-time hooks after activity_log writes for threshold rules,
+  plus an optional scheduled artisan e.g. `activity:detect-anomalies` for
+  baseline / window-window scans.
+- Do not invent a second “Monitor now” dependency scanner here — that stays
+  in Security Monitoring (6F).
+
+Acceptance criteria (for 6A.2 “done”)
+  [x] Anomaly feed + detail API and UI under Activity Logs
+  [x] At least auth-pattern + admin-burst + volume detectors write anomalies
+  [x] Related activity_log ids shown; capable user can mark reviewed/dismissed
+  [x] Clear UI/docs distinction from Security Monitoring; optional escalate
+      to 6F when that functionality is enabled
+  [x] Secrets never stored; GDPR scrub / retention aligned with activity logs
+  [x] Feature tests covering detection + permission gating
 
 
 --------------------------------------------------------------------------------
@@ -1642,9 +1778,12 @@ Purpose
   users can open a dedicated report and see security events / breaches such as:
   “At 2026-10-13 14:22 UTC a security event was detected: repeated failed
   logins from IP x.x.x.x against user Y — status Investigating.”
-- This is a **separate module/feature** from Activity logs, Compliance audit
-  trail, and Support Tickets. It answers security questions (threats,
-  anomalies, incidents), not general product usage or compliance workflow.
+- This is a **separate module/feature** from Activity logging / Activity Logs
+  anomaly detection (6A), Compliance audit trail (6C), and Support Tickets.
+  It answers security questions (threats, security incidents, dependency
+  scan status), not general product usage. Activity-pattern anomalies that
+  are not (yet) security incidents belong in 6A.2; escalate into this module
+  when security-relevant and `security_monitoring` is ON.
 
 Enablement
 - Hub Functionalities flag: `security_monitoring` (default OFF).
@@ -1805,7 +1944,8 @@ Out of scope for v1 of this module
   retention prune jobs. Build in the phased order in 6E.1.
 - Security Monitoring (section 6F / NFR-SEC): separate functionality module for
   regular security event detection and capable-user reports — distinct from
-  activity logs and compliance audit trail.
+  activity logging + activity-pattern anomaly detection (6A) and the
+  compliance audit trail (6C).
 - Settings that vary (e.g. NEW-banner duration) come from the database.
 
 
@@ -1929,6 +2069,9 @@ STEP 1 — Shared hub core (content hub)
 [x] Activity logs — audit trail of user changes/activity (auth + mutating API)
 [x] Activity logs report — aggregates by action / user / day; filterable
 [x] Capability: dashboard_view_activity_logs — who can view logs & report
+[x] Activity Logs anomaly detection (section 6A.2) — pattern detectors +
+    Anomalies UI/API under Activity Logs; optional escalate to Security
+    Monitoring (6F); NOT a duplicate of secmon events/incidents
 [x] Active sessions — list logged-in users + force-logout (Sanctum tokens)
 [x] Capability: dashboard_manage_active_sessions — who can manage sessions
 [x] Frontend: Active sessions page under /my-dashboard (Capabilities-gated)
@@ -2220,7 +2363,9 @@ Acceptance criteria (for “done”)
       (dedicated retention prune env keys optional later)
 
 Related but distinct
-- Activity logs (6A) — general audit; not security-incident focused
+- Activity logging + anomaly detection (6A) — general audit (6A.1) and
+  activity-pattern anomalies under Activity Logs (6A.2); not the Security
+  Monitoring incident module
 - Compliance audit trail (6C) — FCA-style workflow; not threat monitoring
 - Support Tickets (3.3e) — human bug reports
 - GDPR ICO breach notification (6E.3) — legal duty; uses Security Monitoring
@@ -2237,7 +2382,8 @@ Related but distinct
 - NFR-BACKUP-ENC — Hub backup archives encrypted at rest (section 9.7) —
   IMPLEMENTED (AES-256-GCM; shared HUB_BACKUP_ENCRYPTION_KEY).
 - NFR-PRIV — UK GDPR / data protection (section 6E).
-- NFR-AUDIT — Activity logs + compliance audit trail (sections 6A / 6C).
+- NFR-AUDIT — Activity logging + anomaly detection + compliance audit trail
+  (sections 6A / 6A.2 / 6C). Logging + 6A.2 anomalies implemented.
 - NFR-SEC-NAV — External link / copied-URL / cross-site entry hardening
   (section 9.4) — IMPLEMENTED; product choice = show ERROR page.
 - NFR-SEC-FW — Application-layer firewall + upload malware protection

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\ActivityAnomaly;
 use App\Models\ActivityLog;
 use App\Models\AdvisorImportBatch;
 use App\Models\SupportTicket;
@@ -30,6 +31,7 @@ class GdprRetentionPruneService
         $policy = $this->policy();
         $deleted = [
             'activity_logs' => $this->pruneActivityLogs($policy['activity_logs_days'], $dryRun),
+            'activity_anomalies' => $this->pruneActivityAnomalies($policy['activity_logs_days'], $dryRun),
             'login_otp_tokens' => $this->pruneEmailKeyedTable('login_otp_tokens', $policy['login_otp_hours'], 'hours', $dryRun),
             'email_verification_tokens' => $this->pruneEmailKeyedTable('email_verification_tokens', $policy['email_verification_days'], 'days', $dryRun),
             'password_reset_tokens' => $this->pruneEmailKeyedTable('password_reset_tokens', $policy['password_reset_days'], 'days', $dryRun),
@@ -73,6 +75,22 @@ class GdprRetentionPruneService
 
         $before = now()->subDays($days);
         $query = ActivityLog::query()->where('created_at', '<', $before);
+        $count = (int) $query->count();
+        if (! $dryRun && $count > 0) {
+            $query->delete();
+        }
+
+        return $count;
+    }
+
+    private function pruneActivityAnomalies(int $days, bool $dryRun): int
+    {
+        if ($days <= 0 || ! Schema::hasTable('activity_anomalies')) {
+            return 0;
+        }
+
+        $before = now()->subDays($days);
+        $query = ActivityAnomaly::query()->where('detected_at', '<', $before);
         $count = (int) $query->count();
         if (! $dryRun && $count > 0) {
             $query->delete();

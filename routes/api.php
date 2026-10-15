@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\ActivityAnomalyController;
 use App\Http\Controllers\Api\ActivityLogController;
 use App\Http\Controllers\Api\ActiveSessionController;
 use App\Http\Controllers\Api\HubUsersController;
@@ -634,6 +635,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:dashboard_view_activity_logs')->group(function () {
             Route::get('/activity-logs', [ActivityLogController::class, 'index']);
             Route::get('/activity-logs/report', [ActivityLogController::class, 'report']);
+            // 6A.2 Anomaly detection (Activity Logs submodule)
+            Route::get('/activity-logs/anomalies/options', [ActivityAnomalyController::class, 'options']);
+            Route::post('/activity-logs/anomalies/detect-now', [ActivityAnomalyController::class, 'detectNow']);
+            Route::get('/activity-logs/anomalies', [ActivityAnomalyController::class, 'index']);
+            Route::get('/activity-logs/anomalies/{activityAnomaly}', [ActivityAnomalyController::class, 'show'])->whereNumber('activityAnomaly');
+            Route::patch('/activity-logs/anomalies/{activityAnomaly}', [ActivityAnomalyController::class, 'update'])->whereNumber('activityAnomaly');
+            Route::post('/activity-logs/anomalies/{activityAnomaly}/escalate', [ActivityAnomalyController::class, 'escalate'])->whereNumber('activityAnomaly');
         });
 
         // Security Monitoring — events / incidents / report / alert settings
@@ -1098,6 +1106,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:dashboard_view_activity_logs')->group(function () {
             Route::get('/activity-logs', [ActivityLogController::class, 'index']);
             Route::get('/activity-logs/report', [ActivityLogController::class, 'report']);
+            // 6A.2 Anomaly detection (Activity Logs submodule)
+            Route::get('/activity-logs/anomalies/options', [ActivityAnomalyController::class, 'options']);
+            Route::post('/activity-logs/anomalies/detect-now', [ActivityAnomalyController::class, 'detectNow']);
+            Route::get('/activity-logs/anomalies', [ActivityAnomalyController::class, 'index']);
+            Route::get('/activity-logs/anomalies/{activityAnomaly}', [ActivityAnomalyController::class, 'show'])->whereNumber('activityAnomaly');
+            Route::patch('/activity-logs/anomalies/{activityAnomaly}', [ActivityAnomalyController::class, 'update'])->whereNumber('activityAnomaly');
+            Route::post('/activity-logs/anomalies/{activityAnomaly}/escalate', [ActivityAnomalyController::class, 'escalate'])->whereNumber('activityAnomaly');
         });
 
         // Security Monitoring — events / incidents / report / alert settings

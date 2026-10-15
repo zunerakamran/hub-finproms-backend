@@ -89,7 +89,7 @@ class ActivityLogService
             $properties = array_merge($requestMeta, is_array($properties) ? $properties : []);
         }
 
-        return ActivityLog::query()->create([
+        $log = ActivityLog::query()->create([
             'hub_id' => $hub?->id,
             'user_id' => $user?->id,
             'user_name' => $user?->name,
@@ -108,6 +108,18 @@ class ActivityLogService
             'properties' => $properties ?: null,
             'created_at' => now(),
         ]);
+
+        // 6A.2: near-real-time activity-pattern anomaly hooks (never fail the write).
+        $action = (string) $data['action'];
+        if (! str_starts_with($action, 'activity.anomaly_') && ! str_starts_with($action, 'activity_logs.')) {
+            try {
+                app(ActivityAnomalyService::class)->maybeDetectFromLog($log);
+            } catch (\Throwable) {
+                // ignore
+            }
+        }
+
+        return $log;
     }
 
     /**

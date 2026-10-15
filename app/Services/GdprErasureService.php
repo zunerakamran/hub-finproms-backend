@@ -90,6 +90,7 @@ class GdprErasureService
             &$scrubbed
         ) {
             $scrubbed['activity_logs'] = $this->scrubActivityLogs($connection, $userId, $anonymousName, $anonymousEmail);
+            $scrubbed['activity_anomalies'] = $this->scrubActivityAnomalies($connection, $userId, $anonymousName, $anonymousEmail);
             $scrubbed['compliance_audit_events'] = $this->scrubComplianceAuditEvents($connection, $userId, $anonymousName, $anonymousEmail);
             $scrubbed['invoices'] = $this->scrubInvoices($connection, $userId, $anonymousName, $anonymousEmail);
             $scrubbed['support_tickets'] = $this->scrubSupportTickets($connection, $userId);
@@ -170,6 +171,21 @@ class GdprErasureService
                 'user_email' => $email,
                 'ip_address' => null,
                 'user_agent' => null,
+            ]);
+    }
+
+    private function scrubActivityAnomalies(string $connection, int $userId, string $name, string $email): int
+    {
+        if (! $this->tableExists($connection, 'activity_anomalies')) {
+            return 0;
+        }
+
+        return \App\Models\ActivityAnomaly::on($connection)
+            ->where('actor_user_id', $userId)
+            ->update([
+                'actor_name' => $name,
+                'actor_email' => $email,
+                'source_ip' => null,
             ]);
     }
 

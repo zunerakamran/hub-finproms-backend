@@ -37,3 +37,9 @@ Schedule::command('gdpr:prune-retention')
 // Security Monitoring has no daily schedule — events are recorded in real time.
 // Capable users run an on-demand check via POST …/security-monitoring/scan-now
 // (or optionally: php artisan security:monitor).
+
+// 6A.2 Activity Logs anomaly detection — baseline / window scans.
+// Near-real-time hooks also run after selected activity_log writes.
+Schedule::command('activity:detect-anomalies')
+    ->everyFifteenMinutes()
+    ->withoutOverlapping();
