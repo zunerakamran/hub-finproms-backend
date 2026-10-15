@@ -3,7 +3,8 @@
 /**
  * NFR-SEC-NAV — external link / copied-URL / cross-site entry hardening.
  *
- * Frontend enforces the user-facing error page. This config documents the
+ * Frontend enforces the user-facing error page for authenticated external
+ * entry; guests are redirected to login instead. This config documents the
  * allowlist and helpers for open-redirect checks / optional security events.
  */
 

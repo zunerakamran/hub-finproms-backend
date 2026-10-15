@@ -2129,10 +2129,10 @@ UK GDPR / DATA PROTECTION (section 2.2d + 6E) — Phase 1 backend done
     surfaced in Security Monitoring report via on-demand Monitor now)
 [x] NFR-SEC-NAV (section 9.4): external link / copied-URL / cross-site entry
     hardening — in-app nav OK; paste / email / chat / redirect from another
-    (non-hub) app into protected routes shows ERROR page (do not open target);
-    email verify, password reset, Stripe return allowlisted; frontend
-    navigationContinuity + ProtectedRoute guard; backend
-    config/security_navigation.php + SafeFrontendRedirect +
+    (non-hub) app into protected routes shows ERROR when logged in (do not
+    open target); guests → `/login` (no ERROR); email verify, password reset,
+    Stripe return allowlisted; frontend navigationContinuity + ProtectedRoute
+    guard; backend config/security_navigation.php + SafeFrontendRedirect +
     POST /api/security/external-navigation-blocked (optional secmon)
 [x] NFR-SEC-FW (section 9.5): application firewall + malware / upload
     protection — DenyBlockedIps + ScanUploadedFiles on API group;
@@ -2320,19 +2320,23 @@ Product rule (desired behaviour)
     router links / breadcrumbs; relative same-origin transitions.
   - ALLOW (guests only): public home `/` from outside when not logged in.
     Logged-in users opening `/` via paste / email / chat / other app → ERROR.
+  - GUESTS on protected routes via external entry: redirect to `/login`
+    (do NOT show the security ERROR — they are not authenticated yet).
   - BLOCK: first entry into an authenticated route (and home `/` when logged
-    in) when the navigation context is external, including:
+    in) when the navigation context is external AND the user is logged in,
+    including:
       - paste of full URL into address bar / new tab (including main home URL)
       - click from email, Slack, WhatsApp, etc.
       - top-level redirect from a third-party origin onto a protected route
-  - On BLOCK: do NOT render the sensitive target page. CHOSEN UX = ERROR:
+  - On BLOCK (authenticated only): do NOT render the sensitive target page.
+    CHOSEN UX = ERROR:
       D) Error page (SELECTED) — show a clear security error, e.g.
          “This page cannot be opened from an external link, email, chat,
          or another application. Please open the Hub from the official
          login / dashboard and navigate inside the application.”
          Do not mount the requested protected view. Provide a safe button
-         to go to login or `/my-dashboard` (same-origin only). Optional:
-         auto-log the attempt when Security Monitoring is ON.
+         to go home (same-origin only). Optional: auto-log the attempt
+         when Security Monitoring is ON.
       (Alternatives kept for reference only — not selected:)
       A) Soft gate — “Continue into Hub?” interstitial then allow deep link.
       B) Re-auth — require password and/or login OTP again, then continue.
@@ -2361,10 +2365,12 @@ Recommended technical approach (implement in BOTH repos when approved)
   1) Maintain an in-app “navigation continuity” marker (e.g. sessionStorage
      flag set after successful login / OTP and refreshed on in-app router
      transitions). Cleared when the tab/session ends.
-  2) Router guard on protected routes: if continuity marker is absent OR
-     entry looks external (referrer from email/chat/other app, paste into
-     address bar / new tab, redirect from non-hub origin) → show the
-     NFR-SEC-NAV error page (mode D); do not mount the target view.
+  2) Router guard on protected routes: if the user is not authenticated →
+     redirect to `/login` (never show the security ERROR to guests). If
+     authenticated and continuity marker is absent OR entry looks external
+     (referrer from email/chat/other app, paste into address bar / new tab,
+     redirect from non-hub origin) → show the NFR-SEC-NAV error page
+     (mode D); do not mount the target view.
   3) In-app `<Link>` / router.push always sets continuity; hard refresh may
      keep marker (sessionStorage) so F5 inside the app still works — product
      may optionally treat hard refresh as step-up (stricter).
@@ -2374,11 +2380,14 @@ Acceptance criteria (for “done” — when implementation is approved)
   [x] Documented product choice: mode D — show ERROR page (2026-10-14)
   [x] In-app menu / SPA navigation between authenticated pages works unchanged
       (continuity marked at login / OTP / verify; F5 keeps sessionStorage)
-  [x] Paste of a protected deep URL shows the security ERROR (target not opened)
+  [x] Paste of a protected deep URL while logged in shows the security ERROR
+      (target not opened); guests are redirected to `/login` instead
   [x] Click from email / chat / other non-hub app / external redirect into a
-      protected route shows the same ERROR; allowlisted flows still work
+      protected route shows the same ERROR when logged in; guests → login;
+      allowlisted flows still work
   [x] Error copy explains that pages must be opened by navigating inside the Hub
-  [x] Error page offers only safe same-origin actions (login / dashboard / home)
+  [x] Error page offers only a safe same-origin action (home);
+      guests never see the error page (login redirect)
   [x] Password reset, email verification, Stripe return still work (allowlist)
   [x] Session cookies: SameSite strategy documented in .env.example; CSRF still
       required for mutations
