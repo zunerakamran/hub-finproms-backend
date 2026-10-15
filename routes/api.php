@@ -665,6 +665,8 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/active-sessions', [ActiveSessionController::class, 'index']);
             Route::post('/active-sessions/{userId}/force-logout', [ActiveSessionController::class, 'forceLogout'])
                 ->whereNumber('userId');
+            Route::get('/session-settings', [ActiveSessionController::class, 'sessionSettings']);
+            Route::put('/session-settings', [ActiveSessionController::class, 'updateSessionSettings']);
         });
 
         Route::middleware('hub_can:dashboard_view_hub_users')->group(function () {
@@ -1123,6 +1125,8 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/active-sessions', [ActiveSessionController::class, 'index']);
             Route::post('/active-sessions/{userId}/force-logout', [ActiveSessionController::class, 'forceLogout'])
                 ->whereNumber('userId');
+            Route::get('/session-settings', [ActiveSessionController::class, 'sessionSettings']);
+            Route::put('/session-settings', [ActiveSessionController::class, 'updateSessionSettings']);
         });
 
         Route::middleware('hub_can:dashboard_view_hub_users')->group(function () {

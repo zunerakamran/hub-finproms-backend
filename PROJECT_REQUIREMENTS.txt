@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-14 (NFR-BACKUP-ENC: hub backup archives encrypted at rest)
+Last updated: 2026-10-15 (hub session timeout controllable via Manage active sessions)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -1212,8 +1212,9 @@ Notes:
       security incidents; add investigation notes
     - `secmon_manage_alerts` — configure alert thresholds / notification
       recipients (hub-admin style roles only by default)
-  - Manage active sessions — see currently logged-in users and force-logout
-    any user (ends all of their API sessions on this hub) — same roles
+  - Manage active sessions — see currently logged-in users, force-logout any
+    user (ends all of their API sessions on this hub), and set the hub idle
+    session timeout — same roles
   - View hub users (`dashboard_view_hub_users`) — list all users on the current
     hub with full details (role, firm, credits, modules, status, timestamps);
     sidebar label “Users” at `/my-dashboard/hub-users` (distinct from Platform
@@ -1401,7 +1402,7 @@ Notes:
 
 
 --------------------------------------------------------------------------------
-6B. ACTIVE SESSIONS / FORCE LOGOUT
+6B. ACTIVE SESSIONS / FORCE LOGOUT / SESSION TIMEOUT
 --------------------------------------------------------------------------------
 - Capability: `dashboard_manage_active_sessions` (Hub operations group on the
   Capabilities matrix). Applicable roles: all matrix roles; defaults ON for
@@ -1412,12 +1413,26 @@ Notes:
     the current hub (or acting remote hub’s own database).
   - Force-logout any listed user, which deletes all of that user’s tokens so
     they must sign in again.
+  - Set this hub’s idle session timeout (minutes). Controls SPA cookie idle
+    lifetime (`session.lifetime`) and Sanctum PAT expiry on that hub deploy.
+    Stored on `hubs.session_lifetime_minutes` (null = fall back to
+    SESSION_LIFETIME / config default, normally 7 days). Allowed range:
+    15 minutes – 30 days. When set from Central for a wired content hub, the
+    value is pushed to that hub’s own database (WhiteLabelHubSyncService).
+    Saving the timeout immediately revokes all Sanctum tokens and cookie
+    sessions on that hub (including the actor when not acting remotely) so
+    everyone must sign in again under the new policy.
 - Force-logout of the viewer’s own account ends their session immediately.
-- Mutations are written to activity_logs (`auth.force_logout`).
+- Mutations are written to activity_logs (`auth.force_logout`,
+  `auth.session_timeout_updated`).
 - APIs (hub_can:dashboard_manage_active_sessions):
   - GET /api/client-admin/active-sessions (+ /power-admin/…) — logged-in users
   - POST /api/client-admin/active-sessions/{userId}/force-logout (+ /power-admin/…)
-- Frontend: Active sessions page under /my-dashboard (nav + Capabilities gate).
+  - GET /api/client-admin/session-settings (+ /power-admin/…) — current timeout
+  - PUT /api/client-admin/session-settings `{ session_lifetime_minutes }` —
+    update timeout
+- Frontend: Active sessions page under /my-dashboard (nav + Capabilities gate)
+  includes the session timeout control for capable roles.
 
 
 --------------------------------------------------------------------------------
@@ -1917,6 +1932,8 @@ STEP 1 — Shared hub core (content hub)
 [x] Active sessions — list logged-in users + force-logout (Sanctum tokens)
 [x] Capability: dashboard_manage_active_sessions — who can manage sessions
 [x] Frontend: Active sessions page under /my-dashboard (Capabilities-gated)
+[x] Hub session timeout — capable role sets hubs.session_lifetime_minutes
+    (GET/PUT session-settings; applied to SPA idle + Sanctum on that deploy)
 [x] Compliance audit trail — unified SMC / GC / WC history with top tabs
 [x] Capability: dashboard_view_compliance_audit_trail — who can open Audit trail
 [x] Frontend: Audit trail page at /my-dashboard/compliance-audit-trail
@@ -2051,7 +2068,8 @@ SECURITY HARDENING (phase 1 — 2026-10-04)
 [x] Encrypt platform Stripe secrets in settings (Setting::getSecret/setSecret)
 [x] Stripe webhooks fail closed when no webhook secret / missing signature
 [x] SecurityHeaders middleware (HSTS, nosniff, CSP for JSON APIs; embed exempt)
-[x] Sanctum token expiry default 7d (SANCTUM_EXPIRATION); session idle 7d (SESSION_LIFETIME)
+[x] Sanctum token expiry default 7d (SANCTUM_EXPIRATION); session idle 7d (SESSION_LIFETIME);
+    per-hub override via hubs.session_lifetime_minutes (Active sessions / capable role)
 [x] Outbound TLS verify on by default (HTTP_TLS_VERIFY); cPanel + embed proxy
 [x] Scheduler auth: X-Scheduler-Key header + hash_equals (query key still works)
 [x] Activity log redacts api_key / cpanel_* / hub stripe secrets

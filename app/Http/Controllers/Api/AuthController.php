@@ -477,8 +477,14 @@ class AuthController extends Controller
         }
 
         // Personal access token kept for Active Sessions / force-logout + legacy clients.
+        // Expires with the hub’s configured idle timeout (aligned with SPA session cookie).
         try {
-            $token = $user->createToken('auth_token')->plainTextToken;
+            $lifetimeMinutes = $this->hubs->current()->resolvedSessionLifetimeMinutes();
+            $token = $user->createToken(
+                'auth_token',
+                ['*'],
+                now()->addMinutes($lifetimeMinutes)
+            )->plainTextToken;
         } catch (\Throwable $e) {
             report($e);
 

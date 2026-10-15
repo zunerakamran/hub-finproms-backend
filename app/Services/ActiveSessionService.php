@@ -14,8 +14,10 @@ class ActiveSessionService
     public function __construct(
         private readonly ActingHubService $actingHubs,
         private readonly WhiteLabelDatabaseService $remoteDb,
+        private readonly WhiteLabelHubSyncService $whiteLabelSync,
         private readonly ActivityLogService $activityLogs,
         private readonly SecurityMonitoringService $securityMonitoring,
+        private readonly HubService $hubs,
     ) {}
 
     /**
@@ -304,5 +306,197 @@ class ActiveSessionService
         }
 
         return null;
+    }
+
+    /**
+     * Session idle timeout settings for the target hub.
+     *
+     * @return array{
+     *   hub: array{id: int, name: string, slug: string},
+     *   data: array{
+     *     session_lifetime_minutes: int,
+     *     default_minutes: int,
+     *     min_minutes: int,
+     *     max_minutes: int,
+     *     is_custom: bool
+     *   }
+     * }
+     */
+    public function sessionSettingsForActor(User $actor): array
+    {
+        $hub = $this->targetHub($actor);
+
+        return [
+            'hub' => $this->hubPayload($hub),
+            'data' => $this->sessionSettingsPayload($hub),
+        ];
+    }
+
+    /**
+     * Update idle session timeout for the target hub (minutes).
+     * Immediately ends all active sessions on that hub so the new timeout
+     * applies from the next login. Pushes to the content hub’s own DB when
+     * Central has remote wiring.
+     *
+     * @return array{
+     *   message: string,
+     *   hub: array{id: int, name: string, slug: string},
+     *   data: array{
+     *     session_lifetime_minutes: int,
+     *     default_minutes: int,
+     *     min_minutes: int,
+     *     max_minutes: int,
+     *     is_custom: bool
+     *   },
+     *   tokens_revoked: int,
+     *   sessions_revoked: int,
+     *   logged_out_self: bool
+     * }
+     */
+    public function updateSessionSettings(User $actor, int $minutes): array
+    {
+        $hub = $this->targetHub($actor);
+        $minutes = max(
+            Hub::SESSION_LIFETIME_MIN_MINUTES,
+            min(Hub::SESSION_LIFETIME_MAX_MINUTES, $minutes)
+        );
+
+        $previous = $hub->session_lifetime_minutes;
+        $hub->session_lifetime_minutes = $minutes;
+        $hub->save();
+        $this->hubs->forgetCurrentCache();
+
+        if ($hub->isContentHub() && $hub->hasRemoteDatabaseConfigured()) {
+            $this->whiteLabelSync->pushSettings($hub->fresh() ?? $hub);
+        }
+
+        $revocation = $this->revokeAllSessionsForHub($actor, $hub);
+
+        try {
+            $this->activityLogs->log([
+                'action' => 'auth.session_timeout_updated',
+                'description' => 'Session idle timeout set to '.$minutes.' minute(s) on hub '.$hub->slug
+                    .' (ended '.$revocation['tokens_revoked'].' token(s), '
+                    .$revocation['sessions_revoked'].' cookie session(s))',
+                'user' => $actor,
+                'subject' => $hub,
+                'status_code' => 200,
+                'properties' => [
+                    'hub_id' => $hub->id,
+                    'hub_slug' => $hub->slug,
+                    'previous_minutes' => $previous,
+                    'session_lifetime_minutes' => $minutes,
+                    'tokens_revoked' => $revocation['tokens_revoked'],
+                    'sessions_revoked' => $revocation['sessions_revoked'],
+                ],
+            ]);
+        } catch (\Throwable) {
+            //
+        }
+
+        $hub = $hub->fresh() ?? $hub;
+        $duration = $this->formatDuration($minutes);
+
+        return [
+            'message' => 'Session timeout updated to '.$duration
+                .'. All active users on this hub have been logged out.',
+            'hub' => $this->hubPayload($hub),
+            'data' => $this->sessionSettingsPayload($hub),
+            'tokens_revoked' => $revocation['tokens_revoked'],
+            'sessions_revoked' => $revocation['sessions_revoked'],
+            'logged_out_self' => $revocation['logged_out_self'],
+        ];
+    }
+
+    /**
+     * End every Sanctum token + cookie session on the hub where auth lives.
+     *
+     * @return array{tokens_revoked: int, sessions_revoked: int, logged_out_self: bool}
+     */
+    private function revokeAllSessionsForHub(User $actor, Hub $hub): array
+    {
+        $actingRemotely = $hub->isContentHub() && $this->actingHubs->isActingRemotely($actor);
+
+        if ($actingRemotely) {
+            $this->remoteDb->assertConfigured($hub);
+
+            return $this->remoteDb->run($hub, function (string $connection) {
+                return $this->revokeAllSessionsOnConnection($connection, loggedOutSelf: false);
+            });
+        }
+
+        return $this->revokeAllSessionsOnConnection(
+            (string) config('database.default'),
+            loggedOutSelf: true
+        );
+    }
+
+    /**
+     * @return array{tokens_revoked: int, sessions_revoked: int, logged_out_self: bool}
+     */
+    private function revokeAllSessionsOnConnection(string $connection, bool $loggedOutSelf): array
+    {
+        $tokensRevoked = 0;
+        $sessionsRevoked = 0;
+        $schema = DB::connection($connection)->getSchemaBuilder();
+
+        if ($schema->hasTable('personal_access_tokens')) {
+            $query = DB::connection($connection)->table('personal_access_tokens')
+                ->where('tokenable_type', User::class);
+            $tokensRevoked = (int) $query->count();
+            $query->delete();
+        }
+
+        if ($schema->hasTable('sessions') && $schema->hasColumn('sessions', 'user_id')) {
+            $query = DB::connection($connection)->table('sessions')
+                ->whereNotNull('user_id');
+            $sessionsRevoked = (int) $query->count();
+            $query->delete();
+        }
+
+        return [
+            'tokens_revoked' => $tokensRevoked,
+            'sessions_revoked' => $sessionsRevoked,
+            'logged_out_self' => $loggedOutSelf,
+        ];
+    }
+
+    /**
+     * @return array{
+     *   session_lifetime_minutes: int,
+     *   default_minutes: int,
+     *   min_minutes: int,
+     *   max_minutes: int,
+     *   is_custom: bool
+     * }
+     */
+    private function sessionSettingsPayload(Hub $hub): array
+    {
+        $default = max(1, (int) config('session.lifetime', 10080));
+
+        return [
+            'session_lifetime_minutes' => $hub->resolvedSessionLifetimeMinutes(),
+            'default_minutes' => $default,
+            'min_minutes' => Hub::SESSION_LIFETIME_MIN_MINUTES,
+            'max_minutes' => Hub::SESSION_LIFETIME_MAX_MINUTES,
+            'is_custom' => $hub->session_lifetime_minutes !== null
+                && (int) $hub->session_lifetime_minutes > 0,
+        ];
+    }
+
+    private function formatDuration(int $minutes): string
+    {
+        if ($minutes % 1440 === 0) {
+            $days = intdiv($minutes, 1440);
+
+            return $days.' day'.($days === 1 ? '' : 's');
+        }
+        if ($minutes % 60 === 0) {
+            $hours = intdiv($minutes, 60);
+
+            return $hours.' hour'.($hours === 1 ? '' : 's');
+        }
+
+        return $minutes.' minute'.($minutes === 1 ? '' : 's');
     }
 }

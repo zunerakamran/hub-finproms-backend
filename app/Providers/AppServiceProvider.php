@@ -27,6 +27,21 @@ class AppServiceProvider extends ServiceProvider
             URL::forceScheme('https');
         }
 
+        // Apply this deploy’s hub idle session timeout (SPA cookie + Sanctum).
+        // Skipped during console/migrate when hubs table may not exist yet.
+        if (! $this->app->runningInConsole()) {
+            try {
+                $hub = app(\App\Services\HubService::class)->current();
+                $minutes = $hub->resolvedSessionLifetimeMinutes();
+                config([
+                    'session.lifetime' => $minutes,
+                    'sanctum.expiration' => $minutes,
+                ]);
+            } catch (\Throwable) {
+                // Keep .env / config defaults until hubs are available.
+            }
+        }
+
         // NFR-SEC-APP: brute-force — per IP and per email+IP when email present.
         RateLimiter::for('auth', function (Request $request) {
             $perMinute = max(5, (int) config('security_app.auth_requests_per_minute', 20));

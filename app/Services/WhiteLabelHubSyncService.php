@@ -74,6 +74,7 @@ class WhiteLabelHubSyncService
                     'favicon_url' => $hub->faviconAbsoluteUrl(),
                     'auth_bg_image_url' => $hub->authBgImageAbsoluteUrl(),
                     'from_email' => $hub->from_email,
+                    'session_lifetime_minutes' => $hub->session_lifetime_minutes,
                     'frontend_url' => $hub->frontend_url,
                     'checklist' => json_encode($hub->resolvedChecklist()),
                     'role_capabilities' => json_encode($roleCaps),

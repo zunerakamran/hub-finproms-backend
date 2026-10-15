@@ -1299,7 +1299,7 @@ class Hub extends Model
         ],
         'dashboard_manage_active_sessions' => [
             'label' => 'Manage active sessions',
-            'description' => 'See which users are currently logged in and force-logout any user (ends all of their sessions on this hub).',
+            'description' => 'See which users are currently logged in, force-logout any user, and set this hub’s idle session timeout.',
             'group' => self::GROUP_DASHBOARD_HUB,
             'default_shared' => true,
             'default_white_label' => true,
@@ -1726,6 +1726,7 @@ class Hub extends Model
         'favicon_url',
         'auth_bg_image_url',
         'from_email',
+        'session_lifetime_minutes',
         'frontend_url',
         'api_url',
         'deploy_notes',
@@ -1804,6 +1805,7 @@ class Hub extends Model
             'advisor_billing_renew_day' => 'integer',
             'billing_grace_day' => 'integer',
             'subscriber_credits' => 'integer',
+            'session_lifetime_minutes' => 'integer',
             'db_port' => 'integer',
             'backup_enabled' => 'boolean',
             'backup_weekday' => 'integer',
@@ -1816,6 +1818,31 @@ class Hub extends Model
             'stripe_webhook_secret' => \App\Casts\SafeEncrypted::class,
             'db_password' => \App\Casts\SafeEncrypted::class,
         ];
+    }
+
+    /** Minimum idle session lifetime a capable person may set (minutes). */
+    public const SESSION_LIFETIME_MIN_MINUTES = 15;
+
+    /** Maximum idle session lifetime a capable person may set (minutes) — 30 days. */
+    public const SESSION_LIFETIME_MAX_MINUTES = 43200;
+
+    /**
+     * Resolved idle session lifetime in minutes for this hub.
+     * Falls back to config('session.lifetime') / SESSION_LIFETIME when unset.
+     */
+    public function resolvedSessionLifetimeMinutes(): int
+    {
+        $configured = $this->session_lifetime_minutes;
+        if ($configured !== null && (int) $configured > 0) {
+            return max(
+                self::SESSION_LIFETIME_MIN_MINUTES,
+                min(self::SESSION_LIFETIME_MAX_MINUTES, (int) $configured)
+            );
+        }
+
+        $fallback = (int) config('session.lifetime', 10080);
+
+        return max(1, $fallback);
     }
 
     public function advisorBillingRenewDay(): int
