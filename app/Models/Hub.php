@@ -640,6 +640,7 @@ class Hub extends Model
         'secmon_view_report',
         'secmon_manage_incidents',
         'secmon_manage_alerts',
+        'secmon_manage_access',
     ];
 
     /**
@@ -1564,6 +1565,13 @@ class Hub extends Model
         'secmon_manage_alerts' => [
             'label' => 'Manage security alert settings',
             'description' => 'Configure Security Monitoring alert thresholds, failed-login window, and notification recipients.',
+            'group' => self::GROUP_SECURITY_MONITORING,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'secmon_manage_access' => [
+            'label' => 'Manage application access restrictions',
+            'description' => 'Configure where the application can be accessed from: UK only, specific UK cities, allow/restrict countries, or allow/restrict IPs.',
             'group' => self::GROUP_SECURITY_MONITORING,
             'default_shared' => true,
             'default_white_label' => true,

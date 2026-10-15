@@ -19,6 +19,10 @@ class SecurityMonitoringSetting extends Model
         'alert_emails',
         'failed_login_threshold',
         'failed_login_window_minutes',
+        'access_restriction_mode',
+        'access_restriction_countries',
+        'access_restriction_cities',
+        'access_restriction_ips',
         'last_dependency_scan_at',
         'last_dependency_scan_status',
         'last_dependency_scan_summary',
@@ -31,6 +35,9 @@ class SecurityMonitoringSetting extends Model
             'alert_emails' => 'array',
             'failed_login_threshold' => 'integer',
             'failed_login_window_minutes' => 'integer',
+            'access_restriction_countries' => 'array',
+            'access_restriction_cities' => 'array',
+            'access_restriction_ips' => 'array',
             'last_dependency_scan_at' => 'datetime',
         ];
     }
@@ -52,9 +59,30 @@ class SecurityMonitoringSetting extends Model
             'alert_emails' => $this->alert_emails ?? [],
             'failed_login_threshold' => (int) $this->failed_login_threshold,
             'failed_login_window_minutes' => (int) $this->failed_login_window_minutes,
+            'access_restriction_mode' => (string) ($this->access_restriction_mode ?: 'off'),
+            'access_restriction_countries' => array_values($this->access_restriction_countries ?? []),
+            'access_restriction_cities' => array_values($this->access_restriction_cities ?? []),
+            'access_restriction_ips' => array_values($this->access_restriction_ips ?? []),
             'last_dependency_scan_at' => optional($this->last_dependency_scan_at)?->toIso8601String(),
             'last_dependency_scan_status' => $this->last_dependency_scan_status,
             'last_dependency_scan_summary' => $this->last_dependency_scan_summary,
+            'updated_at' => optional($this->updated_at)?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * Access-restriction fields only (for the dedicated settings endpoint).
+     *
+     * @return array<string, mixed>
+     */
+    public function toAccessRestrictionApiArray(): array
+    {
+        return [
+            'hub_id' => $this->hub_id,
+            'mode' => (string) ($this->access_restriction_mode ?: 'off'),
+            'countries' => array_values($this->access_restriction_countries ?? []),
+            'cities' => array_values($this->access_restriction_cities ?? []),
+            'ips' => array_values($this->access_restriction_ips ?? []),
             'updated_at' => optional($this->updated_at)?->toIso8601String(),
         ];
     }

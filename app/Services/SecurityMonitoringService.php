@@ -168,6 +168,10 @@ class SecurityMonitoringService
                 $table->json('alert_emails')->nullable();
                 $table->unsignedSmallInteger('failed_login_threshold')->default(5);
                 $table->unsignedSmallInteger('failed_login_window_minutes')->default(15);
+                $table->string('access_restriction_mode', 40)->default('off');
+                $table->json('access_restriction_countries')->nullable();
+                $table->json('access_restriction_cities')->nullable();
+                $table->json('access_restriction_ips')->nullable();
                 $table->dateTime('last_dependency_scan_at')->nullable();
                 $table->string('last_dependency_scan_status', 40)->nullable();
                 $table->text('last_dependency_scan_summary')->nullable();
@@ -175,6 +179,34 @@ class SecurityMonitoringService
 
                 $table->unique('hub_id', 'secmon_settings_hub_unique');
             });
+        } else {
+            // Heal columns on remote content-hub DBs that predate access restrictions.
+            $needsMode = ! $schema->hasColumn('security_monitoring_settings', 'access_restriction_mode');
+            $needsCountries = ! $schema->hasColumn('security_monitoring_settings', 'access_restriction_countries');
+            $needsCities = ! $schema->hasColumn('security_monitoring_settings', 'access_restriction_cities');
+            $needsIps = ! $schema->hasColumn('security_monitoring_settings', 'access_restriction_ips');
+
+            if ($needsMode || $needsCountries || $needsCities || $needsIps) {
+                $schema->table('security_monitoring_settings', function (Blueprint $table) use (
+                    $needsMode,
+                    $needsCountries,
+                    $needsCities,
+                    $needsIps
+                ) {
+                    if ($needsMode) {
+                        $table->string('access_restriction_mode', 40)->default('off');
+                    }
+                    if ($needsCountries) {
+                        $table->json('access_restriction_countries')->nullable();
+                    }
+                    if ($needsCities) {
+                        $table->json('access_restriction_cities')->nullable();
+                    }
+                    if ($needsIps) {
+                        $table->json('access_restriction_ips')->nullable();
+                    }
+                });
+            }
         }
 
         // Drop hub_id FKs if an earlier migration created them (breaks remote acting DBs).
@@ -228,6 +260,116 @@ class SecurityMonitoringService
         }
 
         return $settings;
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    public function updateAccessSettings(Hub $hub, User $actor, array $data, ?Request $request = null): SecurityMonitoringSetting
+    {
+        $this->assertModuleEnabled($hub);
+        $this->assertCan($hub, $actor, 'secmon_manage_access');
+
+        $mode = (string) ($data['mode'] ?? AccessRestrictionService::MODE_OFF);
+        if (! in_array($mode, AccessRestrictionService::MODES, true)) {
+            throw ValidationException::withMessages([
+                'mode' => 'Invalid access restriction mode.',
+            ]);
+        }
+
+        $geoIp = app(GeoIpLookupService::class);
+        $countries = array_values(array_unique(array_filter(array_map(
+            fn ($c) => $geoIp->normalizeCountry($c),
+            (array) ($data['countries'] ?? [])
+        ))));
+        $cities = array_values(array_unique(array_filter(array_map(
+            fn ($c) => $geoIp->normalizeCity($c),
+            (array) ($data['cities'] ?? [])
+        ))));
+        $ips = array_values(array_unique(array_filter(array_map(
+            fn ($ip) => trim((string) $ip),
+            (array) ($data['ips'] ?? [])
+        ), fn ($ip) => $ip !== '')));
+
+        foreach ($ips as $ip) {
+            if (! $this->isValidIpOrCidr($ip)) {
+                throw ValidationException::withMessages([
+                    'ips' => "Invalid IP or CIDR: {$ip}",
+                ]);
+            }
+        }
+
+        if ($mode === AccessRestrictionService::MODE_UK_CITIES && $cities === []) {
+            throw ValidationException::withMessages([
+                'cities' => 'Select at least one UK city when using the UK cities mode.',
+            ]);
+        }
+
+        if (in_array($mode, [
+            AccessRestrictionService::MODE_RESTRICT_COUNTRIES,
+            AccessRestrictionService::MODE_ALLOW_COUNTRIES,
+        ], true) && $countries === []) {
+            throw ValidationException::withMessages([
+                'countries' => 'Select at least one country for this mode.',
+            ]);
+        }
+
+        if (in_array($mode, [
+            AccessRestrictionService::MODE_RESTRICT_IPS,
+            AccessRestrictionService::MODE_ALLOW_IPS,
+        ], true) && $ips === []) {
+            throw ValidationException::withMessages([
+                'ips' => 'Add at least one IP or CIDR for this mode.',
+            ]);
+        }
+
+        $settings = $this->settingsFor($hub);
+        $settings->fill([
+            'access_restriction_mode' => $mode,
+            'access_restriction_countries' => $countries,
+            'access_restriction_cities' => $cities,
+            'access_restriction_ips' => $ips,
+        ]);
+        $settings->save();
+
+        app(AccessRestrictionService::class)->forgetSettingsCache((int) $hub->id);
+
+        try {
+            $this->activityLogs->log([
+                'action' => 'secmon.access_settings_update',
+                'description' => 'Updated application access restrictions',
+                'user' => $actor,
+                'request' => $request,
+                'status_code' => 200,
+                'properties' => $settings->toAccessRestrictionApiArray(),
+            ]);
+        } catch (\Throwable) {
+            //
+        }
+
+        return $settings;
+    }
+
+    private function isValidIpOrCidr(string $value): bool
+    {
+        if (! str_contains($value, '/')) {
+            return filter_var($value, FILTER_VALIDATE_IP) !== false;
+        }
+
+        [$subnet, $mask] = array_pad(explode('/', $value, 2), 2, null);
+        if ($subnet === null || $mask === null || ! is_numeric($mask)) {
+            return false;
+        }
+
+        if (filter_var($subnet, FILTER_VALIDATE_IP) === false) {
+            return false;
+        }
+
+        $mask = (int) $mask;
+        $isV6 = filter_var($subnet, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false;
+        $max = $isV6 ? 128 : 32;
+
+        return $mask >= 0 && $mask <= $max;
     }
 
     /**
@@ -814,7 +956,14 @@ class SecurityMonitoringService
     }
 
     /**
-     * @return array{categories: list<array{key: string, label: string}>, severities: list<string>, statuses: list<string>, event_statuses: list<string>}
+     * @return array{
+     *   categories: list<array{key: string, label: string}>,
+     *   severities: list<string>,
+     *   statuses: list<string>,
+     *   event_statuses: list<string>,
+     *   access_restriction_modes: list<array{key: string, label: string, description: string}>,
+     *   suggested_uk_cities: list<string>
+     * }
      */
     public function options(): array
     {
@@ -826,6 +975,8 @@ class SecurityMonitoringService
             'severities' => SecurityEvent::SEVERITIES,
             'statuses' => SecurityIncident::STATUSES,
             'event_statuses' => SecurityEvent::STATUSES,
+            'access_restriction_modes' => AccessRestrictionService::modeOptions(),
+            'suggested_uk_cities' => AccessRestrictionService::SUGGESTED_UK_CITIES,
         ];
     }
 

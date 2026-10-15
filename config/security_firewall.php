@@ -41,6 +41,33 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | GeoIP (hub access restrictions)
+    |--------------------------------------------------------------------------
+    |
+    | Country / city for access rules prefer CDN headers (CF-IPCountry /
+    | CF-IPCity, or X-App-Geo-*). Optional HTTP fallback (ip-api.com by default)
+    | is cached. Disable HTTP in locked-down hosts with GEOIP_HTTP_ENABLED=false.
+    |
+    */
+
+    // When true, 127.0.0.1 / ::1 / RFC1918 clients skip hub geo/IP access rules
+    // (env deny-list still applies). Disable only if you must gate private networks.
+    'access_restriction_bypass_private_ips' => env('ACCESS_RESTRICTION_BYPASS_PRIVATE_IPS', true),
+
+    'geoip' => [
+        'http_enabled' => env('GEOIP_HTTP_ENABLED', true),
+        'http_url' => env(
+            'GEOIP_HTTP_URL',
+            'http://ip-api.com/json/{ip}?fields=status,countryCode,city'
+        ),
+        'cache_minutes' => (int) env('GEOIP_CACHE_MINUTES', 1440),
+        'timeout_seconds' => (int) env('GEOIP_TIMEOUT', 2),
+        // Map of IP => ['country' => 'GB', 'city' => 'London'] for tests / staging.
+        'test_overrides' => [],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Upload / malware protection
     |--------------------------------------------------------------------------
     |

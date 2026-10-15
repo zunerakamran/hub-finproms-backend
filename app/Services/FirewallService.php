@@ -16,6 +16,7 @@ class FirewallService
     public function __construct(
         private HubService $hubs,
         private SecurityMonitoringService $securityMonitoring,
+        private AccessRestrictionService $accessRestrictions,
     ) {}
 
     public function isEnabled(): bool
@@ -23,6 +24,9 @@ class FirewallService
         return (bool) config('security_firewall.enabled', true);
     }
 
+    /**
+     * Env deny-list + temporary auto-blocks (IP only, no hub geo rules).
+     */
     public function isIpDenied(?string $ip): bool
     {
         if (! $this->isEnabled() || $ip === null || $ip === '') {
@@ -40,6 +44,27 @@ class FirewallService
         }
 
         return Cache::has(self::CACHE_PREFIX.$ip);
+    }
+
+    /**
+     * Full request gate: env deny-list, temporary blocks, then hub access rules.
+     */
+    public function isRequestDenied(Request $request): bool
+    {
+        if (! $this->isEnabled()) {
+            return false;
+        }
+
+        if ($this->isIpDenied($request->ip())) {
+            return true;
+        }
+
+        return $this->accessRestrictions->isRequestDenied($request);
+    }
+
+    public function accessRestrictions(): AccessRestrictionService
+    {
+        return $this->accessRestrictions;
     }
 
     /**

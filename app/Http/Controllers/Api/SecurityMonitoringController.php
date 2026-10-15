@@ -7,6 +7,7 @@ use App\Models\Hub;
 use App\Models\SecurityEvent;
 use App\Models\SecurityIncident;
 use App\Models\User;
+use App\Services\AccessRestrictionService;
 use App\Services\ActingHubService;
 use App\Services\HubService;
 use App\Services\SecurityMonitoringService;
@@ -208,6 +209,45 @@ class SecurityMonitoringController extends Controller
 
         return response()->json([
             'data' => $settings->toApiArray(),
+        ]);
+    }
+
+    public function accessSettings(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $hub = $this->securityHub($user);
+        $this->security->assertModuleEnabled($hub);
+
+        return response()->json([
+            'data' => $this->security->settingsFor($hub)->toAccessRestrictionApiArray(),
+            'options' => [
+                'modes' => AccessRestrictionService::modeOptions(),
+                'suggested_uk_cities' => AccessRestrictionService::SUGGESTED_UK_CITIES,
+            ],
+        ]);
+    }
+
+    public function updateAccessSettings(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $hub = $this->securityHub($user);
+
+        $data = $request->validate([
+            'mode' => ['required', 'string', Rule::in(AccessRestrictionService::MODES)],
+            'countries' => ['sometimes', 'array', 'max:250'],
+            'countries.*' => ['string', 'size:2'],
+            'cities' => ['sometimes', 'array', 'max:100'],
+            'cities.*' => ['string', 'max:120'],
+            'ips' => ['sometimes', 'array', 'max:500'],
+            'ips.*' => ['string', 'max:64'],
+        ]);
+
+        $settings = $this->security->updateAccessSettings($hub, $user, $data, $request);
+
+        return response()->json([
+            'data' => $settings->toAccessRestrictionApiArray(),
         ]);
     }
 

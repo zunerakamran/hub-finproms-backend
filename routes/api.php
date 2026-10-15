@@ -659,6 +659,10 @@ Route::middleware('auth:sanctum')->group(function () {
                 Route::get('/security-monitoring/alert-settings', [SecurityMonitoringController::class, 'alertSettings']);
                 Route::put('/security-monitoring/alert-settings', [SecurityMonitoringController::class, 'updateAlertSettings']);
             });
+            Route::middleware('hub_can:secmon_manage_access')->group(function () {
+                Route::get('/security-monitoring/access-settings', [SecurityMonitoringController::class, 'accessSettings']);
+                Route::put('/security-monitoring/access-settings', [SecurityMonitoringController::class, 'updateAccessSettings']);
+            });
         });
 
         Route::middleware('hub_can:dashboard_manage_active_sessions')->group(function () {
@@ -1118,6 +1122,10 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::middleware('hub_can:secmon_manage_alerts')->group(function () {
                 Route::get('/security-monitoring/alert-settings', [SecurityMonitoringController::class, 'alertSettings']);
                 Route::put('/security-monitoring/alert-settings', [SecurityMonitoringController::class, 'updateAlertSettings']);
+            });
+            Route::middleware('hub_can:secmon_manage_access')->group(function () {
+                Route::get('/security-monitoring/access-settings', [SecurityMonitoringController::class, 'accessSettings']);
+                Route::put('/security-monitoring/access-settings', [SecurityMonitoringController::class, 'updateAccessSettings']);
             });
         });
 

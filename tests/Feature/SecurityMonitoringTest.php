@@ -49,10 +49,12 @@ class SecurityMonitoringTest extends TestCase
     public function test_capability_keys_are_registered(): void
     {
         $this->assertContains('secmon_view_events', Hub::SECURITY_MONITORING_CAPABILITY_KEYS);
+        $this->assertContains('secmon_manage_access', Hub::SECURITY_MONITORING_CAPABILITY_KEYS);
         $this->assertNotContains('module_security_monitoring', Hub::MODULE_KEYS);
         $this->assertArrayHasKey('security_monitoring', Hub::CHECKLIST_DEFINITIONS);
         $this->assertSame(Hub::GROUP_BEHAVIOUR, Hub::CHECKLIST_DEFINITIONS['security_monitoring']['group']);
         $this->assertSame(Hub::GROUP_SECURITY_MONITORING, Hub::CHECKLIST_DEFINITIONS['secmon_view_report']['group']);
+        $this->assertSame(Hub::GROUP_SECURITY_MONITORING, Hub::CHECKLIST_DEFINITIONS['secmon_manage_access']['group']);
     }
 
     public function test_admin_can_list_events_and_report(): void

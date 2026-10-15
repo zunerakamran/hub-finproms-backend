@@ -8,7 +8,8 @@ use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * NFR-SEC-FW — reject requests from denied / temporarily blocked IPs.
+ * NFR-SEC-FW — reject requests from denied / temporarily blocked IPs
+ * and hub-managed geo / IP access restrictions.
  */
 class DenyBlockedIps
 {
@@ -21,6 +22,14 @@ class DenyBlockedIps
 
             return response()->json([
                 'message' => 'Access denied by application firewall.',
+            ], 403);
+        }
+
+        if ($this->firewall->accessRestrictions()->isRequestDenied($request)) {
+            $this->firewall->accessRestrictions()->recordDeniedRequest($request);
+
+            return response()->json([
+                'message' => 'Access denied by application access restrictions.',
             ], 403);
         }
 
