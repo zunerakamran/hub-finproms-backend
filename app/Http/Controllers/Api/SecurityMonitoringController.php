@@ -222,7 +222,7 @@ class SecurityMonitoringController extends Controller
         return response()->json([
             'data' => $this->security->settingsFor($hub)->toAccessRestrictionApiArray(),
             'options' => [
-                'modes' => AccessRestrictionService::modeOptions(),
+                'rules' => AccessRestrictionService::ruleOptions(),
                 'suggested_uk_cities' => AccessRestrictionService::SUGGESTED_UK_CITIES,
             ],
         ]);
@@ -235,13 +235,22 @@ class SecurityMonitoringController extends Controller
         $hub = $this->securityHub($user);
 
         $data = $request->validate([
-            'mode' => ['required', 'string', Rule::in(AccessRestrictionService::MODES)],
-            'countries' => ['sometimes', 'array', 'max:250'],
-            'countries.*' => ['string', 'size:2'],
-            'cities' => ['sometimes', 'array', 'max:100'],
-            'cities.*' => ['string', 'max:120'],
-            'ips' => ['sometimes', 'array', 'max:500'],
-            'ips.*' => ['string', 'max:64'],
+            'uk_only' => ['sometimes', 'boolean'],
+            'uk_cities_enabled' => ['sometimes', 'boolean'],
+            'uk_cities' => ['sometimes', 'array', 'max:100'],
+            'uk_cities.*' => ['string', 'max:120'],
+            'restrict_countries_enabled' => ['sometimes', 'boolean'],
+            'restricted_countries' => ['sometimes', 'array', 'max:250'],
+            'restricted_countries.*' => ['string', 'size:2'],
+            'allow_countries_enabled' => ['sometimes', 'boolean'],
+            'allowed_countries' => ['sometimes', 'array', 'max:250'],
+            'allowed_countries.*' => ['string', 'size:2'],
+            'restrict_ips_enabled' => ['sometimes', 'boolean'],
+            'restricted_ips' => ['sometimes', 'array', 'max:500'],
+            'restricted_ips.*' => ['string', 'max:64'],
+            'allow_ips_enabled' => ['sometimes', 'boolean'],
+            'allowed_ips' => ['sometimes', 'array', 'max:500'],
+            'allowed_ips.*' => ['string', 'max:64'],
         ]);
 
         $settings = $this->security->updateAccessSettings($hub, $user, $data, $request);

@@ -11,36 +11,12 @@ use Illuminate\Support\Facades\Cache;
 /**
  * Hub-managed geo / IP access rules (NFR-SEC-FW companion).
  *
- * Modes are mutually exclusive; env deny-list and temporary blocks still apply
- * first via FirewallService.
+ * Rules are layered: any combination can be enabled; a request must pass
+ * every enabled rule. Env deny-list / temporary blocks still apply first
+ * via FirewallService.
  */
 class AccessRestrictionService
 {
-    public const MODE_OFF = 'off';
-
-    public const MODE_UK_ONLY = 'uk_only';
-
-    public const MODE_UK_CITIES = 'uk_cities';
-
-    public const MODE_RESTRICT_COUNTRIES = 'restrict_countries';
-
-    public const MODE_ALLOW_COUNTRIES = 'allow_countries';
-
-    public const MODE_RESTRICT_IPS = 'restrict_ips';
-
-    public const MODE_ALLOW_IPS = 'allow_ips';
-
-    /** @var list<string> */
-    public const MODES = [
-        self::MODE_OFF,
-        self::MODE_UK_ONLY,
-        self::MODE_UK_CITIES,
-        self::MODE_RESTRICT_COUNTRIES,
-        self::MODE_ALLOW_COUNTRIES,
-        self::MODE_RESTRICT_IPS,
-        self::MODE_ALLOW_IPS,
-    ];
-
     /** ISO codes treated as United Kingdom for uk_only / uk_cities. */
     private const UK_COUNTRY_CODES = ['GB'];
 
@@ -81,7 +57,6 @@ class AccessRestrictionService
 
         // Local / private clients skip hub geo rules by default so admins are not
         // locked out from localhost or office LANs when GeoIP headers are absent.
-        // Env deny-list and temporary blocks still apply via FirewallService.
         if ((bool) config('security_firewall.access_restriction_bypass_private_ips', true)
             && $ip !== ''
             && $this->geoIp->isPrivateOrLocal($ip)
@@ -100,46 +75,93 @@ class AccessRestrictionService
         }
 
         $settings = $this->cachedSettings($hub);
-        if ($settings === null) {
+        if ($settings === null || ! $this->anyRuleEnabled($settings)) {
             return false;
         }
 
-        $mode = (string) ($settings['mode'] ?? self::MODE_OFF);
-        if ($mode === self::MODE_OFF || ! in_array($mode, self::MODES, true)) {
-            return false;
-        }
-
-        $decision = $this->evaluate($mode, $settings, $ip, $request);
+        $decision = $this->evaluate($settings, $ip, $request);
 
         return $decision['denied'];
     }
 
     /**
-     * @param  array{mode: string, countries: list<string>, cities: list<string>, ips: list<string>}  $settings
+     * @param  array<string, mixed>  $settings
      * @return array{denied: bool, reason: string, country: ?string, city: ?string}
      */
-    public function evaluate(string $mode, array $settings, string $ip, ?Request $request = null): array
+    public function evaluate(array $settings, string $ip, ?Request $request = null): array
     {
-        $geo = ['country' => null, 'city' => null, 'source' => 'none'];
+        $needsGeo = ! empty($settings['uk_only'])
+            || ! empty($settings['uk_cities_enabled'])
+            || ! empty($settings['restrict_countries_enabled'])
+            || ! empty($settings['allow_countries_enabled']);
 
-        if (in_array($mode, [
-            self::MODE_UK_ONLY,
-            self::MODE_UK_CITIES,
-            self::MODE_RESTRICT_COUNTRIES,
-            self::MODE_ALLOW_COUNTRIES,
-        ], true)) {
+        $geo = ['country' => null, 'city' => null, 'source' => 'none'];
+        if ($needsGeo) {
             $geo = $this->geoIp->lookup($ip !== '' ? $ip : null, $request);
         }
 
-        return match ($mode) {
-            self::MODE_UK_ONLY => $this->decideUkOnly($geo),
-            self::MODE_UK_CITIES => $this->decideUkCities($geo, $settings['cities'] ?? []),
-            self::MODE_RESTRICT_COUNTRIES => $this->decideRestrictCountries($geo, $settings['countries'] ?? []),
-            self::MODE_ALLOW_COUNTRIES => $this->decideAllowCountries($geo, $settings['countries'] ?? []),
-            self::MODE_RESTRICT_IPS => $this->decideRestrictIps($ip, $settings['ips'] ?? []),
-            self::MODE_ALLOW_IPS => $this->decideAllowIps($ip, $settings['ips'] ?? []),
-            default => ['denied' => false, 'reason' => 'off', 'country' => $geo['country'], 'city' => $geo['city']],
-        };
+        // 1) Blocked IPs always deny.
+        if (! empty($settings['restrict_ips_enabled'])) {
+            $deniedIps = (array) ($settings['restricted_ips'] ?? []);
+            if ($ip !== '' && $deniedIps !== [] && $this->ipInList($ip, $deniedIps)) {
+                return $this->deny('restrict_ips', $geo);
+            }
+        }
+
+        // 2) Allow-only IPs: when enabled, IP must be on the list.
+        if (! empty($settings['allow_ips_enabled'])) {
+            $allowedIps = (array) ($settings['allowed_ips'] ?? []);
+            if ($allowedIps === [] || $ip === '' || ! $this->ipInList($ip, $allowedIps)) {
+                return $this->deny('allow_ips', $geo);
+            }
+        }
+
+        // 3) UK only.
+        if (! empty($settings['uk_only'])) {
+            $country = $geo['country'];
+            if ($country === null || ! in_array($country, self::UK_COUNTRY_CODES, true)) {
+                return $this->deny('uk_only', $geo);
+            }
+        }
+
+        // 4) Specific UK cities (implies GB).
+        if (! empty($settings['uk_cities_enabled'])) {
+            $cities = (array) ($settings['uk_cities'] ?? []);
+            $country = $geo['country'];
+            $city = $geo['city'];
+
+            if ($country === null || ! in_array($country, self::UK_COUNTRY_CODES, true)) {
+                return $this->deny('uk_cities_country', $geo);
+            }
+            if ($cities === [] || $city === null || ! $this->cityMatches($city, $cities)) {
+                return $this->deny('uk_cities', $geo);
+            }
+        }
+
+        // 5) Allow-only countries.
+        if (! empty($settings['allow_countries_enabled'])) {
+            $allowed = (array) ($settings['allowed_countries'] ?? []);
+            $country = $geo['country'];
+            if ($allowed === [] || $country === null || ! in_array($country, $allowed, true)) {
+                return $this->deny('allow_countries', $geo);
+            }
+        }
+
+        // 6) Restricted countries.
+        if (! empty($settings['restrict_countries_enabled'])) {
+            $restricted = (array) ($settings['restricted_countries'] ?? []);
+            $country = $geo['country'];
+            if ($country !== null && $restricted !== [] && in_array($country, $restricted, true)) {
+                return $this->deny('restrict_countries', $geo);
+            }
+        }
+
+        return [
+            'denied' => false,
+            'reason' => 'allowed',
+            'country' => $geo['country'],
+            'city' => $geo['city'],
+        ];
     }
 
     public function recordDeniedRequest(Request $request, string $reason = 'access_restriction'): void
@@ -187,7 +209,20 @@ class AccessRestrictionService
     }
 
     /**
-     * @return array{mode: string, countries: list<string>, cities: list<string>, ips: list<string>}|null
+     * @param  array<string, mixed>  $settings
+     */
+    public function anyRuleEnabled(array $settings): bool
+    {
+        return ! empty($settings['uk_only'])
+            || ! empty($settings['uk_cities_enabled'])
+            || ! empty($settings['restrict_countries_enabled'])
+            || ! empty($settings['allow_countries_enabled'])
+            || ! empty($settings['restrict_ips_enabled'])
+            || ! empty($settings['allow_ips_enabled']);
+    }
+
+    /**
+     * @return array<string, mixed>|null
      */
     private function cachedSettings(Hub $hub): ?array
     {
@@ -200,29 +235,10 @@ class AccessRestrictionService
                     ->first();
 
                 if (! $row) {
-                    return [
-                        'mode' => self::MODE_OFF,
-                        'countries' => [],
-                        'cities' => [],
-                        'ips' => [],
-                    ];
+                    return $this->emptySettings();
                 }
 
-                return [
-                    'mode' => (string) ($row->access_restriction_mode ?: self::MODE_OFF),
-                    'countries' => array_values(array_filter(array_map(
-                        fn ($c) => $this->geoIp->normalizeCountry($c),
-                        (array) ($row->access_restriction_countries ?? [])
-                    ))),
-                    'cities' => array_values(array_filter(array_map(
-                        fn ($c) => $this->geoIp->normalizeCity($c),
-                        (array) ($row->access_restriction_cities ?? [])
-                    ))),
-                    'ips' => array_values(array_filter(array_map(
-                        fn ($ip) => trim((string) $ip),
-                        (array) ($row->access_restriction_ips ?? [])
-                    ), fn ($ip) => $ip !== '')),
-                ];
+                return $this->normalizeFromModel($row);
             });
         } catch (\Throwable) {
             return null;
@@ -230,155 +246,77 @@ class AccessRestrictionService
     }
 
     /**
-     * @param  array{country: ?string, city: ?string, source: string}  $geo
-     * @return array{denied: bool, reason: string, country: ?string, city: ?string}
+     * @return array<string, mixed>
      */
-    private function decideUkOnly(array $geo): array
+    public function normalizeFromModel(SecurityMonitoringSetting $row): array
     {
-        $country = $geo['country'];
-        $denied = $country === null || ! in_array($country, self::UK_COUNTRY_CODES, true);
-
         return [
-            'denied' => $denied,
-            'reason' => $denied ? 'uk_only' : 'allowed',
-            'country' => $country,
-            'city' => $geo['city'],
+            'uk_only' => (bool) ($row->access_uk_only ?? false),
+            'uk_cities_enabled' => (bool) ($row->access_uk_cities_enabled ?? false),
+            'uk_cities' => array_values(array_filter(array_map(
+                fn ($c) => $this->geoIp->normalizeCity($c),
+                (array) ($row->access_restriction_cities ?? [])
+            ))),
+            'restrict_countries_enabled' => (bool) ($row->access_restrict_countries_enabled ?? false),
+            'restricted_countries' => array_values(array_filter(array_map(
+                fn ($c) => $this->geoIp->normalizeCountry($c),
+                (array) ($row->access_restricted_countries ?? [])
+            ))),
+            'allow_countries_enabled' => (bool) ($row->access_allow_countries_enabled ?? false),
+            'allowed_countries' => array_values(array_filter(array_map(
+                fn ($c) => $this->geoIp->normalizeCountry($c),
+                (array) ($row->access_allowed_countries ?? [])
+            ))),
+            'restrict_ips_enabled' => (bool) ($row->access_restrict_ips_enabled ?? false),
+            'restricted_ips' => $this->normalizeIpList($row->access_restricted_ips ?? []),
+            'allow_ips_enabled' => (bool) ($row->access_allow_ips_enabled ?? false),
+            'allowed_ips' => $this->normalizeIpList($row->access_allowed_ips ?? []),
         ];
     }
 
     /**
-     * @param  array{country: ?string, city: ?string, source: string}  $geo
-     * @param  list<string>  $cities
-     * @return array{denied: bool, reason: string, country: ?string, city: ?string}
+     * @return array<string, mixed>
      */
-    private function decideUkCities(array $geo, array $cities): array
+    public function emptySettings(): array
     {
-        $country = $geo['country'];
-        $city = $geo['city'];
-
-        if ($country === null || ! in_array($country, self::UK_COUNTRY_CODES, true)) {
-            return [
-                'denied' => true,
-                'reason' => 'uk_cities_country',
-                'country' => $country,
-                'city' => $city,
-            ];
-        }
-
-        if ($cities === []) {
-            return [
-                'denied' => true,
-                'reason' => 'uk_cities_empty',
-                'country' => $country,
-                'city' => $city,
-            ];
-        }
-
-        $denied = $city === null || ! $this->cityMatches($city, $cities);
-
         return [
-            'denied' => $denied,
-            'reason' => $denied ? 'uk_cities' : 'allowed',
-            'country' => $country,
-            'city' => $city,
+            'uk_only' => false,
+            'uk_cities_enabled' => false,
+            'uk_cities' => [],
+            'restrict_countries_enabled' => false,
+            'restricted_countries' => [],
+            'allow_countries_enabled' => false,
+            'allowed_countries' => [],
+            'restrict_ips_enabled' => false,
+            'restricted_ips' => [],
+            'allow_ips_enabled' => false,
+            'allowed_ips' => [],
         ];
     }
 
     /**
-     * @param  array{country: ?string, city: ?string, source: string}  $geo
-     * @param  list<string>  $countries
-     * @return array{denied: bool, reason: string, country: ?string, city: ?string}
+     * @param  list<mixed>|mixed  $list
+     * @return list<string>
      */
-    private function decideRestrictCountries(array $geo, array $countries): array
+    private function normalizeIpList(mixed $list): array
     {
-        $country = $geo['country'];
-        if ($countries === [] || $country === null) {
-            return [
-                'denied' => false,
-                'reason' => 'allowed',
-                'country' => $country,
-                'city' => $geo['city'],
-            ];
-        }
-
-        $denied = in_array($country, $countries, true);
-
-        return [
-            'denied' => $denied,
-            'reason' => $denied ? 'restrict_countries' : 'allowed',
-            'country' => $country,
-            'city' => $geo['city'],
-        ];
+        return array_values(array_filter(array_map(
+            fn ($ip) => trim((string) $ip),
+            (array) $list
+        ), fn ($ip) => $ip !== ''));
     }
 
     /**
-     * @param  array{country: ?string, city: ?string, source: string}  $geo
-     * @param  list<string>  $countries
+     * @param  array{country: ?string, city: ?string, source?: string}  $geo
      * @return array{denied: bool, reason: string, country: ?string, city: ?string}
      */
-    private function decideAllowCountries(array $geo, array $countries): array
+    private function deny(string $reason, array $geo): array
     {
-        $country = $geo['country'];
-        if ($countries === []) {
-            return [
-                'denied' => true,
-                'reason' => 'allow_countries_empty',
-                'country' => $country,
-                'city' => $geo['city'],
-            ];
-        }
-
-        $denied = $country === null || ! in_array($country, $countries, true);
-
         return [
-            'denied' => $denied,
-            'reason' => $denied ? 'allow_countries' : 'allowed',
-            'country' => $country,
-            'city' => $geo['city'],
-        ];
-    }
-
-    /**
-     * @param  list<string>  $ips
-     * @return array{denied: bool, reason: string, country: ?string, city: ?string}
-     */
-    private function decideRestrictIps(string $ip, array $ips): array
-    {
-        if ($ip === '' || $ips === []) {
-            return ['denied' => false, 'reason' => 'allowed', 'country' => null, 'city' => null];
-        }
-
-        $denied = $this->ipInList($ip, $ips);
-
-        return [
-            'denied' => $denied,
-            'reason' => $denied ? 'restrict_ips' : 'allowed',
-            'country' => null,
-            'city' => null,
-        ];
-    }
-
-    /**
-     * @param  list<string>  $ips
-     * @return array{denied: bool, reason: string, country: ?string, city: ?string}
-     */
-    private function decideAllowIps(string $ip, array $ips): array
-    {
-        if ($ips === []) {
-            return ['denied' => true, 'reason' => 'allow_ips_empty', 'country' => null, 'city' => null];
-        }
-
-        if ($ip === '') {
-            return ['denied' => true, 'reason' => 'allow_ips', 'country' => null, 'city' => null];
-        }
-
-        $denied = ! $this->ipInList($ip, $ips);
-
-        return [
-            'denied' => $denied,
-            'reason' => $denied ? 'allow_ips' : 'allowed',
-            'country' => null,
-            'city' => null,
+            'denied' => true,
+            'reason' => $reason,
+            'country' => $geo['country'] ?? null,
+            'city' => $geo['city'] ?? null,
         ];
     }
 
@@ -458,41 +396,36 @@ class AccessRestrictionService
     /**
      * @return list<array{key: string, label: string, description: string}>
      */
-    public static function modeOptions(): array
+    public static function ruleOptions(): array
     {
         return [
             [
-                'key' => self::MODE_OFF,
-                'label' => 'No restriction',
-                'description' => 'Anyone can access the application (env deny-list and temporary blocks still apply).',
-            ],
-            [
-                'key' => self::MODE_UK_ONLY,
+                'key' => 'uk_only',
                 'label' => 'UK only',
                 'description' => 'Allow requests only from United Kingdom IP addresses.',
             ],
             [
-                'key' => self::MODE_UK_CITIES,
+                'key' => 'uk_cities',
                 'label' => 'Specific UK cities',
                 'description' => 'Allow requests only from selected UK cities (must also resolve as GB).',
             ],
             [
-                'key' => self::MODE_RESTRICT_COUNTRIES,
+                'key' => 'restrict_countries',
                 'label' => 'Restrict countries',
-                'description' => 'Block requests from the selected countries; all others are allowed.',
+                'description' => 'Block requests from the selected countries.',
             ],
             [
-                'key' => self::MODE_ALLOW_COUNTRIES,
+                'key' => 'allow_countries',
                 'label' => 'Allow countries',
                 'description' => 'Allow requests only from the selected countries.',
             ],
             [
-                'key' => self::MODE_RESTRICT_IPS,
+                'key' => 'restrict_ips',
                 'label' => 'Restrict IPs',
-                'description' => 'Block the listed IPs / CIDR ranges; all others are allowed.',
+                'description' => 'Block the listed IPs / CIDR ranges.',
             ],
             [
-                'key' => self::MODE_ALLOW_IPS,
+                'key' => 'allow_ips',
                 'label' => 'Allow IPs',
                 'description' => 'Allow only the listed IPs / CIDR ranges.',
             ],

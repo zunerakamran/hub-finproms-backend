@@ -168,10 +168,17 @@ class SecurityMonitoringService
                 $table->json('alert_emails')->nullable();
                 $table->unsignedSmallInteger('failed_login_threshold')->default(5);
                 $table->unsignedSmallInteger('failed_login_window_minutes')->default(15);
-                $table->string('access_restriction_mode', 40)->default('off');
-                $table->json('access_restriction_countries')->nullable();
+                $table->boolean('access_uk_only')->default(false);
+                $table->boolean('access_uk_cities_enabled')->default(false);
                 $table->json('access_restriction_cities')->nullable();
-                $table->json('access_restriction_ips')->nullable();
+                $table->boolean('access_restrict_countries_enabled')->default(false);
+                $table->boolean('access_allow_countries_enabled')->default(false);
+                $table->json('access_restricted_countries')->nullable();
+                $table->json('access_allowed_countries')->nullable();
+                $table->boolean('access_restrict_ips_enabled')->default(false);
+                $table->boolean('access_allow_ips_enabled')->default(false);
+                $table->json('access_restricted_ips')->nullable();
+                $table->json('access_allowed_ips')->nullable();
                 $table->dateTime('last_dependency_scan_at')->nullable();
                 $table->string('last_dependency_scan_status', 40)->nullable();
                 $table->text('last_dependency_scan_summary')->nullable();
@@ -181,29 +188,31 @@ class SecurityMonitoringService
             });
         } else {
             // Heal columns on remote content-hub DBs that predate access restrictions.
-            $needsMode = ! $schema->hasColumn('security_monitoring_settings', 'access_restriction_mode');
-            $needsCountries = ! $schema->hasColumn('security_monitoring_settings', 'access_restriction_countries');
-            $needsCities = ! $schema->hasColumn('security_monitoring_settings', 'access_restriction_cities');
-            $needsIps = ! $schema->hasColumn('security_monitoring_settings', 'access_restriction_ips');
+            $healColumns = [
+                'access_restriction_cities' => fn (Blueprint $t) => $t->json('access_restriction_cities')->nullable(),
+                'access_uk_only' => fn (Blueprint $t) => $t->boolean('access_uk_only')->default(false),
+                'access_uk_cities_enabled' => fn (Blueprint $t) => $t->boolean('access_uk_cities_enabled')->default(false),
+                'access_restrict_countries_enabled' => fn (Blueprint $t) => $t->boolean('access_restrict_countries_enabled')->default(false),
+                'access_allow_countries_enabled' => fn (Blueprint $t) => $t->boolean('access_allow_countries_enabled')->default(false),
+                'access_restricted_countries' => fn (Blueprint $t) => $t->json('access_restricted_countries')->nullable(),
+                'access_allowed_countries' => fn (Blueprint $t) => $t->json('access_allowed_countries')->nullable(),
+                'access_restrict_ips_enabled' => fn (Blueprint $t) => $t->boolean('access_restrict_ips_enabled')->default(false),
+                'access_allow_ips_enabled' => fn (Blueprint $t) => $t->boolean('access_allow_ips_enabled')->default(false),
+                'access_restricted_ips' => fn (Blueprint $t) => $t->json('access_restricted_ips')->nullable(),
+                'access_allowed_ips' => fn (Blueprint $t) => $t->json('access_allowed_ips')->nullable(),
+            ];
 
-            if ($needsMode || $needsCountries || $needsCities || $needsIps) {
-                $schema->table('security_monitoring_settings', function (Blueprint $table) use (
-                    $needsMode,
-                    $needsCountries,
-                    $needsCities,
-                    $needsIps
-                ) {
-                    if ($needsMode) {
-                        $table->string('access_restriction_mode', 40)->default('off');
-                    }
-                    if ($needsCountries) {
-                        $table->json('access_restriction_countries')->nullable();
-                    }
-                    if ($needsCities) {
-                        $table->json('access_restriction_cities')->nullable();
-                    }
-                    if ($needsIps) {
-                        $table->json('access_restriction_ips')->nullable();
+            $missing = [];
+            foreach ($healColumns as $column => $_) {
+                if (! $schema->hasColumn('security_monitoring_settings', $column)) {
+                    $missing[] = $column;
+                }
+            }
+
+            if ($missing !== []) {
+                $schema->table('security_monitoring_settings', function (Blueprint $table) use ($healColumns, $missing) {
+                    foreach ($missing as $column) {
+                        ($healColumns[$column])($table);
                     }
                 });
             }
@@ -270,28 +279,37 @@ class SecurityMonitoringService
         $this->assertModuleEnabled($hub);
         $this->assertCan($hub, $actor, 'secmon_manage_access');
 
-        $mode = (string) ($data['mode'] ?? AccessRestrictionService::MODE_OFF);
-        if (! in_array($mode, AccessRestrictionService::MODES, true)) {
-            throw ValidationException::withMessages([
-                'mode' => 'Invalid access restriction mode.',
-            ]);
-        }
-
         $geoIp = app(GeoIpLookupService::class);
-        $countries = array_values(array_unique(array_filter(array_map(
-            fn ($c) => $geoIp->normalizeCountry($c),
-            (array) ($data['countries'] ?? [])
-        ))));
+
+        $ukOnly = (bool) ($data['uk_only'] ?? false);
+        $ukCitiesEnabled = (bool) ($data['uk_cities_enabled'] ?? false);
+        $restrictCountriesEnabled = (bool) ($data['restrict_countries_enabled'] ?? false);
+        $allowCountriesEnabled = (bool) ($data['allow_countries_enabled'] ?? false);
+        $restrictIpsEnabled = (bool) ($data['restrict_ips_enabled'] ?? false);
+        $allowIpsEnabled = (bool) ($data['allow_ips_enabled'] ?? false);
+
         $cities = array_values(array_unique(array_filter(array_map(
             fn ($c) => $geoIp->normalizeCity($c),
-            (array) ($data['cities'] ?? [])
+            (array) ($data['uk_cities'] ?? $data['cities'] ?? [])
         ))));
-        $ips = array_values(array_unique(array_filter(array_map(
+        $restrictedCountries = array_values(array_unique(array_filter(array_map(
+            fn ($c) => $geoIp->normalizeCountry($c),
+            (array) ($data['restricted_countries'] ?? [])
+        ))));
+        $allowedCountries = array_values(array_unique(array_filter(array_map(
+            fn ($c) => $geoIp->normalizeCountry($c),
+            (array) ($data['allowed_countries'] ?? [])
+        ))));
+        $restrictedIps = array_values(array_unique(array_filter(array_map(
             fn ($ip) => trim((string) $ip),
-            (array) ($data['ips'] ?? [])
+            (array) ($data['restricted_ips'] ?? [])
+        ), fn ($ip) => $ip !== '')));
+        $allowedIps = array_values(array_unique(array_filter(array_map(
+            fn ($ip) => trim((string) $ip),
+            (array) ($data['allowed_ips'] ?? [])
         ), fn ($ip) => $ip !== '')));
 
-        foreach ($ips as $ip) {
+        foreach (array_merge($restrictedIps, $allowedIps) as $ip) {
             if (! $this->isValidIpOrCidr($ip)) {
                 throw ValidationException::withMessages([
                     'ips' => "Invalid IP or CIDR: {$ip}",
@@ -299,37 +317,51 @@ class SecurityMonitoringService
             }
         }
 
-        if ($mode === AccessRestrictionService::MODE_UK_CITIES && $cities === []) {
+        if ($ukCitiesEnabled && $cities === []) {
             throw ValidationException::withMessages([
-                'cities' => 'Select at least one UK city when using the UK cities mode.',
+                'uk_cities' => 'Select at least one UK city when UK cities is enabled.',
             ]);
         }
-
-        if (in_array($mode, [
-            AccessRestrictionService::MODE_RESTRICT_COUNTRIES,
-            AccessRestrictionService::MODE_ALLOW_COUNTRIES,
-        ], true) && $countries === []) {
+        if ($restrictCountriesEnabled && $restrictedCountries === []) {
             throw ValidationException::withMessages([
-                'countries' => 'Select at least one country for this mode.',
+                'restricted_countries' => 'Add at least one country to restrict.',
             ]);
         }
-
-        if (in_array($mode, [
-            AccessRestrictionService::MODE_RESTRICT_IPS,
-            AccessRestrictionService::MODE_ALLOW_IPS,
-        ], true) && $ips === []) {
+        if ($allowCountriesEnabled && $allowedCountries === []) {
             throw ValidationException::withMessages([
-                'ips' => 'Add at least one IP or CIDR for this mode.',
+                'allowed_countries' => 'Add at least one country to allow.',
+            ]);
+        }
+        if ($restrictIpsEnabled && $restrictedIps === []) {
+            throw ValidationException::withMessages([
+                'restricted_ips' => 'Add at least one IP or CIDR to restrict.',
+            ]);
+        }
+        if ($allowIpsEnabled && $allowedIps === []) {
+            throw ValidationException::withMessages([
+                'allowed_ips' => 'Add at least one IP or CIDR to allow.',
             ]);
         }
 
         $settings = $this->settingsFor($hub);
-        $settings->fill([
-            'access_restriction_mode' => $mode,
-            'access_restriction_countries' => $countries,
+        $payload = [
+            'access_uk_only' => $ukOnly,
+            'access_uk_cities_enabled' => $ukCitiesEnabled,
             'access_restriction_cities' => $cities,
-            'access_restriction_ips' => $ips,
-        ]);
+            'access_restrict_countries_enabled' => $restrictCountriesEnabled,
+            'access_allow_countries_enabled' => $allowCountriesEnabled,
+            'access_restricted_countries' => $restrictedCountries,
+            'access_allowed_countries' => $allowedCountries,
+            'access_restrict_ips_enabled' => $restrictIpsEnabled,
+            'access_allow_ips_enabled' => $allowIpsEnabled,
+            'access_restricted_ips' => $restrictedIps,
+            'access_allowed_ips' => $allowedIps,
+        ];
+        // Clear legacy single-mode column when present so it cannot conflict.
+        if (\Illuminate\Support\Facades\Schema::hasColumn($settings->getTable(), 'access_restriction_mode')) {
+            $payload['access_restriction_mode'] = 'off';
+        }
+        $settings->fill($payload);
         $settings->save();
 
         app(AccessRestrictionService::class)->forgetSettingsCache((int) $hub->id);
@@ -961,7 +993,7 @@ class SecurityMonitoringService
      *   severities: list<string>,
      *   statuses: list<string>,
      *   event_statuses: list<string>,
-     *   access_restriction_modes: list<array{key: string, label: string, description: string}>,
+     *   access_restriction_rules: list<array{key: string, label: string, description: string}>,
      *   suggested_uk_cities: list<string>
      * }
      */
@@ -975,7 +1007,7 @@ class SecurityMonitoringService
             'severities' => SecurityEvent::SEVERITIES,
             'statuses' => SecurityIncident::STATUSES,
             'event_statuses' => SecurityEvent::STATUSES,
-            'access_restriction_modes' => AccessRestrictionService::modeOptions(),
+            'access_restriction_rules' => AccessRestrictionService::ruleOptions(),
             'suggested_uk_cities' => AccessRestrictionService::SUGGESTED_UK_CITIES,
         ];
     }
