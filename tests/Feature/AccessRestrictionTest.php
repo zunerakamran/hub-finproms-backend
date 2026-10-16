@@ -179,6 +179,260 @@ class AccessRestrictionTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_allow_ip_overrides_restricted_country(): void
+    {
+        $hub = $this->createHubWithSecurityMonitoring();
+        $this->setAccessRules($hub, [
+            'restrict_countries_enabled' => true,
+            'restricted_countries' => ['PK'],
+            'allow_ips_enabled' => true,
+            'allowed_ips' => ['203.0.113.200'],
+        ]);
+
+        config([
+            'security_firewall.enabled' => true,
+            'security_firewall.record_security_events' => false,
+            'security_firewall.geoip.http_enabled' => false,
+        ]);
+
+        // Allowed IP from restricted country → override, allow
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.200'])
+            ->withHeaders(['CF-IPCountry' => 'PK'])
+            ->getJson('/api/hub')
+            ->assertOk();
+
+        // Other IP from restricted country → still blocked
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.201'])
+            ->withHeaders(['CF-IPCountry' => 'PK'])
+            ->getJson('/api/hub')
+            ->assertForbidden();
+
+        // Non-restricted country (not on allow IP list) → still allowed by geo
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.202'])
+            ->withHeaders(['CF-IPCountry' => 'GB'])
+            ->getJson('/api/hub')
+            ->assertOk();
+    }
+
+    public function test_allow_ip_overrides_uk_only(): void
+    {
+        $hub = $this->createHubWithSecurityMonitoring();
+        $this->setAccessRules($hub, [
+            'uk_only' => true,
+            'allow_ips_enabled' => true,
+            'allowed_ips' => ['203.0.113.210'],
+        ]);
+
+        config([
+            'security_firewall.enabled' => true,
+            'security_firewall.record_security_events' => false,
+            'security_firewall.geoip.http_enabled' => false,
+        ]);
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.210'])
+            ->withHeaders(['CF-IPCountry' => 'US'])
+            ->getJson('/api/hub')
+            ->assertOk();
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.211'])
+            ->withHeaders(['CF-IPCountry' => 'US'])
+            ->getJson('/api/hub')
+            ->assertForbidden();
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.212'])
+            ->withHeaders(['CF-IPCountry' => 'GB'])
+            ->getJson('/api/hub')
+            ->assertOk();
+    }
+
+    public function test_allow_country_overrides_restricted_country(): void
+    {
+        $hub = $this->createHubWithSecurityMonitoring();
+        $this->setAccessRules($hub, [
+            'restrict_countries_enabled' => true,
+            'restricted_countries' => ['PK', 'IN'],
+            'allow_countries_enabled' => true,
+            'allowed_countries' => ['PK', 'GB'],
+        ]);
+
+        config([
+            'security_firewall.enabled' => true,
+            'security_firewall.record_security_events' => false,
+            'security_firewall.geoip.http_enabled' => false,
+        ]);
+
+        // PK is restricted but also explicitly allowed → allow
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.220'])
+            ->withHeaders(['CF-IPCountry' => 'PK'])
+            ->getJson('/api/hub')
+            ->assertOk();
+
+        // IN restricted and not allowed → deny
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.221'])
+            ->withHeaders(['CF-IPCountry' => 'IN'])
+            ->getJson('/api/hub')
+            ->assertForbidden();
+
+        // GB allowed
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.222'])
+            ->withHeaders(['CF-IPCountry' => 'GB'])
+            ->getJson('/api/hub')
+            ->assertOk();
+    }
+
+    public function test_restrict_ip_carves_out_allowed_country(): void
+    {
+        // Allow country PK + Restrict IP → that IP blocked; rest of PK allowed.
+        $hub = $this->createHubWithSecurityMonitoring();
+        $this->setAccessRules($hub, [
+            'allow_countries_enabled' => true,
+            'allowed_countries' => ['PK'],
+            'restrict_ips_enabled' => true,
+            'restricted_ips' => ['203.0.113.50'],
+        ]);
+
+        config([
+            'security_firewall.enabled' => true,
+            'security_firewall.record_security_events' => false,
+            'security_firewall.geoip.http_enabled' => false,
+        ]);
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.50'])
+            ->withHeaders(['CF-IPCountry' => 'PK'])
+            ->getJson('/api/hub')
+            ->assertForbidden();
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.51'])
+            ->withHeaders(['CF-IPCountry' => 'PK'])
+            ->getJson('/api/hub')
+            ->assertOk();
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.52'])
+            ->withHeaders(['CF-IPCountry' => 'GB'])
+            ->getJson('/api/hub')
+            ->assertForbidden();
+    }
+
+    public function test_restrict_ip_carves_out_uk_only(): void
+    {
+        $hub = $this->createHubWithSecurityMonitoring();
+        $this->setAccessRules($hub, [
+            'uk_only' => true,
+            'restrict_ips_enabled' => true,
+            'restricted_ips' => ['203.0.113.60'],
+        ]);
+
+        config([
+            'security_firewall.enabled' => true,
+            'security_firewall.record_security_events' => false,
+            'security_firewall.geoip.http_enabled' => false,
+        ]);
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.60'])
+            ->withHeaders(['CF-IPCountry' => 'GB'])
+            ->getJson('/api/hub')
+            ->assertForbidden();
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.61'])
+            ->withHeaders(['CF-IPCountry' => 'GB'])
+            ->getJson('/api/hub')
+            ->assertOk();
+    }
+
+    public function test_restrict_ip_carves_out_uk_cities(): void
+    {
+        $hub = $this->createHubWithSecurityMonitoring();
+        $this->setAccessRules($hub, [
+            'uk_cities_enabled' => true,
+            'uk_cities' => ['London'],
+            'restrict_ips_enabled' => true,
+            'restricted_ips' => ['203.0.113.70'],
+        ]);
+
+        config([
+            'security_firewall.enabled' => true,
+            'security_firewall.record_security_events' => false,
+            'security_firewall.geoip.http_enabled' => false,
+        ]);
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.70'])
+            ->withHeaders(['CF-IPCountry' => 'GB', 'CF-IPCity' => 'London'])
+            ->getJson('/api/hub')
+            ->assertForbidden();
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.71'])
+            ->withHeaders(['CF-IPCountry' => 'GB', 'CF-IPCity' => 'London'])
+            ->getJson('/api/hub')
+            ->assertOk();
+    }
+
+    public function test_restrict_ip_beats_allow_ip_when_same_ip(): void
+    {
+        $hub = $this->createHubWithSecurityMonitoring();
+        $this->setAccessRules($hub, [
+            'allow_ips_enabled' => true,
+            'allowed_ips' => ['203.0.113.80'],
+            'restrict_ips_enabled' => true,
+            'restricted_ips' => ['203.0.113.80'],
+        ]);
+
+        config([
+            'security_firewall.enabled' => true,
+            'security_firewall.record_security_events' => false,
+            'security_firewall.geoip.http_enabled' => false,
+        ]);
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.80'])
+            ->getJson('/api/hub')
+            ->assertForbidden();
+    }
+
+    public function test_allow_country_and_allow_ip_and_restrict_ip_combined(): void
+    {
+        // Allowed country PK; one bad IP blocked; one VIP IP from blocked country IN allowed.
+        $hub = $this->createHubWithSecurityMonitoring();
+        $this->setAccessRules($hub, [
+            'allow_countries_enabled' => true,
+            'allowed_countries' => ['PK'],
+            'restrict_countries_enabled' => true,
+            'restricted_countries' => ['IN'],
+            'restrict_ips_enabled' => true,
+            'restricted_ips' => ['203.0.113.90'],
+            'allow_ips_enabled' => true,
+            'allowed_ips' => ['203.0.113.91'],
+        ]);
+
+        config([
+            'security_firewall.enabled' => true,
+            'security_firewall.record_security_events' => false,
+            'security_firewall.geoip.http_enabled' => false,
+        ]);
+
+        // Restricted IP inside allowed country → blocked
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.90'])
+            ->withHeaders(['CF-IPCountry' => 'PK'])
+            ->getJson('/api/hub')
+            ->assertForbidden();
+
+        // Normal IP in allowed country → allowed
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.92'])
+            ->withHeaders(['CF-IPCountry' => 'PK'])
+            ->getJson('/api/hub')
+            ->assertOk();
+
+        // Allowed IP from restricted country → allowed (IP override)
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.91'])
+            ->withHeaders(['CF-IPCountry' => 'IN'])
+            ->getJson('/api/hub')
+            ->assertOk();
+
+        // Other IP from restricted country → blocked
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.93'])
+            ->withHeaders(['CF-IPCountry' => 'IN'])
+            ->getJson('/api/hub')
+            ->assertForbidden();
+    }
+
     public function test_uk_cities_requires_matching_city(): void
     {
         $hub = $this->createHubWithSecurityMonitoring();

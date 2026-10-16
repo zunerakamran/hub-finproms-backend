@@ -85,75 +85,116 @@ class AccessRestrictionService
     }
 
     /**
+     * Precedence (most specific wins):
+     * 1. Restrict IPs → hard deny (carves blocked IPs out of any allow rule)
+     * 2. Allow IPs → hard allow (overrides country / UK / city blocks below)
+     * 3. Geo rules, where Allow countries can override Restrict countries /
+     *    UK-only / UK-cities for that country
+     * 4. If Allow IPs is the only rule and IP is not listed → deny
+     *
+     * Examples:
+     * - Restrict countries=PK + Allow IPs=1.2.3.4 → only 1.2.3.4 from PK allowed
+     * - Allow countries=PK + Restrict IPs=1.2.3.4 → PK allowed except 1.2.3.4
+     * - UK only + Restrict IPs=x → UK allowed except x
+     * - Same IP on Restrict IPs and Allow IPs → Restrict wins
+     *
      * @param  array<string, mixed>  $settings
      * @return array{denied: bool, reason: string, country: ?string, city: ?string}
      */
     public function evaluate(array $settings, string $ip, ?Request $request = null): array
     {
-        $needsGeo = ! empty($settings['uk_only'])
-            || ! empty($settings['uk_cities_enabled'])
-            || ! empty($settings['restrict_countries_enabled'])
-            || ! empty($settings['allow_countries_enabled']);
+        $ukOnly = ! empty($settings['uk_only']);
+        $ukCitiesEnabled = ! empty($settings['uk_cities_enabled']);
+        $restrictCountriesEnabled = ! empty($settings['restrict_countries_enabled']);
+        $allowCountriesEnabled = ! empty($settings['allow_countries_enabled']);
+        $restrictIpsEnabled = ! empty($settings['restrict_ips_enabled']);
+        $allowIpsEnabled = ! empty($settings['allow_ips_enabled']);
+
+        $needsGeo = $ukOnly || $ukCitiesEnabled || $restrictCountriesEnabled || $allowCountriesEnabled;
 
         $geo = ['country' => null, 'city' => null, 'source' => 'none'];
         if ($needsGeo) {
             $geo = $this->geoIp->lookup($ip !== '' ? $ip : null, $request);
         }
 
-        // 1) Blocked IPs always deny.
-        if (! empty($settings['restrict_ips_enabled'])) {
-            $deniedIps = (array) ($settings['restricted_ips'] ?? []);
-            if ($ip !== '' && $deniedIps !== [] && $this->ipInList($ip, $deniedIps)) {
-                return $this->deny('restrict_ips', $geo);
-            }
+        $allowedIps = (array) ($settings['allowed_ips'] ?? []);
+        $restrictedIps = (array) ($settings['restricted_ips'] ?? []);
+        $allowedCountries = (array) ($settings['allowed_countries'] ?? []);
+        $restrictedCountries = (array) ($settings['restricted_countries'] ?? []);
+        $ukCities = (array) ($settings['uk_cities'] ?? []);
+
+        $ipOnAllowList = $allowIpsEnabled
+            && $ip !== ''
+            && $allowedIps !== []
+            && $this->ipInList($ip, $allowedIps);
+
+        // 1) Restricted IPs — hard deny (cannot be overridden by allow lists).
+        if ($restrictIpsEnabled
+            && $ip !== ''
+            && $restrictedIps !== []
+            && $this->ipInList($ip, $restrictedIps)
+        ) {
+            return $this->deny('restrict_ips', $geo);
         }
 
-        // 2) Allow-only IPs: when enabled, IP must be on the list.
-        if (! empty($settings['allow_ips_enabled'])) {
-            $allowedIps = (array) ($settings['allowed_ips'] ?? []);
-            if ($allowedIps === [] || $ip === '' || ! $this->ipInList($ip, $allowedIps)) {
-                return $this->deny('allow_ips', $geo);
-            }
+        // 2) Allowed IPs — hard allow / exception that overrides geo rules below.
+        if ($ipOnAllowList) {
+            return [
+                'denied' => false,
+                'reason' => 'allow_ips_override',
+                'country' => $geo['country'],
+                'city' => $geo['city'],
+            ];
         }
 
-        // 3) UK only.
-        if (! empty($settings['uk_only'])) {
-            $country = $geo['country'];
-            if ($country === null || ! in_array($country, self::UK_COUNTRY_CODES, true)) {
-                return $this->deny('uk_only', $geo);
-            }
+        $country = $geo['country'];
+        $city = $geo['city'];
+        $countryOnAllowList = $allowCountriesEnabled
+            && $country !== null
+            && $allowedCountries !== []
+            && in_array($country, $allowedCountries, true);
+
+        $isUk = $country !== null && in_array($country, self::UK_COUNTRY_CODES, true);
+        $ukCityOk = $isUk
+            && $city !== null
+            && $ukCities !== []
+            && $this->cityMatches($city, $ukCities);
+
+        // 3) Restricted countries — unless Allow countries explicitly lists that country.
+        if ($restrictCountriesEnabled
+            && $country !== null
+            && $restrictedCountries !== []
+            && in_array($country, $restrictedCountries, true)
+            && ! $countryOnAllowList
+        ) {
+            return $this->deny('restrict_countries', $geo);
         }
 
-        // 4) Specific UK cities (implies GB).
-        if (! empty($settings['uk_cities_enabled'])) {
-            $cities = (array) ($settings['uk_cities'] ?? []);
-            $country = $geo['country'];
-            $city = $geo['city'];
-
-            if ($country === null || ! in_array($country, self::UK_COUNTRY_CODES, true)) {
-                return $this->deny('uk_cities_country', $geo);
-            }
-            if ($cities === [] || $city === null || ! $this->cityMatches($city, $cities)) {
-                return $this->deny('uk_cities', $geo);
-            }
+        // 4) UK only — Allow countries can override for listed non-UK countries.
+        if ($ukOnly && ! $isUk && ! $countryOnAllowList) {
+            return $this->deny('uk_only', $geo);
         }
 
-        // 5) Allow-only countries.
-        if (! empty($settings['allow_countries_enabled'])) {
-            $allowed = (array) ($settings['allowed_countries'] ?? []);
-            $country = $geo['country'];
-            if ($allowed === [] || $country === null || ! in_array($country, $allowed, true)) {
+        // 5) UK cities — Allow countries can override for a whole listed country.
+        if ($ukCitiesEnabled && ! $ukCityOk && ! $countryOnAllowList) {
+            return $this->deny($isUk ? 'uk_cities' : 'uk_cities_country', $geo);
+        }
+
+        // 6) Allow countries as exclusive allowlist when the request was not already
+        //    admitted by UK-only / UK-cities (those paths stay open without needing
+        //    the country on the allow list).
+        if ($allowCountriesEnabled && ! $countryOnAllowList) {
+            $admittedByUkPath = ($ukOnly && $isUk) || ($ukCitiesEnabled && $ukCityOk);
+            if (! $admittedByUkPath) {
                 return $this->deny('allow_countries', $geo);
             }
         }
 
-        // 6) Restricted countries.
-        if (! empty($settings['restrict_countries_enabled'])) {
-            $restricted = (array) ($settings['restricted_countries'] ?? []);
-            $country = $geo['country'];
-            if ($country !== null && $restricted !== [] && in_array($country, $restricted, true)) {
-                return $this->deny('restrict_countries', $geo);
-            }
+        // 7) Allow IPs alone (or with only restrict_ips that did not match):
+        //    IP must be on the allow list — we already returned if it was.
+        $hasGeoRules = $ukOnly || $ukCitiesEnabled || $restrictCountriesEnabled || $allowCountriesEnabled;
+        if ($allowIpsEnabled && ! $hasGeoRules) {
+            return $this->deny('allow_ips', $geo);
         }
 
         return [
@@ -402,32 +443,32 @@ class AccessRestrictionService
             [
                 'key' => 'uk_only',
                 'label' => 'UK only',
-                'description' => 'Allow requests only from United Kingdom IP addresses.',
+                'description' => 'Allow requests only from United Kingdom IP addresses. Allow IPs / Allow countries can override.',
             ],
             [
                 'key' => 'uk_cities',
                 'label' => 'Specific UK cities',
-                'description' => 'Allow requests only from selected UK cities (must also resolve as GB).',
+                'description' => 'Allow requests only from selected UK cities (must also resolve as GB). Allow IPs / Allow countries can override.',
             ],
             [
                 'key' => 'restrict_countries',
                 'label' => 'Restrict countries',
-                'description' => 'Block requests from the selected countries.',
+                'description' => 'Block requests from the selected countries. A matching Allow IP still gets through; Allow countries can unblock a listed country.',
             ],
             [
                 'key' => 'allow_countries',
                 'label' => 'Allow countries',
-                'description' => 'Allow requests only from the selected countries.',
+                'description' => 'Allow these countries (and use as exceptions to UK-only / restrict-countries). Combine with Allow IPs for per-IP exceptions.',
             ],
             [
                 'key' => 'restrict_ips',
                 'label' => 'Restrict IPs',
-                'description' => 'Block the listed IPs / CIDR ranges.',
+                'description' => 'Always block these IPs / CIDRs (highest priority — not overridden by allow lists).',
             ],
             [
                 'key' => 'allow_ips',
                 'label' => 'Allow IPs',
-                'description' => 'Allow only the listed IPs / CIDR ranges.',
+                'description' => 'These IPs are always allowed and override country / UK / city blocks. Alone, only these IPs may access.',
             ],
         ];
     }
