@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-15 (6A.2 Activity Logs anomaly detection implemented backend + frontend)
+Last updated: 2026-10-16 (6B.1 Module disaster recovery via Security Monitoring — implemented)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -161,7 +161,9 @@ Apply:
   applied_at, apply_error; then refresh reported version.
 
 UI (Central Hubs page): upload zips with publish, multi-select hubs, Apply to
-selected; Update history table (filter by hub). Hub detail: code_frontend_path.
+selected (choose latest or a prior ready_to_apply release for deploy package
+rollback — distinct from module disaster recovery §6B.1); Update history
+table (filter by hub). Hub detail: code_frontend_path.
 
 Update history (append-only on Central):
 - Table hub_code_update_events: hub, release, version, action (apply|
@@ -1216,6 +1218,8 @@ Notes:
       security incidents; add investigation notes
     - `secmon_manage_alerts` — configure alert thresholds / notification
       recipients (hub-admin style roles only by default)
+    - `secmon_manage_disaster_recovery` — recognize module disasters; snapshot
+      / roll back the affected product module only (section 6B.1)
   - Manage active sessions — see currently logged-in users, force-logout any
     user (ends all of their API sessions on this hub), and set the hub idle
     session timeout — same roles
@@ -1335,6 +1339,8 @@ Notes:
   6) Remote hub switcher — act on Shared / White-label DBs when wired
   7) Hub backups — per-hub schedule (time/timezone/frequency), Backup now,
      list/download Central copies, restore hub from Central
+  8) Module disaster recovery — via Security Monitoring (recognize → snapshot →
+     roll back the affected product module only). Distinct from hub backups.
 - Functionalities and Capabilities must NOT duplicate each other in the UI.
 - This is the central control plane for ALL tenant behaviour and UI capabilities.
 - Power Admin does NOT replace FinProms admin day-to-day content work on Shared
@@ -1372,6 +1378,79 @@ Notes:
   to a normal ZIP for the admin. `hub_backups.is_encrypted` records status.
   Does not rewrite historical dumps per GDPR erasure (still residual for old
   plaintext files until rotated by retention).
+
+--------------------------------------------------------------------------------
+6B.1 MODULE DISASTER RECOVERY AND ROLLBACK (VIA SECURITY MONITORING)
+--------------------------------------------------------------------------------
+Status: IMPLEMENTED (2026-10-16) — backend + frontend.
+Cross-refs: section 6F (Security Monitoring — detection), NFR-AVAIL (9.9),
+§6B (whole-hub backup — DIFFERENT tool), §1C (code release apply — DIFFERENT).
+
+Purpose (NOT the same as Security Monitoring alone, NOT whole-hub restore)
+- Security Monitoring (6F) RECOGNIZES / detects the disaster (events → incident).
+- Module disaster recovery then recovers by rolling back ONLY the affected
+  product module’s data to a prior module snapshot.
+- Does NOT restore the whole hub database/code (§6B Restore).
+- Does NOT re-apply full release zips (§1C) — that is deploy rollback, not
+  module disaster recovery.
+
+Lifecycle
+  1) Detect — automated or manual security incident (6F).
+  2) Recognize disaster — attach `affected_module` (product module key) and
+     set `disaster_recognized`. High/critical auto-incidents infer module from
+     route/event when possible and auto-recognize.
+  3) Snapshot — module-scoped JSON snapshot of that module’s tables (+ checklist
+     flag). Operators can create snapshots anytime; recognition creates a
+     baseline if none exists.
+  4) Roll back — restore ONLY that module’s tables from a chosen snapshot.
+     A pre-rollback safety snapshot of current module state is taken first.
+
+Recoverable modules (v1)
+  - module_general_compliance
+  - module_social_media_compliance
+  - module_website_compliance
+  - module_website_template_library
+  - module_social_media_template_library
+
+Capability
+  - `secmon_manage_disaster_recovery` (Security Monitoring group; blurred while
+    Functionalities → security_monitoring is off). Defaults ON for hub-admin
+    roles like other secmon_* manage caps.
+
+APIs (hub_can; also under /power-admin/* when acting)
+  - GET  …/security-monitoring/disaster-recovery/modules
+  - GET  …/security-monitoring/disaster-recovery/snapshots?module=
+  - POST …/security-monitoring/disaster-recovery/snapshots
+        { module_key, label?, security_incident_id? }
+  - POST …/security-monitoring/incidents/{id}/recognize-disaster
+        { affected_module }
+  - POST …/security-monitoring/incidents/{id}/rollback
+        { snapshot_id }
+  - Declare incident accepts optional affected_module + recognize_disaster.
+
+UI (Security Monitoring → Incidents)
+  - Declare: optional affected module + “Recognize as module disaster”.
+  - Incident detail: Disaster recovery panel — recognize, create snapshot,
+    select snapshot, Roll back module.
+  - Incident list shows affected module + Disaster badge when recognized.
+
+Storage
+  - Table `module_disaster_snapshots` + payload files under
+    storage/app/module-disaster-snapshots/{hub_id}/{module}/…
+  - Incident columns: affected_module, disaster_recognized,
+    disaster_recognized_at, recovery_status, last_snapshot_id,
+    last_rollback_snapshot_id, last_rollback_at.
+
+Explicit non-goals (v1)
+  - Whole-hub restore (use §6B)
+  - Full codebase rollback (use §1C release apply of a prior package)
+  - Multi-region failover / PITR beyond module snapshots
+
+Acceptance criteria
+  [x] Documented here + NFR-AVAIL 9.9 + §8 checklist; distinct from 6F detect-only
+  [x] Capability + APIs + Security Monitoring UI
+  [x] Snapshot + rollback restores only the chosen module’s tables
+  [x] Feature tests for recognize/rollback (GC) + capability gate
 
 
 --------------------------------------------------------------------------------
@@ -1800,6 +1879,9 @@ Who can see what (Capabilities — Hub operations group)
 - `secmon_manage_incidents` — acknowledge / investigate / resolve / close;
   add investigation notes; link related activity-log rows
 - `secmon_manage_alerts` — configure thresholds, channels, recipients
+- `secmon_manage_disaster_recovery` — recognize disasters for an affected
+  product module; create module snapshots; roll back that module only
+  (section 6B.1 — NOT whole-hub restore; NOT the same as closing an incident)
 - Defaults: ON for hub-admin style roles (power_admin when acting, 
   finproms_admin, client_admin, manager); OFF for approver / advisor /
   admin-staff / user until Power Admin enables them.
@@ -2252,6 +2334,10 @@ SECURITY HARDENING (phase 2 — 2026-10-04)
 [x] NFR-BACKUP-ENC (section 6B / 9.7): encrypt backup ZIPs at rest (AES-256-GCM
     HBENC1); shared HUB_BACKUP_ENCRYPTION_KEY; decrypt on download/restore;
     legacy plaintext still works; hub_backups.is_encrypted
+[x] Module disaster recovery (section 6B.1 / NFR-AVAIL 9.9): Security Monitoring
+    recognizes disaster for an affected product module; module snapshots;
+    roll back that module only (secmon_manage_disaster_recovery); UI on
+    Incidents; distinct from §6B whole-hub restore
 [ ] Future: TOTP authenticator 2FA for Power Admin (in addition to email OTP)
 [x] NFR-SEC-FW (section 9.5): application-layer IP deny + dangerous upload
     rejection (incl. SVG block) + optional ClamAV; see §8 NFR-SEC-FW + §9.5
@@ -2378,7 +2464,8 @@ Related but distinct
 --------------------------------------------------------------------------------
 - NFR-PERF — Concurrent performance / responsiveness under multi-user load
   (phases already tracked under section 8 Concurrent performance [x]).
-- NFR-AVAIL — Backup & restore / deploy resilience (section 6B).
+- NFR-AVAIL — Module disaster recovery (via 6F monitoring) + hub backup
+  resilience (sections 6B / 6B.1 / 9.9) — IMPLEMENTED.
 - NFR-BACKUP-ENC — Hub backup archives encrypted at rest (section 9.7) —
   IMPLEMENTED (AES-256-GCM; shared HUB_BACKUP_ENCRYPTION_KEY).
 - NFR-PRIV — UK GDPR / data protection (section 6E).
@@ -2784,7 +2871,7 @@ Acceptance criteria
 
 Related but distinct
 - NFR-GC-ENC — Generic Compliance field/file crypto (not backups)
-- NFR-AVAIL / §6B — schedule, dual store, retention
+- NFR-AVAIL / §6B / §6B.1 / §9.9 — schedule, dual store, retention, DR/rollback
 - NFR-PRIV — erasure does not rewrite historical backup dumps
 - NFR-SEC-VAL (9.8) — request validation/sanitization (not archive crypto)
 
@@ -2856,6 +2943,40 @@ Related but distinct
 - NFR-SEC-FW (9.5) — IP deny + malware/upload gates
 - NFR-SEC-NAV (9.4) — navigation entry hardening
 - NFR-SEC (9.1) — monitoring & reporting (not the validation gate)
+
+--------------------------------------------------------------------------------
+9.9 NFR-AVAIL — Module disaster recovery and hub availability
+--------------------------------------------------------------------------------
+Status: IMPLEMENTED (2026-10-16). Functional detail in sections 6B.1 and 6F;
+whole-hub backups remain §6B.
+
+Statement
+- When Security Monitoring recognizes a disaster affecting a product module,
+  the platform SHALL allow capable operators to roll back THAT MODULE’s data
+  from a module snapshot — without restoring the entire hub or all code.
+
+Product fulfilment
+  A) Detection — Security Monitoring events / incidents (6F).
+  B) Recognition + module rollback — §6B.1 (secmon_manage_disaster_recovery).
+  C) Whole-hub last resort — §6B hub backup restore (separate).
+  D) Deploy package rollback — §1C prior release apply (separate).
+
+Explicit non-goals (v1)
+  - Automated multi-region failover / hot standby
+  - Treating Security Monitoring resolve/close as data recovery
+  - Whole-code restore as part of module DR
+
+Acceptance criteria
+  [x] Documented in §6B.1 + this subsection + §8 checklist
+  [x] Module snapshot + rollback APIs and Security Monitoring UI
+  [x] Distinct from hub backup restore and from incident status-only workflow
+  [ ] Off-site copies of hub backups remain an ops process
+
+Related but distinct
+- NFR-BACKUP-ENC (9.7) — hub backup archive encryption
+- NFR-SEC (9.1) / §6F — monitoring & incidents (detect, not module restore)
+- §1B/§1C — code version apply
+- NFR-PRIV — backups / snapshots may retain personal data until retention
 
 ================================================================================
 END OF REQUIREMENTS

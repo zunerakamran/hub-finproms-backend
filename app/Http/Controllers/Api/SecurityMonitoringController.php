@@ -7,19 +7,23 @@ use App\Models\Hub;
 use App\Models\SecurityEvent;
 use App\Models\SecurityIncident;
 use App\Models\User;
+use App\Models\ModuleDisasterSnapshot;
 use App\Services\AccessRestrictionService;
 use App\Services\ActingHubService;
 use App\Services\HubService;
+use App\Services\ModuleDisasterRecoveryService;
 use App\Services\SecurityMonitoringService;
 use App\Support\InputSanitizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Throwable;
 
 class SecurityMonitoringController extends Controller
 {
     public function __construct(
         private readonly SecurityMonitoringService $security,
+        private readonly ModuleDisasterRecoveryService $disasterRecovery,
         private readonly HubService $hubs,
         private readonly ActingHubService $actingHubs
     ) {}
@@ -124,6 +128,13 @@ class SecurityMonitoringController extends Controller
             'description' => ['sometimes', 'nullable', 'string', 'max:10000'],
             'category' => ['sometimes', 'string', Rule::in(SecurityEvent::CATEGORIES)],
             'severity' => ['sometimes', 'string', Rule::in(SecurityEvent::SEVERITIES)],
+            'affected_module' => [
+                'sometimes',
+                'nullable',
+                'string',
+                Rule::in($this->disasterRecovery->recoverableModuleKeys()),
+            ],
+            'recognize_disaster' => ['sometimes', 'boolean'],
             'event_ids' => ['sometimes', 'array'],
             'event_ids.*' => ['integer', 'min:1'],
         ]);
@@ -263,6 +274,155 @@ class SecurityMonitoringController extends Controller
 
         return response()->json([
             'data' => $settings->toAccessRestrictionApiArray(),
+        ]);
+    }
+
+    public function disasterModules(Request $request): JsonResponse
+    {
+        $hub = $this->securityHub($request->user());
+        $this->security->assertModuleEnabled($hub);
+
+        return response()->json([
+            'modules' => $this->disasterRecovery->recoverableModules(),
+        ]);
+    }
+
+    public function disasterSnapshots(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $hub = $this->securityHub($user);
+        $this->security->assertModuleEnabled($hub);
+
+        $validated = $request->validate([
+            'module' => [
+                'sometimes',
+                'nullable',
+                'string',
+                Rule::in($this->disasterRecovery->recoverableModuleKeys()),
+            ],
+            'limit' => ['sometimes', 'integer', 'min:1', 'max:100'],
+        ]);
+
+        $items = $this->disasterRecovery->listSnapshots(
+            $hub,
+            $validated['module'] ?? null,
+            (int) ($validated['limit'] ?? 50)
+        );
+
+        return response()->json([
+            'data' => array_map(
+                fn (ModuleDisasterSnapshot $s) => $s->toApiArray(),
+                $items
+            ),
+        ]);
+    }
+
+    public function createDisasterSnapshot(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $hub = $this->securityHub($user);
+        $this->security->assertCan($hub, $user, 'secmon_manage_disaster_recovery');
+
+        $validated = $request->validate([
+            'module_key' => ['required', 'string', Rule::in($this->disasterRecovery->recoverableModuleKeys())],
+            'label' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'security_incident_id' => ['sometimes', 'nullable', 'integer', 'exists:security_incidents,id'],
+        ]);
+
+        $incident = null;
+        if (! empty($validated['security_incident_id'])) {
+            $incident = SecurityIncident::query()->findOrFail($validated['security_incident_id']);
+            $this->security->assertIncidentOnHub($hub, $incident);
+        }
+
+        try {
+            $snapshot = $this->disasterRecovery->createSnapshot(
+                $hub,
+                $validated['module_key'],
+                $user,
+                ModuleDisasterSnapshot::TRIGGER_MANUAL,
+                $validated['label'] ?? null,
+                $incident
+            );
+        } catch (Throwable $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'message' => 'Module snapshot created.',
+            'data' => $snapshot->toApiArray(),
+            'incident' => $incident?->fresh()?->toApiArray(includeDetails: true),
+        ], 201);
+    }
+
+    public function recognizeDisaster(Request $request, SecurityIncident $securityIncident): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $hub = $this->securityHub($user);
+        $this->security->assertCan($hub, $user, 'secmon_manage_disaster_recovery');
+        $this->security->assertIncidentOnHub($hub, $securityIncident);
+
+        $validated = $request->validate([
+            'affected_module' => [
+                'required',
+                'string',
+                Rule::in($this->disasterRecovery->recoverableModuleKeys()),
+            ],
+        ]);
+
+        try {
+            $incident = $this->disasterRecovery->recognizeDisaster(
+                $hub,
+                $securityIncident,
+                $validated['affected_module'],
+                $user,
+                $request
+            );
+        } catch (Throwable $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $snapshots = $this->disasterRecovery->listSnapshots($hub, $validated['affected_module'], 25);
+
+        return response()->json([
+            'message' => 'Disaster recognized for '.$validated['affected_module'].'.',
+            'data' => $incident->toApiArray(includeDetails: true),
+            'snapshots' => array_map(fn (ModuleDisasterSnapshot $s) => $s->toApiArray(), $snapshots),
+        ]);
+    }
+
+    public function rollbackDisaster(Request $request, SecurityIncident $securityIncident): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $hub = $this->securityHub($user);
+        $this->security->assertCan($hub, $user, 'secmon_manage_disaster_recovery');
+        $this->security->assertIncidentOnHub($hub, $securityIncident);
+
+        $validated = $request->validate([
+            'snapshot_id' => ['required', 'integer', 'exists:module_disaster_snapshots,id'],
+        ]);
+
+        try {
+            $result = $this->disasterRecovery->rollbackIncident(
+                $hub,
+                $securityIncident,
+                (int) $validated['snapshot_id'],
+                $user,
+                $request
+            );
+        } catch (Throwable $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'message' => 'Module rolled back from snapshot #'.$validated['snapshot_id'].'.',
+            'data' => $result['incident']->toApiArray(includeDetails: true),
+            'restored_snapshot' => $result['restored_snapshot']->toApiArray(),
+            'pre_rollback_snapshot' => $result['pre_rollback_snapshot']->toApiArray(),
         ]);
     }
 

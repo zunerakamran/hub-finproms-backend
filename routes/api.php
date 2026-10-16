@@ -663,6 +663,13 @@ Route::middleware('auth:sanctum')->group(function () {
                 Route::post('/security-monitoring/incidents', [SecurityMonitoringController::class, 'declareIncident']);
                 Route::patch('/security-monitoring/incidents/{securityIncident}', [SecurityMonitoringController::class, 'updateIncident']);
             });
+            Route::middleware('hub_can:secmon_manage_disaster_recovery')->group(function () {
+                Route::get('/security-monitoring/disaster-recovery/modules', [SecurityMonitoringController::class, 'disasterModules']);
+                Route::get('/security-monitoring/disaster-recovery/snapshots', [SecurityMonitoringController::class, 'disasterSnapshots']);
+                Route::post('/security-monitoring/disaster-recovery/snapshots', [SecurityMonitoringController::class, 'createDisasterSnapshot']);
+                Route::post('/security-monitoring/incidents/{securityIncident}/recognize-disaster', [SecurityMonitoringController::class, 'recognizeDisaster']);
+                Route::post('/security-monitoring/incidents/{securityIncident}/rollback', [SecurityMonitoringController::class, 'rollbackDisaster']);
+            });
             Route::middleware('hub_can:secmon_manage_alerts')->group(function () {
                 Route::get('/security-monitoring/alert-settings', [SecurityMonitoringController::class, 'alertSettings']);
                 Route::put('/security-monitoring/alert-settings', [SecurityMonitoringController::class, 'updateAlertSettings']);
@@ -1133,6 +1140,13 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::middleware('hub_can:secmon_manage_incidents')->group(function () {
                 Route::post('/security-monitoring/incidents', [SecurityMonitoringController::class, 'declareIncident']);
                 Route::patch('/security-monitoring/incidents/{securityIncident}', [SecurityMonitoringController::class, 'updateIncident']);
+            });
+            Route::middleware('hub_can:secmon_manage_disaster_recovery')->group(function () {
+                Route::get('/security-monitoring/disaster-recovery/modules', [SecurityMonitoringController::class, 'disasterModules']);
+                Route::get('/security-monitoring/disaster-recovery/snapshots', [SecurityMonitoringController::class, 'disasterSnapshots']);
+                Route::post('/security-monitoring/disaster-recovery/snapshots', [SecurityMonitoringController::class, 'createDisasterSnapshot']);
+                Route::post('/security-monitoring/incidents/{securityIncident}/recognize-disaster', [SecurityMonitoringController::class, 'recognizeDisaster']);
+                Route::post('/security-monitoring/incidents/{securityIncident}/rollback', [SecurityMonitoringController::class, 'rollbackDisaster']);
             });
             Route::middleware('hub_can:secmon_manage_alerts')->group(function () {
                 Route::get('/security-monitoring/alert-settings', [SecurityMonitoringController::class, 'alertSettings']);

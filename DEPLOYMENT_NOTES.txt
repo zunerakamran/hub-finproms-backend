@@ -451,6 +451,10 @@ Hub backups (dual store):
   - Archives: content hubs use storage/app/backups/{slug}/ (local) + upload to
     Central storage/app/backups/central/{slug}/. Central itself keeps one copy
     under storage/app/backups/central/{slug}/ only.
+  - Disaster recovery: Restore from a completed Central archive (Hub backups UI).
+    Code rollback: Hubs page → pick a prior ready_to_apply release → Roll back.
+    Prefer Backup now before risky Apply; keep old release zips if rollback may
+    be needed. See PROJECT_REQUIREMENTS.txt §6B.1 / NFR-AVAIL §9.9.
   - After deploy on all hubs: php artisan migrate
   - PHP zip: prefer enabling the php-zip extension on every hub
     (cPanel → Select PHP Version → Extensions → zip). Backups also fall back

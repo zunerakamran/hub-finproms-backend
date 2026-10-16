@@ -37,11 +37,39 @@ class SecurityIncident extends Model
         self::STATUS_FALSE_POSITIVE,
     ];
 
+    public const RECOVERY_NONE = 'none';
+
+    public const RECOVERY_RECOGNIZED = 'recognized';
+
+    public const RECOVERY_SNAPSHOT_TAKEN = 'snapshot_taken';
+
+    public const RECOVERY_ROLLED_BACK = 'rolled_back';
+
+    public const RECOVERY_FAILED = 'failed';
+
+    /**
+     * @var list<string>
+     */
+    public const RECOVERY_STATUSES = [
+        self::RECOVERY_NONE,
+        self::RECOVERY_RECOGNIZED,
+        self::RECOVERY_SNAPSHOT_TAKEN,
+        self::RECOVERY_ROLLED_BACK,
+        self::RECOVERY_FAILED,
+    ];
+
     protected $fillable = [
         'hub_id',
         'title',
         'description',
         'category',
+        'affected_module',
+        'disaster_recognized',
+        'disaster_recognized_at',
+        'recovery_status',
+        'last_snapshot_id',
+        'last_rollback_snapshot_id',
+        'last_rollback_at',
         'severity',
         'status',
         'declared_by_user_id',
@@ -55,6 +83,9 @@ class SecurityIncident extends Model
     protected function casts(): array
     {
         return [
+            'disaster_recognized' => 'boolean',
+            'disaster_recognized_at' => 'datetime',
+            'last_rollback_at' => 'datetime',
             'resolved_at' => 'datetime',
         ];
     }
@@ -86,6 +117,16 @@ class SecurityIncident extends Model
             'description' => $this->description,
             'category' => $this->category,
             'category_label' => SecurityEvent::CATEGORY_LABELS[$this->category] ?? $this->category,
+            'affected_module' => $this->affected_module,
+            'affected_module_label' => $this->affected_module
+                ? (Hub::CHECKLIST_DEFINITIONS[$this->affected_module]['label'] ?? $this->affected_module)
+                : null,
+            'disaster_recognized' => (bool) $this->disaster_recognized,
+            'disaster_recognized_at' => optional($this->disaster_recognized_at)?->toIso8601String(),
+            'recovery_status' => $this->recovery_status ?: self::RECOVERY_NONE,
+            'last_snapshot_id' => $this->last_snapshot_id,
+            'last_rollback_snapshot_id' => $this->last_rollback_snapshot_id,
+            'last_rollback_at' => optional($this->last_rollback_at)?->toIso8601String(),
             'severity' => $this->severity,
             'status' => $this->status,
             'declared_by' => [

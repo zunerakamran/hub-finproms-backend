@@ -641,6 +641,7 @@ class Hub extends Model
         'secmon_manage_incidents',
         'secmon_manage_alerts',
         'secmon_manage_access',
+        'secmon_manage_disaster_recovery',
     ];
 
     /**
@@ -1572,6 +1573,13 @@ class Hub extends Model
         'secmon_manage_access' => [
             'label' => 'Manage application access restrictions',
             'description' => 'Configure where the application can be accessed from: UK only, specific UK cities, allow/restrict countries, or allow/restrict IPs.',
+            'group' => self::GROUP_SECURITY_MONITORING,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
+        'secmon_manage_disaster_recovery' => [
+            'label' => 'Manage module disaster recovery',
+            'description' => 'Recognize disasters on product modules (from Security Monitoring), create module snapshots, and roll back only the affected module — not the whole hub.',
             'group' => self::GROUP_SECURITY_MONITORING,
             'default_shared' => true,
             'default_white_label' => true,

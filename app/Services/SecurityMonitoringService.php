@@ -132,6 +132,13 @@ class SecurityMonitoringService
                 $table->string('title', 255);
                 $table->text('description')->nullable();
                 $table->string('category', 40)->default('manual');
+                $table->string('affected_module', 80)->nullable();
+                $table->boolean('disaster_recognized')->default(false);
+                $table->dateTime('disaster_recognized_at')->nullable();
+                $table->string('recovery_status', 40)->default('none');
+                $table->unsignedBigInteger('last_snapshot_id')->nullable();
+                $table->unsignedBigInteger('last_rollback_snapshot_id')->nullable();
+                $table->dateTime('last_rollback_at')->nullable();
                 $table->string('severity', 20)->default('medium');
                 $table->string('status', 40)->default('open');
                 $table->unsignedBigInteger('declared_by_user_id')->nullable();
@@ -143,6 +150,37 @@ class SecurityMonitoringService
                 $table->timestamps();
 
                 $table->index(['status', 'severity', 'created_at'], 'secmon_inc_status_sev_created_idx');
+            });
+        } else {
+            if (! $schema->hasColumn('security_incidents', 'affected_module')) {
+                $schema->table('security_incidents', function (Blueprint $table) {
+                    $table->string('affected_module', 80)->nullable();
+                    $table->boolean('disaster_recognized')->default(false);
+                    $table->dateTime('disaster_recognized_at')->nullable();
+                    $table->string('recovery_status', 40)->default('none');
+                    $table->unsignedBigInteger('last_snapshot_id')->nullable();
+                    $table->unsignedBigInteger('last_rollback_snapshot_id')->nullable();
+                    $table->dateTime('last_rollback_at')->nullable();
+                });
+            }
+        }
+
+        if (! $schema->hasTable('module_disaster_snapshots')) {
+            $schema->create('module_disaster_snapshots', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('hub_id')->nullable()->index();
+                $table->string('module_key', 80);
+                $table->string('label', 255)->nullable();
+                $table->string('trigger', 40)->default('manual');
+                $table->string('disk_path', 500);
+                $table->unsignedBigInteger('size_bytes')->nullable();
+                $table->json('row_counts')->nullable();
+                $table->boolean('module_enabled')->nullable();
+                $table->unsignedBigInteger('security_incident_id')->nullable()->index();
+                $table->unsignedBigInteger('created_by_user_id')->nullable();
+                $table->string('created_by_name')->nullable();
+                $table->timestamps();
+                $table->index(['hub_id', 'module_key', 'created_at'], 'mdr_snap_hub_module_created_idx');
             });
         }
 
@@ -476,6 +514,11 @@ class SecurityMonitoringService
             $incident = $this->createIncidentFromEvent($hub, $event);
             $event->security_incident_id = $incident->id;
             $event->save();
+            try {
+                app(ModuleDisasterRecoveryService::class)->autoRecognizeFromIncident($hub, $incident, $event);
+            } catch (\Throwable) {
+                // Disaster recognition must not break event recording.
+            }
         }
 
         return $event;
@@ -669,6 +712,8 @@ class SecurityMonitoringService
      *   description?: string|null,
      *   category?: string,
      *   severity?: string,
+     *   affected_module?: string|null,
+     *   recognize_disaster?: bool,
      *   event_ids?: list<int>
      * }  $data
      */
@@ -677,13 +722,22 @@ class SecurityMonitoringService
         $this->assertModuleEnabled($hub);
         $this->assertCan($hub, $actor, 'secmon_manage_incidents');
 
+        $affectedModule = isset($data['affected_module']) && filled($data['affected_module'])
+            ? (string) $data['affected_module']
+            : null;
+        if ($affectedModule && ! app(ModuleDisasterRecoveryService::class)->isRecoverableModule($affectedModule)) {
+            throw new \InvalidArgumentException('affected_module is not a recoverable product module.');
+        }
+
         $incident = SecurityIncident::query()->create([
             'hub_id' => $hub->id,
             'title' => mb_substr($data['title'], 0, 255),
             'description' => $data['description'] ?? null,
             'category' => $data['category'] ?? SecurityEvent::CATEGORY_MANUAL,
+            'affected_module' => $affectedModule,
             'severity' => $data['severity'] ?? SecurityEvent::SEVERITY_MEDIUM,
             'status' => SecurityIncident::STATUS_OPEN,
+            'recovery_status' => SecurityIncident::RECOVERY_NONE,
             'declared_by_user_id' => $actor->id,
             'declared_by_name' => $actor->name,
         ]);
@@ -706,9 +760,24 @@ class SecurityMonitoringService
             'description' => 'Manual security incident declared: '.$incident->title,
             'actor' => $actor,
             'request' => $request,
-            'related_refs' => ['security_incident_id' => $incident->id],
+            'related_refs' => [
+                'security_incident_id' => $incident->id,
+                'module_key' => $affectedModule,
+            ],
             'status' => SecurityEvent::STATUS_ACKNOWLEDGED,
         ]);
+
+        if (! empty($data['recognize_disaster']) && $affectedModule) {
+            $incident = app(ModuleDisasterRecoveryService::class)
+                ->recognizeDisaster($hub, $incident, $affectedModule, $actor, $request);
+        } elseif ($affectedModule) {
+            try {
+                app(ModuleDisasterRecoveryService::class)->autoRecognizeFromIncident($hub, $incident);
+            } catch (\Throwable) {
+                //
+            }
+            $incident = $incident->fresh();
+        }
 
         try {
             $this->activityLogs->log([
@@ -717,7 +786,10 @@ class SecurityMonitoringService
                 'user' => $actor,
                 'request' => $request,
                 'status_code' => 201,
-                'properties' => ['incident_id' => $incident->id],
+                'properties' => [
+                    'incident_id' => $incident->id,
+                    'affected_module' => $affectedModule,
+                ],
             ]);
         } catch (\Throwable) {
             //
@@ -1007,6 +1079,8 @@ class SecurityMonitoringService
             'severities' => SecurityEvent::SEVERITIES,
             'statuses' => SecurityIncident::STATUSES,
             'event_statuses' => SecurityEvent::STATUSES,
+            'recovery_statuses' => SecurityIncident::RECOVERY_STATUSES,
+            'recoverable_modules' => app(ModuleDisasterRecoveryService::class)->recoverableModules(),
             'access_restriction_rules' => AccessRestrictionService::ruleOptions(),
             'suggested_uk_cities' => AccessRestrictionService::SUGGESTED_UK_CITIES,
         ];
@@ -1091,13 +1165,17 @@ class SecurityMonitoringService
 
     private function createIncidentFromEvent(Hub $hub, SecurityEvent $event): SecurityIncident
     {
+        $module = app(ModuleDisasterRecoveryService::class)->inferModuleFromEvent($event);
+
         return SecurityIncident::query()->create([
             'hub_id' => $hub->id,
             'title' => $event->title,
             'description' => $event->description,
             'category' => $event->category,
+            'affected_module' => $module,
             'severity' => $event->severity,
             'status' => SecurityIncident::STATUS_OPEN,
+            'recovery_status' => SecurityIncident::RECOVERY_NONE,
             'declared_by_name' => 'System',
         ]);
     }
@@ -1408,7 +1486,7 @@ class SecurityMonitoringService
         return $settings->last_dependency_scan_at->lt(now()->subDays(7));
     }
 
-    private function assertCan(Hub $hub, User $actor, string $capability): void
+    public function assertCan(Hub $hub, User $actor, string $capability): void
     {
         if (! $this->matrix->userCan($hub, $actor, $capability)) {
             abort(403, 'You do not have permission for this Security Monitoring action.');
@@ -1422,7 +1500,7 @@ class SecurityMonitoringService
         }
     }
 
-    private function assertIncidentOnHub(Hub $hub, SecurityIncident $incident): void
+    public function assertIncidentOnHub(Hub $hub, SecurityIncident $incident): void
     {
         if ($incident->hub_id !== null && (int) $incident->hub_id !== (int) $hub->id) {
             abort(404);
