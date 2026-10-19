@@ -139,6 +139,9 @@ Route::post('/internal/code-updates/apply', [InternalCodeUpdateController::class
 Route::get('/internal/code-updates/artifacts/{release}/{kind}', [InternalCodeUpdateController::class, 'artifact'])
     ->where('kind', 'backend|frontend');
 
+// Central → content hub: write allowlisted deploy env keys into hub .env
+Route::post('/internal/deploy-env/apply', [\App\Http\Controllers\Api\InternalDeployEnvController::class, 'apply']);
+
 // Hub iframe preview of live advisor sites (bypasses X-Frame-Options on cPanel).
 // Optional /h/{hubId}/ prefix: Central Hub remotes into a content-hub deployment DB.
 Route::match(['GET', 'HEAD'], '/website-compliance/embed-site/h/{hubId}/{templateRequestId}/{path?}', [WcPublicController::class, 'embedAdvisorSiteForHub'])
@@ -907,6 +910,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('pa_can:pa_manage_hubs')->group(function () {
             Route::post('/hubs', [PowerAdminHubController::class, 'store']);
             Route::put('/hubs/{hub}', [PowerAdminHubController::class, 'update']);
+            Route::post('/hubs/{hub}/push-deploy-env', [PowerAdminHubController::class, 'pushDeployEnv']);
 
             // Code updates: publish release, upload zips, poll versions, apply to selected hubs
             Route::get('/releases', [PowerAdminHubReleaseController::class, 'index']);

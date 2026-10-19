@@ -1745,6 +1745,8 @@ class Hub extends Model
         'session_lifetime_minutes',
         'frontend_url',
         'api_url',
+        'central_api_url',
+        'central_allowed_receive_hosts',
         'deploy_notes',
         'db_driver',
         'db_host',
@@ -2663,24 +2665,41 @@ class Hub extends Model
         $dbName = $database['database'] ?: 'hub_white_label';
         $dbUser = $database['username'] ?: 'hub_user';
 
-        $envSnippet = implode("\n", [
-            '# White-labelled deploy — same codebase, OWN database (not the shared hub DB)',
+        $centralApi = filled($this->central_api_url)
+            ? rtrim((string) $this->central_api_url, '/')
+            : 'https://central.example.com/api';
+        $centralHosts = filled($this->central_allowed_receive_hosts)
+            ? (string) $this->central_allowed_receive_hosts
+            : 'central.example.com';
+        $frontendPath = filled($this->code_frontend_path)
+            ? (string) $this->code_frontend_path
+            : '/home/user/public_html';
+
+        $envSnippet = implode("\n", array_values(array_filter([
+            '# Content hub deploy — same codebase, OWN database (not Central DB)',
             'HUB_SLUG='.$this->slug,
+            'HUB_IS_CONTROL_PLANE=false',
             $frontendLine,
             $apiLine,
             'APP_VERSION='.(string) config('hub.version', '1.0.0'),
             'FRONTEND_VERSION='.(string) config('hub.frontend_version', config('hub.version', '1.0.0')),
+            $needsRemoteDb ? '# Pushed from Central (Power Admin → hub → Save / Push deploy env)' : null,
+            $needsRemoteDb ? 'CENTRAL_API_URL='.$centralApi : null,
+            $needsRemoteDb ? 'CENTRAL_ALLOWED_RECEIVE_HOSTS='.$centralHosts : null,
+            $needsRemoteDb ? 'CODE_UPDATE_FRONTEND_PATH='.$frontendPath : null,
             'DB_CONNECTION='.($database['driver'] ?: 'mysql'),
             'DB_HOST='.$dbHost,
             'DB_PORT='.$dbPort,
             'DB_DATABASE='.$dbName,
             'DB_USERNAME='.$dbUser,
             'DB_PASSWORD=********',
-        ]);
+        ])));
 
         return [
             'frontend_url' => $this->frontend_url,
             'api_url' => $this->api_url,
+            'central_api_url' => $this->central_api_url,
+            'central_allowed_receive_hosts' => $this->central_allowed_receive_hosts,
             'deploy_notes' => $this->deploy_notes,
             'database' => $database,
             'hub_slug_env' => $this->slug,

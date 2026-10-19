@@ -157,6 +157,8 @@ class HubService
                 'db_password' => fn (Blueprint $table) => $table->text('db_password')->nullable(),
                 'db_ssl_mode' => fn (Blueprint $table) => $table->string('db_ssl_mode', 32)->nullable(),
                 'db_ssl_ca' => fn (Blueprint $table) => $table->text('db_ssl_ca')->nullable(),
+                'central_api_url' => fn (Blueprint $table) => $table->string('central_api_url', 2048)->nullable(),
+                'central_allowed_receive_hosts' => fn (Blueprint $table) => $table->string('central_allowed_receive_hosts', 2048)->nullable(),
             ];
 
             foreach ($columns as $name => $add) {

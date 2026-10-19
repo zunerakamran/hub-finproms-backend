@@ -27,19 +27,23 @@ class AppServiceProvider extends ServiceProvider
             URL::forceScheme('https');
         }
 
-        // Apply this deploy’s hub idle session timeout (SPA cookie + Sanctum).
-        // Skipped during console/migrate when hubs table may not exist yet.
-        if (! $this->app->runningInConsole()) {
-            try {
+        // Apply this deploy’s hub idle session timeout (SPA cookie + Sanctum)
+        // and Central-managed deploy env (CENTRAL_API_URL, frontend path, …).
+        // Skipped during migrate when hubs table may not exist yet.
+        try {
+            if (! $this->app->runningUnitTests()) {
                 $hub = app(\App\Services\HubService::class)->current();
-                $minutes = $hub->resolvedSessionLifetimeMinutes();
-                config([
-                    'session.lifetime' => $minutes,
-                    'sanctum.expiration' => $minutes,
-                ]);
-            } catch (\Throwable) {
-                // Keep .env / config defaults until hubs are available.
+                app(\App\Services\HubDeployEnvService::class)->applyRuntimeConfig($hub);
+                if (! $this->app->runningInConsole()) {
+                    $minutes = $hub->resolvedSessionLifetimeMinutes();
+                    config([
+                        'session.lifetime' => $minutes,
+                        'sanctum.expiration' => $minutes,
+                    ]);
+                }
             }
+        } catch (\Throwable) {
+            // Keep .env / config defaults until hubs are available.
         }
 
         // NFR-SEC-APP: brute-force — per IP and per email+IP when email present.

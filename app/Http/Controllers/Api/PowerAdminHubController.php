@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Hub;
 use App\Services\CapabilitiesMatrixService;
+use App\Services\HubDeployEnvService;
 use App\Services\HubService;
 use App\Services\HubVisibilityTransitionService;
 use App\Services\ModuleBillingService;
@@ -28,7 +29,8 @@ class PowerAdminHubController extends Controller
         private readonly CapabilitiesMatrixService $matrix,
         private readonly WhiteLabelHubSyncService $whiteLabelSync,
         private readonly WhiteLabelDatabaseService $remoteDb,
-        private readonly ModuleBillingService $moduleBilling
+        private readonly ModuleBillingService $moduleBilling,
+        private readonly HubDeployEnvService $deployEnv,
     ) {}
 
     public function index(): JsonResponse
@@ -254,8 +256,11 @@ class PowerAdminHubController extends Controller
             'favicon_url' => ['nullable', 'string', 'max:2048'],
             'frontend_url' => ['nullable', 'string', 'max:2048', 'url'],
             'api_url' => ['nullable', 'string', 'max:2048', 'url'],
+            'central_api_url' => ['nullable', 'string', 'max:2048', 'url'],
+            'central_allowed_receive_hosts' => ['nullable', 'string', 'max:2048'],
             'deploy_notes' => ['nullable', 'string', 'max:5000'],
             'code_frontend_path' => ['nullable', 'string', 'max:1024'],
+            'push_deploy_env' => ['sometimes', 'boolean'],
             'db_driver' => ['nullable', 'string', Rule::in(['mysql', 'pgsql', 'sqlsrv'])],
             'db_host' => ['nullable', 'string', 'max:255'],
             'db_port' => ['nullable', 'integer', 'min:1', 'max:65535'],
@@ -293,6 +298,8 @@ class PowerAdminHubController extends Controller
         unset($validated['clear_db_password']);
         $clearDbSslCa = (bool) ($validated['clear_db_ssl_ca'] ?? false);
         unset($validated['clear_db_ssl_ca']);
+        $pushDeployEnv = (bool) ($validated['push_deploy_env'] ?? true);
+        unset($validated['push_deploy_env']);
 
         // Blank password on update means "keep existing".
         if (array_key_exists('db_password', $validated) && ! filled($validated['db_password'])) {
@@ -311,6 +318,9 @@ class PowerAdminHubController extends Controller
                 $hub->db_ssl_ca = null;
             }
             $hub->save();
+            if ($hub->isContentHub()) {
+                $hub = $this->deployEnv->ensureCentralApiDefaults($hub);
+            }
         } catch (Throwable $e) {
             report($e);
 
@@ -358,7 +368,20 @@ class PowerAdminHubController extends Controller
             $syncWarning = 'Remote sync failed: '.$e->getMessage();
         }
 
+        $deployEnvResult = null;
+        if ($pushDeployEnv && $hub->isContentHub()) {
+            try {
+                $deployEnvResult = $this->deployEnv->pushToContentHub($hub->fresh());
+            } catch (Throwable $e) {
+                report($e);
+                $syncWarning = trim(($syncWarning ? $syncWarning.' ' : '').$e->getMessage());
+            }
+        }
+
         $message = 'Hub updated successfully.';
+        if ($deployEnvResult && ! empty($deployEnvResult['message'])) {
+            $message .= ' '.$deployEnvResult['message'];
+        }
         if ($syncWarning) {
             $message .= ' '.$syncWarning;
         }
@@ -367,6 +390,36 @@ class PowerAdminHubController extends Controller
             'message' => $message,
             'hub' => $hub->fresh()->toAdminArray(),
             'sync_warning' => $syncWarning,
+            'deploy_env' => $deployEnvResult,
+        ]);
+    }
+
+    /**
+     * Push Central-managed deploy env (CENTRAL_API_URL, frontend path, …) to a content hub.
+     */
+    public function pushDeployEnv(Hub $hub): JsonResponse
+    {
+        if (! $hub->isContentHub()) {
+            return response()->json([
+                'message' => 'Deploy env push is only for Shared / White-label hubs.',
+            ], 422);
+        }
+
+        try {
+            $result = $this->deployEnv->pushToContentHub($hub->fresh());
+        } catch (Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => $e->getMessage(),
+                'hub' => $hub->fresh()->toAdminArray(),
+            ], 422);
+        }
+
+        return response()->json([
+            'message' => $result['message'],
+            'deploy_env' => $result,
+            'hub' => $hub->fresh()->toAdminArray(),
         ]);
     }
 

@@ -94,6 +94,8 @@ class WhiteLabelHubSyncService
                     'backup_token' => $hub->backup_token,
                     'code_update_token' => $hub->code_update_token,
                     'code_frontend_path' => $hub->code_frontend_path,
+                    'central_api_url' => $hub->central_api_url,
+                    'central_allowed_receive_hosts' => $hub->central_allowed_receive_hosts,
                     'updated_at' => $now,
                 ];
 

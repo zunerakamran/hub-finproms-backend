@@ -217,12 +217,19 @@ class HubCodeApplyService
     private function resolveFrontendExtractPath(string $requested): string
     {
         $configured = trim((string) config('hub.code_update_frontend_path', ''));
+        if ($configured === '') {
+            try {
+                $configured = trim((string) (app(HubService::class)->current()->code_frontend_path ?? ''));
+            } catch (Throwable) {
+                $configured = '';
+            }
+        }
         $requested = trim($requested);
 
         if ($configured !== '') {
             if ($requested !== '' && ! $this->sameFilesystemPath($requested, $configured)) {
                 throw new RuntimeException(
-                    'frontend_path does not match CODE_UPDATE_FRONTEND_PATH on this hub.'
+                    'frontend_path does not match CODE_UPDATE_FRONTEND_PATH / hubs.code_frontend_path on this hub.'
                 );
             }
 
