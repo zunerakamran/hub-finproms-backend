@@ -2,6 +2,7 @@
 
 namespace App\Services\WebsiteCompliance;
 
+use App\Support\SafeOutboundUrl;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -14,7 +15,14 @@ class TemplatePreviewCaptureService
     public function capture(string $previewUrl): ?string
     {
         $previewUrl = trim($previewUrl);
-        if ($previewUrl === '' || ! filter_var($previewUrl, FILTER_VALIDATE_URL)) {
+        $parsed = SafeOutboundUrl::parseHttpUrl($previewUrl);
+        if ($parsed === null) {
+            return null;
+        }
+        // Block SSRF to private / metadata addresses.
+        if (SafeOutboundUrl::isBlockedHost($parsed['host'])) {
+            Log::warning('Template preview capture blocked unsafe URL', ['url' => $previewUrl]);
+
             return null;
         }
 

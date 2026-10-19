@@ -40,8 +40,10 @@ class InternalHubBackupController extends Controller
             $local = $this->backups->createLocalBackup(null, $triggeredBy);
             $centralPayload = null;
             $uploadError = null;
-            $receiveUrl = $request->input('central_receive_url')
-                ?: $request->header('X-Central-Receive-Url');
+            // Prefer CENTRAL_API_URL. Request override is only accepted when it
+            // matches the configured Central host / allowlist (no open SSRF).
+            $receiveUrl = $request->header('X-Central-Receive-Url')
+                ?: $request->input('central_receive_url');
             // Reuse the key + registry slug Central used to authorize /run so the
             // upload matches Central's hubs.backup_token even if this deploy's
             // HUB_SLUG / local token drifted from the Central registry.
@@ -52,7 +54,7 @@ class InternalHubBackupController extends Controller
             try {
                 $centralPayload = $this->backups->uploadLocalBackupToCentral(
                     $local,
-                    is_string($receiveUrl) ? $receiveUrl : null,
+                    is_string($receiveUrl) && $receiveUrl !== '' ? $receiveUrl : null,
                     $uploadToken !== '' ? $uploadToken : null,
                     $uploadSlug !== '' ? $uploadSlug : null,
                 );

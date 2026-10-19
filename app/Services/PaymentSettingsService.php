@@ -171,7 +171,7 @@ class PaymentSettingsService
     {
         return Setting::getBool(
             Setting::KEY_PAYMENT_BANK_TRANSFER_AUTO_CONFIRM,
-            (bool) config('payments.methods.bank_transfer.auto_confirm', true)
+            (bool) config('payments.methods.bank_transfer.auto_confirm', false)
         );
     }
 

@@ -56,21 +56,21 @@ class ZipSupport
             throw new RuntimeException('Could not create extract directory.');
         }
 
+        $destinationDir = rtrim(str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $destinationDir), DIRECTORY_SEPARATOR);
+        $destReal = realpath($destinationDir);
+        if ($destReal === false) {
+            throw new RuntimeException('Could not resolve extract directory.');
+        }
+
         if (self::zipExtensionLoaded()) {
-            $zip = new ZipArchive;
-            if ($zip->open($zipPath) !== true) {
-                throw new RuntimeException('Could not open backup archive.');
-            }
-            if (! $zip->extractTo($destinationDir)) {
-                $zip->close();
-                throw new RuntimeException('Could not extract backup archive.');
-            }
-            $zip->close();
+            $this->extractSafelyWithExtension($zipPath, $destReal);
 
             return;
         }
 
-        if ($this->extractWithBinary($zipPath, $destinationDir)) {
+        if ($this->extractWithBinary($zipPath, $destReal)) {
+            $this->assertExtractedTreeIsContained($destReal);
+
             return;
         }
 
@@ -79,6 +79,127 @@ class ZipSupport
             .'Enable the php-zip extension (cPanel → Select PHP Version → Extensions → zip) '
             .'or install unzip on the server, then try again.'
         );
+    }
+
+    /**
+     * Extract entry-by-entry, rejecting zip-slip (.. / absolute / escaped) paths.
+     */
+    private function extractSafelyWithExtension(string $zipPath, string $destReal): void
+    {
+        $zip = new ZipArchive;
+        if ($zip->open($zipPath) !== true) {
+            throw new RuntimeException('Could not open backup archive.');
+        }
+
+        try {
+            for ($i = 0; $i < $zip->numFiles; $i++) {
+                $name = $zip->getNameIndex($i);
+                if ($name === false) {
+                    continue;
+                }
+
+                $relative = $this->safeZipRelativePath($name);
+                if ($relative === null) {
+                    continue;
+                }
+                if ($relative === '' || str_ends_with($name, '/')) {
+                    if ($relative !== '') {
+                        $dir = $destReal.DIRECTORY_SEPARATOR.str_replace('/', DIRECTORY_SEPARATOR, $relative);
+                        if (! is_dir($dir) && ! mkdir($dir, 0755, true) && ! is_dir($dir)) {
+                            throw new RuntimeException('Could not create directory from archive: '.$relative);
+                        }
+                    }
+
+                    continue;
+                }
+
+                $target = $destReal.DIRECTORY_SEPARATOR.str_replace('/', DIRECTORY_SEPARATOR, $relative);
+                if (! $this->pathIsInsideDirectory($target, $destReal)) {
+                    throw new RuntimeException('Archive entry escapes extract directory: '.$name);
+                }
+
+                $parent = dirname($target);
+                if (! is_dir($parent) && ! mkdir($parent, 0755, true) && ! is_dir($parent)) {
+                    throw new RuntimeException('Could not create extract path for: '.$relative);
+                }
+
+                $stream = $zip->getStream($name);
+                if ($stream === false) {
+                    continue;
+                }
+                $out = fopen($target, 'wb');
+                if ($out === false) {
+                    fclose($stream);
+                    throw new RuntimeException('Cannot write extracted file: '.$relative);
+                }
+                stream_copy_to_stream($stream, $out);
+                fclose($out);
+                fclose($stream);
+            }
+        } finally {
+            $zip->close();
+        }
+    }
+
+    /**
+     * Normalize a zip entry name; null means skip (unsafe / empty).
+     */
+    private function safeZipRelativePath(string $name): ?string
+    {
+        $name = str_replace('\\', '/', $name);
+        if ($name === '' || str_starts_with($name, '/') || preg_match('#^[A-Za-z]:/#', $name)) {
+            return null;
+        }
+        if (str_contains($name, "\0")) {
+            return null;
+        }
+
+        $parts = [];
+        foreach (explode('/', $name) as $segment) {
+            if ($segment === '' || $segment === '.') {
+                continue;
+            }
+            if ($segment === '..') {
+                return null;
+            }
+            $parts[] = $segment;
+        }
+
+        return implode('/', $parts);
+    }
+
+    private function pathIsInsideDirectory(string $path, string $directory): bool
+    {
+        $directory = rtrim(str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $directory), DIRECTORY_SEPARATOR);
+        $path = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $path);
+        $prefix = $directory.DIRECTORY_SEPARATOR;
+
+        // Before the file exists, compare lexical normalized paths.
+        $normDir = strtolower($directory);
+        $normPath = strtolower($path);
+
+        return $normPath === $normDir || str_starts_with($normPath, strtolower($prefix));
+    }
+
+    /**
+     * After binary unzip, refuse trees that contain escaped paths (symlinks / ..).
+     */
+    private function assertExtractedTreeIsContained(string $destReal): void
+    {
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($destReal, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::SELF_FIRST
+        );
+
+        foreach ($iterator as $item) {
+            $real = $item->getRealPath();
+            if ($real === false) {
+                throw new RuntimeException('Archive extracted an unresolvable path (possible zip-slip).');
+            }
+            if (! $this->pathIsInsideDirectory($real, $destReal)) {
+                throw new RuntimeException('Archive extracted a path outside the destination (zip-slip).');
+            }
+        }
     }
 
     private function zipWithExtension(string $sourceDir, string $zipPath): void

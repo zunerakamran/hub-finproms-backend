@@ -67,12 +67,14 @@ return [
 
     /*
     | Hub backup / restore (dual store: local hub + Central).
-    | CENTRAL_API_URL = https://central.example.com/api  (content hubs; optional if
-    | Central always triggers backups and passes X-Central-Receive-Url).
+    | CENTRAL_API_URL = https://central.example.com/api  (preferred on content hubs).
+    | CENTRAL_ALLOWED_RECEIVE_HOSTS = comma-separated hosts allowed when CENTRAL_API_URL
+    | is empty and Central passes X-Central-Receive-Url (e.g. central.fin-proms.com).
     | HUB_BACKUP_SECRET = shared fallback key when per-hub backup_token is empty.
     */
     'hub_backup' => [
         'central_api_url' => env('CENTRAL_API_URL'),
+        'allowed_receive_hosts' => env('CENTRAL_ALLOWED_RECEIVE_HOSTS', ''),
         'secret' => env('HUB_BACKUP_SECRET'),
         'upload_timeout' => (int) env('HUB_BACKUP_UPLOAD_TIMEOUT', 600),
         // NFR-BACKUP-ENC: encrypt ZIP archives at rest (AES-256-GCM).
@@ -83,13 +85,16 @@ return [
 
     /*
     | Hub code updates (Phase 2): Central pushes release zips to selected hubs.
-    | HUB_CODE_UPDATE_SECRET = shared fallback when per-hub code_update_token
-    | and backup_token are empty. Download timeout for large artifacts.
+    | HUB_CODE_UPDATE_SECRET = shared fallback when per-hub code_update_token is empty
+    | (do not reuse HUB_BACKUP_SECRET). Download hosts are allowlisted to Central.
     */
     'hub_code_update' => [
-        'secret' => env('HUB_CODE_UPDATE_SECRET', env('HUB_BACKUP_SECRET')),
+        'secret' => env('HUB_CODE_UPDATE_SECRET'),
         'download_timeout' => (int) env('HUB_CODE_UPDATE_DOWNLOAD_TIMEOUT', 600),
         'apply_timeout' => (int) env('HUB_CODE_UPDATE_APPLY_TIMEOUT', 600),
+        // Comma-separated extra hosts allowed for artifact downloads (in addition to
+        // CENTRAL_API_URL / APP_URL). Example: central.fin-proms.com
+        'allowed_download_hosts' => env('HUB_CODE_UPDATE_ALLOWED_DOWNLOAD_HOSTS', ''),
     ],
 
 ];

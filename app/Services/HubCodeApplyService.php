@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\SafeOutboundUrl;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
@@ -91,9 +92,7 @@ class HubCodeApplyService
             }
 
             if ($frontendLocal !== '' || $frontendUrl !== '') {
-                $path = $frontendPath !== ''
-                    ? $frontendPath
-                    : (string) config('hub.code_update_frontend_path', '');
+                $path = $this->resolveFrontendExtractPath($frontendPath);
                 if ($path === '') {
                     throw new RuntimeException(
                         'Frontend artifact present but no extract path set (hub code_frontend_path or CODE_UPDATE_FRONTEND_PATH).'
@@ -152,10 +151,16 @@ class HubCodeApplyService
 
     private function downloadTo(string $url, string $dest, string $authToken): void
     {
+        $this->assertAllowedArtifactDownloadUrl($url);
+
         $verify = (bool) config('services.http_tls_verify', true);
         $timeout = (int) config('services.hub_code_update.download_timeout', 600);
 
-        $response = Http::withOptions(['verify' => $verify])
+        $response = Http::withOptions([
+            'verify' => $verify,
+            // Never follow redirects to an unallowlisted host.
+            'allow_redirects' => false,
+        ])
             ->timeout($timeout)
             ->withHeaders([
                 'Accept' => 'application/zip, application/octet-stream',
@@ -170,6 +175,88 @@ class HubCodeApplyService
                 'Failed to download artifact from '.$url.' (HTTP '.$response->status().')'
             );
         }
+    }
+
+    /**
+     * Only download release artifacts from Central / configured hosts.
+     */
+    private function assertAllowedArtifactDownloadUrl(string $url): void
+    {
+        $parsed = SafeOutboundUrl::parseHttpUrl($url);
+        if ($parsed === null) {
+            throw new RuntimeException('Invalid artifact download URL.');
+        }
+
+        $path = $parsed['path'];
+        if (! str_contains($path, '/internal/code-updates/artifacts/')) {
+            throw new RuntimeException('Artifact download path is not allowed.');
+        }
+
+        $allow = array_filter([
+            (string) config('services.hub_backup.central_api_url', ''),
+            (string) config('app.url', ''),
+        ]);
+        $extra = array_filter(array_map(
+            'trim',
+            explode(',', (string) config('services.hub_code_update.allowed_download_hosts', ''))
+        ));
+        $allow = array_merge($allow, $extra);
+
+        // Allowlist is authoritative (may include local Central APP_URL).
+        if ($allow === [] || ! SafeOutboundUrl::hostMatchesAllowlist($url, $allow)) {
+            throw new RuntimeException(
+                'Artifact download host is not allowlisted. Set CENTRAL_API_URL or HUB_CODE_UPDATE_ALLOWED_DOWNLOAD_HOSTS.'
+            );
+        }
+    }
+
+    /**
+     * Prefer CODE_UPDATE_FRONTEND_PATH. Request-supplied paths must match config
+     * (absolute) or be relative under base_path (no .. / drive escapes).
+     */
+    private function resolveFrontendExtractPath(string $requested): string
+    {
+        $configured = trim((string) config('hub.code_update_frontend_path', ''));
+        $requested = trim($requested);
+
+        if ($configured !== '') {
+            if ($requested !== '' && ! $this->sameFilesystemPath($requested, $configured)) {
+                throw new RuntimeException(
+                    'frontend_path does not match CODE_UPDATE_FRONTEND_PATH on this hub.'
+                );
+            }
+
+            return $configured;
+        }
+
+        if ($requested === '') {
+            return '';
+        }
+
+        if (str_contains($requested, '..') || str_contains($requested, "\0")) {
+            throw new RuntimeException('Invalid frontend extract path.');
+        }
+
+        // Absolute paths from remote payloads are rejected without local config.
+        if (str_starts_with($requested, '/') || preg_match('/^[A-Za-z]:[\\\\\\/]/', $requested)) {
+            throw new RuntimeException(
+                'Absolute frontend_path requires CODE_UPDATE_FRONTEND_PATH to be configured on this hub.'
+            );
+        }
+
+        return $requested;
+    }
+
+    private function sameFilesystemPath(string $a, string $b): bool
+    {
+        $norm = static function (string $path): string {
+            $path = str_replace('\\', '/', $path);
+            $path = rtrim($path, '/');
+
+            return strtolower($path);
+        };
+
+        return $norm($a) === $norm($b);
     }
 
     private function extractBackendZip(string $zipPath): void

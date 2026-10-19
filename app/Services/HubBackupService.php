@@ -6,6 +6,7 @@ use App\Models\Hub;
 use App\Models\HubBackup;
 use App\Models\User;
 use App\Support\HubBackupEncryptedArchive;
+use App\Support\SafeOutboundUrl;
 use App\Support\ZipSupport;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -222,18 +223,13 @@ class HubBackupService
             throw new RuntimeException('Backup is not ready to upload.');
         }
 
-        $centralUrl = rtrim((string) ($centralReceiveUrl ?: config('services.hub_backup.central_api_url', '')), '/');
-        if ($centralUrl === '') {
+        $centralUrl = $this->resolveCentralReceiveUrl($centralReceiveUrl);
+        if ($centralUrl === null) {
             Log::info('hub backup: Central API URL not set; skipping upload', [
                 'backup_id' => $backup->id,
             ]);
 
             return null;
-        }
-
-        // Accept either base /api or full .../internal/hub-backups/receive
-        if (! str_contains($centralUrl, 'internal/hub-backups/receive')) {
-            $centralUrl .= '/internal/hub-backups/receive';
         }
 
         $absolute = $backup->absolutePath();
@@ -520,6 +516,59 @@ class HubBackupService
     public function resolvePlaintextArchive(string $absolutePath): array
     {
         return HubBackupEncryptedArchive::resolvePlaintext($absolutePath);
+    }
+
+    /**
+     * Resolve the Central receive endpoint.
+     *
+     * Prefer CENTRAL_API_URL. A request-supplied URL is accepted only when its host
+     * matches CENTRAL_API_URL or CENTRAL_ALLOWED_RECEIVE_HOSTS (blocks open SSRF /
+     * token exfil to attacker hosts).
+     */
+    private function resolveCentralReceiveUrl(?string $provided): ?string
+    {
+        $configured = rtrim((string) config('services.hub_backup.central_api_url', ''), '/');
+
+        if ($configured !== '') {
+            $url = $configured;
+            if (! str_contains($url, 'internal/hub-backups/receive')) {
+                $url .= '/internal/hub-backups/receive';
+            }
+
+            // Ignore client override when config is set (config wins).
+            return $url;
+        }
+
+        $provided = is_string($provided) ? trim($provided) : '';
+        if ($provided === '') {
+            return null;
+        }
+
+        $parsed = SafeOutboundUrl::parseHttpUrl($provided);
+        if ($parsed === null) {
+            throw new RuntimeException('Invalid central receive URL.');
+        }
+
+        $path = rtrim($parsed['path'], '/');
+        if (! str_ends_with($path, 'internal/hub-backups/receive')) {
+            throw new RuntimeException('Central receive URL path is not allowed.');
+        }
+
+        $allowedHosts = array_filter(array_map(
+            'trim',
+            explode(',', (string) config('services.hub_backup.allowed_receive_hosts', ''))
+        ));
+        if ($allowedHosts === []) {
+            throw new RuntimeException(
+                'Set CENTRAL_API_URL or CENTRAL_ALLOWED_RECEIVE_HOSTS before accepting a receive URL override.'
+            );
+        }
+
+        if (! SafeOutboundUrl::hostMatchesAllowlist($provided, $allowedHosts)) {
+            throw new RuntimeException('Central receive URL host is not in CENTRAL_ALLOWED_RECEIVE_HOSTS.');
+        }
+
+        return rtrim($provided, '/');
     }
 
     /**

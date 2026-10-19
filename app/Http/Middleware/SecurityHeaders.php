@@ -29,7 +29,7 @@ class SecurityHeaders
 
         // Embed proxy must remain frameable by the hub UI; skip framing locks there.
         // GC encrypted file preview/download set their own CSP (frame-ancestors self).
-        $isEmbedProxy = str_contains($request->path(), 'website-compliance/public/embed');
+        $isEmbedProxy = str_contains($request->path(), 'website-compliance/embed-site');
         $isGcFileDownload = (str_contains($request->path(), 'general-compliance/attachments')
                 && str_ends_with($request->path(), '/download'))
             || str_contains($request->path(), 'gc/file/');

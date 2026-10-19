@@ -319,10 +319,12 @@ class PublicController extends Controller
         }
 
         try {
+            // Do not follow redirects — Location could leave the registered
+            // cpanel_domain host (SSRF). Callers must use the final site URL.
             $upstream = Http::timeout(45)
                 ->withOptions([
                     'verify' => (bool) config('services.http_tls_verify', true),
-                    'allow_redirects' => ['max' => 5, 'strict' => true, 'referer' => true, 'track_redirects' => true],
+                    'allow_redirects' => false,
                 ])
                 ->withHeaders([
                     'User-Agent' => 'FinProms-WC-Embed/1.0',
@@ -332,7 +334,7 @@ class PublicController extends Controller
         } catch (\Throwable $e) {
             return response('Upstream advisor site unreachable: '.$e->getMessage(), 502)
                 ->header('Content-Type', 'text/plain; charset=UTF-8')
-                ->header('Content-Security-Policy', "frame-ancestors *");
+                ->header('Content-Security-Policy', $this->embedFrameAncestorsCsp());
         }
 
         $contentType = (string) ($upstream->header('Content-Type') ?: 'application/octet-stream');
@@ -344,11 +346,25 @@ class PublicController extends Controller
             $body = $this->injectEmbedBranding($body, $base, $templateRequest);
         }
 
-        // Drop framing headers from upstream; allow the hub (and any parent) to embed.
+        // Drop framing headers from upstream; allow only configured hub frontends.
         return response($body, $upstream->status())
             ->header('Content-Type', $contentType)
             ->header('Cache-Control', 'private, no-store')
-            ->header('Content-Security-Policy', "frame-ancestors *");
+            ->header('Content-Security-Policy', $this->embedFrameAncestorsCsp());
+    }
+
+    /** CSP frame-ancestors for embed proxy (never *). */
+    private function embedFrameAncestorsCsp(): string
+    {
+        $origins = \App\Support\SafeFrontendRedirect::allowedOrigins();
+        if ($origins === []) {
+            return "frame-ancestors 'self'";
+        }
+
+        $parts = array_map(static fn (string $o) => trim($o), $origins);
+        $parts = array_values(array_filter($parts));
+
+        return 'frame-ancestors '.implode(' ', $parts);
     }
 
     /**

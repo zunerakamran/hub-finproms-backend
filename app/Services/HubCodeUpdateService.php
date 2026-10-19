@@ -199,13 +199,8 @@ class HubCodeUpdateService
             return (string) $hub->code_update_token;
         }
 
-        // Prefer existing backup token so content hubs authorize without a second sync.
-        if (filled($hub->backup_token)) {
-            $hub->forceFill(['code_update_token' => $hub->backup_token])->save();
-
-            return (string) $hub->backup_token;
-        }
-
+        // Keep code-update auth separate from backup_token (compromising backups
+        // must not automatically authorize remote code apply).
         $token = Str::random(64);
         $hub->forceFill(['code_update_token' => $token])->save();
 
@@ -427,10 +422,9 @@ class HubCodeUpdateService
         }
 
         $hub = $this->hubs->current();
-        foreach ([(string) ($hub->code_update_token ?: ''), (string) ($hub->backup_token ?: '')] as $expected) {
-            if ($expected !== '' && hash_equals($expected, $provided)) {
-                return true;
-            }
+        $expected = (string) ($hub->code_update_token ?: '');
+        if ($expected !== '' && hash_equals($expected, $provided)) {
+            return true;
         }
 
         $shared = (string) config('services.hub_code_update.secret', '');
@@ -449,21 +443,13 @@ class HubCodeUpdateService
         }
 
         $matched = Hub::query()
-            ->where(function ($q) {
-                $q->whereNotNull('code_update_token')->where('code_update_token', '!=', '')
-                    ->orWhere(function ($q2) {
-                        $q2->whereNotNull('backup_token')->where('backup_token', '!=', '');
-                    });
-            })
+            ->whereNotNull('code_update_token')
+            ->where('code_update_token', '!=', '')
             ->get()
             ->first(function (Hub $row) use ($provided) {
-                foreach ([(string) ($row->code_update_token ?: ''), (string) ($row->backup_token ?: '')] as $expected) {
-                    if ($expected !== '' && hash_equals($expected, $provided)) {
-                        return true;
-                    }
-                }
+                $expected = (string) ($row->code_update_token ?: '');
 
-                return false;
+                return $expected !== '' && hash_equals($expected, $provided);
             });
 
         if ($matched) {
@@ -729,7 +715,7 @@ class HubCodeUpdateService
             'applied_at' => $hub->code_applied_at?->toIso8601String(),
             'apply_error' => $hub->code_apply_error,
             'frontend_path' => $hub->code_frontend_path,
-            'update_token_set' => filled($hub->code_update_token) || filled($hub->backup_token),
+            'update_token_set' => filled($hub->code_update_token),
             'can_apply' => filled($hub->api_url) || $hub->isControlPlane(),
         ];
     }
