@@ -386,6 +386,73 @@ class SecurityMonitoringController extends Controller
         ]);
     }
 
+    /**
+     * Dry-run access rules for an IP (and optional user / geo hints). Never blocks.
+     */
+    public function simulateAccess(Request $request): JsonResponse
+    {
+        /** @var User $actor */
+        $actor = $request->user();
+        $hub = $this->accessHub($actor);
+        $this->security->assertModuleEnabled($hub);
+
+        $data = $request->validate([
+            'ip' => ['sometimes', 'nullable', 'string', 'max:64'],
+            'user_id' => ['sometimes', 'nullable', 'integer', 'exists:users,id'],
+            'country' => ['sometimes', 'nullable', 'string', 'size:2'],
+            'city' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'vpn' => ['sometimes', 'nullable', 'boolean'],
+        ]);
+
+        $ip = trim((string) ($data['ip'] ?? ''));
+        $usingRequestIp = $ip === '';
+        if ($usingRequestIp) {
+            $ip = (string) $request->ip();
+        }
+
+        if ($ip === '' || filter_var($ip, FILTER_VALIDATE_IP) === false) {
+            return response()->json([
+                'message' => 'A valid IPv4 or IPv6 address is required.',
+                'errors' => ['ip' => ['A valid IPv4 or IPv6 address is required.']],
+            ], 422);
+        }
+
+        $asUser = null;
+        if (! empty($data['user_id'])) {
+            $asUser = User::query()->findOrFail((int) $data['user_id']);
+        }
+
+        $overrides = [];
+        if (array_key_exists('country', $data) && $data['country'] !== null && $data['country'] !== '') {
+            $overrides['country'] = strtoupper((string) $data['country']);
+        }
+        if (array_key_exists('city', $data) && $data['city'] !== null && $data['city'] !== '') {
+            $overrides['city'] = (string) $data['city'];
+        }
+        if (array_key_exists('vpn', $data) && $data['vpn'] !== null) {
+            $overrides['vpn'] = (bool) $data['vpn'];
+        }
+
+        $simulation = app(AccessRestrictionService::class)->simulateForHub(
+            $hub,
+            $ip,
+            $asUser,
+            $overrides
+        );
+
+        $actorIp = (string) $request->ip();
+        $selfLockoutRisk = $actorIp !== ''
+            && strcasecmp($actorIp, $ip) === 0
+            && in_array($simulation['result'] ?? '', ['block', 'would_block'], true);
+
+        return response()->json([
+            'data' => array_merge($simulation, [
+                'using_request_ip' => $usingRequestIp,
+                'self_lockout_risk' => $selfLockoutRisk,
+            ]),
+        ]);
+    }
+
     public function disasterModules(Request $request): JsonResponse
     {
         $hub = $this->securityHub($request->user());

@@ -122,8 +122,128 @@ class AccessRestrictionService
             return $pass;
         }
 
-        $hubSettings = $this->cachedSettings($hub) ?? $this->emptySettings();
         $user = $this->resolveRequestUser($request);
+
+        return $this->decideForHub($hub, $ip, $user, $request);
+    }
+
+    /**
+     * Dry-run the production decision engine for an IP (and optional user / geo hints).
+     * Never blocks traffic and never writes security events.
+     *
+     * @param  array{country?: ?string, city?: ?string, vpn?: ?bool}  $geoOverrides
+     * @return array{
+     *   result: string,
+     *   denied: bool,
+     *   would_block: bool,
+     *   reason: string,
+     *   reason_label: string,
+     *   mode: string,
+     *   ip: string,
+     *   country: ?string,
+     *   city: ?string,
+     *   vpn: ?bool,
+     *   private_ip_bypass: bool,
+     *   hub_rules_active: bool,
+     *   user_rules_active: bool,
+     *   user: ?array{id: int, name: ?string, email: ?string}
+     * }
+     */
+    public function simulateForHub(Hub $hub, string $ip, ?User $asUser = null, array $geoOverrides = []): array
+    {
+        $ip = trim($ip);
+        $synthetic = Request::create('/', 'GET', server: ['REMOTE_ADDR' => $ip !== '' ? $ip : '127.0.0.1']);
+
+        $country = isset($geoOverrides['country'])
+            ? $this->geoIp->normalizeCountry($geoOverrides['country'])
+            : null;
+        $city = array_key_exists('city', $geoOverrides)
+            ? $this->geoIp->normalizeCity($geoOverrides['city'])
+            : null;
+        if ($country !== null) {
+            $synthetic->headers->set('X-App-Geo-Country', $country);
+        }
+        if ($city !== null && $city !== '') {
+            $synthetic->headers->set('X-App-Geo-City', $city);
+        }
+        if (array_key_exists('vpn', $geoOverrides) && $geoOverrides['vpn'] !== null) {
+            $synthetic->headers->set(
+                'X-App-Geo-Vpn',
+                filter_var($geoOverrides['vpn'], FILTER_VALIDATE_BOOLEAN) ? '1' : '0'
+            );
+        }
+
+        $privateBypass = (bool) config('security_firewall.access_restriction_bypass_private_ips', true)
+            && $ip !== ''
+            && $this->geoIp->isPrivateOrLocal($ip);
+
+        if ($privateBypass || ! (bool) config('security_firewall.enabled', true) || ! $hub->hasSecurityMonitoringFunctionality()) {
+            $hubSettings = $this->cachedSettings($hub) ?? $this->emptySettings();
+            $userSettings = $asUser ? ($this->cachedUserSettings($hub, $asUser) ?? $this->emptySettings()) : null;
+            $reason = $privateBypass
+                ? 'private_ip_bypass'
+                : (! (bool) config('security_firewall.enabled', true) ? 'firewall_disabled' : 'module_disabled');
+
+            return $this->formatSimulationResult(
+                [
+                    'denied' => false,
+                    'would_block' => false,
+                    'reason' => $reason,
+                    'mode' => SecurityMonitoringSetting::normalizedEnforcementMode(
+                        $this->mergeSettings($hubSettings, $userSettings)['enforcement_mode'] ?? 'enforce'
+                    ),
+                    'country' => $country,
+                    'city' => $city,
+                    'vpn' => array_key_exists('vpn', $geoOverrides)
+                        ? (filter_var($geoOverrides['vpn'], FILTER_VALIDATE_BOOLEAN) ?: false)
+                        : null,
+                ],
+                $ip,
+                $hubSettings,
+                $userSettings,
+                $asUser,
+                $privateBypass
+            );
+        }
+
+        $decision = $this->decideForHub($hub, $ip, $asUser, $synthetic);
+        $hubSettings = $this->cachedSettings($hub) ?? $this->emptySettings();
+        $userSettings = $asUser ? ($this->cachedUserSettings($hub, $asUser) ?? $this->emptySettings()) : null;
+
+        return $this->formatSimulationResult(
+            $decision,
+            $ip,
+            $hubSettings,
+            $userSettings,
+            $asUser,
+            false
+        );
+    }
+
+    /**
+     * @return array{
+     *   denied: bool,
+     *   would_block: bool,
+     *   reason: string,
+     *   mode: string,
+     *   country: ?string,
+     *   city: ?string,
+     *   vpn: ?bool
+     * }
+     */
+    private function decideForHub(Hub $hub, string $ip, ?User $user, Request $request): array
+    {
+        $pass = [
+            'denied' => false,
+            'would_block' => false,
+            'reason' => 'allowed',
+            'mode' => 'enforce',
+            'country' => null,
+            'city' => null,
+            'vpn' => null,
+        ];
+
+        $hubSettings = $this->cachedSettings($hub) ?? $this->emptySettings();
         $userSettings = $user ? $this->cachedUserSettings($hub, $user) : null;
         $settings = $this->mergeSettings($hubSettings, $userSettings);
         $mode = SecurityMonitoringSetting::normalizedEnforcementMode(
@@ -167,6 +287,72 @@ class AccessRestrictionService
             'city' => $decision['city'] ?? null,
             'vpn' => $decision['vpn'] ?? null,
         ];
+    }
+
+    /**
+     * @param  array{denied: bool, would_block: bool, reason: string, mode: string, country: ?string, city: ?string, vpn: ?bool}  $decision
+     * @param  array<string, mixed>  $hubSettings
+     * @param  array<string, mixed>|null  $userSettings
+     * @return array<string, mixed>
+     */
+    private function formatSimulationResult(
+        array $decision,
+        string $ip,
+        array $hubSettings,
+        ?array $userSettings,
+        ?User $asUser,
+        bool $privateIpBypass
+    ): array {
+        $denied = (bool) ($decision['denied'] ?? false);
+        $wouldBlock = (bool) ($decision['would_block'] ?? false);
+        $reason = (string) ($decision['reason'] ?? 'allowed');
+
+        $result = 'pass';
+        if ($denied) {
+            $result = 'block';
+        } elseif ($wouldBlock) {
+            $result = 'would_block';
+        }
+
+        return [
+            'result' => $result,
+            'denied' => $denied,
+            'would_block' => $wouldBlock,
+            'reason' => $reason,
+            'reason_label' => self::reasonLabel($reason),
+            'mode' => (string) ($decision['mode'] ?? 'enforce'),
+            'ip' => $ip,
+            'country' => $decision['country'] ?? null,
+            'city' => $decision['city'] ?? null,
+            'vpn' => $decision['vpn'] ?? null,
+            'private_ip_bypass' => $privateIpBypass,
+            'hub_rules_active' => $this->anyRuleEnabled($hubSettings),
+            'user_rules_active' => $userSettings !== null && $this->anyRuleEnabled($userSettings),
+            'user' => $asUser ? [
+                'id' => (int) $asUser->id,
+                'name' => $asUser->name,
+                'email' => $asUser->email,
+            ] : null,
+        ];
+    }
+
+    public static function reasonLabel(string $reason): string
+    {
+        return match ($reason) {
+            'allowed', 'allow_ips_override', 'allow_vpn_override' => 'Allowed',
+            'restrict_ips' => 'Restrict IPs',
+            'restrict_vpn' => 'Block VPN',
+            'restrict_countries' => 'Restrict countries',
+            'allow_countries' => 'Allow countries',
+            'uk_only' => 'UK only',
+            'uk_cities', 'uk_cities_country' => 'Specific UK cities',
+            'allow_ips', 'allow_ips_or_vpn' => 'Allow IPs',
+            'allow_vpn' => 'Allow VPN',
+            'private_ip_bypass' => 'Private / local IP (live traffic skips geo rules)',
+            'firewall_disabled' => 'Firewall disabled',
+            'module_disabled' => 'Security Monitoring not enabled',
+            default => $reason,
+        };
     }
 
     /**

@@ -816,4 +816,127 @@ class AccessRestrictionTest extends TestCase
             ->getJson('/api/hub')
             ->assertForbidden();
     }
+
+    public function test_simulate_reports_block_for_enforce_uk_only(): void
+    {
+        $hub = $this->createHubWithSecurityMonitoring();
+        $admin = User::factory()->create(['role' => User::ROLE_FINPROMS_ADMIN]);
+        $this->setAccessRules($hub, [
+            'uk_only' => true,
+            'enforcement_mode' => 'enforce',
+        ]);
+
+        config([
+            'security_firewall.enabled' => true,
+            'security_firewall.record_security_events' => false,
+            'security_firewall.geoip.http_enabled' => false,
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        $this->postJson('/api/client-admin/access-control/simulate', [
+            'ip' => '203.0.113.50',
+            'country' => 'US',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.result', 'block')
+            ->assertJsonPath('data.reason', 'uk_only')
+            ->assertJsonPath('data.mode', 'enforce')
+            ->assertJsonPath('data.country', 'US')
+            ->assertJsonPath('data.denied', true);
+    }
+
+    public function test_simulate_reports_would_block_in_monitor_mode(): void
+    {
+        $hub = $this->createHubWithSecurityMonitoring();
+        $admin = User::factory()->create(['role' => User::ROLE_FINPROMS_ADMIN]);
+        $this->setAccessRules($hub, [
+            'uk_only' => true,
+            'enforcement_mode' => 'monitor',
+        ]);
+
+        config([
+            'security_firewall.enabled' => true,
+            'security_firewall.record_security_events' => false,
+            'security_firewall.geoip.http_enabled' => false,
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        $this->postJson('/api/client-admin/access-control/simulate', [
+            'ip' => '203.0.113.51',
+            'country' => 'US',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.result', 'would_block')
+            ->assertJsonPath('data.would_block', true)
+            ->assertJsonPath('data.denied', false)
+            ->assertJsonPath('data.mode', 'monitor');
+    }
+
+    public function test_simulate_pass_for_allowed_country(): void
+    {
+        $hub = $this->createHubWithSecurityMonitoring();
+        $admin = User::factory()->create(['role' => User::ROLE_FINPROMS_ADMIN]);
+        $this->setAccessRules($hub, [
+            'uk_only' => true,
+            'enforcement_mode' => 'enforce',
+        ]);
+
+        config([
+            'security_firewall.enabled' => true,
+            'security_firewall.record_security_events' => false,
+            'security_firewall.geoip.http_enabled' => false,
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        $this->postJson('/api/client-admin/access-control/simulate', [
+            'ip' => '203.0.113.52',
+            'country' => 'GB',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.result', 'pass')
+            ->assertJsonPath('data.denied', false)
+            ->assertJsonPath('data.would_block', false);
+    }
+
+    public function test_simulate_includes_user_rules_and_uses_request_ip_when_blank(): void
+    {
+        $hub = $this->createHubWithSecurityMonitoring();
+        $admin = User::factory()->create(['role' => User::ROLE_FINPROMS_ADMIN]);
+        $target = User::factory()->create(['role' => User::ROLE_USER]);
+
+        $this->setAccessRules($hub, []);
+        \App\Models\UserAccessRestrictionSetting::query()->create([
+            'hub_id' => $hub->id,
+            'user_id' => $target->id,
+            'access_restrict_vpn_enabled' => true,
+            'access_enforcement_mode' => 'enforce',
+        ]);
+        app(AccessRestrictionService::class)->forgetUserSettingsCache((int) $hub->id, (int) $target->id);
+
+        config([
+            'security_firewall.enabled' => true,
+            'security_firewall.record_security_events' => false,
+            'security_firewall.geoip.http_enabled' => false,
+            'security_firewall.access_restriction_bypass_private_ips' => false,
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.93'])
+            ->postJson('/api/client-admin/access-control/simulate', [
+                'user_id' => $target->id,
+                'vpn' => true,
+                'country' => 'GB',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.result', 'block')
+            ->assertJsonPath('data.reason', 'restrict_vpn')
+            ->assertJsonPath('data.using_request_ip', true)
+            ->assertJsonPath('data.ip', '203.0.113.93')
+            ->assertJsonPath('data.user_rules_active', true)
+            ->assertJsonPath('data.user.id', $target->id);
+    }
 }
