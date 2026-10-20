@@ -217,6 +217,8 @@ class SecurityMonitoringService
                 $table->boolean('access_allow_ips_enabled')->default(false);
                 $table->json('access_restricted_ips')->nullable();
                 $table->json('access_allowed_ips')->nullable();
+                $table->boolean('access_restrict_vpn_enabled')->default(false);
+                $table->boolean('access_allow_vpn_enabled')->default(false);
                 $table->dateTime('last_dependency_scan_at')->nullable();
                 $table->string('last_dependency_scan_status', 40)->nullable();
                 $table->text('last_dependency_scan_summary')->nullable();
@@ -238,6 +240,8 @@ class SecurityMonitoringService
                 'access_allow_ips_enabled' => fn (Blueprint $t) => $t->boolean('access_allow_ips_enabled')->default(false),
                 'access_restricted_ips' => fn (Blueprint $t) => $t->json('access_restricted_ips')->nullable(),
                 'access_allowed_ips' => fn (Blueprint $t) => $t->json('access_allowed_ips')->nullable(),
+                'access_restrict_vpn_enabled' => fn (Blueprint $t) => $t->boolean('access_restrict_vpn_enabled')->default(false),
+                'access_allow_vpn_enabled' => fn (Blueprint $t) => $t->boolean('access_allow_vpn_enabled')->default(false),
             ];
 
             $missing = [];
@@ -325,6 +329,8 @@ class SecurityMonitoringService
         $allowCountriesEnabled = (bool) ($data['allow_countries_enabled'] ?? false);
         $restrictIpsEnabled = (bool) ($data['restrict_ips_enabled'] ?? false);
         $allowIpsEnabled = (bool) ($data['allow_ips_enabled'] ?? false);
+        $restrictVpnEnabled = (bool) ($data['restrict_vpn_enabled'] ?? false);
+        $allowVpnEnabled = (bool) ($data['allow_vpn_enabled'] ?? false);
 
         $cities = array_values(array_unique(array_filter(array_map(
             fn ($c) => $geoIp->normalizeCity($c),
@@ -394,6 +400,8 @@ class SecurityMonitoringService
             'access_allow_ips_enabled' => $allowIpsEnabled,
             'access_restricted_ips' => $restrictedIps,
             'access_allowed_ips' => $allowedIps,
+            'access_restrict_vpn_enabled' => $restrictVpnEnabled,
+            'access_allow_vpn_enabled' => $allowVpnEnabled,
         ];
         // Clear legacy single-mode column when present so it cannot conflict.
         if (\Illuminate\Support\Facades\Schema::hasColumn($settings->getTable(), 'access_restriction_mode')) {

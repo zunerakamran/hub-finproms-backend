@@ -58,11 +58,13 @@ return [
         'http_enabled' => env('GEOIP_HTTP_ENABLED', true),
         'http_url' => env(
             'GEOIP_HTTP_URL',
-            'http://ip-api.com/json/{ip}?fields=status,countryCode,city'
+            'http://ip-api.com/json/{ip}?fields=status,countryCode,city,proxy,hosting'
         ),
         'cache_minutes' => (int) env('GEOIP_CACHE_MINUTES', 1440),
         'timeout_seconds' => (int) env('GEOIP_TIMEOUT', 2),
-        // Map of IP => ['country' => 'GB', 'city' => 'London'] for tests / staging.
+        // When true, ip-api "hosting" (datacenter) exits count as VPN for Restrict/Allow VPN.
+        'treat_hosting_as_vpn' => env('GEOIP_TREAT_HOSTING_AS_VPN', true),
+        // Map of IP => ['country' => 'GB', 'city' => 'London', 'vpn' => true] for tests / staging.
         'test_overrides' => [],
     ],
 

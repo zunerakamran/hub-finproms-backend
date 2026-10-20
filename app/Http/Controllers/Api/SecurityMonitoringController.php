@@ -268,6 +268,8 @@ class SecurityMonitoringController extends Controller
             'allow_ips_enabled' => ['sometimes', 'boolean'],
             'allowed_ips' => ['sometimes', 'array', 'max:500'],
             'allowed_ips.*' => ['string', 'max:64'],
+            'restrict_vpn_enabled' => ['sometimes', 'boolean'],
+            'allow_vpn_enabled' => ['sometimes', 'boolean'],
         ]);
 
         $settings = $this->security->updateAccessSettings($hub, $user, $data, $request);

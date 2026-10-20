@@ -62,6 +62,8 @@ class AccessRestrictionTest extends TestCase
                 'access_restricted_ips' => $rules['restricted_ips'] ?? [],
                 'access_allow_ips_enabled' => (bool) ($rules['allow_ips_enabled'] ?? false),
                 'access_allowed_ips' => $rules['allowed_ips'] ?? [],
+                'access_restrict_vpn_enabled' => (bool) ($rules['restrict_vpn_enabled'] ?? false),
+                'access_allow_vpn_enabled' => (bool) ($rules['allow_vpn_enabled'] ?? false),
             ]
         );
 
@@ -99,6 +101,8 @@ class AccessRestrictionTest extends TestCase
                     'restricted_ips',
                     'allow_ips_enabled',
                     'allowed_ips',
+                    'restrict_vpn_enabled',
+                    'allow_vpn_enabled',
                 ],
                 'options' => ['rules', 'suggested_uk_cities'],
             ]);
@@ -111,6 +115,8 @@ class AccessRestrictionTest extends TestCase
             'restrict_countries_enabled' => false,
             'allow_countries_enabled' => false,
             'allow_ips_enabled' => false,
+            'restrict_vpn_enabled' => true,
+            'allow_vpn_enabled' => false,
             'uk_cities' => [],
             'restricted_countries' => [],
             'allowed_countries' => [],
@@ -119,7 +125,9 @@ class AccessRestrictionTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.uk_only', true)
             ->assertJsonPath('data.restrict_ips_enabled', true)
-            ->assertJsonPath('data.restricted_ips', ['203.0.113.10']);
+            ->assertJsonPath('data.restricted_ips', ['203.0.113.10'])
+            ->assertJsonPath('data.restrict_vpn_enabled', true)
+            ->assertJsonPath('data.allow_vpn_enabled', false);
     }
 
     public function test_uk_only_blocks_non_uk_country(): void
@@ -560,5 +568,139 @@ class AccessRestrictionTest extends TestCase
             'uk_cities_enabled' => true,
             'uk_cities' => [],
         ])->assertStatus(422);
+    }
+
+    public function test_restrict_vpn_blocks_detected_vpn(): void
+    {
+        $hub = $this->createHubWithSecurityMonitoring();
+        $this->setAccessRules($hub, [
+            'restrict_vpn_enabled' => true,
+        ]);
+
+        config([
+            'security_firewall.enabled' => true,
+            'security_firewall.record_security_events' => false,
+            'security_firewall.geoip.http_enabled' => false,
+            'security_firewall.geoip.test_overrides' => [
+                '203.0.113.40' => ['country' => 'GB', 'vpn' => true],
+                '203.0.113.41' => ['country' => 'GB', 'vpn' => false],
+            ],
+        ]);
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.40'])
+            ->getJson('/api/hub')
+            ->assertForbidden();
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.41'])
+            ->getJson('/api/hub')
+            ->assertOk();
+    }
+
+    public function test_allow_ip_overrides_restrict_vpn(): void
+    {
+        $hub = $this->createHubWithSecurityMonitoring();
+        $this->setAccessRules($hub, [
+            'restrict_vpn_enabled' => true,
+            'allow_ips_enabled' => true,
+            'allowed_ips' => ['203.0.113.50'],
+        ]);
+
+        config([
+            'security_firewall.enabled' => true,
+            'security_firewall.record_security_events' => false,
+            'security_firewall.geoip.http_enabled' => false,
+            'security_firewall.geoip.test_overrides' => [
+                '203.0.113.50' => ['country' => 'US', 'vpn' => true],
+                '203.0.113.51' => ['country' => 'US', 'vpn' => true],
+            ],
+        ]);
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.50'])
+            ->getJson('/api/hub')
+            ->assertOk();
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.51'])
+            ->getJson('/api/hub')
+            ->assertForbidden();
+    }
+
+    public function test_allow_vpn_overrides_uk_only(): void
+    {
+        $hub = $this->createHubWithSecurityMonitoring();
+        $this->setAccessRules($hub, [
+            'uk_only' => true,
+            'allow_vpn_enabled' => true,
+        ]);
+
+        config([
+            'security_firewall.enabled' => true,
+            'security_firewall.record_security_events' => false,
+            'security_firewall.geoip.http_enabled' => false,
+            'security_firewall.geoip.test_overrides' => [
+                '203.0.113.60' => ['country' => 'US', 'vpn' => true],
+                '203.0.113.61' => ['country' => 'US', 'vpn' => false],
+                '203.0.113.62' => ['country' => 'GB', 'vpn' => false],
+            ],
+        ]);
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.60'])
+            ->getJson('/api/hub')
+            ->assertOk();
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.61'])
+            ->getJson('/api/hub')
+            ->assertForbidden();
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.62'])
+            ->getJson('/api/hub')
+            ->assertOk();
+    }
+
+    public function test_allow_vpn_alone_requires_vpn(): void
+    {
+        $hub = $this->createHubWithSecurityMonitoring();
+        $this->setAccessRules($hub, [
+            'allow_vpn_enabled' => true,
+        ]);
+
+        config([
+            'security_firewall.enabled' => true,
+            'security_firewall.record_security_events' => false,
+            'security_firewall.geoip.http_enabled' => false,
+            'security_firewall.geoip.test_overrides' => [
+                '203.0.113.70' => ['country' => 'GB', 'vpn' => true],
+                '203.0.113.71' => ['country' => 'GB', 'vpn' => false],
+            ],
+        ]);
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.70'])
+            ->getJson('/api/hub')
+            ->assertOk();
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.71'])
+            ->getJson('/api/hub')
+            ->assertForbidden();
+    }
+
+    public function test_restrict_vpn_beats_allow_vpn(): void
+    {
+        $hub = $this->createHubWithSecurityMonitoring();
+        $this->setAccessRules($hub, [
+            'restrict_vpn_enabled' => true,
+            'allow_vpn_enabled' => true,
+        ]);
+
+        config([
+            'security_firewall.enabled' => true,
+            'security_firewall.record_security_events' => false,
+            'security_firewall.geoip.http_enabled' => false,
+            'security_firewall.geoip.test_overrides' => [
+                '203.0.113.80' => ['country' => 'GB', 'vpn' => true],
+            ],
+        ]);
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.80'])
+            ->getJson('/api/hub')
+            ->assertForbidden();
     }
 }

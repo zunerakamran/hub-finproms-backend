@@ -1572,7 +1572,7 @@ class Hub extends Model
         ],
         'secmon_manage_access' => [
             'label' => 'Manage application access restrictions',
-            'description' => 'Configure where the application can be accessed from: UK only, specific UK cities, allow/restrict countries, or allow/restrict IPs.',
+            'description' => 'Configure where the application can be accessed from: UK only, specific UK cities, allow/restrict countries, allow/restrict IPs, or allow/restrict VPN.',
             'group' => self::GROUP_SECURITY_MONITORING,
             'default_shared' => true,
             'default_white_label' => true,

@@ -30,6 +30,8 @@ class SecurityMonitoringSetting extends Model
         'access_allow_ips_enabled',
         'access_restricted_ips',
         'access_allowed_ips',
+        'access_restrict_vpn_enabled',
+        'access_allow_vpn_enabled',
         // Legacy columns kept for migration compatibility.
         'access_restriction_mode',
         'access_restriction_countries',
@@ -57,6 +59,8 @@ class SecurityMonitoringSetting extends Model
             'access_allow_ips_enabled' => 'boolean',
             'access_restricted_ips' => 'array',
             'access_allowed_ips' => 'array',
+            'access_restrict_vpn_enabled' => 'boolean',
+            'access_allow_vpn_enabled' => 'boolean',
             'access_restriction_countries' => 'array',
             'access_restriction_ips' => 'array',
             'last_dependency_scan_at' => 'datetime',
@@ -107,6 +111,8 @@ class SecurityMonitoringSetting extends Model
             'restricted_ips' => array_values($this->access_restricted_ips ?? []),
             'allow_ips_enabled' => (bool) ($this->access_allow_ips_enabled ?? false),
             'allowed_ips' => array_values($this->access_allowed_ips ?? []),
+            'restrict_vpn_enabled' => (bool) ($this->access_restrict_vpn_enabled ?? false),
+            'allow_vpn_enabled' => (bool) ($this->access_allow_vpn_enabled ?? false),
             'updated_at' => optional($this->updated_at)?->toIso8601String(),
         ];
     }
