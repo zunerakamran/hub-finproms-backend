@@ -10,8 +10,10 @@ use Illuminate\Support\Facades\Log;
 /**
  * Resolve country / city / VPN signals for a client IP.
  *
- * Prefer CDN / proxy headers (Cloudflare), then optional HTTP lookup (ip-api),
- * then config test overrides. Results are cached to keep middleware cheap.
+ * Prefer CDN / proxy headers (Cloudflare) only when the request is from a
+ * trusted reverse proxy (or Simulate opts in), then optional HTTP lookup
+ * (ip-api), then config test overrides. Results are cached to keep middleware
+ * cheap.
  *
  * VPN detection uses ip-api `proxy` (and optionally `hosting`) fields, or the
  * trusted edge header X-App-Geo-Vpn. Detection is best-effort — not all VPNs
@@ -19,6 +21,9 @@ use Illuminate\Support\Facades\Log;
  */
 class GeoIpLookupService
 {
+    /** Request attribute: Simulate / admin tools may force-trust geo headers. */
+    public const ATTR_FORCE_TRUST_HEADERS = 'geoip.force_trust_headers';
+
     /**
      * @return array{country: ?string, city: ?string, vpn: ?bool, source: string}
      */
@@ -98,13 +103,24 @@ class GeoIpLookupService
             return ['country' => null, 'city' => null, 'vpn' => null, 'source' => 'none'];
         }
 
+        if (! (bool) config('security_firewall.geoip.trust_headers', true)) {
+            return ['country' => null, 'city' => null, 'vpn' => null, 'source' => 'none'];
+        }
+
+        if (! $this->shouldTrustGeoHeaders($request)) {
+            return ['country' => null, 'city' => null, 'vpn' => null, 'source' => 'untrusted'];
+        }
+
         $country = $request->headers->get('CF-IPCountry')
-            ?: $request->headers->get('X-App-Geo-Country')
-            ?: $request->headers->get('X-Country-Code');
+            ?: $request->headers->get('X-App-Geo-Country');
 
         $city = $request->headers->get('CF-IPCity')
-            ?: $request->headers->get('X-App-Geo-City')
-            ?: $request->headers->get('X-City');
+            ?: $request->headers->get('X-App-Geo-City');
+
+        if ((bool) config('security_firewall.geoip.trust_generic_geo_headers', false)) {
+            $country = $country ?: $request->headers->get('X-Country-Code');
+            $city = $city ?: $request->headers->get('X-City');
+        }
 
         $vpnHeader = $request->headers->get('X-App-Geo-Vpn');
 
@@ -127,6 +143,28 @@ class GeoIpLookupService
             'vpn' => $vpn,
             'source' => 'headers',
         ];
+    }
+
+    /**
+     * Geo headers are only safe when set by a trusted edge (or Simulate).
+     */
+    public function shouldTrustGeoHeaders(Request $request): bool
+    {
+        if ($request->attributes->get(self::ATTR_FORCE_TRUST_HEADERS)) {
+            return true;
+        }
+
+        if (! (bool) config('security_firewall.geoip.require_trusted_proxy_for_headers', true)) {
+            return true;
+        }
+
+        // Laravel marks the request when REMOTE_ADDR matched trustProxies().
+        if ($request->isFromTrustedProxy()) {
+            return true;
+        }
+
+        // No trusted proxies configured: never treat client-supplied geo as truth.
+        return false;
     }
 
     /**

@@ -153,6 +153,8 @@ class AccessRestrictionService
     {
         $ip = trim($ip);
         $synthetic = Request::create('/', 'GET', server: ['REMOTE_ADDR' => $ip !== '' ? $ip : '127.0.0.1']);
+        // Simulate injects geo overrides as headers; mark them trusted for this dry-run only.
+        $synthetic->attributes->set(GeoIpLookupService::ATTR_FORCE_TRUST_HEADERS, true);
 
         $country = isset($geoOverrides['country'])
             ? $this->geoIp->normalizeCountry($geoOverrides['country'])

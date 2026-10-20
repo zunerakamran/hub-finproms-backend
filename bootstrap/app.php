@@ -3,6 +3,7 @@
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Request;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -14,6 +15,24 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         // First-party SPA cookie sessions (Sanctum stateful) + CSRF for FRONTEND_URL.
         $middleware->statefulApi();
+
+        // Only honour X-Forwarded-* (client IP / scheme) from configured edge proxies.
+        // Empty TRUSTED_PROXIES = ignore forwarding headers (safe for direct origin access).
+        $trustedProxies = array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('TRUSTED_PROXIES', ''))
+        )));
+        if ($trustedProxies !== []) {
+            $at = in_array('*', $trustedProxies, true) ? '*' : $trustedProxies;
+            $middleware->trustProxies(
+                at: $at,
+                headers: Request::HEADER_X_FORWARDED_FOR
+                    | Request::HEADER_X_FORWARDED_HOST
+                    | Request::HEADER_X_FORWARDED_PORT
+                    | Request::HEADER_X_FORWARDED_PROTO
+                    | Request::HEADER_X_FORWARDED_AWS_ELB
+            );
+        }
 
         $middleware->alias([
             'client_admin' => \App\Http\Middleware\EnsureUserIsClientAdmin::class,

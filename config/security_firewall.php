@@ -58,6 +58,24 @@ return [
     // rules (logged as would_block instead) so admins can recover from self-lockout.
     'access_restriction_admin_escape' => env('ACCESS_RESTRICTION_ADMIN_ESCAPE', true),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Trusted reverse proxies (client IP)
+    |--------------------------------------------------------------------------
+    |
+    | Comma-separated proxy IPs / CIDRs that may set X-Forwarded-* (and related)
+    | headers. Empty = do not trust forwarding headers (safe default when the
+    | app is reached directly). Use "*" only when the origin is locked down so
+    | clients cannot hit Laravel without going through the edge (e.g. Cloudflare
+    | + firewall). See TRUSTED_PROXIES in .env.example.
+    |
+    */
+
+    'trusted_proxies' => array_values(array_filter(array_map(
+        'trim',
+        explode(',', (string) env('TRUSTED_PROXIES', ''))
+    ))),
+
     'geoip' => [
         'http_enabled' => env('GEOIP_HTTP_ENABLED', true),
         'http_url' => env(
@@ -68,6 +86,20 @@ return [
         'timeout_seconds' => (int) env('GEOIP_TIMEOUT', 2),
         // When true, ip-api "hosting" (datacenter) exits count as VPN for Restrict/Allow VPN.
         'treat_hosting_as_vpn' => env('GEOIP_TREAT_HOSTING_AS_VPN', true),
+        // Accept Cloudflare / edge geo headers (CF-IPCountry, X-App-Geo-*).
+        'trust_headers' => env('GEOIP_TRUST_HEADERS', true),
+        // When true, ignore geo headers unless the request is from a trusted proxy
+        // (or the request opts in via attribute for Simulate). Prevents clients from
+        // forging CF-IPCountry / X-App-Geo-* on a direct origin hit.
+        // Defaults off in local/testing so feature tests and local SPA keep working
+        // without a real edge; enable in production behind Cloudflare / LB.
+        'require_trusted_proxy_for_headers' => env(
+            'GEOIP_REQUIRE_TRUSTED_PROXY_FOR_HEADERS',
+            ! in_array((string) env('APP_ENV', 'production'), ['local', 'testing'], true)
+        ),
+        // Also accept weak generic headers (X-Country-Code / X-City). Off by default —
+        // too easy to forge; prefer CF-* or X-App-Geo-* from your edge.
+        'trust_generic_geo_headers' => env('GEOIP_TRUST_GENERIC_HEADERS', false),
         // Map of IP => ['country' => 'GB', 'city' => 'London', 'vpn' => true] for tests / staging.
         'test_overrides' => [],
     ],
