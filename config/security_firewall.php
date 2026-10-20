@@ -54,6 +54,10 @@ return [
     // (env deny-list still applies). Disable only if you must gate private networks.
     'access_restriction_bypass_private_ips' => env('ACCESS_RESTRICTION_BYPASS_PRIVATE_IPS', true),
 
+    // When true, users with secmon_manage_access are never hard-403'd by geo/IP/VPN
+    // rules (logged as would_block instead) so admins can recover from self-lockout.
+    'access_restriction_admin_escape' => env('ACCESS_RESTRICTION_ADMIN_ESCAPE', true),
+
     'geoip' => [
         'http_enabled' => env('GEOIP_HTTP_ENABLED', true),
         'http_url' => env(

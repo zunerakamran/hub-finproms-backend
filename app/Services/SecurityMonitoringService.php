@@ -317,6 +317,8 @@ class SecurityMonitoringService
 
     public const ACCESS_POLICY_CHANGED_EVENT = 'fw.access_policy_changed';
 
+    public const ACCESS_EMERGENCY_UNLOCK_EVENT = 'fw.access_emergency_unlock';
+
     /**
      * @param  array<string, mixed>  $data
      */
@@ -455,6 +457,219 @@ class SecurityMonitoringService
         }
 
         return $query->paginate(max(1, min(100, (int) ($filters['per_page'] ?? 25))));
+    }
+
+    /**
+     * Preview whether proposed settings would block the actor's current IP.
+     *
+     * @param  array<string, mixed>  $proposedApi
+     * @return array<string, mixed>
+     */
+    public function previewSelfLockout(
+        Hub $hub,
+        User $actor,
+        array $proposedApi,
+        string $scope,
+        ?User $target,
+        Request $request
+    ): array {
+        $this->assertModuleEnabled($hub);
+        $this->assertCan($hub, $actor, 'secmon_manage_access');
+
+        $access = app(AccessRestrictionService::class);
+        $proposed = $access->settingsFromApiArray($this->accessPolicySnapshot($proposedApi));
+
+        if ($scope === 'user') {
+            $hubSettings = $access->normalizeFromModel($this->settingsFor($hub));
+            $merged = $access->mergeSettings($hubSettings, $proposed);
+        } else {
+            $userSettings = null;
+            if ($actor) {
+                $row = $this->userAccessSettingsFor($hub, $actor);
+                if ($row->exists) {
+                    $userSettings = $access->normalizeFromUserModel($row);
+                }
+            }
+            $merged = $access->mergeSettings($proposed, $userSettings);
+        }
+
+        $ip = (string) $request->ip();
+        $decision = $access->decideWithSettings($merged, $ip, $request);
+        $result = 'pass';
+        if (! empty($decision['denied'])) {
+            $result = 'block';
+        } elseif (! empty($decision['would_block'])) {
+            $result = 'would_block';
+        }
+
+        return [
+            'result' => $result,
+            'denied' => (bool) ($decision['denied'] ?? false),
+            'would_block' => (bool) ($decision['would_block'] ?? false),
+            'reason' => (string) ($decision['reason'] ?? 'allowed'),
+            'reason_label' => AccessRestrictionService::reasonLabel((string) ($decision['reason'] ?? 'allowed')),
+            'mode' => (string) ($decision['mode'] ?? 'enforce'),
+            'ip' => $ip,
+            'country' => $decision['country'] ?? null,
+            'city' => $decision['city'] ?? null,
+            'vpn' => $decision['vpn'] ?? null,
+            'scope' => $scope,
+            'target_user_id' => $target?->id,
+        ];
+    }
+
+    /**
+     * Restore hub/user access rules from a history event snapshot (before|after).
+     *
+     * @return SecurityMonitoringSetting|\App\Models\UserAccessRestrictionSetting
+     */
+    public function restoreAccessPolicyChange(
+        Hub $hub,
+        User $actor,
+        SecurityEvent $event,
+        string $snapshot = 'before',
+        ?Request $request = null
+    ): SecurityMonitoringSetting|\App\Models\UserAccessRestrictionSetting {
+        $this->ensureSchema();
+        $this->assertModuleEnabled($hub);
+        $this->assertCan($hub, $actor, 'secmon_manage_access');
+        $this->assertEventOnHub($hub, $event);
+
+        if ($event->event_type !== self::ACCESS_POLICY_CHANGED_EVENT) {
+            abort(422, 'Only access policy change events can be restored.');
+        }
+
+        $props = (array) ($event->properties ?? []);
+        $which = strtolower(trim($snapshot)) === 'after' ? 'after' : 'before';
+        $data = (array) ($props[$which] ?? []);
+        if ($data === []) {
+            abort(422, 'This history entry has no '.$which.' snapshot to restore.');
+        }
+
+        $scope = (string) ($props['scope'] ?? 'hub');
+        if ($scope === 'user') {
+            $targetId = (int) ($props['target_user_id'] ?? 0);
+            $target = User::query()->findOrFail($targetId);
+
+            return $this->updateUserAccessSettings($hub, $actor, $target, $data, $request);
+        }
+
+        return $this->updateAccessSettings($hub, $actor, $data, $request);
+    }
+
+    /**
+     * Emergency unlock: disable blocking gates (or switch to monitor) for a hub.
+     *
+     * @return array{hub_updated: bool, user_rows: int, keep_rules: bool}
+     */
+    public function emergencyUnlockAccess(
+        Hub $hub,
+        User $actor,
+        ?Request $request = null,
+        bool $keepRules = false
+    ): array {
+        $this->ensureSchema();
+        $this->assertModuleEnabled($hub);
+        $this->assertCan($hub, $actor, 'secmon_manage_access');
+
+        $settings = $this->settingsFor($hub);
+        $before = $this->accessPolicySnapshot($settings->toAccessRestrictionApiArray());
+
+        $payload = [];
+        if (\Illuminate\Support\Facades\Schema::hasColumn($settings->getTable(), 'access_enforcement_mode')) {
+            $payload['access_enforcement_mode'] = 'monitor';
+        }
+        if (! $keepRules) {
+            $payload = array_merge($payload, [
+                'access_uk_only' => false,
+                'access_uk_cities_enabled' => false,
+                'access_restrict_countries_enabled' => false,
+                'access_allow_countries_enabled' => false,
+                'access_restrict_ips_enabled' => false,
+                'access_allow_ips_enabled' => false,
+                'access_restrict_vpn_enabled' => false,
+                'access_allow_vpn_enabled' => false,
+            ]);
+        }
+        if (\Illuminate\Support\Facades\Schema::hasColumn($settings->getTable(), 'access_restriction_mode')) {
+            $payload['access_restriction_mode'] = 'off';
+        }
+
+        $settings->fill($payload);
+        $settings->save();
+        app(AccessRestrictionService::class)->forgetSettingsCache((int) $hub->id);
+
+        $userRows = 0;
+        if (! $keepRules && \Illuminate\Support\Facades\Schema::hasTable('user_access_restriction_settings')) {
+            $userQuery = \App\Models\UserAccessRestrictionSetting::query()->where('hub_id', $hub->id);
+            $ids = $userQuery->pluck('user_id');
+            $userPayload = [
+                'access_uk_only' => false,
+                'access_uk_cities_enabled' => false,
+                'access_restrict_countries_enabled' => false,
+                'access_allow_countries_enabled' => false,
+                'access_restrict_ips_enabled' => false,
+                'access_allow_ips_enabled' => false,
+                'access_restrict_vpn_enabled' => false,
+                'access_allow_vpn_enabled' => false,
+            ];
+            if (\Illuminate\Support\Facades\Schema::hasColumn('user_access_restriction_settings', 'access_enforcement_mode')) {
+                $userPayload['access_enforcement_mode'] = 'monitor';
+            }
+            $userRows = \App\Models\UserAccessRestrictionSetting::query()
+                ->where('hub_id', $hub->id)
+                ->update($userPayload);
+            foreach ($ids as $userId) {
+                app(AccessRestrictionService::class)->forgetUserSettingsCache((int) $hub->id, (int) $userId);
+            }
+        } elseif ($keepRules && \Illuminate\Support\Facades\Schema::hasTable('user_access_restriction_settings')
+            && \Illuminate\Support\Facades\Schema::hasColumn('user_access_restriction_settings', 'access_enforcement_mode')) {
+            $userRows = \App\Models\UserAccessRestrictionSetting::query()
+                ->where('hub_id', $hub->id)
+                ->update(['access_enforcement_mode' => 'monitor']);
+        }
+
+        $after = $this->accessPolicySnapshot($settings->fresh()->toAccessRestrictionApiArray());
+        $this->recordAccessPolicyChange(
+            $hub,
+            $actor,
+            $request,
+            scope: 'hub',
+            before: $before,
+            after: $after,
+            target: null
+        );
+
+        try {
+            $this->recordEvent($hub, [
+                'category' => SecurityEvent::CATEGORY_AUTHORIZATION,
+                'event_type' => self::ACCESS_EMERGENCY_UNLOCK_EVENT,
+                'severity' => SecurityEvent::SEVERITY_MEDIUM,
+                'title' => 'Emergency access unlock',
+                'description' => sprintf(
+                    '%s used emergency unlock (%s) for hub #%s.',
+                    $actor->email ?? 'admin',
+                    $keepRules ? 'monitor only' : 'clear blocking gates',
+                    $hub->id
+                ),
+                'actor' => $actor,
+                'request' => $request,
+                'status' => SecurityEvent::STATUS_CLOSED,
+                'properties' => [
+                    'keep_rules' => $keepRules,
+                    'user_rows_updated' => $userRows,
+                ],
+            ]);
+        } catch (\Throwable) {
+            //
+        }
+
+        return [
+            'hub_updated' => true,
+            'user_rows' => $userRows,
+            'keep_rules' => $keepRules,
+            'settings' => $settings->fresh()->toAccessRestrictionApiArray(),
+        ];
     }
 
     /**
@@ -625,6 +840,16 @@ class SecurityMonitoringService
         return \App\Models\UserAccessRestrictionSetting::query()->firstOrNew(
             ['hub_id' => $hub->id, 'user_id' => $target->id]
         );
+    }
+
+    /**
+     * Validate access-control API input (throws ValidationException on bad rules).
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function validateAccessSettingsInput(array $data): void
+    {
+        $this->validatedAccessPayload($data);
     }
 
     /**

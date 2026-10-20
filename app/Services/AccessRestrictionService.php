@@ -278,6 +278,20 @@ class AccessRestrictionService
             ];
         }
 
+        // Access managers: never hard-lock themselves out (still logged as would_block).
+        if ($user && $this->userCanManageAccess($hub, $user)) {
+            return [
+                'denied' => false,
+                'would_block' => true,
+                'reason' => $decision['reason'] ?? 'access_restriction',
+                'mode' => 'enforce',
+                'admin_escape' => true,
+                'country' => $decision['country'] ?? null,
+                'city' => $decision['city'] ?? null,
+                'vpn' => $decision['vpn'] ?? null,
+            ];
+        }
+
         return [
             'denied' => true,
             'would_block' => false,
@@ -287,6 +301,79 @@ class AccessRestrictionService
             'city' => $decision['city'] ?? null,
             'vpn' => $decision['vpn'] ?? null,
         ];
+    }
+
+    /**
+     * Evaluate an explicit settings array (for save preview / proposed rules).
+     *
+     * @param  array<string, mixed>  $settings
+     * @return array{denied: bool, would_block: bool, reason: string, mode: string, country: ?string, city: ?string, vpn: ?bool}
+     */
+    public function decideWithSettings(array $settings, string $ip, ?Request $request = null): array
+    {
+        $pass = [
+            'denied' => false,
+            'would_block' => false,
+            'reason' => 'allowed',
+            'mode' => 'enforce',
+            'country' => null,
+            'city' => null,
+            'vpn' => null,
+        ];
+
+        $mode = SecurityMonitoringSetting::normalizedEnforcementMode(
+            $settings['enforcement_mode'] ?? 'enforce'
+        );
+
+        if (! $this->anyRuleEnabled($settings)) {
+            return array_merge($pass, ['mode' => $mode]);
+        }
+
+        $decision = $this->evaluate($settings, $ip, $request);
+        if (! ($decision['denied'] ?? false)) {
+            return array_merge($pass, [
+                'mode' => $mode,
+                'reason' => $decision['reason'] ?? 'allowed',
+                'country' => $decision['country'] ?? null,
+                'city' => $decision['city'] ?? null,
+                'vpn' => $decision['vpn'] ?? null,
+            ]);
+        }
+
+        if ($mode === 'monitor') {
+            return [
+                'denied' => false,
+                'would_block' => true,
+                'reason' => $decision['reason'] ?? 'access_restriction',
+                'mode' => 'monitor',
+                'country' => $decision['country'] ?? null,
+                'city' => $decision['city'] ?? null,
+                'vpn' => $decision['vpn'] ?? null,
+            ];
+        }
+
+        return [
+            'denied' => true,
+            'would_block' => false,
+            'reason' => $decision['reason'] ?? 'access_restriction',
+            'mode' => 'enforce',
+            'country' => $decision['country'] ?? null,
+            'city' => $decision['city'] ?? null,
+            'vpn' => $decision['vpn'] ?? null,
+        ];
+    }
+
+    private function userCanManageAccess(Hub $hub, User $user): bool
+    {
+        if (! (bool) config('security_firewall.access_restriction_admin_escape', true)) {
+            return false;
+        }
+
+        try {
+            return app(CapabilitiesMatrixService::class)->userCan($hub, $user, 'secmon_manage_access');
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     /**
@@ -353,6 +440,27 @@ class AccessRestrictionService
             'module_disabled' => 'Security Monitoring not enabled',
             default => $reason,
         };
+    }
+
+    /**
+     * Normalize API / history snapshot fields into an evaluate()-ready settings array.
+     *
+     * @param  array<string, mixed>  $api
+     * @return array<string, mixed>
+     */
+    public function settingsFromApiArray(array $api): array
+    {
+        $base = $this->emptySettings();
+        foreach (array_keys($base) as $key) {
+            if (array_key_exists($key, $api)) {
+                $base[$key] = $api[$key];
+            }
+        }
+        $base['enforcement_mode'] = SecurityMonitoringSetting::normalizedEnforcementMode(
+            $base['enforcement_mode'] ?? 'enforce'
+        );
+
+        return $base;
     }
 
     /**

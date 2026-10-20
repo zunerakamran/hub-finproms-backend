@@ -124,6 +124,7 @@ class AccessRestrictionTest extends TestCase
             'restricted_countries' => [],
             'allowed_countries' => [],
             'allowed_ips' => [],
+            'acknowledge_self_lockout' => true,
         ])
             ->assertOk()
             ->assertJsonPath('data.uk_only', true)
@@ -1041,5 +1042,137 @@ class AccessRestrictionTest extends TestCase
         $this->getJson('/api/client-admin/access-control/changes')
             ->assertOk()
             ->assertJsonPath('meta.total', 0);
+    }
+
+    public function test_save_that_would_block_actor_requires_acknowledgement(): void
+    {
+        $this->createHubWithSecurityMonitoring();
+        $admin = User::factory()->create(['role' => User::ROLE_FINPROMS_ADMIN]);
+        Sanctum::actingAs($admin);
+
+        config([
+            'security_firewall.enabled' => true,
+            'security_firewall.record_security_events' => false,
+            'security_firewall.geoip.http_enabled' => false,
+            'security_firewall.access_restriction_bypass_private_ips' => false,
+            'security_firewall.access_restriction_admin_escape' => true,
+        ]);
+
+        $payload = [
+            'uk_only' => true,
+            'uk_cities_enabled' => false,
+            'restrict_countries_enabled' => false,
+            'allow_countries_enabled' => false,
+            'restrict_ips_enabled' => false,
+            'allow_ips_enabled' => false,
+            'restrict_vpn_enabled' => false,
+            'allow_vpn_enabled' => false,
+            'enforcement_mode' => 'enforce',
+            'uk_cities' => [],
+            'restricted_countries' => [],
+            'allowed_countries' => [],
+            'restricted_ips' => [],
+            'allowed_ips' => [],
+        ];
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.60'])
+            ->withHeaders(['CF-IPCountry' => 'US'])
+            ->putJson('/api/client-admin/access-control/hub-settings', $payload)
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'self_lockout_risk')
+            ->assertJsonPath('preview.result', 'block');
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.60'])
+            ->withHeaders(['CF-IPCountry' => 'US'])
+            ->putJson('/api/client-admin/access-control/hub-settings', [
+                ...$payload,
+                'acknowledge_self_lockout' => true,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.uk_only', true);
+    }
+
+    public function test_restore_previous_snapshot_from_history(): void
+    {
+        $this->createHubWithSecurityMonitoring();
+        $admin = User::factory()->create(['role' => User::ROLE_FINPROMS_ADMIN]);
+        Sanctum::actingAs($admin);
+
+        $this->putJson('/api/client-admin/access-control/hub-settings', [
+            'uk_only' => true,
+            'uk_cities_enabled' => false,
+            'restrict_countries_enabled' => false,
+            'allow_countries_enabled' => false,
+            'restrict_ips_enabled' => false,
+            'allow_ips_enabled' => false,
+            'restrict_vpn_enabled' => false,
+            'allow_vpn_enabled' => false,
+            'enforcement_mode' => 'monitor',
+            'uk_cities' => [],
+            'restricted_countries' => [],
+            'allowed_countries' => [],
+            'restricted_ips' => [],
+            'allowed_ips' => [],
+            'acknowledge_self_lockout' => true,
+        ])->assertOk();
+
+        $changeId = $this->getJson('/api/client-admin/access-control/changes')
+            ->assertOk()
+            ->json('data.0.id');
+
+        $this->assertNotNull($changeId);
+
+        $this->postJson("/api/client-admin/access-control/changes/{$changeId}/restore", [
+            'snapshot' => 'before',
+        ])
+            ->assertOk()
+            ->assertJsonPath('scope', 'hub')
+            ->assertJsonPath('data.uk_only', false)
+            ->assertJsonPath('data.enforcement_mode', 'enforce');
+    }
+
+    public function test_emergency_unlock_clears_blocking_gates(): void
+    {
+        $hub = $this->createHubWithSecurityMonitoring();
+        $admin = User::factory()->create(['role' => User::ROLE_FINPROMS_ADMIN]);
+        $this->setAccessRules($hub, [
+            'uk_only' => true,
+            'restrict_vpn_enabled' => true,
+            'enforcement_mode' => 'enforce',
+        ]);
+        Sanctum::actingAs($admin);
+
+        $this->postJson('/api/client-admin/access-control/emergency-unlock', [
+            'keep_rules' => false,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.uk_only', false)
+            ->assertJsonPath('data.restrict_vpn_enabled', false)
+            ->assertJsonPath('data.enforcement_mode', 'monitor');
+    }
+
+    public function test_access_manager_is_not_hard_blocked_by_enforce_rules(): void
+    {
+        $hub = $this->createHubWithSecurityMonitoring();
+        $admin = User::factory()->create(['role' => User::ROLE_FINPROMS_ADMIN]);
+        $this->setAccessRules($hub, [
+            'uk_only' => true,
+            'enforcement_mode' => 'enforce',
+        ]);
+
+        config([
+            'security_firewall.enabled' => true,
+            'security_firewall.record_security_events' => false,
+            'security_firewall.geoip.http_enabled' => false,
+            'security_firewall.access_restriction_bypass_private_ips' => false,
+            'security_firewall.access_restriction_admin_escape' => true,
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.70'])
+            ->withHeaders(['CF-IPCountry' => 'US'])
+            ->getJson('/api/hub')
+            ->assertOk();
     }
 }

@@ -263,7 +263,32 @@ class SecurityMonitoringController extends Controller
             'restrict_vpn_enabled' => ['sometimes', 'boolean'],
             'allow_vpn_enabled' => ['sometimes', 'boolean'],
             'enforcement_mode' => ['sometimes', 'string', Rule::in(['monitor', 'enforce'])],
+            'acknowledge_self_lockout' => ['sometimes', 'boolean'],
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array{0: array<string, mixed>, 1: bool}
+     */
+    private function splitAccessSettingsPayload(array $data): array
+    {
+        $acknowledge = (bool) ($data['acknowledge_self_lockout'] ?? false);
+        unset($data['acknowledge_self_lockout']);
+
+        return [$data, $acknowledge];
+    }
+
+    /**
+     * @param  array<string, mixed>  $preview
+     */
+    private function selfLockoutConflictResponse(array $preview): JsonResponse
+    {
+        return response()->json([
+            'message' => 'These rules would block your current IP in Enforce mode. Confirm to save anyway, or switch to Monitor / adjust rules.',
+            'code' => 'self_lockout_risk',
+            'preview' => $preview,
+        ], 409);
     }
 
     public function accessSettings(Request $request): JsonResponse
@@ -288,11 +313,32 @@ class SecurityMonitoringController extends Controller
         $user = $request->user();
         $hub = $this->accessHub($user);
 
-        $data = $request->validate($this->accessSettingsValidationRules());
+        [$data, $acknowledge] = $this->splitAccessSettingsPayload(
+            $request->validate($this->accessSettingsValidationRules())
+        );
+        $this->security->validateAccessSettingsInput($data);
+
+        $preview = $this->security->previewSelfLockout($hub, $user, $data, 'hub', null, $request);
+        $currentPreview = $this->security->previewSelfLockout(
+            $hub,
+            $user,
+            $this->security->settingsFor($hub)->toAccessRestrictionApiArray(),
+            'hub',
+            null,
+            $request
+        );
+        if (($preview['result'] ?? '') === 'block'
+            && ($currentPreview['result'] ?? '') !== 'block'
+            && ! $acknowledge
+        ) {
+            return $this->selfLockoutConflictResponse($preview);
+        }
+
         $settings = $this->security->updateAccessSettings($hub, $user, $data, $request);
 
         return response()->json([
             'data' => $settings->toAccessRestrictionApiArray(),
+            'self_lockout_preview' => $preview,
         ]);
     }
 
@@ -372,7 +418,31 @@ class SecurityMonitoringController extends Controller
         $hub = $this->accessHub($actor);
         $target = User::query()->findOrFail($userId);
 
-        $data = $request->validate($this->accessSettingsValidationRules());
+        [$data, $acknowledge] = $this->splitAccessSettingsPayload(
+            $request->validate($this->accessSettingsValidationRules())
+        );
+        $this->security->validateAccessSettingsInput($data);
+
+        $preview = $this->security->previewSelfLockout($hub, $actor, $data, 'user', $target, $request);
+        $existing = $this->security->userAccessSettingsFor($hub, $target);
+        $currentPreview = $this->security->previewSelfLockout(
+            $hub,
+            $actor,
+            $existing->exists
+                ? $existing->toAccessRestrictionApiArray()
+                : app(AccessRestrictionService::class)->emptySettings(),
+            'user',
+            $target,
+            $request
+        );
+        if (($preview['result'] ?? '') === 'block'
+            && ($currentPreview['result'] ?? '') !== 'block'
+            && ! $acknowledge
+            && (int) $actor->id === (int) $target->id
+        ) {
+            return $this->selfLockoutConflictResponse($preview);
+        }
+
         $settings = $this->security->updateUserAccessSettings($hub, $actor, $target, $data, $request);
 
         return response()->json([
@@ -383,6 +453,74 @@ class SecurityMonitoringController extends Controller
                 'role' => $target->role,
             ],
             'data' => $settings->toAccessRestrictionApiArray(),
+            'self_lockout_preview' => $preview,
+        ]);
+    }
+
+    public function restoreAccessPolicyChange(Request $request, int $changeId): JsonResponse
+    {
+        /** @var User $actor */
+        $actor = $request->user();
+        $hub = $this->accessHub($actor);
+
+        $validated = $request->validate([
+            'snapshot' => ['sometimes', 'string', Rule::in(['before', 'after'])],
+        ]);
+
+        $event = SecurityEvent::query()->findOrFail($changeId);
+        $settings = $this->security->restoreAccessPolicyChange(
+            $hub,
+            $actor,
+            $event,
+            $validated['snapshot'] ?? 'before',
+            $request
+        );
+
+        $payload = [
+            'restored_from_event_id' => $event->id,
+            'snapshot' => ($validated['snapshot'] ?? 'before'),
+            'data' => $settings->toAccessRestrictionApiArray(),
+        ];
+
+        if ($settings instanceof \App\Models\UserAccessRestrictionSetting) {
+            $target = User::query()->find($settings->user_id);
+            $payload['user'] = $target ? [
+                'id' => $target->id,
+                'name' => $target->name,
+                'email' => $target->email,
+                'role' => $target->role,
+            ] : null;
+            $payload['scope'] = 'user';
+        } else {
+            $payload['scope'] = 'hub';
+        }
+
+        return response()->json($payload);
+    }
+
+    public function emergencyUnlockAccess(Request $request): JsonResponse
+    {
+        /** @var User $actor */
+        $actor = $request->user();
+        $hub = $this->accessHub($actor);
+
+        $validated = $request->validate([
+            'keep_rules' => ['sometimes', 'boolean'],
+        ]);
+
+        $result = $this->security->emergencyUnlockAccess(
+            $hub,
+            $actor,
+            $request,
+            (bool) ($validated['keep_rules'] ?? false)
+        );
+
+        return response()->json([
+            'message' => ($result['keep_rules'] ?? false)
+                ? 'Enforcement switched to Monitor. Rules kept.'
+                : 'Blocking access gates cleared and enforcement set to Monitor.',
+            'data' => $result['settings'] ?? null,
+            'user_rows' => $result['user_rows'] ?? 0,
         ]);
     }
 
@@ -428,6 +566,9 @@ class SecurityMonitoringController extends Controller
                     'changed_keys' => $props['changed_keys'] ?? [],
                     'changes' => $props['changes'] ?? [],
                     'change_summary' => $props['change_summary'] ?? null,
+                    'can_restore' => ! empty($props['before']) || ! empty($props['after']),
+                    'has_before' => ! empty($props['before']),
+                    'has_after' => ! empty($props['after']),
                 ];
             })->values(),
             'meta' => [
