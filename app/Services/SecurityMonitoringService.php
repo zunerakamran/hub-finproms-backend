@@ -315,6 +315,8 @@ class SecurityMonitoringService
         return $settings;
     }
 
+    public const ACCESS_POLICY_CHANGED_EVENT = 'fw.access_policy_changed';
+
     /**
      * @param  array<string, mixed>  $data
      */
@@ -326,6 +328,8 @@ class SecurityMonitoringService
         $payload = $this->validatedAccessPayload($data);
 
         $settings = $this->settingsFor($hub);
+        $before = $this->accessPolicySnapshot($settings->toAccessRestrictionApiArray());
+
         // Clear legacy single-mode column when present so it cannot conflict.
         if (\Illuminate\Support\Facades\Schema::hasColumn($settings->getTable(), 'access_restriction_mode')) {
             $payload['access_restriction_mode'] = 'off';
@@ -334,6 +338,17 @@ class SecurityMonitoringService
         $settings->save();
 
         app(AccessRestrictionService::class)->forgetSettingsCache((int) $hub->id);
+
+        $after = $this->accessPolicySnapshot($settings->fresh()->toAccessRestrictionApiArray());
+        $this->recordAccessPolicyChange(
+            $hub,
+            $actor,
+            $request,
+            scope: 'hub',
+            before: $before,
+            after: $after,
+            target: null
+        );
 
         try {
             $this->activityLogs->log([
@@ -368,12 +383,34 @@ class SecurityMonitoringService
         $payload['hub_id'] = (int) $hub->id;
         $payload['user_id'] = (int) $target->id;
 
+        $existing = \App\Models\UserAccessRestrictionSetting::query()
+            ->where('hub_id', $hub->id)
+            ->where('user_id', $target->id)
+            ->first();
+
+        $before = $this->accessPolicySnapshot(
+            $existing
+                ? $existing->toAccessRestrictionApiArray()
+                : app(AccessRestrictionService::class)->emptySettings()
+        );
+
         $settings = \App\Models\UserAccessRestrictionSetting::query()->updateOrCreate(
             ['hub_id' => $hub->id, 'user_id' => $target->id],
             $payload
         );
 
         app(AccessRestrictionService::class)->forgetUserSettingsCache((int) $hub->id, (int) $target->id);
+
+        $after = $this->accessPolicySnapshot($settings->fresh()->toAccessRestrictionApiArray());
+        $this->recordAccessPolicyChange(
+            $hub,
+            $actor,
+            $request,
+            scope: 'user',
+            before: $before,
+            after: $after,
+            target: $target
+        );
 
         try {
             $this->activityLogs->log([
@@ -389,6 +426,198 @@ class SecurityMonitoringService
         }
 
         return $settings;
+    }
+
+    /**
+     * Recent access-policy change events for the Access Control history tab.
+     *
+     * @param  array{per_page?: int|null, scope?: string|null, user_id?: int|null}  $filters
+     */
+    public function listAccessPolicyChanges(Hub $hub, User $actor, array $filters = []): LengthAwarePaginator
+    {
+        $this->ensureSchema();
+        $this->assertModuleEnabled($hub);
+        $this->assertCan($hub, $actor, 'secmon_manage_access');
+
+        $query = SecurityEvent::query()
+            ->where(function ($q) use ($hub) {
+                $q->where('hub_id', $hub->id)->orWhereNull('hub_id');
+            })
+            ->where('event_type', self::ACCESS_POLICY_CHANGED_EVENT)
+            ->orderByDesc('occurred_at')
+            ->orderByDesc('id');
+
+        if (($filters['scope'] ?? null) === 'hub' || ($filters['scope'] ?? null) === 'user') {
+            $query->where('properties->scope', $filters['scope']);
+        }
+        if (! empty($filters['user_id'])) {
+            $query->where('properties->target_user_id', (int) $filters['user_id']);
+        }
+
+        return $query->paginate(max(1, min(100, (int) ($filters['per_page'] ?? 25))));
+    }
+
+    /**
+     * @param  array<string, mixed>  $before
+     * @param  array<string, mixed>  $after
+     */
+    private function recordAccessPolicyChange(
+        Hub $hub,
+        User $actor,
+        ?Request $request,
+        string $scope,
+        array $before,
+        array $after,
+        ?User $target
+    ): void {
+        $changes = $this->accessPolicyDiff($before, $after);
+        if ($changes === []) {
+            return;
+        }
+
+        $changedKeys = array_keys($changes);
+        $summary = implode(', ', array_map(
+            function (string $key) use ($changes): string {
+                $from = $this->formatAccessPolicyValue($changes[$key]['from'] ?? null);
+                $to = $this->formatAccessPolicyValue($changes[$key]['to'] ?? null);
+
+                return $key.': '.$from.' → '.$to;
+            },
+            array_slice($changedKeys, 0, 6)
+        ));
+        if (count($changedKeys) > 6) {
+            $summary .= ' (+'.(count($changedKeys) - 6).' more)';
+        }
+
+        $title = $scope === 'user'
+            ? 'User access rules updated'
+            : 'Hub access rules updated';
+
+        $description = $scope === 'user'
+            ? sprintf(
+                '%s updated access rules for %s (%s). Changes: %s.',
+                $actor->email ?? 'admin',
+                $target?->email ?? 'user',
+                $target?->id ?? '?',
+                $summary
+            )
+            : sprintf(
+                '%s updated hub access rules. Changes: %s.',
+                $actor->email ?? 'admin',
+                $summary
+            );
+
+        try {
+            $this->recordEvent($hub, [
+                'category' => SecurityEvent::CATEGORY_AUTHORIZATION,
+                'event_type' => self::ACCESS_POLICY_CHANGED_EVENT,
+                'severity' => SecurityEvent::SEVERITY_INFO,
+                'title' => $title,
+                'description' => $description,
+                'actor' => $actor,
+                'request' => $request,
+                'status' => SecurityEvent::STATUS_CLOSED,
+                'related_refs' => array_filter([
+                    'scope' => $scope,
+                    'target_user_id' => $target?->id,
+                ]),
+                'properties' => [
+                    'scope' => $scope,
+                    'target_user_id' => $target?->id,
+                    'target_user_email' => $target?->email,
+                    'target_user_name' => $target?->name,
+                    'changed_keys' => $changedKeys,
+                    'changes' => $changes,
+                    'before' => $before,
+                    'after' => $after,
+                    'change_summary' => $summary,
+                ],
+            ]);
+        } catch (\Throwable) {
+            // Audit must not block saving settings.
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $api
+     * @return array<string, mixed>
+     */
+    private function accessPolicySnapshot(array $api): array
+    {
+        $keys = [
+            'uk_only',
+            'uk_cities_enabled',
+            'uk_cities',
+            'restrict_countries_enabled',
+            'restricted_countries',
+            'allow_countries_enabled',
+            'allowed_countries',
+            'restrict_ips_enabled',
+            'restricted_ips',
+            'allow_ips_enabled',
+            'allowed_ips',
+            'restrict_vpn_enabled',
+            'allow_vpn_enabled',
+            'enforcement_mode',
+        ];
+
+        $out = [];
+        foreach ($keys as $key) {
+            $value = $api[$key] ?? null;
+            if (is_array($value)) {
+                $value = array_values(array_map(
+                    fn ($v) => is_string($v) ? trim($v) : $v,
+                    $value
+                ));
+                sort($value);
+            } elseif (is_bool($value) || $value === 0 || $value === 1 || $value === '0' || $value === '1') {
+                $value = (bool) $value;
+            } elseif (is_string($value)) {
+                $value = trim($value);
+            }
+            $out[$key] = $value;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param  array<string, mixed>  $before
+     * @param  array<string, mixed>  $after
+     * @return array<string, array{from: mixed, to: mixed}>
+     */
+    private function accessPolicyDiff(array $before, array $after): array
+    {
+        $changes = [];
+        foreach ($before as $key => $from) {
+            $to = $after[$key] ?? null;
+            if ($this->accessPolicyValuesEqual($from, $to)) {
+                continue;
+            }
+            $changes[$key] = ['from' => $from, 'to' => $to];
+        }
+
+        return $changes;
+    }
+
+    private function accessPolicyValuesEqual(mixed $a, mixed $b): bool
+    {
+        return json_encode($a) === json_encode($b);
+    }
+
+    private function formatAccessPolicyValue(mixed $value): string
+    {
+        if (is_bool($value)) {
+            return $value ? 'true' : 'false';
+        }
+        if (is_array($value)) {
+            return $value === [] ? '[]' : implode(', ', array_map('strval', $value));
+        }
+        if ($value === null || $value === '') {
+            return '—';
+        }
+
+        return (string) $value;
     }
 
     public function userAccessSettingsFor(Hub $hub, User $target): \App\Models\UserAccessRestrictionSetting

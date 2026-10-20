@@ -683,6 +683,7 @@ Route::middleware('auth:sanctum')->group(function () {
                 Route::get('/access-control/hub-settings', [SecurityMonitoringController::class, 'accessSettings']);
                 Route::put('/access-control/hub-settings', [SecurityMonitoringController::class, 'updateAccessSettings']);
                 Route::post('/access-control/simulate', [SecurityMonitoringController::class, 'simulateAccess']);
+                Route::get('/access-control/changes', [SecurityMonitoringController::class, 'accessPolicyChanges']);
                 Route::get('/access-control/users', [SecurityMonitoringController::class, 'accessControlUsers']);
                 Route::get('/access-control/users/{userId}', [SecurityMonitoringController::class, 'userAccessSettings'])
                     ->whereNumber('userId');
@@ -1170,6 +1171,7 @@ Route::middleware('auth:sanctum')->group(function () {
                 Route::get('/access-control/hub-settings', [SecurityMonitoringController::class, 'accessSettings']);
                 Route::put('/access-control/hub-settings', [SecurityMonitoringController::class, 'updateAccessSettings']);
                 Route::post('/access-control/simulate', [SecurityMonitoringController::class, 'simulateAccess']);
+                Route::get('/access-control/changes', [SecurityMonitoringController::class, 'accessPolicyChanges']);
                 Route::get('/access-control/users', [SecurityMonitoringController::class, 'accessControlUsers']);
                 Route::get('/access-control/users/{userId}', [SecurityMonitoringController::class, 'userAccessSettings'])
                     ->whereNumber('userId');

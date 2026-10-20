@@ -386,6 +386,59 @@ class SecurityMonitoringController extends Controller
         ]);
     }
 
+    public function accessPolicyChanges(Request $request): JsonResponse
+    {
+        /** @var User $actor */
+        $actor = $request->user();
+        $hub = $this->accessHub($actor);
+
+        $validated = $request->validate([
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+            'scope' => ['sometimes', 'nullable', 'string', Rule::in(['hub', 'user'])],
+            'user_id' => ['sometimes', 'nullable', 'integer', 'exists:users,id'],
+            'page' => ['sometimes', 'integer', 'min:1'],
+        ]);
+
+        $paginator = $this->security->listAccessPolicyChanges($hub, $actor, [
+            'per_page' => $validated['per_page'] ?? 25,
+            'scope' => $validated['scope'] ?? null,
+            'user_id' => $validated['user_id'] ?? null,
+        ]);
+
+        return response()->json([
+            'data' => collect($paginator->items())->map(function (SecurityEvent $row) {
+                $base = $row->toApiArray(includeDetails: true);
+                $props = (array) ($base['properties'] ?? []);
+
+                return [
+                    'id' => $base['id'],
+                    'occurred_at' => $base['occurred_at'],
+                    'title' => $base['title'],
+                    'description' => $base['description'],
+                    'actor' => $base['actor'],
+                    'source_ip' => $base['source_ip'],
+                    'scope' => $props['scope'] ?? null,
+                    'target_user' => ($props['target_user_id'] ?? null)
+                        ? [
+                            'id' => $props['target_user_id'],
+                            'name' => $props['target_user_name'] ?? null,
+                            'email' => $props['target_user_email'] ?? null,
+                        ]
+                        : null,
+                    'changed_keys' => $props['changed_keys'] ?? [],
+                    'changes' => $props['changes'] ?? [],
+                    'change_summary' => $props['change_summary'] ?? null,
+                ];
+            })->values(),
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+            ],
+        ]);
+    }
+
     /**
      * Dry-run access rules for an IP (and optional user / geo hints). Never blocks.
      */

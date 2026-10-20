@@ -939,4 +939,107 @@ class AccessRestrictionTest extends TestCase
             ->assertJsonPath('data.user_rules_active', true)
             ->assertJsonPath('data.user.id', $target->id);
     }
+
+    public function test_updating_hub_access_rules_records_policy_change_history(): void
+    {
+        $this->createHubWithSecurityMonitoring();
+        $admin = User::factory()->create(['role' => User::ROLE_FINPROMS_ADMIN]);
+        Sanctum::actingAs($admin);
+
+        $this->putJson('/api/client-admin/access-control/hub-settings', [
+            'uk_only' => true,
+            'uk_cities_enabled' => false,
+            'restrict_countries_enabled' => false,
+            'allow_countries_enabled' => false,
+            'restrict_ips_enabled' => false,
+            'allow_ips_enabled' => false,
+            'restrict_vpn_enabled' => true,
+            'allow_vpn_enabled' => false,
+            'enforcement_mode' => 'monitor',
+            'uk_cities' => [],
+            'restricted_countries' => [],
+            'allowed_countries' => [],
+            'restricted_ips' => [],
+            'allowed_ips' => [],
+        ])->assertOk();
+
+        $this->getJson('/api/client-admin/access-control/changes')
+            ->assertOk()
+            ->assertJsonPath('meta.total', 1)
+            ->assertJsonPath('data.0.scope', 'hub')
+            ->assertJsonPath('data.0.actor.email', $admin->email)
+            ->assertJsonFragment(['enforcement_mode' => ['from' => 'enforce', 'to' => 'monitor']]);
+
+        $this->assertDatabaseHas('security_events', [
+            'event_type' => \App\Services\SecurityMonitoringService::ACCESS_POLICY_CHANGED_EVENT,
+            'actor_user_id' => $admin->id,
+        ]);
+    }
+
+    public function test_updating_user_access_rules_records_policy_change_history(): void
+    {
+        $this->createHubWithSecurityMonitoring();
+        $admin = User::factory()->create(['role' => User::ROLE_FINPROMS_ADMIN]);
+        $target = User::factory()->create(['role' => User::ROLE_USER]);
+        Sanctum::actingAs($admin);
+
+        $this->putJson("/api/client-admin/access-control/users/{$target->id}", [
+            'uk_only' => false,
+            'uk_cities_enabled' => false,
+            'restrict_countries_enabled' => false,
+            'allow_countries_enabled' => false,
+            'restrict_ips_enabled' => false,
+            'allow_ips_enabled' => false,
+            'restrict_vpn_enabled' => true,
+            'allow_vpn_enabled' => false,
+            'enforcement_mode' => 'enforce',
+            'uk_cities' => [],
+            'restricted_countries' => [],
+            'allowed_countries' => [],
+            'restricted_ips' => [],
+            'allowed_ips' => [],
+        ])->assertOk();
+
+        $this->getJson('/api/client-admin/access-control/changes?scope=user')
+            ->assertOk()
+            ->assertJsonPath('meta.total', 1)
+            ->assertJsonPath('data.0.scope', 'user')
+            ->assertJsonPath('data.0.target_user.id', $target->id)
+            ->assertJsonPath('data.0.changes.restrict_vpn_enabled.to', true);
+    }
+
+    public function test_identical_hub_access_save_does_not_create_history_entry(): void
+    {
+        $hub = $this->createHubWithSecurityMonitoring();
+        $admin = User::factory()->create(['role' => User::ROLE_FINPROMS_ADMIN]);
+        $this->setAccessRules($hub, [
+            'uk_only' => true,
+            'enforcement_mode' => 'enforce',
+        ]);
+        Sanctum::actingAs($admin);
+
+        $payload = [
+            'uk_only' => true,
+            'uk_cities_enabled' => false,
+            'restrict_countries_enabled' => false,
+            'allow_countries_enabled' => false,
+            'restrict_ips_enabled' => false,
+            'allow_ips_enabled' => false,
+            'restrict_vpn_enabled' => false,
+            'allow_vpn_enabled' => false,
+            'enforcement_mode' => 'enforce',
+            'uk_cities' => [],
+            'restricted_countries' => [],
+            'allowed_countries' => [],
+            'restricted_ips' => [],
+            'allowed_ips' => [],
+        ];
+
+        $this->putJson('/api/client-admin/access-control/hub-settings', $payload)->assertOk();
+        $this->putJson('/api/client-admin/access-control/hub-settings', $payload)->assertOk();
+
+        $this->getJson('/api/client-admin/access-control/changes')
+            ->assertOk()
+            ->assertJsonPath('meta.total', 0);
+    }
 }
