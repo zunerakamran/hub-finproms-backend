@@ -321,6 +321,87 @@ class SecurityMonitoringService
         $this->assertModuleEnabled($hub);
         $this->assertCan($hub, $actor, 'secmon_manage_access');
 
+        $payload = $this->validatedAccessPayload($data);
+
+        $settings = $this->settingsFor($hub);
+        // Clear legacy single-mode column when present so it cannot conflict.
+        if (\Illuminate\Support\Facades\Schema::hasColumn($settings->getTable(), 'access_restriction_mode')) {
+            $payload['access_restriction_mode'] = 'off';
+        }
+        $settings->fill($payload);
+        $settings->save();
+
+        app(AccessRestrictionService::class)->forgetSettingsCache((int) $hub->id);
+
+        try {
+            $this->activityLogs->log([
+                'action' => 'secmon.access_settings_update',
+                'description' => 'Updated hub access restrictions',
+                'user' => $actor,
+                'request' => $request,
+                'status_code' => 200,
+                'properties' => $settings->toAccessRestrictionApiArray(),
+            ]);
+        } catch (\Throwable) {
+            //
+        }
+
+        return $settings;
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    public function updateUserAccessSettings(
+        Hub $hub,
+        User $actor,
+        User $target,
+        array $data,
+        ?Request $request = null
+    ): \App\Models\UserAccessRestrictionSetting {
+        $this->assertModuleEnabled($hub);
+        $this->assertCan($hub, $actor, 'secmon_manage_access');
+
+        $payload = $this->validatedAccessPayload($data);
+        $payload['hub_id'] = (int) $hub->id;
+        $payload['user_id'] = (int) $target->id;
+
+        $settings = \App\Models\UserAccessRestrictionSetting::query()->updateOrCreate(
+            ['hub_id' => $hub->id, 'user_id' => $target->id],
+            $payload
+        );
+
+        app(AccessRestrictionService::class)->forgetUserSettingsCache((int) $hub->id, (int) $target->id);
+
+        try {
+            $this->activityLogs->log([
+                'action' => 'secmon.user_access_settings_update',
+                'description' => 'Updated user access restrictions for '.$target->email,
+                'user' => $actor,
+                'request' => $request,
+                'status_code' => 200,
+                'properties' => $settings->toAccessRestrictionApiArray(),
+            ]);
+        } catch (\Throwable) {
+            //
+        }
+
+        return $settings;
+    }
+
+    public function userAccessSettingsFor(Hub $hub, User $target): \App\Models\UserAccessRestrictionSetting
+    {
+        return \App\Models\UserAccessRestrictionSetting::query()->firstOrNew(
+            ['hub_id' => $hub->id, 'user_id' => $target->id]
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function validatedAccessPayload(array $data): array
+    {
         $geoIp = app(GeoIpLookupService::class);
 
         $ukOnly = (bool) ($data['uk_only'] ?? false);
@@ -387,8 +468,7 @@ class SecurityMonitoringService
             ]);
         }
 
-        $settings = $this->settingsFor($hub);
-        $payload = [
+        return [
             'access_uk_only' => $ukOnly,
             'access_uk_cities_enabled' => $ukCitiesEnabled,
             'access_restriction_cities' => $cities,
@@ -403,29 +483,6 @@ class SecurityMonitoringService
             'access_restrict_vpn_enabled' => $restrictVpnEnabled,
             'access_allow_vpn_enabled' => $allowVpnEnabled,
         ];
-        // Clear legacy single-mode column when present so it cannot conflict.
-        if (\Illuminate\Support\Facades\Schema::hasColumn($settings->getTable(), 'access_restriction_mode')) {
-            $payload['access_restriction_mode'] = 'off';
-        }
-        $settings->fill($payload);
-        $settings->save();
-
-        app(AccessRestrictionService::class)->forgetSettingsCache((int) $hub->id);
-
-        try {
-            $this->activityLogs->log([
-                'action' => 'secmon.access_settings_update',
-                'description' => 'Updated application access restrictions',
-                'user' => $actor,
-                'request' => $request,
-                'status_code' => 200,
-                'properties' => $settings->toAccessRestrictionApiArray(),
-            ]);
-        } catch (\Throwable) {
-            //
-        }
-
-        return $settings;
     }
 
     private function isValidIpOrCidr(string $value): bool

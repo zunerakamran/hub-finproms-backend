@@ -229,29 +229,21 @@ class SecurityMonitoringController extends Controller
         ]);
     }
 
-    public function accessSettings(Request $request): JsonResponse
+    private function accessHub(?User $user): Hub
     {
-        /** @var User $user */
-        $user = $request->user();
-        $hub = $this->securityHub($user);
-        $this->security->assertModuleEnabled($hub);
+        if ($user) {
+            return $this->actingHubs->capabilityHub($user, 'secmon_manage_access');
+        }
 
-        return response()->json([
-            'data' => $this->security->settingsFor($hub)->toAccessRestrictionApiArray(),
-            'options' => [
-                'rules' => AccessRestrictionService::ruleOptions(),
-                'suggested_uk_cities' => AccessRestrictionService::SUGGESTED_UK_CITIES,
-            ],
-        ]);
+        return $this->hubs->current();
     }
 
-    public function updateAccessSettings(Request $request): JsonResponse
+    /**
+     * @return array<string, mixed>
+     */
+    private function accessSettingsValidationRules(): array
     {
-        /** @var User $user */
-        $user = $request->user();
-        $hub = $this->securityHub($user);
-
-        $data = $request->validate([
+        return [
             'uk_only' => ['sometimes', 'boolean'],
             'uk_cities_enabled' => ['sometimes', 'boolean'],
             'uk_cities' => ['sometimes', 'array', 'max:100'],
@@ -270,11 +262,125 @@ class SecurityMonitoringController extends Controller
             'allowed_ips.*' => ['string', 'max:64'],
             'restrict_vpn_enabled' => ['sometimes', 'boolean'],
             'allow_vpn_enabled' => ['sometimes', 'boolean'],
-        ]);
+        ];
+    }
 
+    public function accessSettings(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $hub = $this->accessHub($user);
+        $this->security->assertModuleEnabled($hub);
+
+        return response()->json([
+            'data' => $this->security->settingsFor($hub)->toAccessRestrictionApiArray(),
+            'options' => [
+                'rules' => AccessRestrictionService::ruleOptions(),
+                'suggested_uk_cities' => AccessRestrictionService::SUGGESTED_UK_CITIES,
+            ],
+        ]);
+    }
+
+    public function updateAccessSettings(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $hub = $this->accessHub($user);
+
+        $data = $request->validate($this->accessSettingsValidationRules());
         $settings = $this->security->updateAccessSettings($hub, $user, $data, $request);
 
         return response()->json([
+            'data' => $settings->toAccessRestrictionApiArray(),
+        ]);
+    }
+
+    public function accessControlUsers(Request $request): JsonResponse
+    {
+        /** @var User $actor */
+        $actor = $request->user();
+        $hub = $this->accessHub($actor);
+        $this->security->assertModuleEnabled($hub);
+
+        $validated = $request->validate([
+            'q' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+        ]);
+
+        $query = User::query()->orderBy('name')->orderBy('id');
+        if (! empty($validated['q'])) {
+            $term = '%'.$validated['q'].'%';
+            $query->where(function ($builder) use ($term) {
+                $builder->where('name', 'like', $term)
+                    ->orWhere('email', 'like', $term);
+            });
+        }
+
+        $paginator = $query->paginate((int) ($validated['per_page'] ?? 50));
+
+        return response()->json([
+            'users' => collect($paginator->items())->map(fn (User $u) => [
+                'id' => $u->id,
+                'name' => $u->name,
+                'email' => $u->email,
+                'role' => $u->role,
+            ])->values(),
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+            ],
+        ]);
+    }
+
+    public function userAccessSettings(Request $request, int $userId): JsonResponse
+    {
+        /** @var User $actor */
+        $actor = $request->user();
+        $hub = $this->accessHub($actor);
+        $this->security->assertModuleEnabled($hub);
+
+        $target = User::query()->findOrFail($userId);
+        $settings = $this->security->userAccessSettingsFor($hub, $target);
+
+        return response()->json([
+            'user' => [
+                'id' => $target->id,
+                'name' => $target->name,
+                'email' => $target->email,
+                'role' => $target->role,
+            ],
+            'data' => $settings->exists
+                ? $settings->toAccessRestrictionApiArray()
+                : array_merge(
+                    app(AccessRestrictionService::class)->emptySettings(),
+                    ['hub_id' => $hub->id, 'user_id' => $target->id]
+                ),
+            'options' => [
+                'rules' => AccessRestrictionService::ruleOptions(),
+                'suggested_uk_cities' => AccessRestrictionService::SUGGESTED_UK_CITIES,
+            ],
+        ]);
+    }
+
+    public function updateUserAccessSettings(Request $request, int $userId): JsonResponse
+    {
+        /** @var User $actor */
+        $actor = $request->user();
+        $hub = $this->accessHub($actor);
+        $target = User::query()->findOrFail($userId);
+
+        $data = $request->validate($this->accessSettingsValidationRules());
+        $settings = $this->security->updateUserAccessSettings($hub, $actor, $target, $data, $request);
+
+        return response()->json([
+            'user' => [
+                'id' => $target->id,
+                'name' => $target->name,
+                'email' => $target->email,
+                'role' => $target->role,
+            ],
             'data' => $settings->toAccessRestrictionApiArray(),
         ]);
     }

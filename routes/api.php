@@ -680,6 +680,13 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::middleware('hub_can:secmon_manage_access')->group(function () {
                 Route::get('/security-monitoring/access-settings', [SecurityMonitoringController::class, 'accessSettings']);
                 Route::put('/security-monitoring/access-settings', [SecurityMonitoringController::class, 'updateAccessSettings']);
+                Route::get('/access-control/hub-settings', [SecurityMonitoringController::class, 'accessSettings']);
+                Route::put('/access-control/hub-settings', [SecurityMonitoringController::class, 'updateAccessSettings']);
+                Route::get('/access-control/users', [SecurityMonitoringController::class, 'accessControlUsers']);
+                Route::get('/access-control/users/{userId}', [SecurityMonitoringController::class, 'userAccessSettings'])
+                    ->whereNumber('userId');
+                Route::put('/access-control/users/{userId}', [SecurityMonitoringController::class, 'updateUserAccessSettings'])
+                    ->whereNumber('userId');
             });
         });
 
@@ -1159,6 +1166,13 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::middleware('hub_can:secmon_manage_access')->group(function () {
                 Route::get('/security-monitoring/access-settings', [SecurityMonitoringController::class, 'accessSettings']);
                 Route::put('/security-monitoring/access-settings', [SecurityMonitoringController::class, 'updateAccessSettings']);
+                Route::get('/access-control/hub-settings', [SecurityMonitoringController::class, 'accessSettings']);
+                Route::put('/access-control/hub-settings', [SecurityMonitoringController::class, 'updateAccessSettings']);
+                Route::get('/access-control/users', [SecurityMonitoringController::class, 'accessControlUsers']);
+                Route::get('/access-control/users/{userId}', [SecurityMonitoringController::class, 'userAccessSettings'])
+                    ->whereNumber('userId');
+                Route::put('/access-control/users/{userId}', [SecurityMonitoringController::class, 'updateUserAccessSettings'])
+                    ->whereNumber('userId');
             });
         });
 

@@ -5,11 +5,14 @@ namespace App\Services;
 use App\Models\Hub;
 use App\Models\SecurityEvent;
 use App\Models\SecurityMonitoringSetting;
+use App\Models\User;
+use App\Models\UserAccessRestrictionSetting;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Laravel\Sanctum\PersonalAccessToken;
 
 /**
- * Hub-managed geo / IP / VPN access rules (NFR-SEC-FW companion).
+ * Hub + optional per-user geo / IP / VPN access rules (NFR-SEC-FW companion).
  *
  * Precedence (Option B):
  * 1. Restrict IPs → hard deny
@@ -20,6 +23,7 @@ use Illuminate\Support\Facades\Cache;
  * 6. UK only / UK cities (Allow countries can override)
  * 7. Allow countries exclusive allowlist / Allow IPs alone / Allow VPN alone
  *
+ * Hub rules apply to every request. User rules merge in after the caller is identified.
  * Env deny-list / temporary blocks still apply first via FirewallService.
  */
 class AccessRestrictionService
@@ -38,6 +42,8 @@ class AccessRestrictionService
 
     private const SETTINGS_CACHE_PREFIX = 'security_firewall:access_settings:hub:';
 
+    private const USER_SETTINGS_CACHE_PREFIX = 'security_firewall:access_settings:hub_user:';
+
     public function __construct(
         private readonly HubService $hubs,
         private readonly GeoIpLookupService $geoIp,
@@ -51,8 +57,15 @@ class AccessRestrictionService
         }
     }
 
+    public function forgetUserSettingsCache(?int $hubId, ?int $userId): void
+    {
+        if ($hubId && $userId) {
+            Cache::forget(self::USER_SETTINGS_CACHE_PREFIX.$hubId.':'.$userId);
+        }
+    }
+
     /**
-     * Whether the request should be blocked by hub access rules.
+     * Whether the request should be blocked by hub (+ user when known) access rules.
      */
     public function isRequestDenied(Request $request): bool
     {
@@ -81,14 +94,178 @@ class AccessRestrictionService
             return false;
         }
 
-        $settings = $this->cachedSettings($hub);
-        if ($settings === null || ! $this->anyRuleEnabled($settings)) {
+        $hubSettings = $this->cachedSettings($hub) ?? $this->emptySettings();
+        $user = $this->resolveRequestUser($request);
+        $userSettings = $user ? $this->cachedUserSettings($hub, $user) : null;
+        $settings = $this->mergeSettings($hubSettings, $userSettings);
+
+        if (! $this->anyRuleEnabled($settings)) {
             return false;
         }
 
         $decision = $this->evaluate($settings, $ip, $request);
 
         return $decision['denied'];
+    }
+
+    /**
+     * Merge hub + user Option B settings (user can tighten / add exceptions).
+     *
+     * @param  array<string, mixed>  $hub
+     * @param  array<string, mixed>|null  $user
+     * @return array<string, mixed>
+     */
+    public function mergeSettings(array $hub, ?array $user): array
+    {
+        if ($user === null || ! $this->anyRuleEnabled($user)) {
+            return $hub;
+        }
+
+        $hubRestrictIps = ! empty($hub['restrict_ips_enabled']);
+        $userRestrictIps = ! empty($user['restrict_ips_enabled']);
+        $hubAllowIps = ! empty($hub['allow_ips_enabled']);
+        $userAllowIps = ! empty($user['allow_ips_enabled']);
+        $hubRestrictCountries = ! empty($hub['restrict_countries_enabled']);
+        $userRestrictCountries = ! empty($user['restrict_countries_enabled']);
+        $hubAllowCountries = ! empty($hub['allow_countries_enabled']);
+        $userAllowCountries = ! empty($user['allow_countries_enabled']);
+        $hubUkCities = ! empty($hub['uk_cities_enabled']);
+        $userUkCities = ! empty($user['uk_cities_enabled']);
+
+        $ukCities = array_values((array) ($hub['uk_cities'] ?? []));
+        if ($hubUkCities && $userUkCities) {
+            $userCitiesLower = array_map(
+                fn ($c) => mb_strtolower(trim((string) $c)),
+                (array) ($user['uk_cities'] ?? [])
+            );
+            $ukCities = array_values(array_filter(
+                $ukCities,
+                fn ($city) => in_array(mb_strtolower(trim((string) $city)), $userCitiesLower, true)
+            ));
+        } elseif ($userUkCities) {
+            $ukCities = array_values((array) ($user['uk_cities'] ?? []));
+        }
+
+        return [
+            'uk_only' => ! empty($hub['uk_only']) || ! empty($user['uk_only']),
+            'uk_cities_enabled' => $hubUkCities || $userUkCities,
+            'uk_cities' => $ukCities,
+            'restrict_countries_enabled' => $hubRestrictCountries || $userRestrictCountries,
+            'restricted_countries' => $this->mergeLists(
+                $hubRestrictCountries ? (array) ($hub['restricted_countries'] ?? []) : [],
+                $userRestrictCountries ? (array) ($user['restricted_countries'] ?? []) : []
+            ),
+            'allow_countries_enabled' => $hubAllowCountries || $userAllowCountries,
+            'allowed_countries' => $this->mergeLists(
+                $hubAllowCountries ? (array) ($hub['allowed_countries'] ?? []) : [],
+                $userAllowCountries ? (array) ($user['allowed_countries'] ?? []) : []
+            ),
+            'restrict_ips_enabled' => $hubRestrictIps || $userRestrictIps,
+            'restricted_ips' => $this->mergeLists(
+                $hubRestrictIps ? (array) ($hub['restricted_ips'] ?? []) : [],
+                $userRestrictIps ? (array) ($user['restricted_ips'] ?? []) : []
+            ),
+            'allow_ips_enabled' => $hubAllowIps || $userAllowIps,
+            'allowed_ips' => $this->mergeLists(
+                $hubAllowIps ? (array) ($hub['allowed_ips'] ?? []) : [],
+                $userAllowIps ? (array) ($user['allowed_ips'] ?? []) : []
+            ),
+            'restrict_vpn_enabled' => ! empty($hub['restrict_vpn_enabled']) || ! empty($user['restrict_vpn_enabled']),
+            'allow_vpn_enabled' => ! empty($hub['allow_vpn_enabled']) || ! empty($user['allow_vpn_enabled']),
+        ];
+    }
+
+    /**
+     * @param  list<mixed>  $a
+     * @param  list<mixed>  $b
+     * @return list<string>
+     */
+    private function mergeLists(array $a, array $b): array
+    {
+        return array_values(array_unique(array_filter(array_map(
+            fn ($v) => trim((string) $v),
+            array_merge($a, $b)
+        ), fn ($v) => $v !== '')));
+    }
+
+    public function resolveRequestUser(Request $request): ?User
+    {
+        $user = $request->user();
+        if ($user instanceof User) {
+            return $user;
+        }
+
+        $bearer = $request->bearerToken();
+        if ($bearer) {
+            try {
+                $token = PersonalAccessToken::findToken($bearer);
+                $tokenable = $token?->tokenable;
+                if ($tokenable instanceof User) {
+                    return $tokenable;
+                }
+            } catch (\Throwable) {
+                //
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function cachedUserSettings(Hub $hub, User $user): ?array
+    {
+        $hubId = (int) $hub->id;
+        $userId = (int) $user->id;
+
+        try {
+            return Cache::remember(
+                self::USER_SETTINGS_CACHE_PREFIX.$hubId.':'.$userId,
+                60,
+                function () use ($hub, $user) {
+                    $row = UserAccessRestrictionSetting::query()
+                        ->where('hub_id', $hub->id)
+                        ->where('user_id', $user->id)
+                        ->first();
+
+                    return $row ? $this->normalizeFromUserModel($row) : $this->emptySettings();
+                }
+            );
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function normalizeFromUserModel(UserAccessRestrictionSetting $row): array
+    {
+        return [
+            'uk_only' => (bool) ($row->access_uk_only ?? false),
+            'uk_cities_enabled' => (bool) ($row->access_uk_cities_enabled ?? false),
+            'uk_cities' => array_values(array_filter(array_map(
+                fn ($c) => $this->geoIp->normalizeCity($c),
+                (array) ($row->access_restriction_cities ?? [])
+            ))),
+            'restrict_countries_enabled' => (bool) ($row->access_restrict_countries_enabled ?? false),
+            'restricted_countries' => array_values(array_filter(array_map(
+                fn ($c) => $this->geoIp->normalizeCountry($c),
+                (array) ($row->access_restricted_countries ?? [])
+            ))),
+            'allow_countries_enabled' => (bool) ($row->access_allow_countries_enabled ?? false),
+            'allowed_countries' => array_values(array_filter(array_map(
+                fn ($c) => $this->geoIp->normalizeCountry($c),
+                (array) ($row->access_allowed_countries ?? [])
+            ))),
+            'restrict_ips_enabled' => (bool) ($row->access_restrict_ips_enabled ?? false),
+            'restricted_ips' => $this->normalizeIpList($row->access_restricted_ips ?? []),
+            'allow_ips_enabled' => (bool) ($row->access_allow_ips_enabled ?? false),
+            'allowed_ips' => $this->normalizeIpList($row->access_allowed_ips ?? []),
+            'restrict_vpn_enabled' => (bool) ($row->access_restrict_vpn_enabled ?? false),
+            'allow_vpn_enabled' => (bool) ($row->access_allow_vpn_enabled ?? false),
+        ];
     }
 
     /**
@@ -471,27 +648,8 @@ class AccessRestrictionService
      */
     public static function ruleOptions(): array
     {
+        // Order matches evaluation precedence (Option B + VPN).
         return [
-            [
-                'key' => 'uk_only',
-                'label' => 'UK only',
-                'description' => 'Allow requests only from United Kingdom IP addresses. Allow IPs / Allow countries can override.',
-            ],
-            [
-                'key' => 'uk_cities',
-                'label' => 'Specific UK cities',
-                'description' => 'Allow requests only from selected UK cities (must also resolve as GB). Allow IPs / Allow countries can override.',
-            ],
-            [
-                'key' => 'restrict_countries',
-                'label' => 'Restrict countries',
-                'description' => 'Block requests from the selected countries. A matching Allow IP still gets through; Allow countries can unblock a listed country.',
-            ],
-            [
-                'key' => 'allow_countries',
-                'label' => 'Allow countries',
-                'description' => 'Allow these countries (and use as exceptions to UK-only / restrict-countries). Combine with Allow IPs for per-IP exceptions.',
-            ],
             [
                 'key' => 'restrict_ips',
                 'label' => 'Restrict IPs',
@@ -504,13 +662,28 @@ class AccessRestrictionService
             ],
             [
                 'key' => 'restrict_vpn',
-                'label' => 'Restrict VPN',
-                'description' => 'Block requests detected as VPN, proxy, or hosting/datacenter exit. Allow IPs can still override. Detection is best-effort.',
+                'label' => 'Block VPN',
+                'description' => 'When enabled, block detected VPN/proxy/hosting exits. When disabled, VPN traffic is allowed and follows other rules. Allow IPs can still override. Detection is best-effort.',
             ],
             [
-                'key' => 'allow_vpn',
-                'label' => 'Allow VPN',
-                'description' => 'Detected VPN/proxy exits are always allowed and override country / UK / city blocks. Alone, only VPN traffic may access.',
+                'key' => 'restrict_countries',
+                'label' => 'Restrict countries',
+                'description' => 'Block requests from the selected countries. A matching Allow IP still gets through; Allow countries can unblock a listed country.',
+            ],
+            [
+                'key' => 'allow_countries',
+                'label' => 'Allow countries',
+                'description' => 'Allow these countries (and use as exceptions to UK-only / restrict-countries). Combine with Allow IPs for per-IP exceptions.',
+            ],
+            [
+                'key' => 'uk_cities',
+                'label' => 'Specific UK cities',
+                'description' => 'Allow requests only from selected UK cities (must also resolve as GB). Allow IPs / Allow countries can override.',
+            ],
+            [
+                'key' => 'uk_only',
+                'label' => 'UK only',
+                'description' => 'Allow requests only from United Kingdom IP addresses. Allow IPs / Allow countries can override.',
             ],
         ];
     }

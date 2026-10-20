@@ -1571,8 +1571,8 @@ class Hub extends Model
             'default_white_label' => true,
         ],
         'secmon_manage_access' => [
-            'label' => 'Manage application access restrictions',
-            'description' => 'Configure where the application can be accessed from: UK only, specific UK cities, allow/restrict countries, allow/restrict IPs, or allow/restrict VPN.',
+            'label' => 'Manage access control',
+            'description' => 'Open the Access control page to configure hub and per-user IP, country, UK, and VPN access rules.',
             'group' => self::GROUP_SECURITY_MONITORING,
             'default_shared' => true,
             'default_white_label' => true,

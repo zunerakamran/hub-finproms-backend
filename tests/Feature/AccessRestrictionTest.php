@@ -703,4 +703,66 @@ class AccessRestrictionTest extends TestCase
             ->getJson('/api/hub')
             ->assertForbidden();
     }
+
+    public function test_admin_can_update_user_access_settings_via_access_control_api(): void
+    {
+        $this->createHubWithSecurityMonitoring();
+        $admin = User::factory()->create(['role' => User::ROLE_FINPROMS_ADMIN]);
+        $target = User::factory()->create(['role' => User::ROLE_USER]);
+        Sanctum::actingAs($admin);
+
+        $this->putJson("/api/client-admin/access-control/users/{$target->id}", [
+            'restrict_vpn_enabled' => true,
+            'uk_only' => true,
+            'uk_cities_enabled' => false,
+            'restrict_countries_enabled' => false,
+            'allow_countries_enabled' => false,
+            'restrict_ips_enabled' => false,
+            'allow_ips_enabled' => false,
+            'allow_vpn_enabled' => false,
+            'uk_cities' => [],
+            'restricted_countries' => [],
+            'allowed_countries' => [],
+            'restricted_ips' => [],
+            'allowed_ips' => [],
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.restrict_vpn_enabled', true)
+            ->assertJsonPath('data.uk_only', true)
+            ->assertJsonPath('user.id', $target->id);
+
+        $this->getJson("/api/client-admin/access-control/users/{$target->id}")
+            ->assertOk()
+            ->assertJsonPath('data.restrict_vpn_enabled', true);
+    }
+
+    public function test_user_block_vpn_merges_with_hub_rules_after_auth(): void
+    {
+        $hub = $this->createHubWithSecurityMonitoring();
+        $user = User::factory()->create(['role' => User::ROLE_USER]);
+
+        // Hub has no VPN block; user does.
+        $this->setAccessRules($hub, []);
+        \App\Models\UserAccessRestrictionSetting::query()->create([
+            'hub_id' => $hub->id,
+            'user_id' => $user->id,
+            'access_restrict_vpn_enabled' => true,
+        ]);
+        app(AccessRestrictionService::class)->forgetUserSettingsCache((int) $hub->id, (int) $user->id);
+
+        config([
+            'security_firewall.enabled' => true,
+            'security_firewall.record_security_events' => false,
+            'security_firewall.geoip.http_enabled' => false,
+            'security_firewall.geoip.test_overrides' => [
+                '203.0.113.90' => ['country' => 'GB', 'vpn' => true],
+            ],
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.90'])
+            ->getJson('/api/hub')
+            ->assertForbidden();
+    }
 }
