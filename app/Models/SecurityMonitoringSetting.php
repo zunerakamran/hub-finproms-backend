@@ -32,6 +32,7 @@ class SecurityMonitoringSetting extends Model
         'access_allowed_ips',
         'access_restrict_vpn_enabled',
         'access_allow_vpn_enabled',
+        'access_enforcement_mode',
         // Legacy columns kept for migration compatibility.
         'access_restriction_mode',
         'access_restriction_countries',
@@ -113,7 +114,15 @@ class SecurityMonitoringSetting extends Model
             'allowed_ips' => array_values($this->access_allowed_ips ?? []),
             'restrict_vpn_enabled' => (bool) ($this->access_restrict_vpn_enabled ?? false),
             'allow_vpn_enabled' => (bool) ($this->access_allow_vpn_enabled ?? false),
+            'enforcement_mode' => $this->normalizedEnforcementMode($this->access_enforcement_mode ?? null),
             'updated_at' => optional($this->updated_at)?->toIso8601String(),
         ];
+    }
+
+    public static function normalizedEnforcementMode(mixed $value): string
+    {
+        $mode = strtolower(trim((string) ($value ?? 'enforce')));
+
+        return $mode === 'monitor' ? 'monitor' : 'enforce';
     }
 }

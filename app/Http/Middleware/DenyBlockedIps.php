@@ -9,7 +9,7 @@ use Symfony\Component\HttpFoundation\Response;
 
 /**
  * NFR-SEC-FW — reject requests from denied / temporarily blocked IPs
- * and hub-managed geo / IP access restrictions.
+ * and hub/user access restrictions (enforce mode). Monitor mode logs only.
  */
 class DenyBlockedIps
 {
@@ -25,12 +25,24 @@ class DenyBlockedIps
             ], 403);
         }
 
-        if ($this->firewall->accessRestrictions()->isRequestDenied($request)) {
-            $this->firewall->accessRestrictions()->recordDeniedRequest($request);
+        $decision = $this->firewall->accessRestrictions()->checkRequest($request);
+
+        if (! empty($decision['denied'])) {
+            $this->firewall->accessRestrictions()->recordDeniedRequest(
+                $request,
+                (string) ($decision['reason'] ?? 'access_restriction')
+            );
 
             return response()->json([
                 'message' => 'Access denied by application access restrictions.',
             ], 403);
+        }
+
+        if (! empty($decision['would_block'])) {
+            $this->firewall->accessRestrictions()->recordWouldBlockRequest(
+                $request,
+                (string) ($decision['reason'] ?? 'access_restriction')
+            );
         }
 
         return $next($request);

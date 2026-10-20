@@ -219,6 +219,7 @@ class SecurityMonitoringService
                 $table->json('access_allowed_ips')->nullable();
                 $table->boolean('access_restrict_vpn_enabled')->default(false);
                 $table->boolean('access_allow_vpn_enabled')->default(false);
+                $table->string('access_enforcement_mode', 20)->default('enforce');
                 $table->dateTime('last_dependency_scan_at')->nullable();
                 $table->string('last_dependency_scan_status', 40)->nullable();
                 $table->text('last_dependency_scan_summary')->nullable();
@@ -242,6 +243,7 @@ class SecurityMonitoringService
                 'access_allowed_ips' => fn (Blueprint $t) => $t->json('access_allowed_ips')->nullable(),
                 'access_restrict_vpn_enabled' => fn (Blueprint $t) => $t->boolean('access_restrict_vpn_enabled')->default(false),
                 'access_allow_vpn_enabled' => fn (Blueprint $t) => $t->boolean('access_allow_vpn_enabled')->default(false),
+                'access_enforcement_mode' => fn (Blueprint $t) => $t->string('access_enforcement_mode', 20)->default('enforce'),
             ];
 
             $missing = [];
@@ -412,6 +414,9 @@ class SecurityMonitoringService
         $allowIpsEnabled = (bool) ($data['allow_ips_enabled'] ?? false);
         $restrictVpnEnabled = (bool) ($data['restrict_vpn_enabled'] ?? false);
         $allowVpnEnabled = (bool) ($data['allow_vpn_enabled'] ?? false);
+        $enforcementMode = \App\Models\SecurityMonitoringSetting::normalizedEnforcementMode(
+            $data['enforcement_mode'] ?? 'enforce'
+        );
 
         $cities = array_values(array_unique(array_filter(array_map(
             fn ($c) => $geoIp->normalizeCity($c),
@@ -482,6 +487,7 @@ class SecurityMonitoringService
             'access_allowed_ips' => $allowedIps,
             'access_restrict_vpn_enabled' => $restrictVpnEnabled,
             'access_allow_vpn_enabled' => $allowVpnEnabled,
+            'access_enforcement_mode' => $enforcementMode,
         ];
     }
 

@@ -69,8 +69,36 @@ class AccessRestrictionService
      */
     public function isRequestDenied(Request $request): bool
     {
+        return (bool) ($this->checkRequest($request)['denied'] ?? false);
+    }
+
+    /**
+     * Evaluate access rules for the request.
+     *
+     * @return array{
+     *   denied: bool,
+     *   would_block: bool,
+     *   reason: string,
+     *   mode: string,
+     *   country: ?string,
+     *   city: ?string,
+     *   vpn: ?bool
+     * }
+     */
+    public function checkRequest(Request $request): array
+    {
+        $pass = [
+            'denied' => false,
+            'would_block' => false,
+            'reason' => 'allowed',
+            'mode' => 'enforce',
+            'country' => null,
+            'city' => null,
+            'vpn' => null,
+        ];
+
         if (! (bool) config('security_firewall.enabled', true)) {
-            return false;
+            return $pass;
         }
 
         $ip = (string) $request->ip();
@@ -81,31 +109,64 @@ class AccessRestrictionService
             && $ip !== ''
             && $this->geoIp->isPrivateOrLocal($ip)
         ) {
-            return false;
+            return $pass;
         }
 
         try {
             $hub = $this->hubs->current();
         } catch (\Throwable) {
-            return false;
+            return $pass;
         }
 
         if (! $hub->hasSecurityMonitoringFunctionality()) {
-            return false;
+            return $pass;
         }
 
         $hubSettings = $this->cachedSettings($hub) ?? $this->emptySettings();
         $user = $this->resolveRequestUser($request);
         $userSettings = $user ? $this->cachedUserSettings($hub, $user) : null;
         $settings = $this->mergeSettings($hubSettings, $userSettings);
+        $mode = SecurityMonitoringSetting::normalizedEnforcementMode(
+            $settings['enforcement_mode'] ?? 'enforce'
+        );
 
         if (! $this->anyRuleEnabled($settings)) {
-            return false;
+            return array_merge($pass, ['mode' => $mode]);
         }
 
         $decision = $this->evaluate($settings, $ip, $request);
+        if (! ($decision['denied'] ?? false)) {
+            return array_merge($pass, [
+                'mode' => $mode,
+                'reason' => $decision['reason'] ?? 'allowed',
+                'country' => $decision['country'] ?? null,
+                'city' => $decision['city'] ?? null,
+                'vpn' => $decision['vpn'] ?? null,
+            ]);
+        }
 
-        return $decision['denied'];
+        // Monitor: log-only; Enforce: hard block.
+        if ($mode === 'monitor') {
+            return [
+                'denied' => false,
+                'would_block' => true,
+                'reason' => $decision['reason'] ?? 'access_restriction',
+                'mode' => 'monitor',
+                'country' => $decision['country'] ?? null,
+                'city' => $decision['city'] ?? null,
+                'vpn' => $decision['vpn'] ?? null,
+            ];
+        }
+
+        return [
+            'denied' => true,
+            'would_block' => false,
+            'reason' => $decision['reason'] ?? 'access_restriction',
+            'mode' => 'enforce',
+            'country' => $decision['country'] ?? null,
+            'city' => $decision['city'] ?? null,
+            'vpn' => $decision['vpn'] ?? null,
+        ];
     }
 
     /**
@@ -172,7 +233,30 @@ class AccessRestrictionService
             ),
             'restrict_vpn_enabled' => ! empty($hub['restrict_vpn_enabled']) || ! empty($user['restrict_vpn_enabled']),
             'allow_vpn_enabled' => ! empty($hub['allow_vpn_enabled']) || ! empty($user['allow_vpn_enabled']),
+            'enforcement_mode' => $this->mergeEnforcementMode($hub, $user),
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $hub
+     * @param  array<string, mixed>  $user
+     */
+    private function mergeEnforcementMode(array $hub, array $user): string
+    {
+        $hubActive = $this->anyRuleEnabled($hub);
+        $userActive = $this->anyRuleEnabled($user);
+        $hubMode = SecurityMonitoringSetting::normalizedEnforcementMode($hub['enforcement_mode'] ?? null);
+        $userMode = SecurityMonitoringSetting::normalizedEnforcementMode($user['enforcement_mode'] ?? null);
+
+        if ($hubActive && ! $userActive) {
+            return $hubMode;
+        }
+        if ($userActive && ! $hubActive) {
+            return $userMode;
+        }
+
+        // Both active: enforce wins over monitor.
+        return ($hubMode === 'enforce' || $userMode === 'enforce') ? 'enforce' : 'monitor';
     }
 
     /**
@@ -265,6 +349,9 @@ class AccessRestrictionService
             'allowed_ips' => $this->normalizeIpList($row->access_allowed_ips ?? []),
             'restrict_vpn_enabled' => (bool) ($row->access_restrict_vpn_enabled ?? false),
             'allow_vpn_enabled' => (bool) ($row->access_allow_vpn_enabled ?? false),
+            'enforcement_mode' => SecurityMonitoringSetting::normalizedEnforcementMode(
+                $row->access_enforcement_mode ?? null
+            ),
         ];
     }
 
@@ -393,6 +480,27 @@ class AccessRestrictionService
 
     public function recordDeniedRequest(Request $request, string $reason = 'access_restriction'): void
     {
+        $this->recordAccessDecision($request, 'fw.access_restricted', 'Request blocked by access restriction', $reason, false);
+    }
+
+    public function recordWouldBlockRequest(Request $request, string $reason = 'access_restriction'): void
+    {
+        $this->recordAccessDecision(
+            $request,
+            'fw.access_would_block',
+            'Request would be blocked by access restriction (monitor mode)',
+            $reason,
+            true
+        );
+    }
+
+    private function recordAccessDecision(
+        Request $request,
+        string $eventType,
+        string $title,
+        string $reason,
+        bool $monitorOnly
+    ): void {
         if (! config('security_firewall.record_security_events', true)) {
             return;
         }
@@ -408,11 +516,12 @@ class AccessRestrictionService
 
             $this->securityMonitoring->recordEvent($hub, [
                 'category' => SecurityEvent::CATEGORY_AUTHORIZATION,
-                'event_type' => 'fw.access_restricted',
-                'severity' => SecurityEvent::SEVERITY_MEDIUM,
-                'title' => 'Request blocked by access restriction',
+                'event_type' => $eventType,
+                'severity' => $monitorOnly ? SecurityEvent::SEVERITY_LOW : SecurityEvent::SEVERITY_MEDIUM,
+                'title' => $title,
                 'description' => sprintf(
-                    'Blocked API request from %s (%s/%s) to %s %s — rule: %s.',
+                    '%s API request from %s (%s/%s) to %s %s — rule: %s.',
+                    $monitorOnly ? 'Would block' : 'Blocked',
                     $ip !== '' ? $ip : 'unknown',
                     $geo['country'] ?? '??',
                     $geo['city'] ?? '??',
@@ -429,10 +538,11 @@ class AccessRestrictionService
                     'country' => $geo['country'],
                     'city' => $geo['city'],
                     'vpn' => $geo['vpn'] ?? null,
+                    'monitor_only' => $monitorOnly,
                 ],
             ]);
         } catch (\Throwable) {
-            // Monitoring must not break the 403 response.
+            // Monitoring must not break the request.
         }
     }
 
@@ -503,6 +613,9 @@ class AccessRestrictionService
             'allowed_ips' => $this->normalizeIpList($row->access_allowed_ips ?? []),
             'restrict_vpn_enabled' => (bool) ($row->access_restrict_vpn_enabled ?? false),
             'allow_vpn_enabled' => (bool) ($row->access_allow_vpn_enabled ?? false),
+            'enforcement_mode' => SecurityMonitoringSetting::normalizedEnforcementMode(
+                $row->access_enforcement_mode ?? null
+            ),
         ];
     }
 
@@ -525,6 +638,7 @@ class AccessRestrictionService
             'allowed_ips' => [],
             'restrict_vpn_enabled' => false,
             'allow_vpn_enabled' => false,
+            'enforcement_mode' => 'enforce',
         ];
     }
 

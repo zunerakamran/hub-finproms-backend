@@ -262,6 +262,7 @@ class SecurityMonitoringController extends Controller
             'allowed_ips.*' => ['string', 'max:64'],
             'restrict_vpn_enabled' => ['sometimes', 'boolean'],
             'allow_vpn_enabled' => ['sometimes', 'boolean'],
+            'enforcement_mode' => ['sometimes', 'string', Rule::in(['monitor', 'enforce'])],
         ];
     }
 

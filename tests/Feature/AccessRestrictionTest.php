@@ -64,6 +64,9 @@ class AccessRestrictionTest extends TestCase
                 'access_allowed_ips' => $rules['allowed_ips'] ?? [],
                 'access_restrict_vpn_enabled' => (bool) ($rules['restrict_vpn_enabled'] ?? false),
                 'access_allow_vpn_enabled' => (bool) ($rules['allow_vpn_enabled'] ?? false),
+                'access_enforcement_mode' => ($rules['enforcement_mode'] ?? 'enforce') === 'monitor'
+                    ? 'monitor'
+                    : 'enforce',
             ]
         );
 
@@ -734,6 +737,54 @@ class AccessRestrictionTest extends TestCase
         $this->getJson("/api/client-admin/access-control/users/{$target->id}")
             ->assertOk()
             ->assertJsonPath('data.restrict_vpn_enabled', true);
+    }
+
+    public function test_monitor_mode_allows_but_would_block(): void
+    {
+        $hub = $this->createHubWithSecurityMonitoring();
+        $this->setAccessRules($hub, [
+            'uk_only' => true,
+            'enforcement_mode' => 'monitor',
+        ]);
+
+        config([
+            'security_firewall.enabled' => true,
+            'security_firewall.record_security_events' => false,
+            'security_firewall.geoip.http_enabled' => false,
+        ]);
+
+        // Would fail UK-only, but monitor mode must allow.
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.40'])
+            ->withHeaders(['CF-IPCountry' => 'US'])
+            ->getJson('/api/hub')
+            ->assertOk();
+
+        $req = \Illuminate\Http\Request::create('/api/hub', 'GET', server: ['REMOTE_ADDR' => '203.0.113.40']);
+        $req->headers->set('CF-IPCountry', 'US');
+        $decision = app(AccessRestrictionService::class)->checkRequest($req);
+        $this->assertFalse($decision['denied']);
+        $this->assertTrue($decision['would_block']);
+        $this->assertSame('monitor', $decision['mode']);
+    }
+
+    public function test_enforce_mode_blocks(): void
+    {
+        $hub = $this->createHubWithSecurityMonitoring();
+        $this->setAccessRules($hub, [
+            'uk_only' => true,
+            'enforcement_mode' => 'enforce',
+        ]);
+
+        config([
+            'security_firewall.enabled' => true,
+            'security_firewall.record_security_events' => false,
+            'security_firewall.geoip.http_enabled' => false,
+        ]);
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.41'])
+            ->withHeaders(['CF-IPCountry' => 'US'])
+            ->getJson('/api/hub')
+            ->assertForbidden();
     }
 
     public function test_user_block_vpn_merges_with_hub_rules_after_auth(): void

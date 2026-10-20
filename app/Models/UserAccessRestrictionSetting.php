@@ -28,6 +28,7 @@ class UserAccessRestrictionSetting extends Model
         'access_allowed_ips',
         'access_restrict_vpn_enabled',
         'access_allow_vpn_enabled',
+        'access_enforcement_mode',
     ];
 
     protected function casts(): array
@@ -80,6 +81,9 @@ class UserAccessRestrictionSetting extends Model
             'allowed_ips' => array_values($this->access_allowed_ips ?? []),
             'restrict_vpn_enabled' => (bool) ($this->access_restrict_vpn_enabled ?? false),
             'allow_vpn_enabled' => (bool) ($this->access_allow_vpn_enabled ?? false),
+            'enforcement_mode' => SecurityMonitoringSetting::normalizedEnforcementMode(
+                $this->access_enforcement_mode ?? null
+            ),
             'updated_at' => optional($this->updated_at)?->toIso8601String(),
         ];
     }
