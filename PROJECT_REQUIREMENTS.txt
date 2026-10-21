@@ -2752,15 +2752,24 @@ Product fulfilment (in-app / API)
      - Hub-wide rules apply to every API request; optional per-user rules merge
        after the caller is identified (Sanctum user / bearer token).
      - Rule gates (Option B precedence): Restrict IPs → Allow IPs → Block VPN →
-       Restrict countries → Allow countries → Specific UK cities → UK only.
+       Restricted countries/cities → Allowed countries/cities → Specific UK
+       cities → UK only.
      - Restrict/Allow IP entries accept: single IPv4/IPv6, CIDR
        (`198.51.100.0/24`), or inclusive hyphen range
        (`203.0.113.10-203.0.113.50`; spaces around `-` OK). Start must be
        ≤ end; same address family. Matching is binary inclusive.
+     - Restricted / Allowed countries/cities: each gate has country codes +
+       city names. Specific UK cities remains a separate UK-only allowlist.
      - Opposing lists must not overlap (UI alerts + API 422): Restricted IPs
-       vs Allowed IPs (incl. CIDR/range overlap); Restricted countries vs
-       Allowed countries; GB cannot be Restricted while UK only / UK cities
-       is enabled. Frontend Access Control uses chip adders for IP/country/city.
+       vs Allowed IPs (incl. CIDR/range overlap); Restricted vs Allowed
+       countries; Restricted vs Allowed cities; GB cannot be Restricted while
+       UK only / Specific UK cities is enabled.
+     - Blocked attempts are logged as security_events (`fw.access_restricted` /
+       `fw.access_would_block` / `fw.ip_denied`) with user, country, city, IP,
+       path, and rule — NOT activity_logs and NOT Change history. Access Control
+       UI tab “Blocked attempts” lists them (`GET …/access-control/blocked-attempts`).
+     - 403 responses include `code` + hub `branding` so the SPA shows logo +
+       loader (AccessBlockedSplash) without revealing deny details.
      - Block VPN: best-effort detection (edge `X-App-Geo-Vpn` and/or ip-api
        proxy/hosting). Allow IPs can override.
      - Enforcement mode per hub/user settings: **Monitor** (evaluate + log

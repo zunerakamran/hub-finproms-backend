@@ -251,9 +251,13 @@ class SecurityMonitoringController extends Controller
             'restrict_countries_enabled' => ['sometimes', 'boolean'],
             'restricted_countries' => ['sometimes', 'array', 'max:250'],
             'restricted_countries.*' => ['string', 'size:2'],
+            'restricted_cities' => ['sometimes', 'array', 'max:250'],
+            'restricted_cities.*' => ['string', 'max:120'],
             'allow_countries_enabled' => ['sometimes', 'boolean'],
             'allowed_countries' => ['sometimes', 'array', 'max:250'],
             'allowed_countries.*' => ['string', 'size:2'],
+            'allowed_cities' => ['sometimes', 'array', 'max:250'],
+            'allowed_cities.*' => ['string', 'max:120'],
             'restrict_ips_enabled' => ['sometimes', 'boolean'],
             'restricted_ips' => ['sometimes', 'array', 'max:500'],
             // Single IP / CIDR / hyphen range (e.g. 203.0.113.10-203.0.113.50); IPv6 ranges need headroom.
@@ -522,6 +526,64 @@ class SecurityMonitoringController extends Controller
                 : 'Blocking access gates cleared and enforcement set to Monitor.',
             'data' => $result['settings'] ?? null,
             'user_rows' => $result['user_rows'] ?? 0,
+        ]);
+    }
+
+    public function accessBlockedAttempts(Request $request): JsonResponse
+    {
+        /** @var User $actor */
+        $actor = $request->user();
+        $hub = $this->accessHub($actor);
+
+        $validated = $request->validate([
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+            'page' => ['sometimes', 'integer', 'min:1'],
+            'q' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'event_type' => ['sometimes', 'nullable', 'string', Rule::in(SecurityMonitoringService::ACCESS_BLOCKED_ATTEMPT_EVENTS)],
+        ]);
+
+        $paginator = $this->security->listAccessBlockedAttempts($hub, $actor, [
+            'per_page' => $validated['per_page'] ?? 25,
+            'q' => $validated['q'] ?? null,
+            'event_type' => $validated['event_type'] ?? null,
+        ]);
+
+        return response()->json([
+            'data' => collect($paginator->items())->map(function (SecurityEvent $row) {
+                $base = $row->toApiArray(includeDetails: true);
+                $props = (array) ($base['properties'] ?? []);
+
+                return [
+                    'id' => $base['id'],
+                    'occurred_at' => $base['occurred_at'],
+                    'event_type' => $base['event_type'],
+                    'title' => $base['title'],
+                    'description' => $base['description'],
+                    'severity' => $base['severity'],
+                    'actor' => $base['actor'],
+                    'source_ip' => $base['source_ip'] ?? ($props['source_ip'] ?? null),
+                    'country' => $props['country'] ?? null,
+                    'city' => $props['city'] ?? null,
+                    'path' => $props['path'] ?? null,
+                    'http_method' => $props['http_method'] ?? null,
+                    'reason' => $props['reason'] ?? null,
+                    'vpn' => $props['vpn'] ?? null,
+                    'monitor_only' => (bool) ($props['monitor_only'] ?? false),
+                    'user' => (($props['user_id'] ?? null) ?: ($base['actor']['id'] ?? null))
+                        ? [
+                            'id' => $props['user_id'] ?? ($base['actor']['id'] ?? null),
+                            'name' => $props['user_name'] ?? ($base['actor']['name'] ?? null),
+                            'email' => $props['user_email'] ?? ($base['actor']['email'] ?? null),
+                        ]
+                        : null,
+                ];
+            })->values(),
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+            ],
         ]);
     }
 

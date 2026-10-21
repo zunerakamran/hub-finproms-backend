@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Services\FirewallService;
+use App\Support\AccessDeniedResponse;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -20,9 +21,10 @@ class DenyBlockedIps
         if ($this->firewall->isIpDenied($request->ip())) {
             $this->firewall->recordDeniedRequest($request);
 
-            return response()->json([
-                'message' => 'Access denied by application firewall.',
-            ], 403);
+            return AccessDeniedResponse::json(
+                'Access denied by application firewall.',
+                'firewall_denied'
+            );
         }
 
         $decision = $this->firewall->accessRestrictions()->checkRequest($request);
@@ -33,9 +35,10 @@ class DenyBlockedIps
                 (string) ($decision['reason'] ?? 'access_restriction')
             );
 
-            return response()->json([
-                'message' => 'Access denied by application access restrictions.',
-            ], 403);
+            return AccessDeniedResponse::json(
+                'Access denied by application access restrictions.',
+                'access_restricted'
+            );
         }
 
         if (! empty($decision['would_block'])) {

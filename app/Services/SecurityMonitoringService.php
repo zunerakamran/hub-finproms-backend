@@ -213,7 +213,9 @@ class SecurityMonitoringService
                 $table->boolean('access_restrict_countries_enabled')->default(false);
                 $table->boolean('access_allow_countries_enabled')->default(false);
                 $table->json('access_restricted_countries')->nullable();
+                $table->json('access_restricted_cities')->nullable();
                 $table->json('access_allowed_countries')->nullable();
+                $table->json('access_allowed_cities')->nullable();
                 $table->boolean('access_restrict_ips_enabled')->default(false);
                 $table->boolean('access_allow_ips_enabled')->default(false);
                 $table->json('access_restricted_ips')->nullable();
@@ -237,7 +239,9 @@ class SecurityMonitoringService
                 'access_restrict_countries_enabled' => fn (Blueprint $t) => $t->boolean('access_restrict_countries_enabled')->default(false),
                 'access_allow_countries_enabled' => fn (Blueprint $t) => $t->boolean('access_allow_countries_enabled')->default(false),
                 'access_restricted_countries' => fn (Blueprint $t) => $t->json('access_restricted_countries')->nullable(),
+                'access_restricted_cities' => fn (Blueprint $t) => $t->json('access_restricted_cities')->nullable(),
                 'access_allowed_countries' => fn (Blueprint $t) => $t->json('access_allowed_countries')->nullable(),
+                'access_allowed_cities' => fn (Blueprint $t) => $t->json('access_allowed_cities')->nullable(),
                 'access_restrict_ips_enabled' => fn (Blueprint $t) => $t->boolean('access_restrict_ips_enabled')->default(false),
                 'access_allow_ips_enabled' => fn (Blueprint $t) => $t->boolean('access_allow_ips_enabled')->default(false),
                 'access_restricted_ips' => fn (Blueprint $t) => $t->json('access_restricted_ips')->nullable(),
@@ -319,6 +323,14 @@ class SecurityMonitoringService
     public const ACCESS_POLICY_CHANGED_EVENT = 'fw.access_policy_changed';
 
     public const ACCESS_EMERGENCY_UNLOCK_EVENT = 'fw.access_emergency_unlock';
+
+    /** @var list<string> */
+    public const ACCESS_BLOCKED_ATTEMPT_EVENTS = [
+        'fw.access_restricted',
+        'fw.access_would_block',
+        'fw.ip_denied',
+        'fw.ip_auto_blocked',
+    ];
 
     /**
      * @param  array<string, mixed>  $data
@@ -455,6 +467,49 @@ class SecurityMonitoringService
         }
         if (! empty($filters['user_id'])) {
             $query->where('properties->target_user_id', (int) $filters['user_id']);
+        }
+
+        return $query->paginate(max(1, min(100, (int) ($filters['per_page'] ?? 25))));
+    }
+
+    /**
+     * Blocked / would-block access attempts for the Access Control "Blocked attempts" tab.
+     * These live in security_events (not activity_logs / not policy-change History).
+     *
+     * @param  array{per_page?: int|null, event_type?: string|null, q?: string|null}  $filters
+     */
+    public function listAccessBlockedAttempts(Hub $hub, User $actor, array $filters = []): LengthAwarePaginator
+    {
+        $this->ensureSchema();
+        $this->assertModuleEnabled($hub);
+        $this->assertCan($hub, $actor, 'secmon_manage_access');
+
+        $types = self::ACCESS_BLOCKED_ATTEMPT_EVENTS;
+        if (! empty($filters['event_type']) && in_array($filters['event_type'], $types, true)) {
+            $types = [$filters['event_type']];
+        }
+
+        $query = SecurityEvent::query()
+            ->where(function ($q) use ($hub) {
+                $q->where('hub_id', $hub->id)->orWhereNull('hub_id');
+            })
+            ->whereIn('event_type', $types)
+            ->orderByDesc('occurred_at')
+            ->orderByDesc('id');
+
+        $q = trim((string) ($filters['q'] ?? ''));
+        if ($q !== '') {
+            $like = '%'.$q.'%';
+            $query->where(function ($inner) use ($like) {
+                $inner->where('description', 'like', $like)
+                    ->orWhere('title', 'like', $like)
+                    ->orWhere('source_ip', 'like', $like)
+                    ->orWhere('actor_email', 'like', $like)
+                    ->orWhere('actor_name', 'like', $like)
+                    ->orWhere('properties->country', 'like', $like)
+                    ->orWhere('properties->city', 'like', $like)
+                    ->orWhere('properties->user_email', 'like', $like);
+            });
         }
 
         return $query->paginate(max(1, min(100, (int) ($filters['per_page'] ?? 25))));
@@ -766,8 +821,10 @@ class SecurityMonitoringService
             'uk_cities',
             'restrict_countries_enabled',
             'restricted_countries',
+            'restricted_cities',
             'allow_countries_enabled',
             'allowed_countries',
+            'allowed_cities',
             'restrict_ips_enabled',
             'restricted_ips',
             'allow_ips_enabled',
@@ -885,6 +942,14 @@ class SecurityMonitoringService
             fn ($c) => $geoIp->normalizeCountry($c),
             (array) ($data['allowed_countries'] ?? [])
         ))));
+        $restrictedCities = array_values(array_unique(array_filter(array_map(
+            fn ($c) => $geoIp->normalizeCity($c),
+            (array) ($data['restricted_cities'] ?? [])
+        ))));
+        $allowedCities = array_values(array_unique(array_filter(array_map(
+            fn ($c) => $geoIp->normalizeCity($c),
+            (array) ($data['allowed_cities'] ?? [])
+        ))));
         $restrictedIps = array_values(array_unique(array_filter(array_map(
             fn ($ip) => trim((string) $ip),
             (array) ($data['restricted_ips'] ?? [])
@@ -915,7 +980,16 @@ class SecurityMonitoringService
         $countryOverlap = array_values(array_intersect($restrictedCountries, $allowedCountries));
         if ($countryOverlap !== []) {
             throw ValidationException::withMessages([
-                'countries' => 'Country conflict: '.implode(', ', $countryOverlap).' cannot be in both Restricted countries and Allowed countries.',
+                'countries' => 'Country conflict: '.implode(', ', $countryOverlap).' cannot be in both Restricted and Allowed countries.',
+            ]);
+        }
+
+        $restrictedCityKeys = array_map(fn ($c) => mb_strtolower((string) $c), $restrictedCities);
+        $allowedCityKeys = array_map(fn ($c) => mb_strtolower((string) $c), $allowedCities);
+        $cityOverlapKeys = array_values(array_intersect($restrictedCityKeys, $allowedCityKeys));
+        if ($cityOverlapKeys !== []) {
+            throw ValidationException::withMessages([
+                'cities' => 'City conflict: '.implode(', ', $cityOverlapKeys).' cannot be in both Restricted and Allowed cities.',
             ]);
         }
 
@@ -927,17 +1001,17 @@ class SecurityMonitoringService
 
         if ($ukCitiesEnabled && $cities === []) {
             throw ValidationException::withMessages([
-                'uk_cities' => 'Select at least one UK city when UK cities is enabled.',
+                'uk_cities' => 'Select at least one UK city when Specific UK cities is enabled.',
             ]);
         }
-        if ($restrictCountriesEnabled && $restrictedCountries === []) {
+        if ($restrictCountriesEnabled && $restrictedCountries === [] && $restrictedCities === []) {
             throw ValidationException::withMessages([
-                'restricted_countries' => 'Add at least one country to restrict.',
+                'restricted_countries' => 'Add at least one country or city to restrict.',
             ]);
         }
-        if ($allowCountriesEnabled && $allowedCountries === []) {
+        if ($allowCountriesEnabled && $allowedCountries === [] && $allowedCities === []) {
             throw ValidationException::withMessages([
-                'allowed_countries' => 'Add at least one country to allow.',
+                'allowed_countries' => 'Add at least one country or city to allow.',
             ]);
         }
         if ($restrictIpsEnabled && $restrictedIps === []) {
@@ -958,7 +1032,9 @@ class SecurityMonitoringService
             'access_restrict_countries_enabled' => $restrictCountriesEnabled,
             'access_allow_countries_enabled' => $allowCountriesEnabled,
             'access_restricted_countries' => $restrictedCountries,
+            'access_restricted_cities' => $restrictedCities,
             'access_allowed_countries' => $allowedCountries,
+            'access_allowed_cities' => $allowedCities,
             'access_restrict_ips_enabled' => $restrictIpsEnabled,
             'access_allow_ips_enabled' => $allowIpsEnabled,
             'access_restricted_ips' => $restrictedIps,

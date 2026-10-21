@@ -684,6 +684,7 @@ Route::middleware('auth:sanctum')->group(function () {
                 Route::put('/access-control/hub-settings', [SecurityMonitoringController::class, 'updateAccessSettings']);
                 Route::post('/access-control/simulate', [SecurityMonitoringController::class, 'simulateAccess']);
                 Route::get('/access-control/changes', [SecurityMonitoringController::class, 'accessPolicyChanges']);
+                Route::get('/access-control/blocked-attempts', [SecurityMonitoringController::class, 'accessBlockedAttempts']);
                 Route::post('/access-control/changes/{changeId}/restore', [SecurityMonitoringController::class, 'restoreAccessPolicyChange'])
                     ->whereNumber('changeId');
                 Route::post('/access-control/emergency-unlock', [SecurityMonitoringController::class, 'emergencyUnlockAccess']);
@@ -1175,6 +1176,7 @@ Route::middleware('auth:sanctum')->group(function () {
                 Route::put('/access-control/hub-settings', [SecurityMonitoringController::class, 'updateAccessSettings']);
                 Route::post('/access-control/simulate', [SecurityMonitoringController::class, 'simulateAccess']);
                 Route::get('/access-control/changes', [SecurityMonitoringController::class, 'accessPolicyChanges']);
+                Route::get('/access-control/blocked-attempts', [SecurityMonitoringController::class, 'accessBlockedAttempts']);
                 Route::post('/access-control/changes/{changeId}/restore', [SecurityMonitoringController::class, 'restoreAccessPolicyChange'])
                     ->whereNumber('changeId');
                 Route::post('/access-control/emergency-unlock', [SecurityMonitoringController::class, 'emergencyUnlockAccess']);

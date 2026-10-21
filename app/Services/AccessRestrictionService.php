@@ -15,14 +15,17 @@ use Laravel\Sanctum\PersonalAccessToken;
 /**
  * Hub + optional per-user geo / IP / VPN access rules (NFR-SEC-FW companion).
  *
- * Precedence (Option B):
+ * Precedence (Option B — product sequence):
  * 1. Restrict IPs → hard deny
  * 2. Allow IPs → hard allow (overrides rules below)
- * 3. Restrict VPN → deny when VPN/proxy detected
- * 4. Allow VPN → hard allow when VPN detected (overrides geo below)
- * 5. Restrict countries (Allow countries can unblock a listed country)
- * 6. UK only / UK cities (Allow countries can override)
- * 7. Allow countries exclusive allowlist / Allow IPs alone / Allow VPN alone
+ * 3. Block VPN → deny when VPN/proxy detected
+ * 4. Allow VPN → hard allow when VPN detected (legacy; UI may keep off)
+ * 5. Restrict countries / cities → hard deny
+ * 6. Allow countries / cities → hard allow (overrides UK rules below)
+ * 7. Specific UK cities
+ * 8. UK only
+ * 9. Allow countries/cities exclusive allowlist when enabled and not matched / not on UK path
+ * 10. Allow IPs / Allow VPN alone when no geo rules
  *
  * Hub rules apply to every request. User rules merge in after the caller is identified.
  * Env deny-list / temporary blocks still apply first via FirewallService.
@@ -429,11 +432,13 @@ class AccessRestrictionService
     public static function reasonLabel(string $reason): string
     {
         return match ($reason) {
-            'allowed', 'allow_ips_override', 'allow_vpn_override' => 'Allowed',
+            'allowed', 'allow_ips_override', 'allow_vpn_override', 'allow_countries_override', 'allow_cities_override' => 'Allowed',
             'restrict_ips' => 'Restrict IPs',
             'restrict_vpn' => 'Block VPN',
-            'restrict_countries' => 'Restrict countries',
-            'allow_countries' => 'Allow countries',
+            'restrict_countries' => 'Restricted countries',
+            'restrict_cities' => 'Restricted cities',
+            'allow_countries' => 'Allowed countries',
+            'allow_cities' => 'Allowed cities',
             'uk_only' => 'UK only',
             'uk_cities', 'uk_cities_country' => 'Specific UK cities',
             'allow_ips', 'allow_ips_or_vpn' => 'Allow IPs',
@@ -513,10 +518,18 @@ class AccessRestrictionService
                 $hubRestrictCountries ? (array) ($hub['restricted_countries'] ?? []) : [],
                 $userRestrictCountries ? (array) ($user['restricted_countries'] ?? []) : []
             ),
+            'restricted_cities' => $this->mergeLists(
+                $hubRestrictCountries ? (array) ($hub['restricted_cities'] ?? []) : [],
+                $userRestrictCountries ? (array) ($user['restricted_cities'] ?? []) : []
+            ),
             'allow_countries_enabled' => $hubAllowCountries || $userAllowCountries,
             'allowed_countries' => $this->mergeLists(
                 $hubAllowCountries ? (array) ($hub['allowed_countries'] ?? []) : [],
                 $userAllowCountries ? (array) ($user['allowed_countries'] ?? []) : []
+            ),
+            'allowed_cities' => $this->mergeLists(
+                $hubAllowCountries ? (array) ($hub['allowed_cities'] ?? []) : [],
+                $userAllowCountries ? (array) ($user['allowed_cities'] ?? []) : []
             ),
             'restrict_ips_enabled' => $hubRestrictIps || $userRestrictIps,
             'restricted_ips' => $this->mergeLists(
@@ -635,10 +648,18 @@ class AccessRestrictionService
                 fn ($c) => $this->geoIp->normalizeCountry($c),
                 (array) ($row->access_restricted_countries ?? [])
             ))),
+            'restricted_cities' => array_values(array_filter(array_map(
+                fn ($c) => $this->geoIp->normalizeCity($c),
+                (array) ($row->access_restricted_cities ?? [])
+            ))),
             'allow_countries_enabled' => (bool) ($row->access_allow_countries_enabled ?? false),
             'allowed_countries' => array_values(array_filter(array_map(
                 fn ($c) => $this->geoIp->normalizeCountry($c),
                 (array) ($row->access_allowed_countries ?? [])
+            ))),
+            'allowed_cities' => array_values(array_filter(array_map(
+                fn ($c) => $this->geoIp->normalizeCity($c),
+                (array) ($row->access_allowed_cities ?? [])
             ))),
             'restrict_ips_enabled' => (bool) ($row->access_restrict_ips_enabled ?? false),
             'restricted_ips' => $this->normalizeIpList($row->access_restricted_ips ?? []),
@@ -667,7 +688,10 @@ class AccessRestrictionService
         $restrictVpnEnabled = ! empty($settings['restrict_vpn_enabled']);
         $allowVpnEnabled = ! empty($settings['allow_vpn_enabled']);
 
-        $needsGeo = $ukOnly || $ukCitiesEnabled || $restrictCountriesEnabled || $allowCountriesEnabled;
+        $restrictedCities = (array) ($settings['restricted_cities'] ?? []);
+        $allowedCities = (array) ($settings['allowed_cities'] ?? []);
+        $needsCityGeo = $ukCitiesEnabled || $restrictedCities !== [] || $allowedCities !== [];
+        $needsGeo = $ukOnly || $needsCityGeo || $restrictCountriesEnabled || $allowCountriesEnabled;
         $needsVpn = $restrictVpnEnabled || $allowVpnEnabled;
 
         $geo = ['country' => null, 'city' => null, 'vpn' => null, 'source' => 'none'];
@@ -686,7 +710,7 @@ class AccessRestrictionService
             && $allowedIps !== []
             && $this->ipInList($ip, $allowedIps);
 
-        // 1) Restricted IPs — hard deny (cannot be overridden by allow lists).
+        // 1) Restricted IPs — hard deny.
         if ($restrictIpsEnabled
             && $ip !== ''
             && $restrictedIps !== []
@@ -695,30 +719,59 @@ class AccessRestrictionService
             return $this->deny('restrict_ips', $geo);
         }
 
-        // 2) Allowed IPs — hard allow / exception that overrides VPN + geo below.
+        // 2) Allowed IPs — hard allow (overrides VPN + geo below).
         if ($ipOnAllowList) {
             return $this->allow('allow_ips_override', $geo);
         }
 
         $isVpn = ($geo['vpn'] ?? null) === true;
 
-        // 3) Restrict VPN — block detected VPN/proxy (Allow IP already overrode above).
-        //    Unknown VPN signal does not block (fail open on detection gaps).
+        // 3) Block VPN.
         if ($restrictVpnEnabled && $isVpn) {
             return $this->deny('restrict_vpn', $geo);
         }
 
-        // 4) Allow VPN — hard allow when VPN detected (overrides country / UK / city).
+        // 4) Allow VPN (legacy hard allow).
         if ($allowVpnEnabled && $isVpn) {
             return $this->allow('allow_vpn_override', $geo);
         }
 
         $country = $geo['country'];
         $city = $geo['city'];
+
         $countryOnAllowList = $allowCountriesEnabled
             && $country !== null
             && $allowedCountries !== []
             && in_array($country, $allowedCountries, true);
+        $cityOnAllowList = $allowCountriesEnabled
+            && $city !== null
+            && $allowedCities !== []
+            && $this->cityMatches($city, $allowedCities);
+        $onAllowGeoList = $countryOnAllowList || $cityOnAllowList;
+
+        // 5) Restricted countries / cities — hard deny (opposing allow lists must not overlap).
+        if ($restrictCountriesEnabled) {
+            if ($country !== null
+                && $restrictedCountries !== []
+                && in_array($country, $restrictedCountries, true)
+            ) {
+                return $this->deny('restrict_countries', $geo);
+            }
+            if ($city !== null
+                && $restrictedCities !== []
+                && $this->cityMatches($city, $restrictedCities)
+            ) {
+                return $this->deny('restrict_cities', $geo);
+            }
+        }
+
+        // 6) Allowed countries / cities — hard allow (overrides Specific UK cities / UK only).
+        if ($onAllowGeoList) {
+            return $this->allow(
+                $cityOnAllowList && ! $countryOnAllowList ? 'allow_cities_override' : 'allow_countries_override',
+                $geo
+            );
+        }
 
         $isUk = $country !== null && in_array($country, self::UK_COUNTRY_CODES, true);
         $ukCityOk = $isUk
@@ -726,41 +779,30 @@ class AccessRestrictionService
             && $ukCities !== []
             && $this->cityMatches($city, $ukCities);
 
-        // 5) Restricted countries — unless Allow countries explicitly lists that country.
-        if ($restrictCountriesEnabled
-            && $country !== null
-            && $restrictedCountries !== []
-            && in_array($country, $restrictedCountries, true)
-            && ! $countryOnAllowList
-        ) {
-            return $this->deny('restrict_countries', $geo);
-        }
-
-        // 6) UK only — Allow countries can override for listed non-UK countries.
-        if ($ukOnly && ! $isUk && ! $countryOnAllowList) {
-            return $this->deny('uk_only', $geo);
-        }
-
-        // 7) UK cities — Allow countries can override for a whole listed country.
-        if ($ukCitiesEnabled && ! $ukCityOk && ! $countryOnAllowList) {
+        // 7) Specific UK cities.
+        if ($ukCitiesEnabled && ! $ukCityOk) {
             return $this->deny($isUk ? 'uk_cities' : 'uk_cities_country', $geo);
         }
 
-        // 8) Allow countries as exclusive allowlist when the request was not already
-        //    admitted by UK-only / UK-cities (those paths stay open without needing
-        //    the country on the allow list).
-        if ($allowCountriesEnabled && ! $countryOnAllowList) {
+        // 8) UK only.
+        if ($ukOnly && ! $isUk) {
+            return $this->deny('uk_only', $geo);
+        }
+
+        // 9) Allow countries/cities as exclusive allowlist when not already admitted by UK path.
+        if ($allowCountriesEnabled && ! $onAllowGeoList) {
             $admittedByUkPath = ($ukOnly && $isUk) || ($ukCitiesEnabled && $ukCityOk);
             if (! $admittedByUkPath) {
-                return $this->deny('allow_countries', $geo);
+                return $this->deny(
+                    ($allowedCities !== [] && $allowedCountries === []) ? 'allow_cities' : 'allow_countries',
+                    $geo
+                );
             }
         }
 
         $hasGeoRules = $ukOnly || $ukCitiesEnabled || $restrictCountriesEnabled || $allowCountriesEnabled;
 
-        // 9) Exclusive allow modes when no geo rules admitted the request:
-        //    Allow IPs / Allow VPN alone (or together) require a positive match.
-        //    Matches already returned above; reaching here means no match.
+        // 10) Exclusive Allow IPs / Allow VPN alone when no geo rules.
         if (! $hasGeoRules && ($allowIpsEnabled || $allowVpnEnabled)) {
             if ($allowIpsEnabled && $allowVpnEnabled) {
                 return $this->deny('allow_ips_or_vpn', $geo);
@@ -810,6 +852,12 @@ class AccessRestrictionService
 
             $ip = (string) $request->ip();
             $geo = $this->geoIp->lookup($ip !== '' ? $ip : null, $request);
+            $actor = $this->resolveRequestUser($request);
+            $country = $geo['country'] ?? null;
+            $city = $geo['city'] ?? null;
+            $who = $actor
+                ? trim(($actor->name ?: 'User').' <'.($actor->email ?: 'unknown').'>')
+                : 'guest / unauthenticated';
 
             $this->securityMonitoring->recordEvent($hub, [
                 'category' => SecurityEvent::CATEGORY_AUTHORIZATION,
@@ -817,25 +865,30 @@ class AccessRestrictionService
                 'severity' => $monitorOnly ? SecurityEvent::SEVERITY_LOW : SecurityEvent::SEVERITY_MEDIUM,
                 'title' => $title,
                 'description' => sprintf(
-                    '%s API request from %s (%s/%s) to %s %s — rule: %s.',
+                    '%s access by %s from %s/%s (IP %s) to %s %s — rule: %s.',
                     $monitorOnly ? 'Would block' : 'Blocked',
+                    $who,
+                    $country ?: '??',
+                    $city ?: '??',
                     $ip !== '' ? $ip : 'unknown',
-                    $geo['country'] ?? '??',
-                    $geo['city'] ?? '??',
                     $request->method(),
                     '/'.$request->path(),
                     $reason
                 ),
-                'actor' => $request->user(),
+                'actor' => $actor,
                 'request' => $request,
                 'properties' => [
                     'source_ip' => $ip,
                     'path' => '/'.$request->path(),
+                    'http_method' => $request->method(),
                     'reason' => $reason,
-                    'country' => $geo['country'],
-                    'city' => $geo['city'],
+                    'country' => $country,
+                    'city' => $city,
                     'vpn' => $geo['vpn'] ?? null,
                     'monitor_only' => $monitorOnly,
+                    'user_id' => $actor?->id,
+                    'user_email' => $actor?->email,
+                    'user_name' => $actor?->name,
                 ],
             ]);
         } catch (\Throwable) {
@@ -899,10 +952,18 @@ class AccessRestrictionService
                 fn ($c) => $this->geoIp->normalizeCountry($c),
                 (array) ($row->access_restricted_countries ?? [])
             ))),
+            'restricted_cities' => array_values(array_filter(array_map(
+                fn ($c) => $this->geoIp->normalizeCity($c),
+                (array) ($row->access_restricted_cities ?? [])
+            ))),
             'allow_countries_enabled' => (bool) ($row->access_allow_countries_enabled ?? false),
             'allowed_countries' => array_values(array_filter(array_map(
                 fn ($c) => $this->geoIp->normalizeCountry($c),
                 (array) ($row->access_allowed_countries ?? [])
+            ))),
+            'allowed_cities' => array_values(array_filter(array_map(
+                fn ($c) => $this->geoIp->normalizeCity($c),
+                (array) ($row->access_allowed_cities ?? [])
             ))),
             'restrict_ips_enabled' => (bool) ($row->access_restrict_ips_enabled ?? false),
             'restricted_ips' => $this->normalizeIpList($row->access_restricted_ips ?? []),
@@ -927,8 +988,10 @@ class AccessRestrictionService
             'uk_cities' => [],
             'restrict_countries_enabled' => false,
             'restricted_countries' => [],
+            'restricted_cities' => [],
             'allow_countries_enabled' => false,
             'allowed_countries' => [],
+            'allowed_cities' => [],
             'restrict_ips_enabled' => false,
             'restricted_ips' => [],
             'allow_ips_enabled' => false,
@@ -1024,7 +1087,7 @@ class AccessRestrictionService
      */
     public static function ruleOptions(): array
     {
-        // Order matches evaluation precedence (Option B + VPN).
+        // Order matches evaluation precedence.
         return [
             [
                 'key' => 'restrict_ips',
@@ -1034,32 +1097,32 @@ class AccessRestrictionService
             [
                 'key' => 'allow_ips',
                 'label' => 'Allow IPs',
-                'description' => 'These IPs / CIDRs / ranges are always allowed and override VPN / country / UK / city blocks. Alone, only these entries may access.',
+                'description' => 'These IPs / CIDRs / ranges are always allowed and override VPN / country / city / UK rules. Alone, only these entries may access.',
             ],
             [
                 'key' => 'restrict_vpn',
                 'label' => 'Block VPN',
-                'description' => 'When enabled, block detected VPN/proxy/hosting exits. When disabled, VPN traffic is allowed and follows other rules. Allow IPs can still override. Detection is best-effort.',
+                'description' => 'When enabled, block detected VPN/proxy/hosting exits. Allow IPs can still override. Detection is best-effort.',
             ],
             [
                 'key' => 'restrict_countries',
-                'label' => 'Restrict countries',
-                'description' => 'Block requests from the selected countries. A matching Allow IP still gets through; Allow countries can unblock a listed country.',
+                'label' => 'Restricted countries / cities',
+                'description' => 'Block requests from selected countries or cities. Allow IPs can override. Must not overlap Allowed countries / cities.',
             ],
             [
                 'key' => 'allow_countries',
-                'label' => 'Allow countries',
-                'description' => 'Allow these countries (and use as exceptions to UK-only / restrict-countries). Combine with Allow IPs for per-IP exceptions.',
+                'label' => 'Allowed countries / cities',
+                'description' => 'Always allow these countries or cities (overrides Specific UK cities / UK only). Alone or with no UK path, acts as an allowlist.',
             ],
             [
                 'key' => 'uk_cities',
                 'label' => 'Specific UK cities',
-                'description' => 'Allow requests only from selected UK cities (must also resolve as GB). Allow IPs / Allow countries can override.',
+                'description' => 'Allow requests only from selected UK cities (must also resolve as GB). Allow IPs / Allowed countries or cities can override.',
             ],
             [
                 'key' => 'uk_only',
                 'label' => 'UK only',
-                'description' => 'Allow requests only from United Kingdom IP addresses. Allow IPs / Allow countries can override.',
+                'description' => 'Allow requests only from United Kingdom IP addresses. Allow IPs / Allowed countries or cities can override.',
             ],
         ];
     }
