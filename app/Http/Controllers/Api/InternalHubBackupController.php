@@ -7,13 +7,17 @@ use App\Models\Hub;
 use App\Models\HubBackup;
 use App\Services\HubBackupService;
 use App\Services\HubService;
+use App\Support\HubInternalAuth;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * Hub ↔ Central backup callbacks (shared secret / per-hub backup_token).
+ * Hub ↔ Central backup callbacks.
+ *
+ * run / receive: X-Hub-Backup-Key (backup_token / HUB_BACKUP_SECRET)
+ * restore:       X-Hub-Restore-Key (restore_token / HUB_RESTORE_SECRET)
  */
 class InternalHubBackupController extends Controller
 {
@@ -27,7 +31,7 @@ class InternalHubBackupController extends Controller
      */
     public function run(Request $request): JsonResponse
     {
-        if (! $this->authorizeHub($request)) {
+        if (! HubInternalAuth::authorizeCurrentHub($request, HubInternalAuth::PURPOSE_BACKUP)) {
             return response()->json(['message' => 'Unauthorized'], 401);
         }
 
@@ -47,7 +51,7 @@ class InternalHubBackupController extends Controller
             // Reuse the key + registry slug Central used to authorize /run so the
             // upload matches Central's hubs.backup_token even if this deploy's
             // HUB_SLUG / local token drifted from the Central registry.
-            $uploadToken = (string) $request->header('X-Hub-Backup-Key', '');
+            $uploadToken = (string) $request->header(HubInternalAuth::HEADER_BACKUP, '');
             $uploadSlug = (string) ($request->header('X-Hub-Slug')
                 ?: $request->input('hub_slug', '')
                 ?: $this->hubs->current()->slug);
@@ -87,12 +91,12 @@ class InternalHubBackupController extends Controller
         }
 
         $slug = (string) ($request->header('X-Hub-Slug') ?: $request->input('hub_slug', ''));
-        if (! $this->authorizeIncoming($request, $slug)) {
+        if (! HubInternalAuth::authorizeIncomingBackup($request, $slug)) {
             Log::warning('hub backup receive: unauthorized', [
                 'ip' => $request->ip(),
                 'slug' => $slug,
-                'key_present' => $request->header('X-Hub-Backup-Key') !== null
-                    && $request->header('X-Hub-Backup-Key') !== '',
+                'key_present' => $request->header(HubInternalAuth::HEADER_BACKUP) !== null
+                    && $request->header(HubInternalAuth::HEADER_BACKUP) !== '',
             ]);
 
             return response()->json(['message' => 'Unauthorized'], 401);
@@ -146,7 +150,7 @@ class InternalHubBackupController extends Controller
      */
     public function restore(Request $request): JsonResponse
     {
-        if (! $this->authorizeHub($request)) {
+        if (! HubInternalAuth::authorizeCurrentHub($request, HubInternalAuth::PURPOSE_RESTORE)) {
             return response()->json(['message' => 'Unauthorized'], 401);
         }
 
@@ -178,56 +182,6 @@ class InternalHubBackupController extends Controller
         }
     }
 
-    private function authorizeHub(Request $request): bool
-    {
-        $provided = (string) $request->header('X-Hub-Backup-Key', '');
-        if ($provided === '') {
-            return false;
-        }
-
-        $hub = $this->hubs->current();
-        $expected = (string) ($hub->backup_token ?: '');
-        $shared = (string) config('services.hub_backup.secret', '');
-
-        if ($expected !== '' && hash_equals($expected, $provided)) {
-            return true;
-        }
-
-        return $shared !== '' && hash_equals($shared, $provided);
-    }
-
-    private function authorizeIncoming(Request $request, string $slug): bool
-    {
-        $provided = (string) $request->header('X-Hub-Backup-Key', '');
-        if ($provided === '') {
-            return false;
-        }
-
-        $hub = Hub::query()->where('slug', $slug)->first();
-        if ($hub && filled($hub->backup_token) && hash_equals((string) $hub->backup_token, $provided)) {
-            return true;
-        }
-
-        // Token matches a registered hub (content HUB_SLUG can differ from Central slug).
-        $matched = Hub::query()
-            ->whereNotNull('backup_token')
-            ->where('backup_token', '!=', '')
-            ->get()
-            ->first(fn (Hub $row) => hash_equals((string) $row->backup_token, $provided));
-        if ($matched) {
-            Log::info('hub backup receive: authorized by token match', [
-                'provided_slug' => $slug,
-                'matched_slug' => $matched->slug,
-            ]);
-
-            return true;
-        }
-
-        $shared = (string) config('services.hub_backup.secret', '');
-
-        return $shared !== '' && hash_equals($shared, $provided);
-    }
-
     /**
      * Resolve the Central registry hub for a received archive (slug, else token).
      */
@@ -240,7 +194,7 @@ class InternalHubBackupController extends Controller
             }
         }
 
-        $provided = (string) $request->header('X-Hub-Backup-Key', '');
+        $provided = (string) $request->header(HubInternalAuth::HEADER_BACKUP, '');
         if ($provided === '') {
             return null;
         }

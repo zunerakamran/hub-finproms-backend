@@ -248,7 +248,10 @@ class GeneralComplianceEncryptionTest extends TestCase
     public function test_internal_gc_file_endpoint_serves_encrypted_bytes_with_hub_key(): void
     {
         Storage::fake('gc_encrypted');
-        config(['services.hub_backup.secret' => 'test-hub-secret']);
+        config([
+            'services.hub_backup.secret' => 'test-backup-secret',
+            'services.hub_backup.gc_file_secret' => 'test-gc-secret',
+        ]);
 
         $hub = $this->createHub();
         $caps = is_array($hub->role_capabilities) ? $hub->role_capabilities : [];
@@ -280,7 +283,12 @@ class GeneralComplianceEncryptionTest extends TestCase
         $this->getJson('/api/internal/gc/file/'.$attachment->id)
             ->assertUnauthorized();
 
-        $this->withHeaders(['X-Hub-Backup-Key' => 'test-hub-secret'])
+        // Backup key must NOT unlock GC file bridge.
+        $this->withHeaders(['X-Hub-Backup-Key' => 'test-backup-secret'])
+            ->get('/api/internal/gc/file/'.$attachment->id)
+            ->assertUnauthorized();
+
+        $this->withHeaders(['X-Hub-Gc-File-Key' => 'test-gc-secret'])
             ->get('/api/internal/gc/file/'.$attachment->id)
             ->assertOk()
             ->assertSee('BRIDGE-BYTES', false);
@@ -304,6 +312,7 @@ class GeneralComplianceEncryptionTest extends TestCase
             'is_active' => true,
             'api_url' => 'https://shared-remote.test/api',
             'backup_token' => 'shared-backup-token',
+            'gc_file_token' => 'shared-gc-token',
             'checklist' => array_merge(Hub::defaultChecklist(Hub::TYPE_SHARED), [
                 'module_general_compliance' => true,
             ]),
@@ -334,7 +343,7 @@ class GeneralComplianceEncryptionTest extends TestCase
         $this->assertSame('REMOTE-FILE-BYTES', $bytes);
         Http::assertSent(function ($request) {
             return $request->url() === 'https://shared-remote.test/api/internal/gc/file/99'
-                && $request->header('X-Hub-Backup-Key')[0] === 'shared-backup-token';
+                && $request->header('X-Hub-Gc-File-Key')[0] === 'shared-gc-token';
         });
     }
 

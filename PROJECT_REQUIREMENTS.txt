@@ -1,9 +1,8 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-21 (NFR-SEC-APP SSRF: WC embed proxy + cPanel outbound
-  block private/loopback/metadata hosts via SafeOutboundUrl; validate
-  cpanel_domain on deploy / promote-to-live)
+Last updated: 2026-10-21 (NFR-SEC: purpose-scoped /internal/* hub keys —
+  restore / GC / deploy-env no longer share backup_token; SSRF embed fix)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -150,15 +149,14 @@ Release artifacts (stored on Central disk: storage/app/private/releases/{ver}/):
 Apply:
 - POST /api/power-admin/releases/apply { release_id?, hub_ids: [] }
 - Central marks hub code_apply_status=updating, ensures code_update_token
-  (reuses backup_token when present), pushes token + code_frontend_path via
-  white-label DB sync when remote DB wired.
+  (never reuses backup/restore/GC/deploy tokens), pushes token +
+  code_frontend_path via white-label DB sync when remote DB wired.
 - Content hub: POST {api_url}/internal/code-updates/apply with
   X-Hub-Code-Update-Key; hub downloads artifacts from Central
   GET /api/internal/code-updates/artifacts/{release}/{backend|frontend},
   extracts, writes VERSION + storage marker, runs migrate --force, clears caches.
 - Central self-apply uses local artifact files (no HTTP loopback).
-- Auth: code_update_token OR backup_token OR HUB_CODE_UPDATE_SECRET /
-  HUB_BACKUP_SECRET.
+- Auth: code_update_token OR HUB_CODE_UPDATE_SECRET only (not backup keys).
 - Per hub: apply_status (idle|updating|applied|failed), target_version,
   applied_at, apply_error; then refresh reported version.
 
@@ -1366,9 +1364,21 @@ Notes:
 - Scheduler: `hubs:run-due-backups` every minute (requires schedule:run cron on
   each deploy). Central also triggers due remotes via hub api_url when set.
 - Restore from Central uses the Central-stored zip; content hubs receive the
-  archive on POST /api/internal/hub-backups/restore (X-Hub-Backup-Key).
+  archive on POST /api/internal/hub-backups/restore (**X-Hub-Restore-Key**,
+  not the backup key).
+- Purpose-scoped machine auth (2026-10-21): compromising backup credentials
+  MUST NOT authorize restore, GC file bridge, or deploy-env writes.
+    - run / receive → `X-Hub-Backup-Key` + `backup_token` / `HUB_BACKUP_SECRET`
+    - restore → `X-Hub-Restore-Key` + `restore_token` / `HUB_RESTORE_SECRET`
+    - GC files → `X-Hub-Gc-File-Key` + `gc_file_token` / `HUB_GC_FILE_SECRET`
+    - deploy-env → `X-Hub-Deploy-Env-Key` + `deploy_env_token` / `HUB_DEPLOY_ENV_SECRET`
+    - code updates remain on `X-Hub-Code-Update-Key` + `code_update_token`
+  Saving backup schedule mints all purpose tokens; WhiteLabel sync pushes them
+  to content hubs. Optional `HUB_INTERNAL_ALLOWED_IPS`; throttle
+  `internal-hub` + stricter `internal-restore`.
 - Env (optional): CENTRAL_API_URL on content hubs for independent upload;
-  HUB_BACKUP_SECRET shared fallback; per-hub backup_token auto-generated.
+  purpose-scoped shared secret fallbacks (never reuse one value for all);
+  per-hub tokens auto-generated.
 - Capability: pa_manage_hub_backups (Power Admin platform checklist).
 - **Encryption at rest (NFR-BACKUP-ENC):** completed ZIP archives are encrypted
   on disk with streaming AES-256-GCM (`HBENC1` header) when
@@ -2349,6 +2359,9 @@ SECURITY HARDENING (phase 2 — 2026-10-04)
     WhiteLabelDatabaseService PDO/pgsql ssl options)
 [x] Hub backup & restore (section 6B): per-hub schedule from Central, dual store
     (hub local + Central), Backup now / download / restore, pa_manage_hub_backups
+[x] Hub /internal/* purpose-scoped secrets (2026-10-21): separate tokens +
+    headers for backup / restore / GC files / deploy-env; optional IP allowlist;
+    `throttle:internal-hub` + `throttle:internal-restore`; HubInternalAuth helper
 [x] NFR-BACKUP-ENC (section 6B / 9.7): encrypt backup ZIPs at rest (AES-256-GCM
     HBENC1); shared HUB_BACKUP_ENCRYPTION_KEY; decrypt on download/restore;
     legacy plaintext still works; hub_backups.is_encrypted
@@ -2928,6 +2941,13 @@ Product fulfilment
      - Template preview capture already used the same helper; embed + cPanel
        must stay aligned.
 
+  H) Hub machine callbacks — purpose-scoped secrets
+     - `/api/internal/*` MUST NOT share one master key across backup, restore,
+       GC file bridge, and deploy-env. Each purpose has its own header +
+       per-hub token + optional shared env fallback (`HubInternalAuth`).
+     - Optional `HUB_INTERNAL_ALLOWED_IPS`; dedicated rate limiters
+       `internal-hub` and `internal-restore`.
+
 Operational fulfilment (out of app code)
 - Keep cPanel / host firewall, fail2ban (or equivalent), TLS, and optional
   CDN/WAF in front of public hosts.
@@ -2947,6 +2967,8 @@ Acceptance criteria (for “done”)
   [x] Security headers present on API responses (feature test)
   [x] SSRF: SafeOutboundUrl on WC embed + cPanel sync + preview; deploy
       validates cpanel_domain; feature test rejects metadata/loopback embed
+  [x] Hub /internal/* purpose-scoped secrets (backup ≠ restore ≠ GC ≠ deploy-env);
+      unit + GC feature tests assert backup key cannot unlock other purposes
 
 Related but distinct
 - NFR-SEC (9.1) — monitoring & dependency scan reporting

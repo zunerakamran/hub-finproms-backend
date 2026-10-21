@@ -96,8 +96,9 @@ class GeneralComplianceEncryptedFiles
         $token = self::hubAuthToken($hub);
         if ($token === '') {
             throw new RuntimeException(
-                'Hub “'.$hub->slug.'” has no backup_token / HUB_BACKUP_SECRET; '
-                .'cannot store encrypted GC files remotely.'
+                'Hub “'.$hub->slug.'” has no gc_file_token / HUB_GC_FILE_SECRET; '
+                .'cannot store encrypted GC files remotely. Save hub backup settings '
+                .'(or push settings) so purpose tokens are generated.'
             );
         }
 
@@ -110,7 +111,7 @@ class GeneralComplianceEncryptedFiles
         $response = Http::withOptions(['verify' => $verify])
             ->timeout(120)
             ->withHeaders([
-                'X-Hub-Backup-Key' => $token,
+                \App\Support\HubInternalAuth::HEADER_GC_FILE => $token,
                 'X-Hub-Slug' => (string) $hub->slug,
                 'Accept' => 'application/json',
             ])
@@ -153,8 +154,9 @@ class GeneralComplianceEncryptedFiles
         $token = self::hubAuthToken($hub);
         if ($token === '') {
             throw new RuntimeException(
-                'Hub “'.$hub->slug.'” has no backup_token / HUB_BACKUP_SECRET; '
-                .'cannot download encrypted GC files from Central.'
+                'Hub “'.$hub->slug.'” has no gc_file_token / HUB_GC_FILE_SECRET; '
+                .'cannot download encrypted GC files from Central. Save hub backup settings '
+                .'(or push settings) so purpose tokens are generated.'
             );
         }
 
@@ -162,7 +164,7 @@ class GeneralComplianceEncryptedFiles
         $response = Http::withOptions(['verify' => $verify])
             ->timeout(120)
             ->withHeaders([
-                'X-Hub-Backup-Key' => $token,
+                \App\Support\HubInternalAuth::HEADER_GC_FILE => $token,
                 'X-Hub-Slug' => (string) $hub->slug,
                 'Accept' => '*/*',
             ])
@@ -237,7 +239,7 @@ class GeneralComplianceEncryptedFiles
             throw new RuntimeException(
                 'Generic Compliance file is missing from storage (path: '.$path.'). '
                 .'If you are on Central viewing a content hub, deploy the latest API on that hub '
-                .'and ensure backup_token / HUB_BACKUP_SECRET match. Otherwise re-upload the file.'
+                .'and ensure gc_file_token / HUB_GC_FILE_SECRET match. Otherwise re-upload the file.'
             );
         }
 
@@ -282,12 +284,19 @@ class GeneralComplianceEncryptedFiles
 
     private static function hubAuthToken(Hub $hub): string
     {
-        $token = (string) ($hub->backup_token ?: '');
-        if ($token !== '') {
-            return $token;
+        $existing = \App\Support\HubInternalAuth::tokenOrShared(
+            $hub,
+            \App\Support\HubInternalAuth::PURPOSE_GC_FILE
+        );
+        if ($existing !== '') {
+            return $existing;
         }
 
-        return (string) config('services.hub_backup.secret', '');
+        // Mint on Central registry; pushSettings / backup schedule sync to the hub.
+        return \App\Support\HubInternalAuth::ensureToken(
+            $hub,
+            \App\Support\HubInternalAuth::PURPOSE_GC_FILE
+        );
     }
 
     private static function readRawBytes(string $path): ?string

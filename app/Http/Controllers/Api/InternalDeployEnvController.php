@@ -3,28 +3,27 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Services\HubBackupService;
 use App\Services\HubDeployEnvService;
 use App\Services\HubService;
+use App\Support\HubInternalAuth;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Throwable;
 
 /**
  * Content hub: apply allowlisted deploy env keys from Central.
- * Auth: same X-Hub-Backup-Key as backup callbacks.
+ * Auth: X-Hub-Deploy-Env-Key (deploy_env_token / HUB_DEPLOY_ENV_SECRET) — not the backup key.
  */
 class InternalDeployEnvController extends Controller
 {
     public function __construct(
         private readonly HubDeployEnvService $deployEnv,
         private readonly HubService $hubs,
-        private readonly HubBackupService $backups,
     ) {}
 
     public function apply(Request $request): JsonResponse
     {
-        if (! $this->authorizeHub($request)) {
+        if (! HubInternalAuth::authorizeCurrentHub($request, HubInternalAuth::PURPOSE_DEPLOY_ENV)) {
             return response()->json(['message' => 'Unauthorized'], 401);
         }
 
@@ -55,23 +54,5 @@ class InternalDeployEnvController extends Controller
 
             return response()->json(['message' => $e->getMessage()], 422);
         }
-    }
-
-    private function authorizeHub(Request $request): bool
-    {
-        $provided = (string) $request->header('X-Hub-Backup-Key', '');
-        if ($provided === '') {
-            return false;
-        }
-
-        $hub = $this->hubs->current();
-        $expected = (string) ($hub->backup_token ?: '');
-        $shared = (string) config('services.hub_backup.secret', '');
-
-        if ($expected !== '' && hash_equals($expected, $provided)) {
-            return true;
-        }
-
-        return $shared !== '' && hash_equals($shared, $provided);
     }
 }

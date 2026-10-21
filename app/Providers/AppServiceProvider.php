@@ -78,5 +78,19 @@ class AppServiceProvider extends ServiceProvider
 
             return Limit::perMinute(30)->by('wc-publish:'.$key);
         });
+
+        // Hub ↔ Central /internal/* machine callbacks (tighter than global API).
+        RateLimiter::for('internal-hub', function (Request $request) {
+            $perMinute = max(5, (int) config('services.hub_backup.internal_rate_per_minute', 30));
+
+            return Limit::perMinute($perMinute)->by('internal-hub:'.$request->ip());
+        });
+
+        // DB restore is especially sensitive — keep a low ceiling.
+        RateLimiter::for('internal-restore', function (Request $request) {
+            $perMinute = max(1, (int) config('services.hub_backup.restore_rate_per_minute', 5));
+
+            return Limit::perMinute($perMinute)->by('internal-restore:'.$request->ip());
+        });
     }
 }

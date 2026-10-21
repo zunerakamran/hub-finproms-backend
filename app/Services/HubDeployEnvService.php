@@ -198,7 +198,12 @@ class HubDeployEnvService
             ];
         }
 
-        $token = $this->backups->ensureBackupToken($hub);
+        $this->backups->ensureBackupToken($hub);
+        $hub->refresh();
+        $token = \App\Support\HubInternalAuth::ensureToken(
+            $hub,
+            \App\Support\HubInternalAuth::PURPOSE_DEPLOY_ENV
+        );
         $payload = $this->envValuesForHub($hub);
         if ($payload === []) {
             return [
@@ -213,7 +218,7 @@ class HubDeployEnvService
         $response = Http::withOptions(['verify' => $verify])
             ->timeout(30)
             ->withHeaders([
-                'X-Hub-Backup-Key' => $token,
+                \App\Support\HubInternalAuth::HEADER_DEPLOY_ENV => $token,
                 'X-Hub-Slug' => $hub->slug,
                 'Accept' => 'application/json',
             ])

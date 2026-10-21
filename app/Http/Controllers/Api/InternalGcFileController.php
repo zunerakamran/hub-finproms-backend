@@ -4,9 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\GeneralComplianceRequestAttachment;
-use App\Models\Hub;
-use App\Services\HubService;
 use App\Support\GeneralComplianceEncryptedFiles;
+use App\Support\HubInternalAuth;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -14,7 +13,9 @@ use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * Hub ↔ Central GC encrypted-file bridge (shared secret / per-hub backup_token).
+ * Hub ↔ Central GC encrypted-file bridge.
+ *
+ * Auth: X-Hub-Gc-File-Key (gc_file_token / HUB_GC_FILE_SECRET) — not the backup key.
  *
  * Central acting on a content hub reads that hub's DB remotely, but encrypted
  * bytes live on the content hub's disk. These endpoints let Central store/fetch
@@ -22,16 +23,12 @@ use Throwable;
  */
 class InternalGcFileController extends Controller
 {
-    public function __construct(
-        private readonly HubService $hubs
-    ) {}
-
     /**
      * Decrypt and return attachment bytes from THIS deploy's disk.
      */
     public function show(Request $request, int|string $id): Response|JsonResponse
     {
-        if (! $this->authorizeHub($request)) {
+        if (! HubInternalAuth::authorizeCurrentHub($request, HubInternalAuth::PURPOSE_GC_FILE)) {
             return response()->json(['message' => 'Unauthorized.'], 401);
         }
 
@@ -79,7 +76,7 @@ class InternalGcFileController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
-        if (! $this->authorizeHub($request)) {
+        if (! HubInternalAuth::authorizeCurrentHub($request, HubInternalAuth::PURPOSE_GC_FILE)) {
             return response()->json(['message' => 'Unauthorized.'], 401);
         }
 
@@ -105,24 +102,6 @@ class InternalGcFileController extends Controller
             'original_name' => $this->safeFilename((string) $file->getClientOriginalName()),
             'mime_type' => $file->getClientMimeType() ?: $file->getMimeType(),
         ], 201);
-    }
-
-    private function authorizeHub(Request $request): bool
-    {
-        $provided = (string) $request->header('X-Hub-Backup-Key', '');
-        if ($provided === '') {
-            return false;
-        }
-
-        $hub = $this->hubs->current();
-        $expected = (string) ($hub->backup_token ?: '');
-        $shared = (string) config('services.hub_backup.secret', '');
-
-        if ($expected !== '' && hash_equals($expected, $provided)) {
-            return true;
-        }
-
-        return $shared !== '' && hash_equals($shared, $provided);
     }
 
     private function safeFilename(string $name): string

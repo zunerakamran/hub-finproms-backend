@@ -70,12 +70,24 @@ return [
     | CENTRAL_API_URL = https://central.example.com/api  (preferred on content hubs).
     | CENTRAL_ALLOWED_RECEIVE_HOSTS = comma-separated hosts allowed when CENTRAL_API_URL
     | is empty and Central passes X-Central-Receive-Url (e.g. central.fin-proms.com).
-    | HUB_BACKUP_SECRET = shared fallback key when per-hub backup_token is empty.
+    | Purpose-scoped secrets (do not reuse across purposes):
+    |   HUB_BACKUP_SECRET     — run / receive only (X-Hub-Backup-Key)
+    |   HUB_RESTORE_SECRET    — restore only (X-Hub-Restore-Key)
+    |   HUB_GC_FILE_SECRET    — GC encrypted file bridge (X-Hub-Gc-File-Key)
+    |   HUB_DEPLOY_ENV_SECRET — deploy-env .env write (X-Hub-Deploy-Env-Key)
+    | Per-hub tokens (backup_token / restore_token / gc_file_token / deploy_env_token)
+    | are preferred and auto-generated. Optional HUB_INTERNAL_ALLOWED_IPS CIDR list.
     */
     'hub_backup' => [
         'central_api_url' => env('CENTRAL_API_URL'),
         'allowed_receive_hosts' => env('CENTRAL_ALLOWED_RECEIVE_HOSTS', ''),
         'secret' => env('HUB_BACKUP_SECRET'),
+        'restore_secret' => env('HUB_RESTORE_SECRET'),
+        'gc_file_secret' => env('HUB_GC_FILE_SECRET'),
+        'deploy_env_secret' => env('HUB_DEPLOY_ENV_SECRET'),
+        'internal_allowed_ips' => env('HUB_INTERNAL_ALLOWED_IPS', ''),
+        'internal_rate_per_minute' => (int) env('HUB_INTERNAL_RATE_PER_MINUTE', 30),
+        'restore_rate_per_minute' => (int) env('HUB_RESTORE_RATE_PER_MINUTE', 5),
         'upload_timeout' => (int) env('HUB_BACKUP_UPLOAD_TIMEOUT', 600),
         // NFR-BACKUP-ENC: encrypt ZIP archives at rest (AES-256-GCM).
         // Prefer a shared HUB_BACKUP_ENCRYPTION_KEY on Central + content hubs.

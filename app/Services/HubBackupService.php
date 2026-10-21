@@ -6,6 +6,7 @@ use App\Models\Hub;
 use App\Models\HubBackup;
 use App\Models\User;
 use App\Support\HubBackupEncryptedArchive;
+use App\Support\HubInternalAuth;
 use App\Support\SafeOutboundUrl;
 use App\Support\ZipSupport;
 use Carbon\Carbon;
@@ -51,6 +52,9 @@ class HubBackupService
             'retention_central' => (int) ($hub->backup_retention_central ?: 14),
             'last_run_at' => $hub->backup_last_run_at?->toIso8601String(),
             'token_set' => filled($hub->backup_token),
+            'restore_token_set' => filled($hub->restore_token),
+            'gc_file_token_set' => filled($hub->gc_file_token),
+            'deploy_env_token_set' => filled($hub->deploy_env_token),
             'due_now' => $this->isDue($hub),
             // Central backs itself up once on this server (no local+central duplicate).
             'single_store' => $hub->isControlPlane(),
@@ -59,14 +63,12 @@ class HubBackupService
 
     public function ensureBackupToken(Hub $hub): string
     {
-        if (filled($hub->backup_token)) {
-            return (string) $hub->backup_token;
-        }
+        // Also mint restore / GC / deploy-env tokens so purpose-scoped
+        // /internal/* auth is ready after the first backup settings save.
+        HubInternalAuth::ensureAllTokens($hub);
+        $hub->refresh();
 
-        $token = Str::random(64);
-        $hub->forceFill(['backup_token' => $token])->save();
-
-        return $token;
+        return (string) $hub->backup_token;
     }
 
     public function isDue(Hub $hub, ?Carbon $now = null): bool
@@ -609,10 +611,8 @@ class HubBackupService
             throw new RuntimeException('Hub api_url is not set; cannot push restore to that server.');
         }
 
-        $token = (string) ($hub->backup_token ?: '');
-        if ($token === '') {
-            throw new RuntimeException('Hub backup token is missing. Save backup settings first.');
-        }
+        $token = HubInternalAuth::ensureToken($hub, HubInternalAuth::PURPOSE_RESTORE);
+        $hub->refresh();
 
         $absolute = $backup->absolutePath();
         if (! $absolute || ! is_file($absolute)) {
@@ -623,7 +623,7 @@ class HubBackupService
         $response = Http::withOptions(['verify' => $verify])
             ->timeout((int) config('services.hub_backup.upload_timeout', 600))
             ->withHeaders([
-                'X-Hub-Backup-Key' => $token,
+                HubInternalAuth::HEADER_RESTORE => $token,
                 'X-Hub-Slug' => $hub->slug,
             ])
             ->attach('archive', file_get_contents($absolute), $backup->filename ?: 'backup.zip')

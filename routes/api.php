@@ -125,22 +125,28 @@ Route::get('/website-compliance/uploaded-images/{filename}', [WcUploadController
     ->where('filename', '[A-Za-z0-9._-]+');
 Route::get('/website-compliance/scheduler/publish-scheduled', [WcSchedulerController::class, 'publishScheduled']);
 
-// Hub backup callbacks (shared secret / per-hub backup_token — no Sanctum)
-Route::post('/internal/hub-backups/run', [InternalHubBackupController::class, 'run']);
-Route::post('/internal/hub-backups/receive', [InternalHubBackupController::class, 'receive']);
-Route::post('/internal/hub-backups/restore', [InternalHubBackupController::class, 'restore']);
+// Hub ↔ Central machine callbacks (no Sanctum). Purpose-scoped keys:
+//   backup run/receive → X-Hub-Backup-Key
+//   restore            → X-Hub-Restore-Key
+//   GC files           → X-Hub-Gc-File-Key
+//   deploy-env         → X-Hub-Deploy-Env-Key
+//   code updates       → X-Hub-Code-Update-Key
+// Throttled tighter than the global API limiter.
+Route::middleware('throttle:internal-hub')->group(function () {
+    Route::post('/internal/hub-backups/run', [InternalHubBackupController::class, 'run']);
+    Route::post('/internal/hub-backups/receive', [InternalHubBackupController::class, 'receive']);
+    Route::post('/internal/hub-backups/restore', [InternalHubBackupController::class, 'restore'])
+        ->middleware('throttle:internal-restore');
 
-// GC encrypted files: Central ↔ content-hub storage bridge (same auth as backups)
-Route::get('/internal/gc/file/{id}', [InternalGcFileController::class, 'show'])->whereNumber('id');
-Route::post('/internal/gc/file', [InternalGcFileController::class, 'store']);
+    Route::get('/internal/gc/file/{id}', [InternalGcFileController::class, 'show'])->whereNumber('id');
+    Route::post('/internal/gc/file', [InternalGcFileController::class, 'store']);
 
-// Code update apply / artifact download (per-hub code_update_token or backup_token)
-Route::post('/internal/code-updates/apply', [InternalCodeUpdateController::class, 'apply']);
-Route::get('/internal/code-updates/artifacts/{release}/{kind}', [InternalCodeUpdateController::class, 'artifact'])
-    ->where('kind', 'backend|frontend');
+    Route::post('/internal/code-updates/apply', [InternalCodeUpdateController::class, 'apply']);
+    Route::get('/internal/code-updates/artifacts/{release}/{kind}', [InternalCodeUpdateController::class, 'artifact'])
+        ->where('kind', 'backend|frontend');
 
-// Central → content hub: write allowlisted deploy env keys into hub .env
-Route::post('/internal/deploy-env/apply', [\App\Http\Controllers\Api\InternalDeployEnvController::class, 'apply']);
+    Route::post('/internal/deploy-env/apply', [\App\Http\Controllers\Api\InternalDeployEnvController::class, 'apply']);
+});
 
 // Hub iframe preview of live advisor sites (bypasses X-Frame-Options on cPanel).
 // Optional /h/{hubId}/ prefix: Central Hub remotes into a content-hub deployment DB.

@@ -56,6 +56,10 @@ class HubBackupTest extends TestCase
         $this->assertTrue((bool) $hub->backup_enabled);
         $this->assertSame('03:30', $hub->backup_time);
         $this->assertNotEmpty($hub->backup_token);
+        $this->assertNotEmpty($hub->restore_token);
+        $this->assertNotEmpty($hub->gc_file_token);
+        $this->assertNotEmpty($hub->deploy_env_token);
+        $this->assertNotSame($hub->backup_token, $hub->restore_token);
     }
 
     public function test_local_backup_creates_archive_for_current_hub(): void
