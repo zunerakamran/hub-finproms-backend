@@ -17,6 +17,7 @@ use App\Services\WebsiteCompliance\CpanelSyncService;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
 use App\Support\ApiListResponse;
 use App\Support\PlainText;
+use App\Support\SafeOutboundUrl;
 use App\Support\WebsiteCompliance\HubTemplateCatalog;
 use App\Support\WebsiteCompliance\BrandColor;
 use Illuminate\Http\JsonResponse;
@@ -290,6 +291,15 @@ class TemplateRequestController extends Controller
         }
 
         $targetDomain = trim((string) $request->cpanel_domain);
+        // Defense in depth: reject literal private/metadata hosts on write.
+        // Fetch-time checks also resolve DNS (see PublicController / CpanelSyncService).
+        $siteCheck = SafeOutboundUrl::validateAdvisorSiteUrl($targetDomain, resolveDns: false);
+        if (! ($siteCheck['ok'] ?? false)) {
+            throw ValidationException::withMessages([
+                'cpanel_domain' => [$siteCheck['message'] ?? 'Invalid advisor site URL.'],
+            ]);
+        }
+
         $isLiveUpdate = $templateRequest->isLive();
         $wasPending = (string) $templateRequest->status === TemplateRequest::STATUS_PENDING;
         $isLegacyDeployed = (string) $templateRequest->status === TemplateRequest::STATUS_DEPLOYED;
@@ -529,6 +539,13 @@ class TemplateRequestController extends Controller
             return response()->json([
                 'message' => 'A main/live domain is required to deploy this site live.',
             ], 422);
+        }
+
+        $siteCheck = SafeOutboundUrl::validateAdvisorSiteUrl($liveDomain, resolveDns: false);
+        if (! ($siteCheck['ok'] ?? false)) {
+            throw ValidationException::withMessages([
+                'cpanel_domain' => [$siteCheck['message'] ?? 'Invalid advisor site URL.'],
+            ]);
         }
 
         $updates = [

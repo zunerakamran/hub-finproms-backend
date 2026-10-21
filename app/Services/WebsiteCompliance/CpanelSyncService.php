@@ -4,6 +4,7 @@ namespace App\Services\WebsiteCompliance;
 
 use App\Models\WebsiteCompliance\Section;
 use App\Models\WebsiteCompliance\TemplateRequest;
+use App\Support\SafeOutboundUrl;
 use App\Support\WebsiteCompliance\BrandColor;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -534,7 +535,33 @@ class CpanelSyncService
             'body' => null,
         ];
 
+        // SSRF: never post API keys / content to private or metadata hosts.
+        $siteCheck = SafeOutboundUrl::validateAdvisorSiteUrl(
+            (string) $templateRequest->cpanel_domain,
+            resolveDns: true
+        );
+        if (! ($siteCheck['ok'] ?? false)) {
+            Log::warning("cPanel push ({$label}) blocked unsafe cpanel_domain", [
+                'template_request_id' => $templateRequest->id,
+                'message' => $siteCheck['message'] ?? 'unsafe host',
+            ]);
+
+            return [
+                'ok' => false,
+                'endpoint' => null,
+                'message' => (string) ($siteCheck['message'] ?? 'cPanel domain is not an allowed public http(s) host.'),
+                'http_status' => null,
+                'body' => null,
+            ];
+        }
+
         foreach (self::advisorApiEndpoints($templateRequest) as $endpoint) {
+            if (! SafeOutboundUrl::isSafeOutboundUrl($endpoint, resolveDns: true)) {
+                Log::warning("cPanel push ({$label}) skipped unsafe endpoint", ['endpoint' => $endpoint]);
+
+                continue;
+            }
+
             try {
                 $response = Http::timeout(25)
                     ->withHeaders([

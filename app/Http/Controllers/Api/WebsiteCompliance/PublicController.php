@@ -12,6 +12,7 @@ use App\Services\HubService;
 use App\Services\WebsiteCompliance\AdvisorSectionService;
 use App\Services\WebsiteCompliance\CpanelSyncService;
 use App\Services\WhiteLabelDatabaseService;
+use App\Support\SafeOutboundUrl;
 use App\Support\WebsiteCompliance\BrandColor;
 use App\Support\WebsiteCompliance\HubTemplateCatalog;
 use App\Support\WebsiteCompliance\WcDatabaseContext;
@@ -19,6 +20,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class PublicController extends Controller
 {
@@ -298,6 +300,18 @@ class PublicController extends Controller
         }
 
         $base = rtrim(CpanelSyncService::normalizeAdvisorSiteUrl($templateRequest->cpanel_domain), '/').'/';
+        // Block private / loopback / cloud-metadata hosts (SSRF). Preview capture
+        // already uses SafeOutboundUrl; embed must do the same before Http::get.
+        $safeBase = SafeOutboundUrl::validateAdvisorSiteUrl(rtrim($base, '/'), resolveDns: true);
+        if (! ($safeBase['ok'] ?? false)) {
+            Log::warning('WC embed blocked unsafe cpanel_domain', [
+                'template_request_id' => $templateRequestId,
+                'hub_id' => $hubId,
+                'host' => parse_url($base, PHP_URL_HOST),
+            ]);
+            abort(403, 'Deployment site host is not allowed');
+        }
+
         $path = str_replace('\\', '/', (string) $path);
         $path = ltrim($path, '/');
         if ($path !== '' && (str_contains($path, '..') || str_starts_with($path, '/'))) {
@@ -316,6 +330,10 @@ class PublicController extends Controller
         $targetHostPath = $this->embedUrlPrefix($target);
         if ($baseHostPath === '' || ! str_starts_with($targetHostPath, $baseHostPath)) {
             abort(403, 'Target outside deployment site');
+        }
+
+        if (! SafeOutboundUrl::isSafeOutboundUrl($target, resolveDns: true)) {
+            abort(403, 'Deployment site host is not allowed');
         }
 
         try {
@@ -407,9 +425,13 @@ class PublicController extends Controller
         $secondary = null;
 
         try {
+            $brandUrl = rtrim($siteBase, '/').'/api.php';
+            if (! SafeOutboundUrl::isSafeOutboundUrl($brandUrl, resolveDns: true)) {
+                throw new \RuntimeException('Advisor site host is not allowed');
+            }
             $brandRes = Http::timeout(12)
                 ->withOptions(['verify' => (bool) config('services.http_tls_verify', true)])
-                ->get(rtrim($siteBase, '/').'/api.php');
+                ->get($brandUrl);
             if ($brandRes->successful()) {
                 $json = $brandRes->json();
                 if (is_array($json)) {

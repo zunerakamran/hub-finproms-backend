@@ -40,4 +40,29 @@ class SafeOutboundUrlTest extends TestCase
             'https://evil.example.com/api',
         ]));
     }
+
+    #[Test]
+    public function it_rejects_unsafe_advisor_site_urls_without_dns(): void
+    {
+        $meta = SafeOutboundUrl::validateAdvisorSiteUrl('http://169.254.169.254/', resolveDns: false);
+        $this->assertFalse($meta['ok']);
+
+        $loopback = SafeOutboundUrl::validateAdvisorSiteUrl('127.0.0.1', resolveDns: false);
+        $this->assertFalse($loopback['ok']);
+
+        $private = SafeOutboundUrl::validateAdvisorSiteUrl('https://10.0.0.5/site', resolveDns: false);
+        $this->assertFalse($private['ok']);
+
+        $ok = SafeOutboundUrl::validateAdvisorSiteUrl('advisor.example.com', resolveDns: false);
+        $this->assertTrue($ok['ok']);
+        $this->assertSame('https://advisor.example.com', $ok['url']);
+    }
+
+    #[Test]
+    public function it_reports_safe_outbound_urls(): void
+    {
+        $this->assertFalse(SafeOutboundUrl::isSafeOutboundUrl('http://169.254.169.254/latest', resolveDns: false));
+        $this->assertFalse(SafeOutboundUrl::isSafeOutboundUrl('file:///etc/passwd', resolveDns: false));
+        $this->assertTrue(SafeOutboundUrl::isSafeOutboundUrl('https://advisor.example.com/', resolveDns: false));
+    }
 }

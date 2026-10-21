@@ -1,9 +1,9 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-21 (NFR-SEC-FW Access Control: hyphenated IP ranges
-  e.g. 203.0.113.10-203.0.113.50 on Restrict/Allow IPs + env deny list;
-  CIDR + single IP unchanged)
+Last updated: 2026-10-21 (NFR-SEC-APP SSRF: WC embed proxy + cPanel outbound
+  block private/loopback/metadata hosts via SafeOutboundUrl; validate
+  cpanel_domain on deploy / promote-to-live)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -2308,6 +2308,12 @@ SECURITY HARDENING (phase 1 — 2026-10-04)
 [x] Sanctum token expiry default 7d (SANCTUM_EXPIRATION); session idle 7d (SESSION_LIFETIME);
     per-hub override via hubs.session_lifetime_minutes (Active sessions / capable role)
 [x] Outbound TLS verify on by default (HTTP_TLS_VERIFY); cPanel + embed proxy
+[x] SSRF hardening (2026-10-21): WC public embed proxy and cPanel sync MUST
+    refuse private / loopback / link-local / cloud-metadata hosts via
+    `SafeOutboundUrl` (same helper as template preview capture). Deploy and
+    promote-to-live validate `cpanel_domain` on write (literal IP/host checks);
+    embed + cPanel HTTP clients re-check with DNS resolution before fetch.
+    Unit + feature tests cover metadata/loopback rejection.
 [x] Scheduler auth: X-Scheduler-Key header + hash_equals (query key still works)
 [x] Activity log redacts api_key / cpanel_* / hub stripe secrets
 [x] CORS: localhost origins only outside production; CORS_ALLOWED_ORIGINS extra
@@ -2413,9 +2419,11 @@ UK GDPR / DATA PROTECTION (section 2.2d + 6E) — Phase 1 backend done
     History/restore; lockout recovery; trusted-proxy/geo hardening;
     `secmon_manage_access`; events fw.access_* (see §9.5 D)
 [x] NFR-SEC-APP (section 9.6): protection against SQL injection, XSS, CSRF,
-    brute-force, malware, and app-layer DDoS/abuse — Eloquent/bindings;
-    SafeHtml on Terms/Privacy/Cookies + SPA DOMPurify; Sanctum CSRF;
-    auth+API rate limiters; NFR-SEC-FW malware; volumetric DDoS = ops/CDN
+    brute-force, malware, app-layer DDoS/abuse, and SSRF on WC outbound
+    fetches — Eloquent/bindings; SafeHtml on Terms/Privacy/Cookies + SPA
+    DOMPurify; Sanctum CSRF; auth+API rate limiters; NFR-SEC-FW malware;
+    SafeOutboundUrl on embed proxy + cPanel sync + preview capture;
+    volumetric DDoS = ops/CDN
 [x] NFR-SEC-VAL (section 9.8): server-side validation and sanitization of all
     user inputs — every mutating API uses Laravel validate(); API middleware
     SanitizeRequestInput scrubs null bytes / control chars; InputSanitizer
@@ -2854,10 +2862,12 @@ rate limits are application-layer abuse mitigation only.
 
 Statement
 - The platform SHALL protect against SQL injection, cross-site scripting (XSS),
-  cross-site request forgery (CSRF), brute-force authentication attacks, and
-  malware in uploads, and SHALL apply application-layer throttling against
-  abusive / flood traffic. Network-layer DDoS absorption (CDN, provider WAF,
-  host firewall) SHALL be maintained operationally outside this codebase.
+  cross-site request forgery (CSRF), brute-force authentication attacks,
+  malware in uploads, and server-side request forgery (SSRF) on trusted
+  outbound HTTP (WC embed / cPanel / preview), and SHALL apply application-
+  layer throttling against abusive / flood traffic. Network-layer DDoS
+  absorption (CDN, provider WAF, host firewall) SHALL be maintained
+  operationally outside this codebase.
 
 Product fulfilment
 
@@ -2907,6 +2917,17 @@ Product fulfilment
      - Rate-limit trips may record `api.rate_limited` in Security Monitoring.
      - NOT a substitute for CDN / cloud DDoS protection or host firewall.
 
+  G) SSRF (server-side request forgery) — WC outbound
+     - Public embed proxy (`/api/website-compliance/embed-site/...`) and
+       cPanel sync posts MUST call `SafeOutboundUrl` before any server-side
+       HTTP fetch. Block loopback, RFC1918, link-local, and cloud metadata
+       hosts (e.g. 169.254.169.254); do not follow redirects off-host.
+     - `cpanel_domain` on deploy / promote-to-live is validated on write
+       (literal private/metadata hosts rejected). Fetch paths also resolve
+       DNS and fail closed on private answers.
+     - Template preview capture already used the same helper; embed + cPanel
+       must stay aligned.
+
 Operational fulfilment (out of app code)
 - Keep cPanel / host firewall, fail2ban (or equivalent), TLS, and optional
   CDN/WAF in front of public hosts.
@@ -2924,6 +2945,8 @@ Acceptance criteria (for “done”)
   [x] Malware covered by cross-ref to NFR-SEC-FW
   [x] Explicit: volumetric DDoS = ops/CDN, not Laravel alone
   [x] Security headers present on API responses (feature test)
+  [x] SSRF: SafeOutboundUrl on WC embed + cPanel sync + preview; deploy
+      validates cpanel_domain; feature test rejects metadata/loopback embed
 
 Related but distinct
 - NFR-SEC (9.1) — monitoring & dependency scan reporting
@@ -2931,7 +2954,7 @@ Related but distinct
 - NFR-SEC-FW (9.5) — IP deny + upload malware gates
 - NFR-SEC-VAL (9.8) — validate + sanitize all user inputs (complements XSS)
 - NFR-BACKUP-ENC (9.7) — backup archive encryption at rest
-- SECURITY HARDENING phase 1–2 — headers, cookies, secrets
+- SECURITY HARDENING phase 1–2 — headers, cookies, secrets (SSRF item in phase 1)
 
 --------------------------------------------------------------------------------
 9.7 NFR-BACKUP-ENC — Hub backup encryption at rest

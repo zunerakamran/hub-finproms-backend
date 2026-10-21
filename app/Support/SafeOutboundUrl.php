@@ -98,6 +98,60 @@ class SafeOutboundUrl
     }
 
     /**
+     * True when $url is http(s) and its host is not private / loopback / metadata.
+     */
+    public static function isSafeOutboundUrl(string $url, bool $resolveDns = true): bool
+    {
+        $parsed = self::parseHttpUrl($url);
+        if ($parsed === null) {
+            return false;
+        }
+
+        return ! self::isBlockedHost($parsed['host'], $resolveDns);
+    }
+
+    /**
+     * Normalize a bare host or URL to absolute http(s), then reject unsafe hosts.
+     *
+     * @return array{ok: true, url: string}|array{ok: false, message: string}
+     */
+    public static function validateAdvisorSiteUrl(string $domain, bool $resolveDns = true): array
+    {
+        $domain = trim($domain);
+        if ($domain === '') {
+            return [
+                'ok' => false,
+                'message' => 'Advisor site URL is required.',
+            ];
+        }
+
+        $domain = rtrim($domain, '/');
+        if (! preg_match('#^https?://#i', $domain)) {
+            $domain = 'https://'.$domain;
+        }
+
+        $parsed = self::parseHttpUrl($domain);
+        if ($parsed === null) {
+            return [
+                'ok' => false,
+                'message' => 'Advisor site URL must be a valid http(s) URL.',
+            ];
+        }
+
+        if (self::isBlockedHost($parsed['host'], $resolveDns)) {
+            return [
+                'ok' => false,
+                'message' => 'Advisor site URL must not target private, loopback, link-local, or metadata hosts.',
+            ];
+        }
+
+        return [
+            'ok' => true,
+            'url' => $domain,
+        ];
+    }
+
+    /**
      * Whether $url's host matches any allowlisted base URL's host.
      *
      * @param  list<string>  $allowedBaseUrls
