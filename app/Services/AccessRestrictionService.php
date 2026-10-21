@@ -7,6 +7,7 @@ use App\Models\SecurityEvent;
 use App\Models\SecurityMonitoringSetting;
 use App\Models\User;
 use App\Models\UserAccessRestrictionSetting;
+use App\Support\IpAddressMatcher;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Laravel\Sanctum\PersonalAccessToken;
@@ -1015,42 +1016,7 @@ class AccessRestrictionService
 
     public function ipMatches(string $ip, string $entry): bool
     {
-        if (! str_contains($entry, '/')) {
-            return strcasecmp($ip, $entry) === 0;
-        }
-
-        [$subnet, $mask] = array_pad(explode('/', $entry, 2), 2, null);
-        if ($subnet === null || $mask === null || ! is_numeric($mask)) {
-            return false;
-        }
-
-        $mask = (int) $mask;
-        $ipBytes = @inet_pton($ip);
-        $subnetBytes = @inet_pton($subnet);
-        if ($ipBytes === false || $subnetBytes === false || strlen($ipBytes) !== strlen($subnetBytes)) {
-            return false;
-        }
-
-        $len = strlen($ipBytes);
-        $bits = $len * 8;
-        if ($mask < 0 || $mask > $bits) {
-            return false;
-        }
-
-        $fullBytes = intdiv($mask, 8);
-        $remain = $mask % 8;
-
-        if ($fullBytes > 0 && substr($ipBytes, 0, $fullBytes) !== substr($subnetBytes, 0, $fullBytes)) {
-            return false;
-        }
-
-        if ($remain === 0) {
-            return true;
-        }
-
-        $maskByte = (~(0xFF >> $remain)) & 0xFF;
-
-        return (ord($ipBytes[$fullBytes]) & $maskByte) === (ord($subnetBytes[$fullBytes]) & $maskByte);
+        return IpAddressMatcher::matches($ip, $entry);
     }
 
     /**
@@ -1063,12 +1029,12 @@ class AccessRestrictionService
             [
                 'key' => 'restrict_ips',
                 'label' => 'Restrict IPs',
-                'description' => 'Always block these IPs / CIDRs (highest priority — not overridden by allow lists).',
+                'description' => 'Always block these IPs / CIDRs / ranges (highest priority — not overridden by allow lists).',
             ],
             [
                 'key' => 'allow_ips',
                 'label' => 'Allow IPs',
-                'description' => 'These IPs are always allowed and override VPN / country / UK / city blocks. Alone, only these IPs may access.',
+                'description' => 'These IPs / CIDRs / ranges are always allowed and override VPN / country / UK / city blocks. Alone, only these entries may access.',
             ],
             [
                 'key' => 'restrict_vpn',

@@ -23,8 +23,9 @@ return [
     | IP deny list (application firewall)
     |--------------------------------------------------------------------------
     |
-    | Comma-separated IPv4/IPv6 addresses or CIDR ranges in env, plus optional
-    | temporary blocks written to cache when failed-login threshold is crossed.
+    | Comma-separated IPv4/IPv6 addresses, CIDRs, or hyphen ranges
+    | (e.g. 203.0.113.10-203.0.113.50) in env, plus optional temporary blocks
+    | written to cache when failed-login threshold is crossed.
     |
     */
 

@@ -552,6 +552,99 @@ class AccessRestrictionTest extends TestCase
             ->assertOk();
     }
 
+    public function test_restrict_and_allow_ip_hyphen_ranges(): void
+    {
+        $hub = $this->createHubWithSecurityMonitoring();
+
+        config([
+            'security_firewall.enabled' => true,
+            'security_firewall.record_security_events' => false,
+            'security_firewall.geoip.http_enabled' => false,
+        ]);
+
+        $this->setAccessRules($hub, [
+            'restrict_ips_enabled' => true,
+            'restricted_ips' => ['203.0.113.10-203.0.113.20'],
+        ]);
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.10'])
+            ->getJson('/api/hub')
+            ->assertForbidden();
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.15'])
+            ->getJson('/api/hub')
+            ->assertForbidden();
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.20'])
+            ->getJson('/api/hub')
+            ->assertForbidden();
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.21'])
+            ->getJson('/api/hub')
+            ->assertOk();
+
+        $this->setAccessRules($hub, [
+            'restrict_ips_enabled' => false,
+            'restricted_ips' => [],
+            'allow_ips_enabled' => true,
+            'allowed_ips' => ['198.51.100.5 - 198.51.100.8'],
+        ]);
+
+        $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.6'])
+            ->getJson('/api/hub')
+            ->assertOk();
+
+        $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.9'])
+            ->getJson('/api/hub')
+            ->assertForbidden();
+    }
+
+    public function test_update_rejects_invalid_ip_range(): void
+    {
+        $this->createHubWithSecurityMonitoring();
+        $admin = User::factory()->create(['role' => User::ROLE_FINPROMS_ADMIN]);
+        Sanctum::actingAs($admin);
+
+        // Inverted range (start > end)
+        $this->putJson('/api/client-admin/security-monitoring/access-settings', [
+            'restrict_ips_enabled' => true,
+            'restricted_ips' => ['203.0.113.50-203.0.113.10'],
+        ])->assertStatus(422);
+
+        // Mixed family
+        $this->putJson('/api/client-admin/security-monitoring/access-settings', [
+            'restrict_ips_enabled' => true,
+            'restricted_ips' => ['203.0.113.10-2001:db8::1'],
+        ])->assertStatus(422);
+    }
+
+    public function test_update_rejects_opposing_ip_and_country_overlaps(): void
+    {
+        $this->createHubWithSecurityMonitoring();
+        $admin = User::factory()->create(['role' => User::ROLE_FINPROMS_ADMIN]);
+        Sanctum::actingAs($admin);
+
+        $this->putJson('/api/client-admin/security-monitoring/access-settings', [
+            'restrict_ips_enabled' => true,
+            'restricted_ips' => ['203.0.113.10-203.0.113.20'],
+            'allow_ips_enabled' => true,
+            'allowed_ips' => ['203.0.113.15'],
+        ])->assertStatus(422);
+
+        $this->putJson('/api/client-admin/security-monitoring/access-settings', [
+            'restrict_countries_enabled' => true,
+            'restricted_countries' => ['RU', 'CN'],
+            'allow_countries_enabled' => true,
+            'allowed_countries' => ['CN', 'IE'],
+        ])->assertStatus(422);
+
+        $this->putJson('/api/client-admin/security-monitoring/access-settings', [
+            'uk_only' => true,
+            'restrict_countries_enabled' => true,
+            'restricted_countries' => ['GB'],
+        ])->assertStatus(422);
+    }
+
     public function test_regular_user_cannot_manage_access_settings(): void
     {
         $this->createHubWithSecurityMonitoring();

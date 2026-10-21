@@ -8,6 +8,7 @@ use App\Models\SecurityIncident;
 use App\Models\SecurityIncidentNote;
 use App\Models\SecurityMonitoringSetting;
 use App\Models\User;
+use App\Support\IpAddressMatcher;
 use App\Support\WebsiteCompliance\WcDatabaseContext;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Schema\Blueprint;
@@ -894,11 +895,34 @@ class SecurityMonitoringService
         ), fn ($ip) => $ip !== '')));
 
         foreach (array_merge($restrictedIps, $allowedIps) as $ip) {
-            if (! $this->isValidIpOrCidr($ip)) {
+            if (! IpAddressMatcher::isValidEntry($ip)) {
                 throw ValidationException::withMessages([
-                    'ips' => "Invalid IP or CIDR: {$ip}",
+                    'ips' => "Invalid IP, CIDR, or range: {$ip}",
                 ]);
             }
+        }
+
+        foreach ($restrictedIps as $restricted) {
+            foreach ($allowedIps as $allowed) {
+                if (IpAddressMatcher::entriesOverlap($restricted, $allowed)) {
+                    throw ValidationException::withMessages([
+                        'ips' => "IP conflict: {$restricted} cannot appear in both Restricted IPs and Allowed IPs (overlaps {$allowed}).",
+                    ]);
+                }
+            }
+        }
+
+        $countryOverlap = array_values(array_intersect($restrictedCountries, $allowedCountries));
+        if ($countryOverlap !== []) {
+            throw ValidationException::withMessages([
+                'countries' => 'Country conflict: '.implode(', ', $countryOverlap).' cannot be in both Restricted countries and Allowed countries.',
+            ]);
+        }
+
+        if (($ukOnly || ($ukCitiesEnabled && $cities !== [])) && in_array('GB', $restrictedCountries, true)) {
+            throw ValidationException::withMessages([
+                'countries' => 'Country conflict: GB cannot be Restricted while UK only / Specific UK cities is enabled.',
+            ]);
         }
 
         if ($ukCitiesEnabled && $cities === []) {
@@ -918,12 +942,12 @@ class SecurityMonitoringService
         }
         if ($restrictIpsEnabled && $restrictedIps === []) {
             throw ValidationException::withMessages([
-                'restricted_ips' => 'Add at least one IP or CIDR to restrict.',
+                'restricted_ips' => 'Add at least one IP, CIDR, or range to restrict.',
             ]);
         }
         if ($allowIpsEnabled && $allowedIps === []) {
             throw ValidationException::withMessages([
-                'allowed_ips' => 'Add at least one IP or CIDR to allow.',
+                'allowed_ips' => 'Add at least one IP, CIDR, or range to allow.',
             ]);
         }
 
@@ -943,28 +967,6 @@ class SecurityMonitoringService
             'access_allow_vpn_enabled' => $allowVpnEnabled,
             'access_enforcement_mode' => $enforcementMode,
         ];
-    }
-
-    private function isValidIpOrCidr(string $value): bool
-    {
-        if (! str_contains($value, '/')) {
-            return filter_var($value, FILTER_VALIDATE_IP) !== false;
-        }
-
-        [$subnet, $mask] = array_pad(explode('/', $value, 2), 2, null);
-        if ($subnet === null || $mask === null || ! is_numeric($mask)) {
-            return false;
-        }
-
-        if (filter_var($subnet, FILTER_VALIDATE_IP) === false) {
-            return false;
-        }
-
-        $mask = (int) $mask;
-        $isV6 = filter_var($subnet, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false;
-        $max = $isV6 ? 128 : 32;
-
-        return $mask >= 0 && $mask <= $max;
     }
 
     /**

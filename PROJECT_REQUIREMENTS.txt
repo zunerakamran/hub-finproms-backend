@@ -1,7 +1,9 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-16 (6B.1 Module disaster recovery via Security Monitoring — implemented)
+Last updated: 2026-10-21 (NFR-SEC-FW Access Control: hyphenated IP ranges
+  e.g. 203.0.113.10-203.0.113.50 on Restrict/Allow IPs + env deny list;
+  CIDR + single IP unchanged)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -1882,6 +1884,10 @@ Who can see what (Capabilities — Hub operations group)
 - `secmon_manage_disaster_recovery` — recognize disasters for an affected
   product module; create module snapshots; roll back that module only
   (section 6B.1 — NOT whole-hub restore; NOT the same as closing an incident)
+- `secmon_manage_access` — open Access Control (hub + user geo/IP/VPN rules,
+  Monitor/Enforce, Simulate, History restore, emergency unlock). See
+  NFR-SEC-FW section 9.5 D). Blurred while Functionalities → Security
+  Monitoring is OFF.
 - Defaults: ON for hub-admin style roles (power_admin when acting, 
   finproms_admin, client_admin, manager); OFF for approver / advisor /
   admin-staff / user until Power Admin enables them.
@@ -1912,6 +1918,12 @@ a **security incident** for investigation. Minimum event types:
      - Upload of disallowed / suspicious file types (NFR-SEC-FW upload scan)
      - Malware detected in upload / malware scan failure (when ClamAV enabled)
      - Application firewall IP denied / temporary auto-block (NFR-SEC-FW)
+     - Access restriction block / would-block (`fw.access_restricted`,
+       `fw.access_would_block`) when hub/user geo/IP/VPN rules match
+       (NFR-SEC-FW 9.5 D)
+     - Access policy change (`fw.access_policy_changed`) — who changed hub
+       or user access rules, with before/after field diff
+     - Emergency access unlock (`fw.access_emergency_unlock`)
 
   D) Platform / dependency health (ops-facing, still shown in the module)
      - Last successful dependency vulnerability scan result (composer audit /
@@ -2342,6 +2354,13 @@ SECURITY HARDENING (phase 2 — 2026-10-04)
 [x] NFR-SEC-FW (section 9.5): application-layer IP deny + dangerous upload
     rejection (incl. SVG block) + optional ClamAV; see §8 NFR-SEC-FW + §9.5
     (per-endpoint mime allowlists already exist on major upload routes)
+[x] NFR-SEC-FW 9.5 D) Access restrictions (Option B): Access Control page
+    (hub + per-user rules); Restrict/Allow IPs & countries (single IP, CIDR,
+    or hyphen range e.g. 203.0.113.10-203.0.113.50); UK only / UK cities;
+    Block VPN; Monitor/Enforce; Simulate; change History + restore;
+    self-lockout confirm; emergency unlock (UI + `access-control:unlock`);
+    admin escape for `secmon_manage_access`; trusted proxies + geo-header
+    hardening (TRUSTED_PROXIES / GEOIP_*); capability `secmon_manage_access`
 
 --------------------------------------------------------------------------------
 UK GDPR / DATA PROTECTION (section 2.2d + 6E) — Phase 1 backend done
@@ -2389,6 +2408,10 @@ UK GDPR / DATA PROTECTION (section 2.2d + 6E) — Phase 1 backend done
     threshold; secmon events fw.ip_denied / fw.ip_auto_blocked /
     data.upload_rejected / data.malware_detected; host/cPanel firewall remains
     ops (not a full WAF product)
+[x] NFR-SEC-FW 9.5 D) Access restrictions Option B (2026-10-20): Access
+    Control UI + hub/user geo/IP/VPN rules; Monitor/Enforce; Simulate;
+    History/restore; lockout recovery; trusted-proxy/geo hardening;
+    `secmon_manage_access`; events fw.access_* (see §9.5 D)
 [x] NFR-SEC-APP (section 9.6): protection against SQL injection, XSS, CSRF,
     brute-force, malware, and app-layer DDoS/abuse — Eloquent/bindings;
     SafeHtml on Terms/Privacy/Cookies + SPA DOMPurify; Sanctum CSRF;
@@ -2675,10 +2698,12 @@ Related but distinct
 --------------------------------------------------------------------------------
 9.5 NFR-SEC-FW — Firewall and malware protection
 --------------------------------------------------------------------------------
-Status: IMPLEMENTED (2026-10-14) — application-layer controls in this backend.
+Status: IMPLEMENTED (2026-10-14) — application-layer IP deny + upload gates.
+Extended 2026-10-20 — Access restrictions Option B (geo/IP/VPN Access Control).
 Optional ClamAV malware scanning is OFF by default (enable when clamscan is
 installed on the host). Host / cPanel / cloud firewall remains an ops duty.
 Cross-refs: section 6F (Security Monitoring events), NFR-SEC (section 9.1),
+Access Control.docx (architecture baseline; product ships Option B subset),
 SECURITY HARDENING phase 2 (headers / cookies), deferred mime/SVG item closed.
 
 Statement
@@ -2686,10 +2711,14 @@ Statement
   malware / dangerous-upload protections appropriate to a multi-tenant hub
   on shared hosting (cPanel), without requiring a commercial WAF appliance
   inside the application repo.
+- The platform SHALL ALSO support hub- and user-scoped network access
+  restrictions (country / city / IP / VPN signals) evaluated on API requests,
+  with safe activation (Monitor → Simulate → Enforce) and lockout recovery.
 
 Product fulfilment (in-app / API)
   A) Application firewall
-     - Deny list of client IPs (and optional CIDR) configured via
+     - Deny list of client IPs (CIDR and/or hyphen ranges
+       e.g. 203.0.113.10-203.0.113.50) configured via
        SECURITY_FIREWALL_DENIED_IPS / config/security_firewall.php.
      - Middleware DenyBlockedIps on the API group returns HTTP 403 for denied
        clients before controllers run.
@@ -2714,6 +2743,48 @@ Product fulfilment (in-app / API)
      - HTTP security headers (SecurityHeaders middleware)
      - Rate limiters (auth / imports / wc-publish) + secmon rate-limit events
      - Per-route mime allowlists on major upload endpoints
+  D) Access restrictions (Option B — Access Control)
+     Practical subset of Access Control.docx (not full GLOBAL AND/deny-wins
+     platform). Requires Functionalities → Security Monitoring ON + capability
+     `secmon_manage_access`.
+     - UI: `/my-dashboard/access-control` (Hub rules | User rules | Simulate |
+       History). Removed from Security Monitoring as a nested tab.
+     - Hub-wide rules apply to every API request; optional per-user rules merge
+       after the caller is identified (Sanctum user / bearer token).
+     - Rule gates (Option B precedence): Restrict IPs → Allow IPs → Block VPN →
+       Restrict countries → Allow countries → Specific UK cities → UK only.
+     - Restrict/Allow IP entries accept: single IPv4/IPv6, CIDR
+       (`198.51.100.0/24`), or inclusive hyphen range
+       (`203.0.113.10-203.0.113.50`; spaces around `-` OK). Start must be
+       ≤ end; same address family. Matching is binary inclusive.
+     - Opposing lists must not overlap (UI alerts + API 422): Restricted IPs
+       vs Allowed IPs (incl. CIDR/range overlap); Restricted countries vs
+       Allowed countries; GB cannot be Restricted while UK only / UK cities
+       is enabled. Frontend Access Control uses chip adders for IP/country/city.
+     - Block VPN: best-effort detection (edge `X-App-Geo-Vpn` and/or ip-api
+       proxy/hosting). Allow IPs can override.
+     - Enforcement mode per hub/user settings: **Monitor** (evaluate + log
+       `fw.access_would_block`, allow) or **Enforce** (HTTP 403 +
+       `fw.access_restricted`). If both hub and user modes are active,
+       Enforce wins.
+     - Simulate: dry-run same decision engine for an IP (+ optional user /
+       country / city / VPN overrides). Never blocks; never writes deny events.
+     - History: `fw.access_policy_changed` with field-level before/after;
+       restore previous (“before”) or “after” snapshot via API.
+     - Lockout recovery: save confirms when Enforce would block the actor’s
+       current IP (409 `self_lockout_risk` unless acknowledged); Emergency
+       unlock / Switch to Monitor in UI; CLI `php artisan access-control:unlock`;
+       authenticated users with `secmon_manage_access` are soft-escaped from
+       hard 403 (logged as would-block) when ACCESS_RESTRICTION_ADMIN_ESCAPE
+       is true (default).
+     - Trusted request data (architecture § Trusted request data):
+       - TRUSTED_PROXIES — Laravel trusts X-Forwarded-* only from listed
+         proxies (empty = ignore forwarding headers). Use `*` only when origin
+         is firewalled so clients cannot hit Laravel directly.
+       - GEOIP_TRUST_HEADERS / GEOIP_REQUIRE_TRUSTED_PROXY_FOR_HEADERS —
+         CF-IP* / X-App-Geo-* used only from a trusted proxy (or Simulate
+         force-trust). Generic X-Country-Code / X-City off by default.
+       - Per-deploy `.env` (each hub server), not stored in Access Control UI.
 
 Operational fulfilment (infra — outside Laravel code)
 - Operators SHALL keep the host firewall / fail2ban / provider WAF (if any)
@@ -2721,6 +2792,11 @@ Operational fulfilment (infra — outside Laravel code)
 - Where ClamAV is required by policy, install and update virus definitions on
   the server, then set MALWARE_SCAN_ENABLED=true (and REQUIRED if fail-closed
   is mandated).
+- For Access Control in production behind Cloudflare/LB: configure
+  TRUSTED_PROXIES appropriately and keep origin locked to the edge; enable
+  GEOIP_REQUIRE_TRUSTED_PROXY_FOR_HEADERS so forged geo headers on a direct
+  origin hit are ignored. Run pending access-restriction migrations on each
+  hub database.
 
 Out of scope / explicit non-goals
 - Replacing a full network WAF / IDS / SIEM product (already out of scope in 6F)
@@ -2728,6 +2804,10 @@ Out of scope / explicit non-goals
 - Scanning files already stored on disk from before this NFR (no retroactive
   bulk re-scan job in v1)
 - Frontend-only changes (backend enforces uploads; SPA needs no gate)
+- Full Access Control.docx platform in v1: GLOBAL scope AND-combine across
+  scopes, draft→approve workflow, three-valued UNKNOWN fail-closed geo,
+  city confidence thresholds, webhook/service policies, live WebSocket
+  re-evaluation (documented architecture; not shipped as Option B)
 
 Acceptance criteria (for “done”)
   [x] Documented in section 9.5 + section 8 checklist
@@ -2739,6 +2819,13 @@ Acceptance criteria (for “done”)
   [x] Security Monitoring event types documented in section 6F catalogue
   [x] Feature tests: SecurityFirewallTest
   [x] Favicon no longer accepts SVG
+  [x] Access Control page + `secmon_manage_access` + hub/user APIs
+  [x] Monitor vs Enforce + would_block / denied behaviour
+  [x] Simulate API + UI
+  [x] Policy change History + restore
+  [x] Self-lockout confirm + emergency unlock (UI + artisan)
+  [x] Trusted proxies + geo-header hardening + GeoIpTrustHeadersTest
+  [x] Feature tests: AccessRestrictionTest
 
 Related but distinct
 - NFR-SEC / Security Monitoring (9.1) — detection & reporting; this NFR is the gate
@@ -2746,6 +2833,7 @@ Related but distinct
 - NFR-GC-ENC (9.3) — field encryption, not malware scanning
 - NFR-SEC-APP (9.6) — broader attack-surface baseline (includes malware cross-ref)
 - Host / cPanel firewall — ops, not application code
+- Access Control.docx — full architecture proposal; product v1 = Option B above
 
 --------------------------------------------------------------------------------
 9.6 NFR-SEC-APP — Protection against SQLi, XSS, CSRF, brute-force, malware, DDoS

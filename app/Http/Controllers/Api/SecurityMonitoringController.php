@@ -256,10 +256,11 @@ class SecurityMonitoringController extends Controller
             'allowed_countries.*' => ['string', 'size:2'],
             'restrict_ips_enabled' => ['sometimes', 'boolean'],
             'restricted_ips' => ['sometimes', 'array', 'max:500'],
-            'restricted_ips.*' => ['string', 'max:64'],
+            // Single IP / CIDR / hyphen range (e.g. 203.0.113.10-203.0.113.50); IPv6 ranges need headroom.
+            'restricted_ips.*' => ['string', 'max:128'],
             'allow_ips_enabled' => ['sometimes', 'boolean'],
             'allowed_ips' => ['sometimes', 'array', 'max:500'],
-            'allowed_ips.*' => ['string', 'max:64'],
+            'allowed_ips.*' => ['string', 'max:128'],
             'restrict_vpn_enabled' => ['sometimes', 'boolean'],
             'allow_vpn_enabled' => ['sometimes', 'boolean'],
             'enforcement_mode' => ['sometimes', 'string', Rule::in(['monitor', 'enforce'])],
