@@ -107,6 +107,7 @@ class User extends Authenticatable
         'acting_advisor_id',
         'firm_id',
         'modules',
+        'capability_overrides',
         'terms_accepted_at',
         'terms_accepted_version',
         'privacy_accepted_at',
@@ -148,6 +149,7 @@ class User extends Authenticatable
             'is_discontinued' => 'boolean',
             'discontinued_at' => 'datetime',
             'modules' => 'array',
+            'capability_overrides' => 'array',
             'two_factor_enabled' => 'boolean',
         ];
     }

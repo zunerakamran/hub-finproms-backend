@@ -216,6 +216,27 @@ class UserRolesService
             );
         }
 
+        // Drop per-user capability overrides that no longer sit in the role UNION.
+        if ($assigned !== [] || $removed !== []) {
+            try {
+                $pruneHub = $hub;
+                if (! $pruneHub) {
+                    $pruneHub = app(HubService::class)->current();
+                }
+                if ($pruneHub) {
+                    app(UserCapabilitiesService::class)->pruneToRoleUnion(
+                        $pruneHub,
+                        $user,
+                        log: $log,
+                        actor: $actor,
+                        request: $request,
+                    );
+                }
+            } catch (\Throwable) {
+                // Overrides prune must not block role sync.
+            }
+        }
+
         $this->hubRoles->forgetUserCountsCache($hub ? (int) $hub->id : null);
 
         return [

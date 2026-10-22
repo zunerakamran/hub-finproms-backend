@@ -1,8 +1,8 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-22 (Multi-role §2.7 / §2.7.1 + SoD §2.7.2 implemented;
-  frontend multi-role UI done)
+Last updated: 2026-10-22 (Per-user capabilities §2.7.3 + role/user capability
+  activity logs; multi-role §2.7 / §2.7.1 + SoD §2.7.2 already done)
 
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
@@ -624,6 +624,39 @@ OPTIONAL / LATER (document only unless product asks):
 
 IMPLEMENTATION: ComplianceSeparationService (backend) enforces the core
 rule across SMC, GC, WC assign/review/status + reviewer lists + taxonomy.
+
+
+2.7.3 Per-user capability overrides (REQUIRED)
+--------------------------------------------------------------------
+After the hub-wide role × capability matrix (§5.2) and multi-role UNION
+(§2.7.1), staff may further refine capabilities for an individual user.
+
+RULES:
+- Candidate set = capabilities granted by ANY of the user’s assigned roles
+  on that hub’s matrix (role UNION). The User capabilities UI shows ONLY
+  those keys — check / uncheck within that set.
+- Cannot GRANT a capability the user’s roles do not already have.
+- Unchecking stores a denylist override (`users.capability_overrides` JSON:
+  `{ "flag": false }`). Missing key = inherit role UNION.
+- `userCan` = role UNION AND not denylisted AND existing module / acting /
+  functionality gates.
+- When roles are removed, overrides that no longer sit in the role UNION
+  are pruned (activity: `user.capability_overrides_pruned`).
+
+GATE / PAGE:
+- Capability: `dashboard_manage_user_capabilities` (“Manage user capabilities”)
+  in Hub operations — unlocks `/my-dashboard/user-capabilities`.
+- APIs (hub_can): GET/PUT `/api/client-admin/user-capabilities/{userId}`
+  (+ power-admin alias); GET list reuses hub-users listing under the same
+  capability prefix.
+
+ACTIVITY LOGS:
+- Role matrix saves → `capabilities.role_matrix_updated` (enabled/disabled
+  cells, including Power Admin `pa_*` column changes).
+- Per-user saves → `user.capability_enabled` / `user.capability_disabled`.
+
+IMPLEMENTATION: UserCapabilitiesService; wired in CapabilitiesMatrixService
+  userCan; UserRolesService prune; AdminUserCapabilities frontend page.
 
 
 --------------------------------------------------------------------------------
@@ -2424,6 +2457,12 @@ STEP 1 — Shared hub core (content hub)
     pickup queues exclude conflicted own items; acting-as advisor subject also
     conflicted. Frontend: hide self-assign/review/change-status when conflicted;
     assign dropdowns exclude conflicted users; SoD validation messages surfaced.
+[x] PER-USER CAPABILITIES (§2.7.3) — users.capability_overrides denylist within
+    role UNION; dashboard_manage_user_capabilities + /my-dashboard/user-capabilities;
+    APIs GET/PUT user-capabilities; userCan honours overrides; prune on role sync;
+    activity logs for role matrix (`capabilities.role_matrix_updated`) and user
+    overrides (`user.capability_enabled` / `user.capability_disabled`). Frontend
+    AdminUserCapabilities page + nav unlock.
 [x] Power Admin capabilities checklist (section 5.3) — separate from hub Functionalities
 [x] Wire Power Admin nav/APIs to Power Admin capabilities
 [x] Capabilities matrix UI — roles × user capabilities (incl. Power Admin) per hub

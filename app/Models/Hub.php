@@ -1313,6 +1313,13 @@ class Hub extends Model
             'default_shared' => true,
             'default_white_label' => true,
         ],
+        'dashboard_manage_user_capabilities' => [
+            'label' => 'Manage user capabilities',
+            'description' => 'Open the User capabilities page and refine which of a user’s assigned-role capabilities they actually have (check / uncheck within their role UNION only — cannot grant beyond roles).',
+            'group' => self::GROUP_DASHBOARD_HUB,
+            'default_shared' => true,
+            'default_white_label' => true,
+        ],
         'dashboard_view_compliance_audit_trail' => [
             'label' => 'View compliance audit trail',
             'description' => 'Open the hub-wide compliance audit trail page and switch between Social Media, General, and Website Content Pre Approval history.',

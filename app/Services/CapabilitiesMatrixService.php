@@ -493,9 +493,13 @@ class CapabilitiesMatrixService
         // Functionalities (formerly hub behaviour) are edited on the Hub checklist
         // screen only — ignore any legacy behaviour payload here.
 
+        $paBefore = $this->powerCapabilities->resolved();
+        $paChanged = [];
+
         // Power Admin column (platform)
         if (isset($payload['power_admin']) && is_array($payload['power_admin'])) {
             $this->powerCapabilities->update($payload['power_admin']);
+            $paChanged = $this->diffBoolMaps($paBefore, $this->powerCapabilities->resolved());
         } elseif (isset($payload['matrix'][User::ROLE_POWER_ADMIN]) && is_array($payload['matrix'][User::ROLE_POWER_ADMIN])) {
             $paPartial = [];
             foreach (array_keys(PowerAdminCapabilitiesService::DEFINITIONS) as $key) {
@@ -505,6 +509,7 @@ class CapabilitiesMatrixService
             }
             if ($paPartial !== []) {
                 $this->powerCapabilities->update($paPartial);
+                $paChanged = $this->diffBoolMaps($paBefore, $this->powerCapabilities->resolved());
             }
         }
 
@@ -513,6 +518,11 @@ class CapabilitiesMatrixService
         // Previously Shared edits were redirected onto the control-plane hub after
         // Central was introduced, so enabled cells never appeared on the right hub.
         $tenantHub = $hub;
+
+        $beforeTenant = $this->resolvedRoleCapabilities($tenantHub);
+        $beforePlane = ((int) $tenantHub->id === (int) $controlPlane->id)
+            ? $beforeTenant
+            : $this->resolvedRoleCapabilities($controlPlane);
 
         $matrixInput = isset($payload['matrix']) && is_array($payload['matrix'])
             ? $payload['matrix']
@@ -600,7 +610,118 @@ class CapabilitiesMatrixService
         $this->forgetResolvedCaches();
         app(HubService::class)->forgetCurrentCache();
 
-        return $this->matrix($tenantHub->fresh() ?? $hub->fresh());
+        $freshTenant = $tenantHub->fresh() ?? $hub->fresh();
+        $afterTenant = $this->resolvedRoleCapabilities($freshTenant);
+        $afterPlane = ((int) $freshTenant->id === (int) $controlPlane->id)
+            ? $afterTenant
+            : $this->resolvedRoleCapabilities($controlPlane->fresh() ?? $controlPlane);
+
+        $roleChanges = array_merge(
+            $this->diffRoleMatrices($beforeTenant, $afterTenant, (int) $freshTenant->id),
+            ((int) $freshTenant->id === (int) $controlPlane->id)
+                ? []
+                : $this->diffRoleMatrices($beforePlane, $afterPlane, (int) $controlPlane->id)
+        );
+
+        if ($roleChanges !== [] || $paChanged !== []) {
+            $this->logRoleCapabilityChanges($freshTenant, $roleChanges, $paChanged);
+        }
+
+        return $this->matrix($freshTenant);
+    }
+
+    /**
+     * @param  array<string, bool>  $before
+     * @param  array<string, bool>  $after
+     * @return list<array{key: string, from: bool, to: bool}>
+     */
+    private function diffBoolMaps(array $before, array $after): array
+    {
+        $changes = [];
+        foreach (array_unique(array_merge(array_keys($before), array_keys($after))) as $key) {
+            $from = (bool) ($before[$key] ?? false);
+            $to = (bool) ($after[$key] ?? false);
+            if ($from !== $to) {
+                $changes[] = ['key' => (string) $key, 'from' => $from, 'to' => $to];
+            }
+        }
+
+        return $changes;
+    }
+
+    /**
+     * @param  array<string, array<string, bool>>  $before
+     * @param  array<string, array<string, bool>>  $after
+     * @return list<array{hub_id: int, role: string, key: string, from: bool, to: bool}>
+     */
+    private function diffRoleMatrices(array $before, array $after, int $hubId): array
+    {
+        $changes = [];
+        $roles = array_unique(array_merge(array_keys($before), array_keys($after)));
+        foreach ($roles as $role) {
+            $bCaps = is_array($before[$role] ?? null) ? $before[$role] : [];
+            $aCaps = is_array($after[$role] ?? null) ? $after[$role] : [];
+            foreach (array_unique(array_merge(array_keys($bCaps), array_keys($aCaps))) as $key) {
+                $from = (bool) ($bCaps[$key] ?? false);
+                $to = (bool) ($aCaps[$key] ?? false);
+                if ($from !== $to) {
+                    $changes[] = [
+                        'hub_id' => $hubId,
+                        'role' => (string) $role,
+                        'key' => (string) $key,
+                        'from' => $from,
+                        'to' => $to,
+                    ];
+                }
+            }
+        }
+
+        return $changes;
+    }
+
+    /**
+     * @param  list<array{hub_id: int, role: string, key: string, from: bool, to: bool}>  $roleChanges
+     * @param  list<array{key: string, from: bool, to: bool}>  $paChanged
+     */
+    private function logRoleCapabilityChanges(Hub $hub, array $roleChanges, array $paChanged): void
+    {
+        try {
+            $enabled = [];
+            $disabled = [];
+            foreach ($roleChanges as $change) {
+                $label = $change['role'].'.'.$change['key'];
+                if ($change['to']) {
+                    $enabled[] = $label;
+                } else {
+                    $disabled[] = $label;
+                }
+            }
+            foreach ($paChanged as $change) {
+                $label = 'power_admin.'.$change['key'];
+                if ($change['to']) {
+                    $enabled[] = $label;
+                } else {
+                    $disabled[] = $label;
+                }
+            }
+
+            app(ActivityLogService::class)->log([
+                'action' => 'capabilities.role_matrix_updated',
+                'description' => 'Role capabilities matrix updated on '.$hub->name
+                    .($enabled !== [] ? '; enabled: '.implode(', ', array_slice($enabled, 0, 20)) : '')
+                    .($disabled !== [] ? '; disabled: '.implode(', ', array_slice($disabled, 0, 20)) : ''),
+                'hub' => $hub,
+                'subject' => $hub,
+                'properties' => [
+                    'enabled' => $enabled,
+                    'disabled' => $disabled,
+                    'role_changes' => $roleChanges,
+                    'power_admin_changes' => $paChanged,
+                ],
+            ]);
+        } catch (\Throwable) {
+            // Never fail a matrix save because of audit logging.
+        }
     }
 
     /**
@@ -1063,6 +1184,7 @@ class CapabilitiesMatrixService
      * Whether this user currently has a capability (Admin-staff may mirror advisor).
      * Multi-role (§2.7.1): UNION of all assigned roles, except when Admin-staff
      * is acting as an advisor (then the advisor matrix column applies alone).
+     * Per-user overrides (§2.7.3): denylist within that UNION (cannot grant beyond roles).
      * Also enforces per-user module allow-lists when a flag requires a module.
      */
     public function userCan(Hub $hub, User $user, string $flag): bool
@@ -1070,6 +1192,10 @@ class CapabilitiesMatrixService
         $acting = app(ActingAdvisorService::class);
         if ($acting->canActOnBehalf($user) && $acting->actingAdvisor($user)) {
             if (! $this->roleCan($hub, User::ROLE_ADVISOR, $flag)) {
+                return false;
+            }
+
+            if (! app(UserCapabilitiesService::class)->userAllows($user, $flag)) {
                 return false;
             }
 
@@ -1085,6 +1211,10 @@ class CapabilitiesMatrixService
         }
 
         if (! $allowed) {
+            return false;
+        }
+
+        if (! app(UserCapabilitiesService::class)->userAllows($user, $flag)) {
             return false;
         }
 

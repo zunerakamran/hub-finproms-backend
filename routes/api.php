@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\ActivityAnomalyController;
 use App\Http\Controllers\Api\ActivityLogController;
 use App\Http\Controllers\Api\ActiveSessionController;
 use App\Http\Controllers\Api\HubUsersController;
+use App\Http\Controllers\Api\UserCapabilitiesController;
 use App\Http\Controllers\Api\ComplianceAuditEventController;
 use App\Http\Controllers\Api\OneTimeInvoicesController;
 use App\Http\Controllers\Api\ActingAdvisorController;
@@ -725,6 +726,14 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/hub-users', [HubUsersController::class, 'index']);
         });
 
+        Route::middleware('hub_can:dashboard_manage_user_capabilities')->group(function () {
+            Route::get('/user-capabilities', [HubUsersController::class, 'index']);
+            Route::get('/user-capabilities/{userId}', [UserCapabilitiesController::class, 'show'])
+                ->whereNumber('userId');
+            Route::put('/user-capabilities/{userId}', [UserCapabilitiesController::class, 'update'])
+                ->whereNumber('userId');
+        });
+
         Route::middleware(['hub_can:dashboard_view_compliance_audit_trail', 'acting_wl_wc_db'])->group(function () {
             Route::get('/compliance-audit-events', [ComplianceAuditEventController::class, 'index']);
         });
@@ -1215,6 +1224,14 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::middleware('hub_can:dashboard_view_hub_users')->group(function () {
             Route::get('/hub-users', [HubUsersController::class, 'index']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_user_capabilities')->group(function () {
+            Route::get('/user-capabilities', [HubUsersController::class, 'index']);
+            Route::get('/user-capabilities/{userId}', [UserCapabilitiesController::class, 'show'])
+                ->whereNumber('userId');
+            Route::put('/user-capabilities/{userId}', [UserCapabilitiesController::class, 'update'])
+                ->whereNumber('userId');
         });
 
         Route::middleware(['hub_can:dashboard_view_compliance_audit_trail', 'acting_wl_wc_db'])->group(function () {
