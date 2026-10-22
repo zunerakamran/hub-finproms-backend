@@ -764,6 +764,9 @@ class GeneralComplianceController extends Controller
             'from' => ['sometimes', 'nullable', 'date'],
             'to' => ['sometimes', 'nullable', 'date'],
             'per_page' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:100'],
+            'unassigned_only' => ['sometimes', 'boolean'],
+            'history_only' => ['sometimes', 'boolean'],
+            'mine_as_approver' => ['sometimes', 'boolean'],
         ]);
 
         return [
@@ -774,6 +777,9 @@ class GeneralComplianceController extends Controller
             'from' => $validated['from'] ?? null,
             'to' => $validated['to'] ?? null,
             'per_page' => $validated['per_page'] ?? 20,
+            'unassigned_only' => (bool) ($validated['unassigned_only'] ?? false),
+            'history_only' => (bool) ($validated['history_only'] ?? false),
+            'mine_as_approver' => (bool) ($validated['mine_as_approver'] ?? false),
         ];
     }
 }

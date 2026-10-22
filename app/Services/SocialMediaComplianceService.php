@@ -875,6 +875,10 @@ class SocialMediaComplianceService
             $this->firmVisibility->scopeQueryForActor($query, $actor, 'user', 'assigned_to');
         }
 
+        if (! empty($filters['mine_as_approver'])) {
+            $filters['approver_user_id'] = (int) $actor->id;
+        }
+
         $this->applyFilters($query, $filters);
 
         $perPage = max(1, min(100, (int) ($filters['per_page'] ?? 20)));
@@ -1174,6 +1178,16 @@ class SocialMediaComplianceService
         }
         if (! empty($filters['assigned_to'])) {
             $query->where('assigned_to', (int) $filters['assigned_to']);
+        }
+        if (! empty($filters['unassigned_only'])) {
+            $query->whereNull('assigned_to');
+        }
+        if (! empty($filters['history_only'])) {
+            // Exclude the unassigned pickup pool from history / “All requests”.
+            $query->whereNotNull('assigned_to');
+        }
+        if (! empty($filters['mine_as_approver']) && ! empty($filters['approver_user_id'])) {
+            $query->where('assigned_to', (int) $filters['approver_user_id']);
         }
         if (! empty($filters['from'])) {
             $query->whereDate('submission_date', '>=', $filters['from']);
