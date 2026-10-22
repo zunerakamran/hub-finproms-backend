@@ -368,7 +368,7 @@ class SecurityMonitoringController extends Controller
             });
         }
 
-        $paginator = $query->paginate((int) ($validated['per_page'] ?? 50));
+        $paginator = $query->with('roleAssignments')->paginate((int) ($validated['per_page'] ?? 50));
 
         return response()->json([
             'users' => collect($paginator->items())->map(fn (User $u) => [
@@ -376,6 +376,9 @@ class SecurityMonitoringController extends Controller
                 'name' => $u->name,
                 'email' => $u->email,
                 'role' => $u->role,
+                'roles' => $u->roleKeys(),
+                'role_labels' => $u->role_labels,
+                'primary_role' => $u->role,
             ])->values(),
             'meta' => [
                 'current_page' => $paginator->currentPage(),
@@ -402,6 +405,9 @@ class SecurityMonitoringController extends Controller
                 'name' => $target->name,
                 'email' => $target->email,
                 'role' => $target->role,
+                'roles' => $target->roleKeys(),
+                'role_labels' => $target->role_labels,
+                'primary_role' => $target->role,
             ],
             'data' => $settings->exists
                 ? $settings->toAccessRestrictionApiArray()
@@ -456,6 +462,9 @@ class SecurityMonitoringController extends Controller
                 'name' => $target->name,
                 'email' => $target->email,
                 'role' => $target->role,
+                'roles' => $target->roleKeys(),
+                'role_labels' => $target->role_labels,
+                'primary_role' => $target->role,
             ],
             'data' => $settings->toAccessRestrictionApiArray(),
             'self_lockout_preview' => $preview,
@@ -494,6 +503,9 @@ class SecurityMonitoringController extends Controller
                 'name' => $target->name,
                 'email' => $target->email,
                 'role' => $target->role,
+                'roles' => $target->roleKeys(),
+                'role_labels' => $target->role_labels,
+                'primary_role' => $target->role,
             ] : null;
             $payload['scope'] = 'user';
         } else {

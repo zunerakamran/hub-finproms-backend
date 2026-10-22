@@ -10,6 +10,7 @@ use App\Services\ActingHubService;
 use App\Services\AdminNewUserRegistrationMailService;
 use App\Services\FunctionalMailService;
 use App\Services\HubRolesService;
+use App\Services\UserRolesService;
 use App\Services\WhiteLabelFirmService;
 use App\Services\WhiteLabelUserService;
 use Illuminate\Http\JsonResponse;
@@ -58,7 +59,8 @@ class PowerAdminUserController extends Controller
         private readonly ActingHubService $actingHubs,
         private readonly WhiteLabelUserService $whiteLabelUsers,
         private readonly WhiteLabelFirmService $whiteLabelFirms,
-        private readonly HubRolesService $hubRoles
+        private readonly HubRolesService $hubRoles,
+        private readonly UserRolesService $userRoles,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -105,10 +107,14 @@ class PowerAdminUserController extends Controller
         }
 
         if (! empty($validated['role'])) {
-            $query->where('role', $validated['role']);
+            $role = (string) $validated['role'];
+            $query->where(function ($q) use ($role) {
+                $q->where('role', $role)
+                    ->orWhereHas('roleAssignments', fn ($r) => $r->where('role', $role));
+            });
         }
 
-        $paginator = $query->paginate($perPage);
+        $paginator = $query->with(['firm:id,name', 'roleAssignments'])->paginate($perPage);
         $labelHub = $this->actingHubs->targetHub($request->user());
 
         return response()->json([
@@ -132,9 +138,24 @@ class PowerAdminUserController extends Controller
         $validated = $this->normalizeFirmForRole($validated);
         $validated = $this->normalizeAdminStaffPermission($validated);
 
+        $roleSet = $this->userRoles->rolesFromPayload($validated)
+            ?? ['roles' => [User::ROLE_USER], 'primary' => User::ROLE_USER];
+
         if ($hub = $this->actingWhiteLabelHub($request)) {
+            $this->assertAssignableRoleSet($roleSet['roles'], $hub);
+            $validated['roles'] = $roleSet['roles'];
+            $validated['primary_role'] = $roleSet['primary'];
+            $validated['role'] = $roleSet['primary'];
+            $validated = $this->normalizeFirmForRole($validated, $roleSet['primary']);
+            $validated = $this->normalizeAdminStaffPermission($validated, null, $roleSet['roles']);
+
             try {
-                $user = $this->whiteLabelUsers->create($hub, $validated);
+                $user = $this->whiteLabelUsers->create(
+                    $hub,
+                    $validated,
+                    actor: $request->user(),
+                    request: $request,
+                );
             } catch (InvalidArgumentException $e) {
                 return response()->json(['message' => $e->getMessage()], 422);
             } catch (ValidationException $e) {
@@ -155,13 +176,19 @@ class PowerAdminUserController extends Controller
             ], 201);
         }
 
+        $this->assertAssignableRoleSet($roleSet['roles'], $this->labelHub());
+        $validated['roles'] = $roleSet['roles'];
+        $validated['role'] = $roleSet['primary'];
+        $validated = $this->normalizeFirmForRole($validated, $roleSet['primary']);
+        $validated = $this->normalizeAdminStaffPermission($validated, null, $roleSet['roles']);
+
         $user = User::query()->create([
             'name' => $validated['name'],
             'email' => $validated['email'],
             'password' => $validated['password'],
-            'role' => $validated['role'],
+            'role' => $roleSet['primary'],
             'credits' => $validated['credits'] ?? 0,
-            'is_advisor' => $validated['is_advisor'] ?? ($validated['role'] === User::ROLE_ADVISOR),
+            'is_advisor' => $validated['is_advisor'] ?? in_array(User::ROLE_ADVISOR, $roleSet['roles'], true),
             'allows_admin_staff_acting' => (bool) ($validated['allows_admin_staff_acting'] ?? false),
             'has_unlimited_credits' => $validated['has_unlimited_credits'] ?? false,
             'is_suspended' => $validated['is_suspended'] ?? false,
@@ -169,12 +196,24 @@ class PowerAdminUserController extends Controller
             'email_verified_at' => now(),
         ]);
 
+        // Boot may have inserted primary silently — reset so every role is logged as assigned.
+        $this->userRoles->resetPivotForLoggedSync($user);
+        $this->userRoles->syncRoles(
+            $user,
+            $roleSet['roles'],
+            $roleSet['primary'],
+            log: true,
+            actor: $request->user(),
+            request: $request,
+            hub: $this->labelHub(),
+        );
+
         $this->adminNewUserMail->send($user);
         $this->functionalMail->accountCreatedByAdmin($user);
 
         return response()->json([
             'message' => 'User created successfully.',
-            'user' => $this->serialize($user->fresh('firm')),
+            'user' => $this->serialize($user->fresh(['firm', 'roleAssignments'])),
             'roles' => $this->roleOptions(),
             'firms' => $this->firmOptions(),
             'acting_on_white_label' => false,
@@ -223,17 +262,38 @@ class PowerAdminUserController extends Controller
             $current->exists = true;
             $current->role = $existing['role'];
             $current->is_suspended = $existing['is_suspended'];
+            if (! empty($existing['roles']) && is_array($existing['roles'])) {
+                $current->setRelation(
+                    'roleAssignments',
+                    collect($existing['roles'])->map(fn (string $role) => new \App\Models\UserRole([
+                        'user_id' => $current->id,
+                        'role' => $role,
+                    ]))
+                );
+            }
 
             $validated = $this->validatedPayload($request, $current, skipUnique: true);
-            $validated = $this->normalizeFirmForRole($validated, $existing['role'] ?? null);
-            $validated = $this->normalizeAdminStaffPermission($validated, $current);
+            $roleSet = $this->userRoles->rolesFromPayload($validated, $current);
+            $primaryForNormalize = $roleSet['primary'] ?? ($existing['role'] ?? null);
+            $validated = $this->normalizeFirmForRole($validated, $primaryForNormalize);
+            $validated = $this->normalizeAdminStaffPermission($validated, $current, $roleSet['roles'] ?? null);
 
-            if (array_key_exists('role', $validated) && $validated['role'] !== $existing['role']) {
-                $this->assertCanChangeRoleOnHub($request, $hub, $existing, $validated['role']);
+            if ($roleSet !== null) {
+                $this->assertAssignableRoleSet($roleSet['roles'], $hub);
+                $this->assertCanChangeRoleOnHub($request, $hub, $existing, $roleSet['roles']);
+                $validated['roles'] = $roleSet['roles'];
+                $validated['primary_role'] = $roleSet['primary'];
+                $validated['role'] = $roleSet['primary'];
             }
 
             try {
-                $updated = $this->whiteLabelUsers->update($hub, $user, $validated);
+                $updated = $this->whiteLabelUsers->update(
+                    $hub,
+                    $user,
+                    $validated,
+                    actor: $request->user(),
+                    request: $request,
+                );
             } catch (InvalidArgumentException $e) {
                 return response()->json(['message' => $e->getMessage()], 422);
             }
@@ -256,33 +316,49 @@ class PowerAdminUserController extends Controller
             ]);
         }
 
-        $model = User::query()->findOrFail($user);
+        $model = User::query()->with('roleAssignments')->findOrFail($user);
         $validated = $this->validatedPayload($request, $model);
-        $validated = $this->normalizeFirmForRole($validated, $model->role);
-        $validated = $this->normalizeAdminStaffPermission($validated, $model);
+        $roleSet = $this->userRoles->rolesFromPayload($validated, $model);
+        $primaryForNormalize = $roleSet['primary'] ?? $model->role;
+        $validated = $this->normalizeFirmForRole($validated, $primaryForNormalize);
+        $validated = $this->normalizeAdminStaffPermission($validated, $model, $roleSet['roles'] ?? null);
 
-        if (array_key_exists('role', $validated) && $validated['role'] !== $model->role) {
-            $this->assertCanChangeRole($request, $model, $validated['role']);
+        if ($roleSet !== null) {
+            $this->assertAssignableRoleSet($roleSet['roles'], $this->labelHub());
+            $this->assertCanChangeRole($request, $model, $roleSet['roles']);
         }
 
         $wasSuspended = (bool) $model->is_suspended;
-        $payload = collect($validated)->except(['password'])->all();
+        $payload = collect($validated)->except(['password', 'roles', 'primary_role'])->all();
 
         if (! empty($validated['password'])) {
             $payload['password'] = $validated['password'];
         }
 
-        // Keep Excel-style advisor flags coherent when role is set to advisor.
-        if (($payload['role'] ?? null) === User::ROLE_ADVISOR && ! array_key_exists('is_advisor', $payload)) {
-            $payload['is_advisor'] = true;
-        }
-
-        if (array_key_exists('role', $payload) && $payload['role'] !== User::ROLE_ADMIN_STAFF) {
-            $payload['acting_advisor_id'] = null;
+        if ($roleSet !== null) {
+            $payload['role'] = $roleSet['primary'];
+            if (in_array(User::ROLE_ADVISOR, $roleSet['roles'], true) && ! array_key_exists('is_advisor', $payload)) {
+                $payload['is_advisor'] = true;
+            }
+            if (! in_array(User::ROLE_ADMIN_STAFF, $roleSet['roles'], true)) {
+                $payload['acting_advisor_id'] = null;
+            }
         }
 
         $model->fill($payload);
         $model->save();
+
+        if ($roleSet !== null) {
+            $this->userRoles->syncRoles(
+                $model,
+                $roleSet['roles'],
+                $roleSet['primary'],
+                log: true,
+                actor: $request->user(),
+                request: $request,
+                hub: $this->labelHub(),
+            );
+        }
 
         if (array_key_exists('password', $payload)) {
             $model->tokens()->delete();
@@ -297,7 +373,7 @@ class PowerAdminUserController extends Controller
 
         return response()->json([
             'message' => 'User updated successfully.',
-            'user' => $this->serialize($model->fresh('firm')),
+            'user' => $this->serialize($model->fresh(['firm', 'roleAssignments'])),
             'roles' => $this->roleOptions(),
             'firms' => $this->firmOptions(),
             'acting_on_white_label' => false,
@@ -330,7 +406,7 @@ class PowerAdminUserController extends Controller
             ], 422);
         }
 
-        if ($model->role === User::ROLE_POWER_ADMIN && $this->powerAdminCount() <= 1) {
+        if ($model->hasRole(User::ROLE_POWER_ADMIN) && $this->powerAdminCount() <= 1) {
             return response()->json([
                 'message' => 'Cannot delete the last Power Admin account.',
             ], 422);
@@ -370,11 +446,32 @@ class PowerAdminUserController extends Controller
 
         $roleHub = $this->actingWhiteLabelHub($request) ?? $this->labelHub();
 
+        $assignable = $this->assignableRoles($roleHub);
+
         return $request->validate([
             'name' => [$user ? 'sometimes' : 'required', 'string', 'max:255'],
             'email' => $emailRules,
             'password' => $passwordRules,
-            'role' => [$user ? 'sometimes' : 'required', 'string', Rule::in($this->assignableRoles($roleHub))],
+            // Legacy single role OR multi-role: roles[] (+ optional primary_role).
+            'role' => [
+                $user ? 'sometimes' : 'required_without:roles',
+                'nullable',
+                'string',
+                function (string $attribute, mixed $value, \Closure $fail) use ($assignable): void {
+                    if ($value === null || $value === '') {
+                        return;
+                    }
+                    foreach ($this->userRoles->splitRoleString((string) $value) as $role) {
+                        $role = $this->userRoles->normalizeRole($role);
+                        if (! in_array($role, $assignable, true)) {
+                            $fail('The selected role is invalid.');
+                        }
+                    }
+                },
+            ],
+            'roles' => [$user ? 'sometimes' : 'required_without:role', 'nullable', 'array', 'min:1'],
+            'roles.*' => ['string', Rule::in($assignable)],
+            'primary_role' => ['sometimes', 'nullable', 'string', Rule::in($assignable)],
             'credits' => ['sometimes', 'integer', 'min:0'],
             'is_advisor' => ['sometimes', 'boolean'],
             'allows_admin_staff_acting' => ['sometimes', 'boolean'],
@@ -390,10 +487,17 @@ class PowerAdminUserController extends Controller
      * @param  array<string, mixed>  $validated
      * @return array<string, mixed>
      */
-    private function normalizeAdminStaffPermission(array $validated, ?User $existing = null): array
+    /**
+     * @param  list<string>|null  $roles
+     */
+    private function normalizeAdminStaffPermission(array $validated, ?User $existing = null, ?array $roles = null): array
     {
-        $role = $validated['role'] ?? $existing?->role;
-        $isAdvisor = ($role === User::ROLE_ADVISOR)
+        $roles ??= isset($validated['roles']) && is_array($validated['roles'])
+            ? $validated['roles']
+            : null;
+        $primary = $validated['role'] ?? $existing?->role;
+        $isAdvisor = ($roles !== null && in_array(User::ROLE_ADVISOR, $roles, true))
+            || $primary === User::ROLE_ADVISOR
             || (bool) ($validated['is_advisor'] ?? $existing?->is_advisor ?? false);
 
         if (! $isAdvisor) {
@@ -445,60 +549,93 @@ class PowerAdminUserController extends Controller
      */
     private function normalizeFirmForRole(array $validated, ?string $existingRole = null): array
     {
+        $roles = isset($validated['roles']) && is_array($validated['roles'])
+            ? $validated['roles']
+            : [];
         $role = $validated['role'] ?? $existingRole;
-        if (in_array($role, [User::ROLE_POWER_ADMIN, User::ROLE_FINPROMS_ADMIN], true)) {
+        $isControlPlane = in_array($role, [User::ROLE_POWER_ADMIN, User::ROLE_FINPROMS_ADMIN], true)
+            || in_array(User::ROLE_POWER_ADMIN, $roles, true)
+            || in_array(User::ROLE_FINPROMS_ADMIN, $roles, true);
+        if ($isControlPlane) {
             $validated['firm_id'] = null;
         }
 
         return $validated;
     }
 
-    private function assertCanChangeRole(Request $request, User $user, string $newRole): void
+    /**
+     * @param  list<string>  $newRoles
+     */
+    private function assertCanChangeRole(Request $request, User $user, array $newRoles): void
     {
-        if ($user->role !== User::ROLE_POWER_ADMIN) {
+        if (! $user->hasRole(User::ROLE_POWER_ADMIN)) {
             return;
         }
 
-        if ($newRole === User::ROLE_POWER_ADMIN) {
+        if (in_array(User::ROLE_POWER_ADMIN, $newRoles, true)) {
             return;
         }
 
         if ($this->powerAdminCount() <= 1) {
             throw ValidationException::withMessages([
-                'role' => 'Cannot demote the last Power Admin account.',
+                'roles' => 'Cannot demote the last Power Admin account.',
             ]);
         }
 
         if ($request->user()->id === $user->id) {
             throw ValidationException::withMessages([
-                'role' => 'You cannot demote your own Power Admin role.',
+                'roles' => 'You cannot demote your own Power Admin role.',
             ]);
         }
     }
 
     /**
      * @param  array<string, mixed>  $existing
+     * @param  list<string>  $newRoles
      */
-    private function assertCanChangeRoleOnHub(Request $request, Hub $hub, array $existing, string $newRole): void
+    private function assertCanChangeRoleOnHub(Request $request, Hub $hub, array $existing, array $newRoles): void
     {
-        if ($existing['role'] !== User::ROLE_POWER_ADMIN) {
+        $heldPowerAdmin = ($existing['role'] ?? null) === User::ROLE_POWER_ADMIN
+            || (is_array($existing['roles'] ?? null) && in_array(User::ROLE_POWER_ADMIN, $existing['roles'], true));
+
+        if (! $heldPowerAdmin) {
             return;
         }
 
-        if ($newRole === User::ROLE_POWER_ADMIN) {
+        if (in_array(User::ROLE_POWER_ADMIN, $newRoles, true)) {
             return;
         }
 
         if ($this->whiteLabelUsers->powerAdminCount($hub) <= 1) {
             throw ValidationException::withMessages([
-                'role' => 'Cannot demote the last Power Admin account on this hub.',
+                'roles' => 'Cannot demote the last Power Admin account on this hub.',
             ]);
+        }
+    }
+
+    /**
+     * @param  list<string>  $roles
+     */
+    private function assertAssignableRoleSet(array $roles, ?Hub $hub): void
+    {
+        $assignable = $this->assignableRoles($hub);
+        foreach ($roles as $role) {
+            if (! in_array($role, $assignable, true)) {
+                throw ValidationException::withMessages([
+                    'roles' => 'The selected role is invalid: '.$role,
+                ]);
+            }
         }
     }
 
     private function powerAdminCount(): int
     {
-        return User::query()->where('role', User::ROLE_POWER_ADMIN)->count();
+        return User::query()
+            ->where(function ($q) {
+                $q->where('role', User::ROLE_POWER_ADMIN)
+                    ->orWhereHas('roleAssignments', fn ($r) => $r->where('role', User::ROLE_POWER_ADMIN));
+            })
+            ->count();
     }
 
     /**
@@ -560,6 +697,15 @@ class PowerAdminUserController extends Controller
         $user->name = $payload['name'] ?? '';
         $user->email = $payload['email'] ?? '';
         $user->role = $payload['role'] ?? User::ROLE_USER;
+        if (! empty($payload['roles']) && is_array($payload['roles'])) {
+            $user->setRelation(
+                'roleAssignments',
+                collect($payload['roles'])->map(fn (string $role) => new \App\Models\UserRole([
+                    'user_id' => $user->id,
+                    'role' => $role,
+                ]))
+            );
+        }
         $user->exists = true;
 
         return $user;

@@ -105,7 +105,11 @@ class GdprController extends Controller
         }
 
         if (! empty($validated['role'])) {
-            $query->where('role', $validated['role']);
+            $role = (string) $validated['role'];
+            $query->where(function ($q) use ($role) {
+                $q->where('role', $role)
+                    ->orWhereHas('roleAssignments', fn ($r) => $r->where('role', $role));
+            });
         }
 
         $paginator = $query->paginate($perPage, ['*'], 'page', $page);

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Database\Factories\UserFactory;
 use App\Support\WebsiteCompliance\WcDatabaseContext;
+use App\Services\UserRolesService;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -124,6 +125,8 @@ class User extends Authenticatable
 
     protected $appends = [
         'role_label',
+        'roles',
+        'role_labels',
         'avatar_url',
     ];
 
@@ -147,6 +150,109 @@ class User extends Authenticatable
             'modules' => 'array',
             'two_factor_enabled' => 'boolean',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        // Keep pivot in sync for simple creates (register, factory, import) without
+        // activity logs. Admin create/update call UserRolesService::syncRoles (logged).
+        static::created(function (User $user): void {
+            try {
+                app(UserRolesService::class)->ensurePrimaryInPivot($user);
+            } catch (\Throwable) {
+                // Pivot may not exist yet during early migrate / seed.
+            }
+        });
+    }
+
+    public function roleAssignments(): HasMany
+    {
+        return $this->hasMany(UserRole::class);
+    }
+
+    /**
+     * All role keys this user holds (ordered). Primary is users.role.
+     *
+     * @return list<string>
+     */
+    public function roleKeys(): array
+    {
+        return app(UserRolesService::class)->roleKeys($this);
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function getRolesAttribute(): array
+    {
+        return $this->roleKeys();
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function getRoleLabelsAttribute(): array
+    {
+        $hub = null;
+        try {
+            $hubs = app(\App\Services\HubService::class);
+            $hub = $hubs->current();
+            $authUser = auth()->user();
+            if ($authUser) {
+                $hub = app(\App\Services\ActingHubService::class)->targetHub($authUser);
+            }
+        } catch (\Throwable) {
+            $hub = null;
+        }
+
+        $labels = [];
+        foreach ($this->roleKeys() as $role) {
+            $labels[] = $hub
+                ? $hub->roleLabel($role)
+                : (self::ROLE_LABELS[$role] ?? $role);
+        }
+
+        return $labels;
+    }
+
+    public function hasRole(string $role): bool
+    {
+        $role = app(UserRolesService::class)->normalizeRole($role);
+
+        return in_array($role, $this->roleKeys(), true);
+    }
+
+    /**
+     * @param  list<string>  $roles
+     */
+    public function hasAnyRole(array $roles): bool
+    {
+        foreach ($roles as $role) {
+            if ($this->hasRole((string) $role)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Approver-scoped queues: true when the user holds approver and no broader staff role.
+     */
+    public function isApproverScopedOnly(): bool
+    {
+        if (! $this->hasRole(self::ROLE_APPROVER)) {
+            return false;
+        }
+
+        return ! $this->hasAnyRole([
+            self::ROLE_POWER_ADMIN,
+            self::ROLE_FINPROMS_ADMIN,
+            self::ROLE_CLIENT_ADMIN,
+            self::ROLE_MANAGER,
+            self::ROLE_ADMIN_STAFF,
+            'admin',
+        ]);
     }
 
     public function getAvatarUrlAttribute(): ?string
@@ -260,38 +366,38 @@ class User extends Authenticatable
 
     public function isPowerAdmin(): bool
     {
-        return $this->role === self::ROLE_POWER_ADMIN;
+        return $this->hasRole(self::ROLE_POWER_ADMIN);
     }
 
     public function isFinpromsAdmin(): bool
     {
-        return $this->role === self::ROLE_FINPROMS_ADMIN;
+        return $this->hasRole(self::ROLE_FINPROMS_ADMIN);
     }
 
     public function isClientAdmin(): bool
     {
         // Hub-admin shell access (FinProms admin, WL client admin, manager, legacy admin).
-        return in_array($this->role, self::HUB_ADMIN_ROLES, true);
+        return $this->hasAnyRole(self::HUB_ADMIN_ROLES);
     }
 
     public function isWhiteLabelClientAdmin(): bool
     {
-        return $this->role === self::ROLE_CLIENT_ADMIN || $this->role === 'admin';
+        return $this->hasRole(self::ROLE_CLIENT_ADMIN) || $this->hasRole('admin');
     }
 
     public function isManager(): bool
     {
-        return $this->role === self::ROLE_MANAGER;
+        return $this->hasRole(self::ROLE_MANAGER);
     }
 
     public function isApprover(): bool
     {
-        return $this->role === self::ROLE_APPROVER;
+        return $this->hasRole(self::ROLE_APPROVER);
     }
 
     public function isAdvisor(): bool
     {
-        return $this->role === self::ROLE_ADVISOR || (bool) $this->is_advisor;
+        return $this->hasRole(self::ROLE_ADVISOR) || (bool) $this->is_advisor;
     }
 
     /**
@@ -304,7 +410,7 @@ class User extends Authenticatable
 
     public function isAdminStaff(): bool
     {
-        return $this->role === self::ROLE_ADMIN_STAFF;
+        return $this->hasRole(self::ROLE_ADMIN_STAFF);
     }
 
     public function actingAdvisor(): BelongsTo
@@ -378,7 +484,7 @@ class User extends Authenticatable
         }
 
         // Every Excel-importable role (including User) is on the invite list.
-        if (in_array((string) $this->role, [
+        if ($this->hasAnyRole([
             self::ROLE_CLIENT_ADMIN,
             self::ROLE_MANAGER,
             self::ROLE_APPROVER,
@@ -386,7 +492,7 @@ class User extends Authenticatable
             self::ROLE_ADMIN_STAFF,
             self::ROLE_USER,
             'admin', // legacy
-        ], true)) {
+        ])) {
             return true;
         }
 

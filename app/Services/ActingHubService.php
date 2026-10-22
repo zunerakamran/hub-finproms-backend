@@ -44,7 +44,7 @@ class ActingHubService
             return false;
         }
 
-        return $this->matrix->roleCan($current, (string) $user->role, self::CAPABILITY);
+        return $this->matrix->userCan($current, $user, self::CAPABILITY);
     }
 
     /**

@@ -673,7 +673,7 @@ class ChangeRequestWorkflowService
     public function assertReviewable(ChangeRequest $changeRequest, User $user): void
     {
         $canViewAll = $this->gate->can($user, 'wc_view_all_change_requests')
-            && (string) $user->role !== User::ROLE_APPROVER;
+            && ! $user->isApproverScopedOnly();
         $canOverrideStatus = $this->gate->can($user, 'wc_change_request_status');
 
         if (
@@ -731,7 +731,7 @@ class ChangeRequestWorkflowService
     public function assertCanScheduleOrPublish(ChangeRequest $changeRequest, User $user): void
     {
         $canViewAll = $this->gate->can($user, 'wc_view_all_change_requests')
-            && (string) $user->role !== User::ROLE_APPROVER;
+            && ! $user->isApproverScopedOnly();
         $canOverrideStatus = $this->gate->can($user, 'wc_change_request_status');
 
         if (

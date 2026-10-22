@@ -1,9 +1,10 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-21 (NFR-SEC: WC template-content documents require auth
-  or signed URL; images stay public for live sites; hub-scoped embed tickets +
-  purpose-scoped /internal/* keys + SSRF hardening)
+Last updated: 2026-10-22 (Multi-role users implemented in backend: user_roles
+  pivot, capability UNION, role assign/remove activity logs — §2.7 / §2.7.1;
+  frontend multi-select still pending)
+
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -365,9 +366,21 @@ Shared / White-label hubs by default. Central may optionally expose a public
 site shell when Power Admin enables member_* caps on Central’s own matrix.
 Staff and members open Dashboard from the main site nav; login lands on
 /my-dashboard. Legacy /client-admin and /power-admin URLs redirect into
-/my-dashboard. Members never see tools that are not enabled for their role.
+/my-dashboard. Members never see tools that are not enabled for ANY of their
+roles (see §2.7.1 multi-role rule).
 
-ROLES (canonical list):
+MULTI-ROLE MODEL (REQUIRED — target behaviour):
+- PREVIOUSLY: each user had exactly ONE role (`users.role`).
+- NOW: each user MAY hold ONE OR MORE roles at the same time on that hub’s
+  user store (e.g. manager + approver, client_admin + approver).
+- A user MUST always have at least one role.
+- Capability evaluation uses the UNION of all assigned roles (§2.7.1).
+- Canonical role *labels* and matrix columns are unchanged; only the
+  user↔role cardinality changes from 1:1 to many:many.
+- Full rules, primary-role / audit display, migration, and affected areas:
+  see §2.7.1.
+
+ROLES (canonical list — role keys unchanged):
 
   1) POWER ADMIN (power_admin) — platform developers / us
      - Logs into CENTRAL HUB CONTROLLER (control plane).
@@ -406,27 +419,167 @@ ROLES (canonical list):
 
   6) ADVISOR (advisor) — reserved role label in the capabilities matrix
      - Not assigned automatically on plan subscribe or Excel import.
-     - White-label invited advisors keep role=user; Excel import sets
-       is_advisor and has_unlimited_credits when hub behaviour allows.
-     - Uses member UI (same as user).
+     - White-label invited advisors keep role=user (may add other roles later);
+       Excel import sets is_advisor and has_unlimited_credits when hub
+       behaviour allows.
+     - Uses member UI (same as user) unless other assigned roles unlock more.
 
   7) USER (user) — general user / subscriber
      - Browse / subscribe / buy / download as user capability checklist allows.
-     - Role stays user after a paid public-hub plan subscription (credits only).
-     - Private-hub Excel-imported advisors also keep role=user (flags distinguish them).
+     - After a paid public-hub plan subscription, the user role remains
+       (credits only); other roles already assigned are NOT removed.
+     - Private-hub Excel-imported advisors also keep role=user (flags distinguish
+       them) unless staff explicitly assign additional roles.
      - Label in the Capabilities matrix is "User" (not "Member").
+
+  8) ADMIN-STAFF (admin_staff) — firm-scoped staff (see User model / matrix)
+     - Submit compliance and related work on behalf of advisors when allowed.
+     - Display name overridable via hub role_display_names.
 
 Notes:
 - Former "admin" → client_admin. Shared hub operator should use finproms_admin
   going forward (existing client_admin on shared may be migrated).
-- Seeded shared-hub FinProms admin: finproms@hubfinproms.com (role=finproms_admin).
-- Advisor import keeps role=user and sets is_advisor / unlimited flags.
-- Public plan subscribe does NOT change role (stays user; credits only).
-- Role alone does not unlock every screen — Power Admin checklists (on Central
-  Hub) still gate member UI, hub-admin UI, and power_admin UI.
+- Seeded shared-hub FinProms admin: finproms@hubfinproms.com (holds
+  finproms_admin; may later hold additional roles if needed).
+- Advisor import keeps role=user (as one of the user’s roles) and sets
+  is_advisor / unlimited flags; import UI MUST support assigning multiple
+  roles when the multi-role model is live (see §2.7.1).
+- Public plan subscribe does NOT strip or replace other roles; it does not
+  invent new roles beyond keeping `user` as needed for member access.
+- Roles alone do not unlock every screen — Power Admin checklists (on Central
+  Hub) still gate member UI, hub-admin UI, and power_admin UI via the matrix
+  UNION rule in §2.7.1.
 - LEGACY NOTE: Older builds treated Shared Hub as the control plane. Target
   architecture moves the control plane to Central Hub Controller; Shared Hub
   becomes a controllable content hub only.
+
+
+2.7.1 Multiple roles per user (REQUIRED change)
+--------------------------------------------------------------------
+Decision: YES — this change is approved and required. It is the correct
+direction for the product: the Capabilities matrix is already role ×
+capability; staff often need more than one hat (e.g. manager who also
+approves). Doing this is FINE and recommended, provided the rules below
+are followed so security and audit stay clear.
+
+WHY THIS IS FINE:
+- The matrix already models rights per role column; multi-role only changes
+  how a user’s effective rights are computed (UNION), not the matrix itself.
+- Head of Firm, modules, and firm-document rights are already membership /
+  flag based — not single-role hard-codes — so they remain compatible.
+- Risk is mainly migration + replacing “single `users.role`” assumptions in
+  APIs, UI, imports, and audit display — not a redesign of the permission
+  model.
+
+CARDINALITY & STORAGE (target):
+- User ↔ Role is many-to-many on each hub’s user store.
+- Prefer a pivot (`user_roles`: user_id, role) OR an equivalent durable
+  multi-value store. Do NOT keep only a single `users.role` column as the
+  source of truth once multi-role ships.
+- Migration: existing `users.role` becomes the user’s initial (and primary)
+  role; every current user gets exactly one pivot row matching today’s value.
+- Backward-compatible API during rollout: keep `role` (= primary role) AND
+  add `roles: string[]` (and optionally `role_labels`). Frontend must switch
+  to multi-select assign UI and read `roles`.
+
+PRIMARY ROLE (display / audit only — NOT a second permission system):
+- Each user has exactly one PRIMARY role chosen from their assigned roles.
+- Primary is used for: activity_logs.user_role, compliance audit actor role,
+  uploaded_by_role style labels when a single string is required, default
+  badge on Hub → Users, Excel “Role” single-cell display when needed.
+- Primary does NOT limit capabilities — capabilities always use the UNION
+  of ALL assigned roles (below).
+- Default primary on create/import = first assigned role, or the highest
+  privilege in this order when not specified:
+  power_admin > finproms_admin > client_admin > manager > approver >
+  admin_staff > advisor > user.
+- Staff with manage-users rights may change which assigned role is primary.
+
+EFFECTIVE CAPABILITIES (UNION / OR):
+- `userCan(hub, user, flag)` is TRUE if ANY of the user’s assigned roles
+  has that flag checked on that hub’s §5.2 matrix (then apply existing
+  module allow-list / acting-advisor / functionality gates as today).
+- Dashboard nav / home cards = union of tools unlocked by any role.
+- Admin-staff “act as advisor” continues to mirror the subject advisor’s
+  effective capabilities when acting; having admin_staff among roles is
+  what enables acting, not primary alone.
+- Control-plane access: if the user holds `power_admin` among their roles,
+  Central / pa_* rules apply as today for that role; other roles still
+  contribute their hub matrix caps when acting on a content hub.
+
+COMBINATION RULES:
+- Any combination of non–control-plane roles is allowed
+  (e.g. manager+approver, client_admin+approver, user+approver).
+- `power_admin` MAY be combined with other roles only when explicitly
+  assigned by a capable Power Admin; last-power_admin protection still
+  applies (cannot remove the only power_admin on a connection).
+- `finproms_admin` / `client_admin` may be combined with operational roles
+  (manager, approver, …) so one person can admin and review.
+- Duplicate role keys on one user are ignored.
+- Removing a role from a user is blocked if it would leave them with zero
+  roles; removing primary auto-promotes another assigned role (use
+  privilege order above).
+
+MANAGE ROLES / MATRIX COLUMNS:
+- “Users per role” counts users who HOLD that role (a user with two roles
+  appears in two column counts — expected).
+- Delete role from hub matrix remains blocked while any user still holds
+  that role (unchanged rule; multi-role makes this more important).
+- Adding a custom / dormant system role to the hub is unchanged (§5.2).
+
+USER MANAGEMENT & IMPORT:
+- Hub → Users / Power Admin manage-users: role field becomes multi-select
+  (assign / revoke roles; set primary).
+- Advisor Excel import: Role column SHOULD accept one role (current) and,
+  when multi-role is live, optionally a delimited list (e.g. manager|approver)
+  or repeated role columns; imported set replaces only the roles specified
+  for that row’s create path — document the chosen Excel format in the
+  import template help text.
+- Public self-register / plan subscribe: assign `user` only (do not wipe
+  other roles if an existing account somehow already has more).
+
+HARD-CODED ROLE CHECKS (must be updated):
+- Any code that reads `$user->role === '…'` for authorisation MUST move to
+  “user has role X” or “userCan(capability)” as appropriate.
+- Approver-scoped list filters (e.g. hide view-all for pure approvers) must
+  use role membership + capabilities, not a single string compare that
+  breaks when approver+manager are combined — prefer capability-first;
+  if a role-based exception remains, define whether “has approver AND has
+  manager” uses the broader (manager) behaviour (RECOMMENDED: broader /
+  union-friendly behaviour).
+
+AFFECTED FUNCTIONALITIES (checklist for backend + frontend):
+  1) Data model & migrations — users.role → multi-role store + primary
+  2) User model helpers — isPowerAdmin / isManager / … → hasRole / roles
+  3) CapabilitiesMatrixService — userCan / effectiveRoleFor → union of roles
+     (acting-advisor path preserved)
+  4) Auth /me and session payloads — roles[] + primary role + labels
+  5) Hub → Users / pa_manage_users_roles — multi-assign UI + APIs
+  6) Manage roles page — user counts per role (multi-count OK)
+  7) Capabilities matrix — no column redesign; evaluation only
+  8) Advisor Excel import / template / submit — multi-role cell support
+  9) White-label user create/update services — accept roles[]
+  10) Activity logs & reports — store primary (or joined roles string);
+      filters by role match any held role
+  11) Compliance audit trail (SMC / GC / WC) — actor / related role display
+  12) Supporting-files uploaded_by_role — primary or derived label
+  13) Support Tickets / Security Monitoring role gates — via userCan union
+  14) Firm Head / firm documents — unchanged (membership-based) but any
+      role-gated side paths must use hasRole / userCan
+  15) Acting hub / control-plane role detection — hasRole(power_admin) etc.
+  16) Last power_admin / last finproms_admin guards — count users who HOLD
+      that role, not primary-only
+  17) Discontinue / suspend / GDPR erasure — role fields in denormalised
+      logs remain historical snapshots
+  18) Frontend nav, badges, user forms, filters, import help copy
+  19) Automated tests — factories, feature tests that assume one role
+
+OUT OF SCOPE / UNCHANGED:
+- Role keys and display-name overrides (§5.2 Manage roles)
+- Hub Functionalities / Modules checklists (5.1 / 5.1A)
+- Power Admin pa_* checklist shape (5.3) — still applies when user holds
+  power_admin
+- Head of Firm appointment (still membership-based, any role(s))
 
 
 --------------------------------------------------------------------------------
@@ -1134,13 +1287,20 @@ Notes:
 - Distinct from Functionalities (5.1). Do NOT repeat Functionalities here.
 - This is a role × capability matrix per hub, managed only from the
   CENTRAL HUB CONTROLLER Power Admin dashboard.
-- Matrix COLUMNS = roles currently present on that hub (users with that role
-  exist on the hub’s user store / remote DB) UNION roles Power Admin has
-  explicitly added for THAT hub UNION must roles (power_admin, finproms_admin)
-  which are always present on every hub. Do NOT always show every other system role.
+- MULTI-ROLE (see §2.7.1): a user may hold several roles; their effective
+  rights are the UNION (OR) of every checked cell across those role columns
+  on this hub (then module / acting-advisor / functionality gates apply).
+  The matrix itself stays role × capability — columns are still one per role,
+  not one per user.
+- Matrix COLUMNS = roles currently present on that hub (users who HOLD that
+  role exist on the hub’s user store / remote DB — a multi-role user counts
+  toward every role they hold) UNION roles Power Admin has explicitly added
+  for THAT hub UNION must roles (power_admin, finproms_admin) which are always
+  present on every hub. Do NOT always show every other system role.
 - “Manage roles” page (`/my-dashboard/role-display-names`, capability
   `dashboard_manage_role_display_names` labeled Manage roles):
-  - List roles on the CURRENT hub with total users per role
+  - List roles on the CURRENT hub with total users per role (count users who
+    HOLD that role; multi-role users are counted once per role they hold)
   - Add a dormant system role or create a custom role for the CURRENT hub
   - Delete a role from this hub’s matrix when it has 0 users (blocked while users
     still hold the role; power_admin and finproms_admin are must roles and can
@@ -1313,7 +1473,8 @@ Notes:
   - Manage hub Functionalities and Modules checklists
   - Manage payment methods
   - Manage Power Admin / user capabilities matrix (this list + 5.2)
-  - Manage users / roles (create, update, delete, assign roles)
+  - Manage users / roles (create, update, delete, assign ONE OR MORE roles
+    per user + set primary role — §2.7.1)
   - Manage hub backups (schedules, run/download/restore from Central)
   - Remotely control content hubs (hub switcher / acting hub)
 - Stored as platform settings on Central Hub (not per content hub).
@@ -1333,7 +1494,8 @@ Notes:
      hub_type, deploy wiring)
   2) Hub Functionalities checklist per hub (section 5.1) — how the hub works
   3) User capabilities matrix per hub (section 5.2) — what members and hub
-     admins can do on each Shared AND each White-labelled hub (by role)
+     admins can do on each Shared AND each White-labelled hub (by role;
+     multi-role users get the UNION of their roles — §2.7.1)
   4) Power Admin's OWN capabilities (section 5.3) — same Capabilities screen
   5) Platform payment methods (Stripe / bank transfer), and other platform
      settings as needed
@@ -2028,7 +2190,10 @@ Out of scope for v1 of this module
 - Single codebase for Central Hub Controller + Shared hub(s) + all White-labels.
 - Three instance roles: central (control plane), shared (public/content hub),
   white_label (private client hub).
-- Roles: power_admin, finproms_admin, client_admin, manager, approver, advisor, user.
+- Roles: power_admin, finproms_admin, client_admin, manager, approver,
+  admin_staff, advisor, user. Each user may hold MULTIPLE roles; effective
+  capabilities = UNION of assigned roles (§2.7.1). Primary role is for
+  display / audit only.
 - Separate frontend shells: member catalog app (on Shared / White-label), and
   one universal Dashboard shell at /my-dashboard (tools from Capabilities +
   Power Admin pa_* checklist on Central Hub).
@@ -2195,9 +2360,19 @@ STEP 1 — Shared hub core (content hub)
 [x] Hub Functionalities checklist (section 5.1) — Power Admin Functionalities screen only
 [x] User capabilities matrix (section 5.2) — roles × member/dashboard caps (no Functionalities duplication)
 [x] Wire hub-admin dashboard menus/actions to capability checklist (per-role; no hub-wide OR leak)
+    — “no hub-wide OR leak” = do not grant a capability to an unchecked role
+    column; multi-role users may OR across *their own* roles only (§2.7.1)
 [x] Wire member nav/actions to member capability checklist
 [x] Roles documented: power_admin, finproms_admin, client_admin, manager,
-    approver, advisor, user
+    approver, advisor, user (admin_staff also in matrix / User model)
+[x] MULTI-ROLE USERS (§2.7 / §2.7.1) — backend: user_roles pivot; users.role =
+    primary; capability UNION in userCan; UserRolesService sync + activity logs
+    (user.role_assigned / user.role_removed / user.primary_role_changed);
+    Power Admin / WL user APIs accept roles[] + primary_role; Excel import
+    accepts delimited multi-role cells; Hub → Users / Manage roles counts;
+    approver-scoped queue uses isApproverScopedOnly. Frontend (hub-finproms-frontend):
+    Users & roles multi-select + primary role, Hub Users / Access Control multi-role
+    display, AuthContext hasRole / roleKeys — done.
 [x] Power Admin capabilities checklist (section 5.3) — separate from hub Functionalities
 [x] Wire Power Admin nav/APIs to Power Admin capabilities
 [x] Capabilities matrix UI — roles × user capabilities (incl. Power Admin) per hub
@@ -2244,6 +2419,7 @@ STEP 1 — Shared hub core (content hub)
 [x] Optional compliance supporting files (SMC / GC / WC) on submit, review/approve-reject, and change-status — shown in version history with uploader role (advisor / approver / manager), not as a separate request-level box
 [x] Approver / manager dedicated front-end UIs (SMC & ops flows)
 [x] Power Admin user management UI (pa_manage_users_roles — create/update/delete/roles)
+    — extend for multi-role assign + primary when §2.7.1 is implemented
 [x] Control white labelled hubs via dashboard hub switcher (dashboard_control_white_label_hubs)
 [x] Acting-hub content create/list on white-label DB (posts, types, categories, tags, bundles)
 [x] Central content library (manual create + Excel bulk, distribute live posts;

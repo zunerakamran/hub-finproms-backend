@@ -257,15 +257,29 @@ class HubRolesService
             $rows = collect();
             $current = $this->hubs->current();
             if ((int) $hub->id === (int) $current->id || $hub->isControlPlane()) {
-                $rows = User::query()
-                    ->whereNotNull('role')
-                    ->where('role', '!=', '')
-                    ->select('role', DB::raw('COUNT(*) as user_count'))
-                    ->groupBy('role')
-                    ->get();
+                if (Schema::hasTable('user_roles')) {
+                    // Multi-role: count users who HOLD each role (a user may appear in multiple columns).
+                    $rows = DB::table('user_roles')
+                        ->select('role', DB::raw('COUNT(DISTINCT user_id) as user_count'))
+                        ->groupBy('role')
+                        ->get();
+                } else {
+                    $rows = User::query()
+                        ->whereNotNull('role')
+                        ->where('role', '!=', '')
+                        ->select('role', DB::raw('COUNT(*) as user_count'))
+                        ->groupBy('role')
+                        ->get();
+                }
             } elseif ($hub->isContentHub() && $hub->hasRemoteDatabaseConfigured()) {
                 $connection = $this->remoteDb->connect($hub);
-                if (Schema::connection($connection)->hasTable('users')) {
+                if (Schema::connection($connection)->hasTable('user_roles')) {
+                    $rows = DB::connection($connection)
+                        ->table('user_roles')
+                        ->select('role', DB::raw('COUNT(DISTINCT user_id) as user_count'))
+                        ->groupBy('role')
+                        ->get();
+                } elseif (Schema::connection($connection)->hasTable('users')) {
                     $rows = DB::connection($connection)
                         ->table('users')
                         ->whereNotNull('role')
@@ -296,6 +310,18 @@ class HubRolesService
     public function isMustRole(string $role): bool
     {
         return in_array($this->normalizeRoleKey($role), self::MUST_ROLES, true);
+    }
+
+    public function forgetUserCountsCache(?int $hubId = null): void
+    {
+        if ($hubId === null) {
+            self::$userCountsCache = [];
+            self::$visibleMatrixRolesCache = [];
+
+            return;
+        }
+
+        unset(self::$userCountsCache[$hubId], self::$visibleMatrixRolesCache[$hubId]);
     }
 
     /**

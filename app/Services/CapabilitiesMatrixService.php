@@ -1061,11 +1061,30 @@ class CapabilitiesMatrixService
 
     /**
      * Whether this user currently has a capability (Admin-staff may mirror advisor).
+     * Multi-role (§2.7.1): UNION of all assigned roles, except when Admin-staff
+     * is acting as an advisor (then the advisor matrix column applies alone).
      * Also enforces per-user module allow-lists when a flag requires a module.
      */
     public function userCan(Hub $hub, User $user, string $flag): bool
     {
-        if (! $this->roleCan($hub, $this->effectiveRoleFor($user), $flag)) {
+        $acting = app(ActingAdvisorService::class);
+        if ($acting->canActOnBehalf($user) && $acting->actingAdvisor($user)) {
+            if (! $this->roleCan($hub, User::ROLE_ADVISOR, $flag)) {
+                return false;
+            }
+
+            return $this->userPassesModuleGate($hub, $user, $flag);
+        }
+
+        $allowed = false;
+        foreach ($user->roleKeys() as $role) {
+            if ($this->roleCan($hub, $role, $flag)) {
+                $allowed = true;
+                break;
+            }
+        }
+
+        if (! $allowed) {
             return false;
         }
 
@@ -1079,7 +1098,7 @@ class CapabilitiesMatrixService
      */
     private function userPassesModuleGate(Hub $hub, User $user, string $flag): bool
     {
-        if (ActingHubService::isControlPlaneRole((string) $user->role)) {
+        if ($user->hasAnyRole(ActingHubService::CONTROL_PLANE_ROLES)) {
             return true;
         }
 

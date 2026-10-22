@@ -31,7 +31,8 @@ class AdvisorImportService
 
     public function __construct(
         private readonly HubService $hubs,
-        private readonly SubscriberCreditsService $subscriberCredits
+        private readonly SubscriberCreditsService $subscriberCredits,
+        private readonly UserRolesService $userRoles,
     ) {}
 
     /**
@@ -107,8 +108,8 @@ class AdvisorImportService
                 $name = Str::before($email, '@');
             }
 
-            $role = $this->resolveRole($hub, $roleInput);
-            if ($role === null) {
+            $roles = $this->resolveRoles($hub, $roleInput);
+            if ($roles === []) {
                 $skipped[] = [
                     'row' => $rowNumber,
                     'email' => $email,
@@ -116,6 +117,7 @@ class AdvisorImportService
                 ];
                 continue;
             }
+            $role = $this->userRoles->pickPrimary($roles);
 
             if ($firmName === '') {
                 $skipped[] = [
@@ -142,13 +144,13 @@ class AdvisorImportService
             $modules = $this->resolveModules($hub, $modulesInput);
             $firmId = (int) $firm->id;
             $resolvedFirmName = (string) $firm->name;
-            $roleLabel = $hub->roleLabel($role);
+            $roleLabel = implode(' | ', array_map(fn (string $key) => $hub->roleLabel($key), $roles));
             $moduleLabels = array_map(fn (string $key) => $hub->moduleLabel($key), $modules);
 
             $user = User::on($connection)->where('email', $email)->first();
 
             if ($user) {
-                if (ActingHubService::isControlPlaneRole((string) $user->role)) {
+                if ($user->hasAnyRole(ActingHubService::CONTROL_PLANE_ROLES)) {
                     $skipped[] = [
                         'row' => $rowNumber,
                         'email' => $email,
@@ -165,6 +167,7 @@ class AdvisorImportService
                     'email' => $email,
                     'password' => '',
                     'role' => $role,
+                    'roles' => $roles,
                     'firm_id' => $firmId,
                     'firm' => $resolvedFirmName,
                     'modules' => $modules,
@@ -180,7 +183,7 @@ class AdvisorImportService
 
                 if ($action === 'reactivate') {
                     $previewReactivated[] = $previewRow;
-                    if ($this->roleIsAdvisor($role)) {
+                    if ($this->rolesIncludeAdvisor($roles)) {
                         $billableBatch++;
                     }
                 } else {
@@ -196,6 +199,7 @@ class AdvisorImportService
                 'email' => $email,
                 'password' => $password,
                 'role' => $role,
+                'roles' => $roles,
                 'firm_id' => $firmId,
                 'firm' => $resolvedFirmName,
                 'modules' => $modules,
@@ -207,7 +211,7 @@ class AdvisorImportService
                 'firm' => $resolvedFirmName,
                 'modules' => $moduleLabels,
             ];
-            if ($this->roleIsAdvisor($role)) {
+            if ($this->rolesIncludeAdvisor($roles)) {
                 $billableBatch++;
             }
         }
@@ -262,7 +266,16 @@ class AdvisorImportService
             $name = trim((string) ($row['name'] ?? ''));
             $email = strtolower(trim((string) ($row['email'] ?? '')));
             $password = trim((string) ($row['password'] ?? ''));
-            $role = trim((string) ($row['role'] ?? ''));
+            $roles = isset($row['roles']) && is_array($row['roles'])
+                ? array_values(array_filter(array_map('strval', $row['roles'])))
+                : $this->userRoles->splitRoleString((string) ($row['role'] ?? ''));
+            $roles = array_values(array_filter(
+                array_map(fn (string $r) => $this->userRoles->normalizeRole($r), $roles),
+                fn (string $r) => in_array($r, self::IMPORTABLE_ROLES, true)
+            ));
+            $role = $roles !== []
+                ? $this->userRoles->pickPrimary($roles)
+                : trim((string) ($row['role'] ?? ''));
             $firmId = isset($row['firm_id']) && $row['firm_id'] !== null && $row['firm_id'] !== ''
                 ? (int) $row['firm_id']
                 : null;
@@ -283,7 +296,7 @@ class AdvisorImportService
                 $name = Str::before($email, '@');
             }
 
-            if (! in_array($role, self::IMPORTABLE_ROLES, true)) {
+            if ($roles === []) {
                 $skipped[] = [
                     'row' => $index + 1,
                     'email' => $email,
@@ -301,7 +314,7 @@ class AdvisorImportService
                 continue;
             }
 
-            $isAdvisor = $this->roleIsAdvisor($role);
+            $isAdvisor = $this->rolesIncludeAdvisor($roles);
 
             try {
                 $result = DB::connection($connection)->transaction(function () use (
@@ -310,6 +323,7 @@ class AdvisorImportService
                     $email,
                     $password,
                     $role,
+                    $roles,
                     $isAdvisor,
                     $firmId,
                     $modules,
@@ -320,7 +334,7 @@ class AdvisorImportService
                     $temporaryPassword = null;
 
                     if ($user) {
-                        if (ActingHubService::isControlPlaneRole((string) $user->role)) {
+                        if ($user->hasAnyRole(ActingHubService::CONTROL_PLANE_ROLES)) {
                             return [
                                 'status' => 'skipped',
                                 'reason' => 'Email belongs to a control-plane admin account.',
@@ -343,6 +357,7 @@ class AdvisorImportService
                             $user->allows_admin_staff_acting = false;
                         }
                         $user->save();
+                        $this->userRoles->syncRoles($user, $roles, $role, log: true, hub: $hub);
 
                         if ($isAdvisor) {
                             $this->ensureAdvisorSubscription($user);
@@ -353,7 +368,7 @@ class AdvisorImportService
 
                         return [
                             'status' => $wasInactive ? 'reactivated' : 'updated',
-                            'user' => $user->fresh('firm'),
+                            'user' => $user->fresh(['firm', 'roleAssignments']),
                         ];
                     }
 
@@ -382,6 +397,9 @@ class AdvisorImportService
                         'email_verified_at' => now(),
                     ]);
 
+                    $this->userRoles->resetPivotForLoggedSync($user);
+                    $this->userRoles->syncRoles($user, $roles, $role, log: true, hub: $hub);
+
                     if ($isAdvisor) {
                         $this->ensureAdvisorSubscription($user);
                     }
@@ -389,7 +407,7 @@ class AdvisorImportService
 
                     return [
                         'status' => 'created',
-                        'user' => $user->fresh('firm'),
+                        'user' => $user->fresh(['firm', 'roleAssignments']),
                         'temporary_password' => $temporaryPassword,
                     ];
                 });
@@ -607,8 +625,40 @@ class AdvisorImportService
 
     /**
      * Resolve a sheet role value (key or display/renamed label) to a role key.
+     * Supports multi-role cells: "manager|approver" or "Manager, Approver".
      */
     public function resolveRole(Hub $hub, string $value): ?string
+    {
+        $roles = $this->resolveRoles($hub, $value);
+
+        return $roles[0] ?? null;
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function resolveRoles(Hub $hub, string $value): array
+    {
+        $parts = $this->userRoles->splitRoleString($value);
+        if ($parts === [] && trim($value) !== '') {
+            $parts = [trim($value)];
+        }
+
+        $out = [];
+        foreach ($parts as $part) {
+            $resolved = $this->resolveSingleRole($hub, $part);
+            if ($resolved === null) {
+                return [];
+            }
+            if (! in_array($resolved, $out, true)) {
+                $out[] = $resolved;
+            }
+        }
+
+        return $out;
+    }
+
+    private function resolveSingleRole(Hub $hub, string $value): ?string
     {
         $value = trim($value);
         if ($value === '') {
@@ -831,6 +881,14 @@ class AdvisorImportService
     private function roleIsAdvisor(string $role): bool
     {
         return $role === User::ROLE_ADVISOR;
+    }
+
+    /**
+     * @param  list<string>  $roles
+     */
+    private function rolesIncludeAdvisor(array $roles): bool
+    {
+        return in_array(User::ROLE_ADVISOR, $roles, true);
     }
 
     /**

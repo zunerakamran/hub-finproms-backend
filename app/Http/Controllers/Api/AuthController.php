@@ -529,6 +529,7 @@ class AuthController extends Controller
 
         $user->loadMissing([
             'firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
+            'roleAssignments',
         ]);
         if ($user->firm) {
             $user->firm->setAttribute('compliance_visibility', [

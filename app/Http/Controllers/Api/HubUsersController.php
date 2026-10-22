@@ -72,10 +72,14 @@ class HubUsersController extends Controller
         }
 
         if (! empty($validated['role'])) {
-            $query->where('role', $validated['role']);
+            $role = (string) $validated['role'];
+            $query->where(function ($builder) use ($role) {
+                $builder->where('role', $role)
+                    ->orWhereHas('roleAssignments', fn ($r) => $r->where('role', $role));
+            });
         }
 
-        $paginator = $query->paginate($perPage, ['*'], 'page', $page);
+        $paginator = $query->with(['firm:id,name', 'roleAssignments'])->paginate($perPage, ['*'], 'page', $page);
         $labelHub = $targetHub;
 
         return response()->json([

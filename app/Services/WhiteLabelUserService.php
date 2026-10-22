@@ -15,7 +15,8 @@ use InvalidArgumentException;
 class WhiteLabelUserService
 {
     public function __construct(
-        private readonly WhiteLabelDatabaseService $remoteDb
+        private readonly WhiteLabelDatabaseService $remoteDb,
+        private readonly UserRolesService $userRoles,
     ) {}
 
     public function assertTarget(Hub $hub): void
@@ -37,7 +38,7 @@ class WhiteLabelUserService
         $this->assertTarget($hub);
 
         return $this->remoteDb->run($hub, function (string $connection) use ($hub, $search, $role, $perPage, $page) {
-            $query = User::on($connection)->with('firm:id,name')->orderBy('name')->orderBy('id');
+            $query = User::on($connection)->with(['firm:id,name', 'roleAssignments'])->orderBy('name')->orderBy('id');
 
             if ($search) {
                 $term = '%'.$search.'%';
@@ -47,7 +48,10 @@ class WhiteLabelUserService
             }
 
             if ($role) {
-                $query->where('role', $role);
+                $query->where(function ($q) use ($role) {
+                    $q->where('role', $role)
+                        ->orWhereHas('roleAssignments', fn ($r) => $r->where('role', $role));
+                });
             }
 
             $paginator = $query->paginate($perPage, ['*'], 'page', $page);
@@ -71,20 +75,23 @@ class WhiteLabelUserService
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
-    public function create(Hub $hub, array $payload): array
+    public function create(Hub $hub, array $payload, ?User $actor = null, ?\Illuminate\Http\Request $request = null): array
     {
         $this->assertTarget($hub);
 
-        return $this->remoteDb->run($hub, function (string $connection) use ($hub, $payload) {
+        return $this->remoteDb->run($hub, function (string $connection) use ($hub, $payload, $actor, $request) {
             $this->assertEmailAvailable($connection, (string) $payload['email']);
+
+            $roleSet = $this->userRoles->rolesFromPayload($payload)
+                ?? ['roles' => [(string) ($payload['role'] ?? User::ROLE_USER)], 'primary' => (string) ($payload['role'] ?? User::ROLE_USER)];
 
             $user = User::on($connection)->create([
                 'name' => $payload['name'],
                 'email' => $payload['email'],
                 'password' => $payload['password'],
-                'role' => $payload['role'],
+                'role' => $roleSet['primary'],
                 'credits' => $payload['credits'] ?? 0,
-                'is_advisor' => $payload['is_advisor'] ?? ($payload['role'] === User::ROLE_ADVISOR),
+                'is_advisor' => $payload['is_advisor'] ?? in_array(User::ROLE_ADVISOR, $roleSet['roles'], true),
                 'allows_admin_staff_acting' => (bool) ($payload['allows_admin_staff_acting'] ?? false),
                 'has_unlimited_credits' => $payload['has_unlimited_credits'] ?? false,
                 'is_suspended' => $payload['is_suspended'] ?? false,
@@ -92,7 +99,18 @@ class WhiteLabelUserService
                 'email_verified_at' => now(),
             ]);
 
-            return $this->serialize($user->fresh(), $hub);
+            $this->userRoles->resetPivotForLoggedSync($user);
+            $this->userRoles->syncRoles(
+                $user,
+                $roleSet['roles'],
+                $roleSet['primary'],
+                log: true,
+                actor: $actor,
+                request: $request,
+                hub: $hub,
+            );
+
+            return $this->serialize($user->fresh(['firm', 'roleAssignments']), $hub);
         });
     }
 
@@ -104,7 +122,10 @@ class WhiteLabelUserService
         $this->assertTarget($hub);
 
         return $this->remoteDb->run($hub, function (string $connection) use ($hub, $userId) {
-            return $this->serialize($this->findOrFail($connection, $userId), $hub);
+            $user = $this->findOrFail($connection, $userId);
+            $user->loadMissing('roleAssignments');
+
+            return $this->serialize($user, $hub);
         });
     }
 
@@ -112,39 +133,48 @@ class WhiteLabelUserService
      * @param  array<string, mixed>  $payload
      * @return array{user: array<string, mixed>, password_changed: bool, newly_suspended: bool}
      */
-    public function update(Hub $hub, int $userId, array $payload): array
-    {
+    public function update(
+        Hub $hub,
+        int $userId,
+        array $payload,
+        ?User $actor = null,
+        ?\Illuminate\Http\Request $request = null,
+    ): array {
         $this->assertTarget($hub);
 
-        return $this->remoteDb->run($hub, function (string $connection) use ($hub, $userId, $payload) {
+        return $this->remoteDb->run($hub, function (string $connection) use ($hub, $userId, $payload, $actor, $request) {
             $user = $this->findOrFail($connection, $userId);
+            $user->loadMissing('roleAssignments');
 
             if (array_key_exists('email', $payload)) {
                 $this->assertEmailAvailable($connection, (string) $payload['email'], $user->id);
             }
 
             $wasSuspended = (bool) $user->is_suspended;
-            $fill = collect($payload)->except(['password'])->all();
+            $roleSet = $this->userRoles->rolesFromPayload($payload, $user);
+            $fill = collect($payload)->except(['password', 'roles', 'primary_role'])->all();
 
             if (! empty($payload['password'])) {
                 $fill['password'] = $payload['password'];
             }
 
-            if (($fill['role'] ?? null) === User::ROLE_ADVISOR && ! array_key_exists('is_advisor', $fill)) {
-                $fill['is_advisor'] = true;
+            if ($roleSet !== null) {
+                $fill['role'] = $roleSet['primary'];
+                if (in_array(User::ROLE_ADVISOR, $roleSet['roles'], true) && ! array_key_exists('is_advisor', $fill)) {
+                    $fill['is_advisor'] = true;
+                }
+                if (! in_array(User::ROLE_ADMIN_STAFF, $roleSet['roles'], true)) {
+                    $fill['acting_advisor_id'] = null;
+                }
             }
 
-            $role = $fill['role'] ?? $user->role;
-            $isAdvisor = ($role === User::ROLE_ADVISOR)
+            $rolesForAdvisor = $roleSet['roles'] ?? $user->roleKeys();
+            $isAdvisor = in_array(User::ROLE_ADVISOR, $rolesForAdvisor, true)
                 || (bool) ($fill['is_advisor'] ?? $user->is_advisor);
             if (! $isAdvisor) {
                 $fill['allows_admin_staff_acting'] = false;
             } elseif (array_key_exists('allows_admin_staff_acting', $fill)) {
                 $fill['allows_admin_staff_acting'] = (bool) $fill['allows_admin_staff_acting'];
-            }
-
-            if (array_key_exists('role', $fill) && $fill['role'] !== User::ROLE_ADMIN_STAFF) {
-                $fill['acting_advisor_id'] = null;
             }
 
             if (array_key_exists('firm_id', $fill)) {
@@ -153,6 +183,18 @@ class WhiteLabelUserService
 
             $user->fill($fill);
             $user->save();
+
+            if ($roleSet !== null) {
+                $this->userRoles->syncRoles(
+                    $user,
+                    $roleSet['roles'],
+                    $roleSet['primary'],
+                    log: true,
+                    actor: $actor,
+                    request: $request,
+                    hub: $hub,
+                );
+            }
 
             $passwordChanged = array_key_exists('password', $fill);
             if ($passwordChanged) {
@@ -168,7 +210,7 @@ class WhiteLabelUserService
             }
 
             return [
-                'user' => $this->serialize($user->fresh(), $hub),
+                'user' => $this->serialize($user->fresh(['firm', 'roleAssignments']), $hub),
                 'password_changed' => $passwordChanged,
                 'newly_suspended' => $newlySuspended,
             ];
@@ -182,7 +224,7 @@ class WhiteLabelUserService
         $this->remoteDb->run($hub, function (string $connection) use ($userId): void {
             $user = $this->findOrFail($connection, $userId);
 
-            if ($user->role === User::ROLE_POWER_ADMIN && $this->powerAdminCountOnConnection($connection) <= 1) {
+            if ($user->hasRole(User::ROLE_POWER_ADMIN) && $this->powerAdminCountOnConnection($connection) <= 1) {
                 throw ValidationException::withMessages([
                     'user' => 'Cannot delete the last Power Admin account on this hub.',
                 ]);
@@ -209,16 +251,25 @@ class WhiteLabelUserService
     {
         $hubAllowsUnlimited = $hub ? $hub->givesUnlimitedSubscriberCredits() : false;
         $unlimited = $user->hasUnlimitedCredits($hubAllowsUnlimited);
+        $roles = $user->roleKeys();
+        $primary = (string) ($user->role ?: ($roles[0] ?? User::ROLE_USER));
         $roleLabel = $hub
-            ? $hub->roleLabel((string) $user->role)
-            : ($user->role_label ?? (User::ROLE_LABELS[$user->role] ?? (string) $user->role));
+            ? $hub->roleLabel($primary)
+            : (User::ROLE_LABELS[$primary] ?? $primary);
+        $roleLabels = array_map(
+            fn (string $role) => $hub ? $hub->roleLabel($role) : (User::ROLE_LABELS[$role] ?? $role),
+            $roles
+        );
 
         return [
             'id' => $user->id,
             'name' => $user->name,
             'email' => $user->email,
-            'role' => $user->role,
+            'role' => $primary,
             'role_label' => $roleLabel,
+            'roles' => $roles,
+            'role_labels' => $roleLabels,
+            'primary_role' => $primary,
             'credits' => $unlimited ? 0 : (int) $user->credits,
             'is_advisor' => (bool) $user->is_advisor,
             'allows_admin_staff_acting' => (bool) $user->allows_admin_staff_acting,
@@ -336,6 +387,11 @@ class WhiteLabelUserService
 
     private function powerAdminCountOnConnection(string $connection): int
     {
-        return User::on($connection)->where('role', User::ROLE_POWER_ADMIN)->count();
+        return User::on($connection)
+            ->where(function ($q) {
+                $q->where('role', User::ROLE_POWER_ADMIN)
+                    ->orWhereHas('roleAssignments', fn ($r) => $r->where('role', User::ROLE_POWER_ADMIN));
+            })
+            ->count();
     }
 }

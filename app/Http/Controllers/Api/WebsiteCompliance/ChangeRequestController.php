@@ -176,11 +176,10 @@ class ChangeRequestController extends Controller
         ];
         // Pickup/assign write tenantUserIdOrNull; match the same id for scoping.
         $actorId = $this->gate->tenantUserIdOrNull($user) ?? (int) $user->id;
-        // Approver role is always personal-queue scoped. Hub-wide history is for
-        // managers/admins via wc_view_all_change_requests — never for Approver,
-        // even if an older seeder left that flag on for the role.
+        // Approver-only users stay personal-queue scoped. Multi-role users who
+        // also hold manager/admin roles may use hub-wide history (UNION).
         $canViewAll = $this->gate->can($user, 'wc_view_all_change_requests')
-            && (string) $user->role !== User::ROLE_APPROVER;
+            && ! $user->isApproverScopedOnly();
         $canChangeStatus = $this->gate->can($user, 'wc_change_request_status');
         $canAssign = $this->gate->can($user, 'wc_assign_change_requests');
 
@@ -271,7 +270,7 @@ class ChangeRequestController extends Controller
         $isUnassignedPending = $changeRequest->status === ChangeRequest::STATUS_PENDING
             && empty($changeRequest->approver_id);
         $canViewAll = $this->gate->can($user, 'wc_view_all_change_requests')
-            && (string) $user->role !== User::ROLE_APPROVER;
+            && ! $user->isApproverScopedOnly();
         $canAssign = $this->gate->can($user, 'wc_assign_change_requests');
         $canReview = $this->gate->can($user, 'wc_review_change_requests');
         $canChangeStatus = $this->gate->can($user, 'wc_change_request_status');
