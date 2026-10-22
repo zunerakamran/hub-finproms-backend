@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Storage;
 use App\Services\ActingAdvisorService;
 use App\Services\ActivityLogService;
 use App\Services\ComplianceAuditTrailService;
+use App\Services\ComplianceSeparationService;
 use App\Services\FirmComplianceVisibilityService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -26,7 +27,8 @@ class ChangeRequestWorkflowService
         private readonly ActivityLogService $activityLogs,
         private readonly ComplianceAuditTrailService $auditTrail,
         private readonly WebsiteComplianceGate $gate,
-        private readonly FirmComplianceVisibilityService $firmVisibility
+        private readonly FirmComplianceVisibilityService $firmVisibility,
+        private readonly ComplianceSeparationService $separation,
     ) {}
 
     /**
@@ -240,6 +242,13 @@ class ChangeRequestWorkflowService
             $changeRequest->editor_id ? (int) $changeRequest->editor_id : null,
             $changeRequest->editor?->firm_id ? (int) $changeRequest->editor->firm_id : null,
             $changeRequest->approver_id ? (int) $changeRequest->approver_id : null
+        );
+
+        $this->separation->assertActorNotConflictedHttp(
+            $user,
+            $changeRequest->editor_id ? (int) $changeRequest->editor_id : null,
+            $changeRequest->on_behalf_by_user_id ? (int) $changeRequest->on_behalf_by_user_id : null,
+            (int) ($this->gate->tenantUserIdOrNull($user) ?? $user->id)
         );
 
         $currentStatus = (string) $changeRequest->status;
@@ -675,13 +684,14 @@ class ChangeRequestWorkflowService
         $canViewAll = $this->gate->can($user, 'wc_view_all_change_requests')
             && ! $user->isApproverScopedOnly();
         $canOverrideStatus = $this->gate->can($user, 'wc_change_request_status');
+        $actorTenantId = $this->gate->tenantUserIdOrNull($user) ?? (int) $user->id;
 
         if (
             ! $canViewAll
             && ! $canOverrideStatus
             && ! $this->gate->isRemoteControlPlaneOperator($user)
             && $changeRequest->approver_id !== null
-            && (int) $changeRequest->approver_id !== (int) ($this->gate->tenantUserIdOrNull($user) ?? $user->id)
+            && (int) $changeRequest->approver_id !== (int) $actorTenantId
         ) {
             throw new HttpException(403, 'Unauthorized');
         }
@@ -698,6 +708,13 @@ class ChangeRequestWorkflowService
         )) {
             throw new HttpException(403, 'Unauthorized');
         }
+
+        $this->separation->assertActorNotConflictedHttp(
+            $user,
+            $changeRequest->editor_id ? (int) $changeRequest->editor_id : null,
+            $changeRequest->on_behalf_by_user_id ? (int) $changeRequest->on_behalf_by_user_id : null,
+            (int) $actorTenantId
+        );
 
         if (in_array($changeRequest->status, ChangeRequest::STATUS_LOCKED, true)) {
             throw new HttpException(
@@ -733,13 +750,14 @@ class ChangeRequestWorkflowService
         $canViewAll = $this->gate->can($user, 'wc_view_all_change_requests')
             && ! $user->isApproverScopedOnly();
         $canOverrideStatus = $this->gate->can($user, 'wc_change_request_status');
+        $actorTenantId = $this->gate->tenantUserIdOrNull($user) ?? (int) $user->id;
 
         if (
             ! $canViewAll
             && ! $canOverrideStatus
             && ! $this->gate->isRemoteControlPlaneOperator($user)
             && $changeRequest->approver_id !== null
-            && (int) $changeRequest->approver_id !== (int) ($this->gate->tenantUserIdOrNull($user) ?? $user->id)
+            && (int) $changeRequest->approver_id !== (int) $actorTenantId
         ) {
             throw new HttpException(403, 'Unauthorized');
         }
@@ -756,6 +774,13 @@ class ChangeRequestWorkflowService
         )) {
             throw new HttpException(403, 'Unauthorized');
         }
+
+        $this->separation->assertActorNotConflictedHttp(
+            $user,
+            $changeRequest->editor_id ? (int) $changeRequest->editor_id : null,
+            $changeRequest->on_behalf_by_user_id ? (int) $changeRequest->on_behalf_by_user_id : null,
+            (int) $actorTenantId
+        );
 
         if (in_array($changeRequest->status, ChangeRequest::STATUS_LOCKED, true)) {
             throw new HttpException(

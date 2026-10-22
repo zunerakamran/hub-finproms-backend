@@ -32,7 +32,8 @@ class GeneralComplianceService
         private readonly ActivityLogService $activityLogs,
         private readonly ComplianceAuditTrailService $auditTrail,
         private readonly FirmComplianceVisibilityService $firmVisibility,
-        private readonly ActingAdvisorService $actingAdvisors
+        private readonly ActingAdvisorService $actingAdvisors,
+        private readonly ComplianceSeparationService $separation,
     ) {}
 
     public function assertModuleEnabled(Hub $hub): void
@@ -45,14 +46,19 @@ class GeneralComplianceService
     }
 
     /**
-     * Users whose role currently has gc_review_requests on this hub.
+     * Users who HOLD a role with gc_review_requests on this hub (§2.7.1 / §2.7.2).
      *
      * @return Collection<int, User>
      */
-    public function reviewersForHub(Hub $hub, ?Firm $submitterFirm = null, bool $filterByFirm = false): Collection
-    {
+    public function reviewersForHub(
+        Hub $hub,
+        ?Firm $submitterFirm = null,
+        bool $filterByFirm = false,
+        ?int $excludeOwnerUserId = null,
+        ?int $excludeOnBehalfUserId = null,
+    ): Collection {
         $roles = array_values(array_filter(
-            CapabilitiesMatrixService::MATRIX_ROLES,
+            $this->matrix->allMatrixRoles(),
             fn (string $role) => $this->matrix->roleCan($hub, $role, 'gc_review_requests')
         ));
 
@@ -60,17 +66,12 @@ class GeneralComplianceService
             return collect();
         }
 
-        $reviewers = User::query()
-            ->with('firm:id,name,is_central')
-            ->whereIn('role', $roles)
-            ->where(function ($q) {
-                $q->where('is_suspended', false)->orWhereNull('is_suspended');
-            })
-            ->where(function ($q) {
-                $q->where('is_discontinued', false)->orWhereNull('is_discontinued');
-            })
-            ->orderBy('name')
-            ->get(['id', 'name', 'email', 'role', 'firm_id']);
+        $reviewers = $this->separation->usersHoldingRolesQuery($roles)->get();
+        $reviewers = $this->separation->excludeConflictedReviewers(
+            $reviewers,
+            $excludeOwnerUserId,
+            $excludeOnBehalfUserId
+        );
 
         if ($filterByFirm) {
             return $this->firmVisibility->filterAssigneesForSubmitterFirm($reviewers, $submitterFirm);
@@ -512,8 +513,8 @@ class GeneralComplianceService
     ): GeneralComplianceRequest {
         $this->assertModuleEnabled($hub);
 
-        $canAssign = $this->matrix->roleCan($hub, (string) $actor->role, 'gc_assign_requests');
-        $canReview = $this->matrix->roleCan($hub, (string) $actor->role, 'gc_review_requests');
+        $canAssign = $this->matrix->userCan($hub, $actor, 'gc_assign_requests');
+        $canReview = $this->matrix->userCan($hub, $actor, 'gc_review_requests');
 
         if (! $canAssign && ! $canReview) {
             throw ValidationException::withMessages([
@@ -531,6 +532,11 @@ class GeneralComplianceService
             $compliance->assigned_to ? (int) $compliance->assigned_to : null
         );
 
+        $ownerId = (int) $compliance->user_id;
+        $onBehalfId = $compliance->on_behalf_by_user_id
+            ? (int) $compliance->on_behalf_by_user_id
+            : null;
+
         // Reviewers without assign capability may only pick up unassigned requests for themselves.
         if (! $canAssign) {
             if (! $assignTo || (int) $assignTo !== (int) $actor->id) {
@@ -543,6 +549,12 @@ class GeneralComplianceService
                     'assigned_to' => 'This request is already assigned to another reviewer.',
                 ]);
             }
+            $this->separation->assertActorNotConflicted(
+                $actor,
+                $ownerId,
+                $onBehalfId,
+                (int) $this->actingAdvisors->requireSubject($actor)->id,
+            );
         }
 
         $compliance->loadMissing(['assignee', 'currentVersionRow']);
@@ -551,11 +563,12 @@ class GeneralComplianceService
 
         if ($assignTo) {
             $approver = User::query()->findOrFail($assignTo);
-            if (! $this->matrix->roleCan($hub, (string) $approver->role, 'gc_review_requests')) {
+            if (! $this->matrix->userCan($hub, $approver, 'gc_review_requests')) {
                 throw ValidationException::withMessages([
                     'assigned_to' => 'Selected user does not have review capability on this hub.',
                 ]);
             }
+            $this->separation->assertAssigneeNotConflicted($approver, $ownerId, $onBehalfId);
 
             $compliance->loadMissing('user.firm');
             if (! $this->firmVisibility->userIsEligibleAssignee($approver, $compliance->user?->firm)) {
@@ -665,8 +678,8 @@ class GeneralComplianceService
     ): GeneralComplianceRequest {
         $this->assertModuleEnabled($hub);
 
-        $canViewAll = $this->matrix->roleCan($hub, (string) $actor->role, 'gc_view_all_requests')
-            || $this->matrix->roleCan($hub, (string) $actor->role, 'gc_assign_requests');
+        $canViewAll = $this->matrix->userCan($hub, $actor, 'gc_view_all_requests')
+            || $this->matrix->userCan($hub, $actor, 'gc_assign_requests');
 
         if (! $canViewAll && (int) $compliance->assigned_to !== (int) $actor->id) {
             throw ValidationException::withMessages([
@@ -682,6 +695,13 @@ class GeneralComplianceService
             (int) $compliance->user_id,
             $compliance->user?->firm_id ? (int) $compliance->user->firm_id : null,
             $compliance->assigned_to ? (int) $compliance->assigned_to : null
+        );
+
+        $this->separation->assertActorNotConflicted(
+            $actor,
+            (int) $compliance->user_id,
+            $compliance->on_behalf_by_user_id ? (int) $compliance->on_behalf_by_user_id : null,
+            (int) $this->actingAdvisors->requireSubject($actor)->id,
         );
 
         $status = (string) $data['status'];
@@ -802,7 +822,7 @@ class GeneralComplianceService
     ): GeneralComplianceRequest {
         $this->assertModuleEnabled($hub);
 
-        if (! $this->matrix->roleCan($hub, (string) $actor->role, 'gc_change_request_status')) {
+        if (! $this->matrix->userCan($hub, $actor, 'gc_change_request_status')) {
             throw ValidationException::withMessages([
                 'capability' => 'You do not have permission to change general compliance request status.',
             ]);
@@ -816,6 +836,13 @@ class GeneralComplianceService
             (int) $compliance->user_id,
             $compliance->user?->firm_id ? (int) $compliance->user->firm_id : null,
             $compliance->assigned_to ? (int) $compliance->assigned_to : null
+        );
+
+        $this->separation->assertActorNotConflicted(
+            $actor,
+            (int) $compliance->user_id,
+            $compliance->on_behalf_by_user_id ? (int) $compliance->on_behalf_by_user_id : null,
+            (int) $this->actingAdvisors->requireSubject($actor)->id,
         );
 
         $status = (string) $data['status'];
@@ -937,12 +964,12 @@ class GeneralComplianceService
     {
         $this->assertModuleEnabled($hub);
 
-        $canViewAll = $this->matrix->roleCan($hub, (string) $actor->role, 'gc_view_all_requests')
-            || $this->matrix->roleCan($hub, (string) $actor->role, 'gc_assign_requests')
-            || $this->matrix->roleCan($hub, (string) $actor->role, 'gc_change_request_status');
-        $canReview = $this->matrix->roleCan($hub, (string) $actor->role, 'gc_review_requests');
-        $canViewOwn = $this->matrix->roleCan($hub, (string) $actor->role, 'gc_view_own_requests')
-            || $this->matrix->roleCan($hub, (string) $actor->role, 'gc_submit_request');
+        $canViewAll = $this->matrix->userCan($hub, $actor, 'gc_view_all_requests')
+            || $this->matrix->userCan($hub, $actor, 'gc_assign_requests')
+            || $this->matrix->userCan($hub, $actor, 'gc_change_request_status');
+        $canReview = $this->matrix->userCan($hub, $actor, 'gc_review_requests');
+        $canViewOwn = $this->matrix->userCan($hub, $actor, 'gc_view_own_requests')
+            || $this->matrix->userCan($hub, $actor, 'gc_submit_request');
 
         $query = GeneralComplianceRequest::query()
             ->with([
@@ -956,19 +983,26 @@ class GeneralComplianceService
             ->orderByDesc('id');
 
         if ($canViewAll) {
-            // Full queue, then firm-visibility scope below.
-        } elseif ($canReview) {
-            // Own assignments + unassigned (so reviewers can pick up / assign to themselves).
-            $query->where(function ($q) use ($actor) {
-                $q->where('assigned_to', $actor->id)->orWhereNull('assigned_to');
+            // Full queue, then firm-visibility scope below. Decisions still blocked by §2.7.2.
+        } elseif ($canReview || $canViewOwn) {
+            $subject = $canViewOwn ? $this->actingAdvisors->subjectOrNull($actor) : null;
+            $query->where(function ($q) use ($actor, $canReview, $canViewOwn, $subject) {
+                if ($canReview) {
+                    $q->orWhere(function ($reviewQ) use ($actor) {
+                        $reviewQ->where(function ($scope) use ($actor) {
+                            $scope->where('assigned_to', $actor->id)->orWhereNull('assigned_to');
+                        });
+                        $this->separation->scopeExcludeConflictedFromPickup($reviewQ, $actor);
+                    });
+                }
+                if ($canViewOwn) {
+                    if ($subject) {
+                        $q->orWhere('user_id', $subject->id);
+                    } elseif (! $canReview) {
+                        $q->orWhereRaw('1 = 0');
+                    }
+                }
             });
-        } elseif ($canViewOwn) {
-            $subject = $this->actingAdvisors->subjectOrNull($actor);
-            if (! $subject) {
-                $query->whereRaw('1 = 0');
-            } else {
-                $query->where('user_id', $subject->id);
-            }
         } else {
             throw ValidationException::withMessages([
                 'capability' => 'You do not have permission to view general compliance requests.',

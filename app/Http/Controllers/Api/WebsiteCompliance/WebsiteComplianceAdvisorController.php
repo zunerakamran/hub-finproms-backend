@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Api\WebsiteCompliance;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\WebsiteCompliance\ChangeRequest;
 use App\Services\CapabilitiesMatrixService;
+use App\Services\ComplianceSeparationService;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -13,7 +15,8 @@ class WebsiteComplianceAdvisorController extends Controller
 {
     public function __construct(
         private readonly WebsiteComplianceGate $gate,
-        private readonly CapabilitiesMatrixService $matrix
+        private readonly CapabilitiesMatrixService $matrix,
+        private readonly ComplianceSeparationService $separation,
     ) {}
 
     /**
@@ -86,7 +89,7 @@ class WebsiteComplianceAdvisorController extends Controller
         }
 
         $roles = array_values(array_filter(
-            CapabilitiesMatrixService::MATRIX_ROLES,
+            $this->matrix->allMatrixRoles(),
             fn (string $role) => $this->matrix->roleCan($hub, $role, 'wc_review_change_requests')
         ));
 
@@ -94,17 +97,22 @@ class WebsiteComplianceAdvisorController extends Controller
             return response()->json([]);
         }
 
-        $reviewers = User::query()
-            ->with('firm:id,name,is_central')
-            ->whereIn('role', $roles)
-            ->where(function ($q) {
-                $q->where('is_suspended', false)->orWhereNull('is_suspended');
-            })
-            ->where(function ($q) {
-                $q->where('is_discontinued', false)->orWhereNull('is_discontinued');
-            })
-            ->orderBy('name')
-            ->get(['id', 'name', 'email', 'role', 'firm_id']);
+        $excludeOwnerId = null;
+        $excludeOnBehalfId = null;
+        $requestId = $request->integer('request_id');
+        if ($requestId > 0) {
+            $row = ChangeRequest::query()->find($requestId);
+            if ($row) {
+                $excludeOwnerId = $row->editor_id ? (int) $row->editor_id : null;
+                $excludeOnBehalfId = $row->on_behalf_by_user_id ? (int) $row->on_behalf_by_user_id : null;
+            }
+        }
+
+        $reviewers = $this->separation->excludeConflictedReviewers(
+            $this->separation->usersHoldingRolesQuery($roles)->get(),
+            $excludeOwnerId,
+            $excludeOnBehalfId,
+        );
 
         return response()->json(
             $reviewers->map(fn (User $u) => [
@@ -112,6 +120,7 @@ class WebsiteComplianceAdvisorController extends Controller
                 'name' => $u->name,
                 'email' => $u->email,
                 'role' => $u->role,
+                'roles' => $u->roleKeys(),
                 'firm_id' => $u->firm_id ? (int) $u->firm_id : null,
                 'firm' => $u->firm ? [
                     'id' => (int) $u->firm->id,

@@ -49,12 +49,28 @@ class SocialMediaComplianceController extends Controller
         $hub = $this->smcHub($request->user());
         $this->compliance->assertModuleEnabled($hub);
 
+        $excludeOwnerId = null;
+        $excludeOnBehalfId = null;
+        $requestId = $request->integer('request_id');
+        if ($requestId > 0) {
+            $row = SocialMediaComplianceRequest::query()->find($requestId);
+            if ($row) {
+                $excludeOwnerId = (int) $row->user_id;
+                $excludeOnBehalfId = $row->on_behalf_by_user_id ? (int) $row->on_behalf_by_user_id : null;
+            }
+        }
+
         return response()->json([
-            'data' => $this->compliance->reviewersForHub($hub)->map(fn (User $u) => [
+            'data' => $this->compliance->reviewersForHub(
+                $hub,
+                excludeOwnerUserId: $excludeOwnerId,
+                excludeOnBehalfUserId: $excludeOnBehalfId,
+            )->map(fn (User $u) => [
                 'id' => $u->id,
                 'name' => $u->name,
                 'email' => $u->email,
                 'role' => $u->role,
+                'roles' => $u->roleKeys(),
                 'firm_id' => $u->firm_id ? (int) $u->firm_id : null,
                 'firm' => $u->firm ? [
                     'id' => (int) $u->firm->id,

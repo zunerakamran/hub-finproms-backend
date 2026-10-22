@@ -1,9 +1,8 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-22 (Multi-role users implemented in backend: user_roles
-  pivot, capability UNION, role assign/remove activity logs — §2.7 / §2.7.1;
-  frontend multi-select still pending)
+Last updated: 2026-10-22 (Multi-role §2.7 / §2.7.1 + SoD §2.7.2 implemented;
+  frontend multi-role UI done)
 
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
@@ -580,6 +579,48 @@ OUT OF SCOPE / UNCHANGED:
 - Power Admin pa_* checklist shape (5.3) — still applies when user holds
   power_admin
 - Head of Firm appointment (still membership-based, any role(s))
+
+
+2.7.2 Separation of duties (multi-role conflicts) — REQUIRED
+--------------------------------------------------------------------
+When a user holds both submitter-style and reviewer-style roles (e.g.
+advisor + approver, editor + approver, admin_staff + approver), capability
+UNION must NOT allow them to decide on their own work.
+
+CORE RULE (SMC / GC / WC):
+- If the actor is the request OWNER (submitter / editor / subject advisor)
+  OR the ON-BEHALF staff who created it, they MUST NOT:
+  - appear in the assignable reviewers list for that request
+  - self-assign or be assigned that request
+  - review / approve / reject / approve-with-feedback
+  - override status (manager change-status) on that request
+- They MAY still see the item under “my / own” history and in hub-wide
+  view-all / reports when those capabilities allow — viewing is not deciding.
+- Admin-staff acting as advisor A: requests owned by A are conflicted for
+  that staff while deciding; requests the staff submitted on behalf of anyone
+  are also conflicted for that staff.
+
+LIST / QUEUE BEHAVIOUR:
+- Review / pickup queues MUST exclude conflicted own items from unassigned
+  pickup (and must not offer self-assign on them).
+- Users with BOTH submit + review caps must see a UNION of: own submissions
+  (view-own) AND eligible review items (not conflicted) — not review-only.
+
+REVIEWER LOOKUPS:
+- Eligible reviewers = users who HOLD any role with the review capability
+  (user_roles / multi-role), not primary users.role alone.
+- Always exclude conflicted user ids for the request being assigned.
+
+TAXONOMY ADD REQUESTS:
+- A user with taxonomy_request_add + taxonomy_request_manage must NOT
+  approve or reject their own pending request.
+
+OPTIONAL / LATER (document only unless product asks):
+- Support ticket self-status-change block
+- Self-affecting credit / plan changes requiring a second admin
+
+IMPLEMENTATION: ComplianceSeparationService (backend) enforces the core
+rule across SMC, GC, WC assign/review/status + reviewer lists + taxonomy.
 
 
 --------------------------------------------------------------------------------
@@ -2373,6 +2414,13 @@ STEP 1 — Shared hub core (content hub)
     approver-scoped queue uses isApproverScopedOnly. Frontend (hub-finproms-frontend):
     Users & roles multi-select + primary role, Hub Users / Access Control multi-role
     display, AuthContext hasRole / roleKeys — done.
+[x] SEPARATION OF DUTIES (§2.7.2) — ComplianceSeparationService blocks
+    owner / on-behalf self-assign, self-review, and change-status on SMC / GC / WC;
+    reviewer lists exclude conflicted ids (optional request_id) and include
+    multi-role holders; taxonomy add-request self-approve/reject blocked;
+    pickup queues exclude conflicted own items; acting-as advisor subject also
+    conflicted. Frontend: hide self-assign/review/change-status when conflicted;
+    assign dropdowns exclude conflicted users; SoD validation messages surfaced.
 [x] Power Admin capabilities checklist (section 5.3) — separate from hub Functionalities
 [x] Wire Power Admin nav/APIs to Power Admin capabilities
 [x] Capabilities matrix UI — roles × user capabilities (incl. Power Admin) per hub

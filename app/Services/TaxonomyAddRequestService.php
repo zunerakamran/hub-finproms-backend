@@ -19,7 +19,8 @@ class TaxonomyAddRequestService
         private readonly CapabilitiesMatrixService $matrix,
         private readonly ActivityLogService $activityLogs,
         private readonly ActingAdvisorService $actingAdvisors,
-        private readonly GeneralComplianceService $generalCompliance
+        private readonly GeneralComplianceService $generalCompliance,
+        private readonly ComplianceSeparationService $separation,
     ) {}
 
     /**
@@ -251,6 +252,14 @@ class TaxonomyAddRequestService
             ]);
         }
 
+        $this->separation->assertActorNotConflicted(
+            $user,
+            $request->user_id ? (int) $request->user_id : null,
+            null,
+            null,
+            'You cannot approve your own taxonomy request. Another reviewer must handle it.'
+        );
+
         if ($request->status !== TaxonomyAddRequest::STATUS_PENDING) {
             throw ValidationException::withMessages([
                 'status' => 'Only pending requests can be approved.',
@@ -299,6 +308,14 @@ class TaxonomyAddRequestService
                 'capability' => 'You do not have permission to reject this taxonomy add request.',
             ]);
         }
+
+        $this->separation->assertActorNotConflicted(
+            $user,
+            $request->user_id ? (int) $request->user_id : null,
+            null,
+            null,
+            'You cannot reject your own taxonomy request. Another reviewer must handle it.'
+        );
 
         if ($request->status !== TaxonomyAddRequest::STATUS_PENDING) {
             throw ValidationException::withMessages([

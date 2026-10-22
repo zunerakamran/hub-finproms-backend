@@ -13,6 +13,7 @@ use App\Services\ActingAdvisorService;
 use App\Services\ActingHubService;
 use App\Services\ActivityLogService;
 use App\Services\ComplianceAuditTrailService;
+use App\Services\ComplianceSeparationService;
 use App\Services\FirmComplianceVisibilityService;
 use App\Services\WebsiteCompliance\ChangeRequestPublishService;
 use App\Services\WebsiteCompliance\ChangeRequestWorkflowService;
@@ -36,7 +37,8 @@ class ChangeRequestController extends Controller
         private readonly ComplianceAuditTrailService $auditTrail,
         private readonly ChangeRequestWorkflowService $workflow,
         private readonly FirmComplianceVisibilityService $firmVisibility,
-        private readonly ActingAdvisorService $actingAdvisors
+        private readonly ActingAdvisorService $actingAdvisors,
+        private readonly ComplianceSeparationService $separation,
     ) {}
 
     public function store(Request $request): JsonResponse
@@ -183,31 +185,48 @@ class ChangeRequestController extends Controller
         $canChangeStatus = $this->gate->can($user, 'wc_change_request_status');
         $canAssign = $this->gate->can($user, 'wc_assign_change_requests');
 
+        $canReview = $this->gate->can($user, 'wc_review_change_requests');
+        $canSubmit = $this->gate->can($user, 'wc_submit_change_requests')
+            || $this->gate->can($user, 'wc_edit_sections');
+
         // Managers who assign or change status need the full firm-scoped inbox (not personal pickup only).
         if ($canViewAll || $canChangeStatus || $canAssign) {
             $query = ChangeRequest::with($with)->latest();
             $this->firmVisibility->scopeQueryForActor($query, $user, 'editor', 'approver_id');
-        } elseif ($this->gate->can($user, 'wc_review_change_requests')) {
-            // Approvers: unassigned pending for pickup + only requests they picked.
+        } elseif ($canReview || $canSubmit) {
+            // Multi-role: UNION of own editor history + eligible review pickup (§2.7.2).
+            $subject = $canSubmit ? $this->actingAdvisors->subjectOrNull($user) : null;
+            $editorId = $subject
+                ? ($this->gate->tenantUserIdOrNull($subject) ?? (int) $subject->id)
+                : null;
             $query = ChangeRequest::with($with)
-                ->where(function ($q) use ($actorId) {
-                    $q->where('approver_id', $actorId)
-                        ->orWhere(function ($pending) {
-                            $pending->where('status', ChangeRequest::STATUS_PENDING)
-                                ->whereNull('approver_id');
+                ->where(function ($q) use ($actorId, $canReview, $canSubmit, $editorId) {
+                    if ($canReview) {
+                        $q->orWhere(function ($reviewQ) use ($actorId) {
+                            $reviewQ->where(function ($scope) use ($actorId) {
+                                $scope->where('approver_id', $actorId)
+                                    ->orWhere(function ($pending) {
+                                        $pending->where('status', ChangeRequest::STATUS_PENDING)
+                                            ->whereNull('approver_id');
+                                    });
+                            });
+                            $reviewQ->where('editor_id', '!=', $actorId)
+                                ->where(function ($behalf) use ($actorId) {
+                                    $behalf->whereNull('on_behalf_by_user_id')
+                                        ->orWhere('on_behalf_by_user_id', '!=', $actorId);
+                                });
                         });
+                    }
+                    if ($canSubmit && $editorId) {
+                        $q->orWhere('editor_id', $editorId);
+                    } elseif ($canSubmit && ! $canReview) {
+                        $q->orWhereRaw('0 = 1');
+                    }
                 })
                 ->latest();
             $this->firmVisibility->scopeQueryForActor($query, $user, 'editor', 'approver_id');
         } else {
-            // Advisors / Admin-staff (and Admin-staff acting as an advisor): own editor history.
-            $subject = $this->actingAdvisors->subjectOrNull($user);
-            $editorId = $subject
-                ? ($this->gate->tenantUserIdOrNull($subject) ?? (int) $subject->id)
-                : null;
-            $query = $editorId
-                ? ChangeRequest::with($with)->where('editor_id', $editorId)->latest()
-                : ChangeRequest::with($with)->whereRaw('0 = 1')->latest();
+            $query = ChangeRequest::with($with)->whereRaw('0 = 1')->latest();
         }
 
         if ($request->filled('status')) {
@@ -353,10 +372,18 @@ class ChangeRequestController extends Controller
             null
         );
 
+        $actorTenantId = $this->gate->tenantUserIdOrNull($user) ?? (int) $user->id;
+        $this->separation->assertActorNotConflicted(
+            $user,
+            $changeRequest->editor_id ? (int) $changeRequest->editor_id : null,
+            $changeRequest->on_behalf_by_user_id ? (int) $changeRequest->on_behalf_by_user_id : null,
+            (int) $actorTenantId
+        );
+
         $fromStatus = (string) $changeRequest->status;
 
         $changeRequest->update([
-            'approver_id' => $this->gate->tenantUserIdOrNull($user),
+            'approver_id' => $actorTenantId,
             // Stay Pending when claimed — same as SMC/GC assignment (status changes via review / manager override).
             'status' => ChangeRequest::STATUS_PENDING,
         ]);
@@ -428,6 +455,12 @@ class ChangeRequestController extends Controller
                 ],
             ], 422);
         }
+
+        $this->separation->assertAssigneeNotConflicted(
+            $approver,
+            $changeRequest->editor_id ? (int) $changeRequest->editor_id : null,
+            $changeRequest->on_behalf_by_user_id ? (int) $changeRequest->on_behalf_by_user_id : null
+        );
 
         $fromStatus = (string) $changeRequest->status;
         $previousApprover = $changeRequest->approver;
