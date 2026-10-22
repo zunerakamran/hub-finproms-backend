@@ -836,28 +836,35 @@ class SocialMediaComplianceService
             ])
             ->orderByDesc('id');
 
+        // “All requests” / review queue: never mix in the actor’s own submissions —
+        // those belong under My requests. Include assigned-to-me + unassigned pickup
+        // (or hub-wide when view-all / assign / change-status).
+        $subjectId = (int) $this->actingAdvisors->requireSubject($actor)->id;
+
         if ($canViewAll) {
-            // Full queue, then firm-visibility scope below. Decisions still blocked by §2.7.2.
-        } elseif ($canReview || $canViewOwn) {
-            // Multi-role: UNION of own submissions + eligible review pickup (not conflicted).
-            $subject = $canViewOwn ? $this->actingAdvisors->subjectOrNull($actor) : null;
-            $query->where(function ($q) use ($actor, $canReview, $canViewOwn, $subject) {
-                if ($canReview) {
-                    $q->orWhere(function ($reviewQ) use ($actor) {
-                        $reviewQ->where(function ($scope) use ($actor) {
-                            $scope->where('assigned_to', $actor->id)->orWhereNull('assigned_to');
-                        });
-                        $this->separation->scopeExcludeConflictedFromPickup($reviewQ, $actor);
-                    });
-                }
-                if ($canViewOwn) {
-                    if ($subject) {
-                        $q->orWhere('user_id', $subject->id);
-                    } elseif (! $canReview) {
-                        $q->orWhereRaw('1 = 0');
-                    }
-                }
+            $this->separation->scopeExcludeConflictedFromPickup(
+                $query,
+                $actor,
+                'user_id',
+                'on_behalf_by_user_id',
+                $subjectId,
+            );
+        } elseif ($canReview) {
+            $query->where(function ($reviewQ) use ($actor, $subjectId) {
+                $reviewQ->where(function ($scope) use ($actor) {
+                    $scope->where('assigned_to', $actor->id)->orWhereNull('assigned_to');
+                });
+                $this->separation->scopeExcludeConflictedFromPickup(
+                    $reviewQ,
+                    $actor,
+                    'user_id',
+                    'on_behalf_by_user_id',
+                    $subjectId,
+                );
             });
+        } elseif ($canViewOwn) {
+            // All-requests endpoint is not for submitters-only; use /mine.
+            $query->whereRaw('1 = 0');
         } else {
             throw ValidationException::withMessages([
                 'capability' => 'You do not have permission to view social media compliance requests.',

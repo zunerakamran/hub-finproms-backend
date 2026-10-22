@@ -265,6 +265,43 @@ class ComplianceSeparationOfDutiesTest extends TestCase
         $this->assertContains((int) $dual->id, $ids);
     }
 
+    public function test_all_requests_list_excludes_own_submission_for_dual_role(): void
+    {
+        $hub = $this->createSharedHubWithSmc();
+        $firm = Firm::query()->create([
+            'name' => 'Firm A',
+            'compliance_visible_to_own' => true,
+        ]);
+
+        $dual = User::factory()->create([
+            'role' => User::ROLE_USER,
+            'firm_id' => $firm->id,
+        ]);
+        app(UserRolesService::class)->syncRoles(
+            $dual,
+            [User::ROLE_USER, User::ROLE_APPROVER],
+            User::ROLE_USER,
+            log: false,
+        );
+
+        $other = User::factory()->create([
+            'role' => User::ROLE_USER,
+            'firm_id' => $firm->id,
+        ]);
+
+        $own = $this->createPendingSmc($dual);
+        $theirs = $this->createPendingSmc($other);
+
+        $ids = app(SocialMediaComplianceService::class)
+            ->listForActor($hub, $dual->fresh(), ['per_page' => 50])
+            ->getCollection()
+            ->pluck('id')
+            ->all();
+
+        $this->assertNotContains((int) $own->id, $ids);
+        $this->assertContains((int) $theirs->id, $ids);
+    }
+
     public function test_taxonomy_owner_cannot_approve_own_request(): void
     {
         config([

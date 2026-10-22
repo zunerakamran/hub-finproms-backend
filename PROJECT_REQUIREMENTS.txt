@@ -601,10 +601,13 @@ CORE RULE (SMC / GC / WC):
   are also conflicted for that staff.
 
 LIST / QUEUE BEHAVIOUR:
-- Review / pickup queues MUST exclude conflicted own items from unassigned
-  pickup (and must not offer self-assign on them).
-- Users with BOTH submit + review caps must see a UNION of: own submissions
-  (view-own) AND eligible review items (not conflicted) — not review-only.
+- “All requests” / review / pickup queues MUST exclude the actor’s own
+  submissions (owner + on-behalf + acting-as subject). Those belong under
+  My requests only — dual-role advisor+approver must not see duplicates.
+- Review / pickup: show assigned-to-me and unassigned (new) items eligible
+  for review; never offer self-assign on conflicted own items.
+- Hub-wide managers (view-all / assign / change-status) still see others’
+  requests firm-scoped, but their own submissions stay in My requests.
 
 REVIEWER LOOKUPS:
 - Eligible reviewers = users who HOLD any role with the review capability

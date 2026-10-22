@@ -132,8 +132,9 @@ class ComplianceSeparationService
     }
 
     /**
-     * Restrict a review/pickup query so conflicted own items are not offered for pickup.
-     * Own submissions still appear when the caller also ORs a view-own branch.
+     * Restrict a review / “All requests” query so the actor’s own (and
+     * acting-as subject) submissions are not listed. Those belong under
+     * My requests. Also excludes items the actor submitted on behalf.
      *
      * @param  Builder<\Illuminate\Database\Eloquent\Model>  $query
      */
@@ -144,15 +145,22 @@ class ComplianceSeparationService
         ?string $onBehalfColumn = 'on_behalf_by_user_id',
         ?int $actorTenantUserId = null,
     ): void {
-        $actorId = (int) ($actorTenantUserId ?? $actor->id);
-        if ($actorId <= 0) {
+        $ids = [(int) $actor->id];
+        if ($actorTenantUserId !== null && (int) $actorTenantUserId > 0) {
+            $ids[] = (int) $actorTenantUserId;
+        }
+        $ids = array_values(array_unique(array_filter(
+            $ids,
+            static fn (int $id): bool => $id > 0
+        )));
+        if ($ids === []) {
             return;
         }
 
-        $query->where($ownerColumn, '!=', $actorId);
+        $query->whereNotIn($ownerColumn, $ids);
         if ($onBehalfColumn !== null && $onBehalfColumn !== '') {
-            $query->where(function (Builder $q) use ($onBehalfColumn, $actorId): void {
-                $q->whereNull($onBehalfColumn)->orWhere($onBehalfColumn, '!=', $actorId);
+            $query->where(function (Builder $q) use ($onBehalfColumn, $ids): void {
+                $q->whereNull($onBehalfColumn)->orWhereNotIn($onBehalfColumn, $ids);
             });
         }
     }

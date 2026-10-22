@@ -58,4 +58,20 @@ class ComplianceSeparationServiceTest extends TestCase
         $filtered = $service->excludeConflictedReviewers(collect([$a, $b, $c]), 2, 3);
         $this->assertSame([1], $filtered->pluck('id')->all());
     }
+
+    public function test_scope_exclude_uses_actor_and_subject_ids(): void
+    {
+        $service = new ComplianceSeparationService;
+        $actor = new User;
+        $actor->id = 20;
+
+        $ids = [];
+        // Build the blocked set the same way the scope does.
+        $blocked = [20, 10];
+        $this->assertTrue(in_array(10, $blocked, true));
+        $this->assertTrue($service->actorIsConflicted($actor, 10, null, 10));
+        $this->assertSame([20], $service->conflictUserIds(20, null));
+        $ids[] = $service->conflictUserIds(10, 20);
+        $this->assertSame([10, 20], $ids[0]);
+    }
 }

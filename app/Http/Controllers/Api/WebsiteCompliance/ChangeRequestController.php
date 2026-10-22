@@ -189,41 +189,60 @@ class ChangeRequestController extends Controller
         $canSubmit = $this->gate->can($user, 'wc_submit_change_requests')
             || $this->gate->can($user, 'wc_edit_sections');
 
-        // Managers who assign or change status need the full firm-scoped inbox (not personal pickup only).
-        if ($canViewAll || $canChangeStatus || $canAssign) {
+        $subject = $this->actingAdvisors->subjectOrNull($user);
+        $subjectEditorId = $subject
+            ? ($this->gate->tenantUserIdOrNull($subject) ?? (int) $subject->id)
+            : null;
+        $mineAsEditor = $request->boolean('mine_as_editor');
+
+        // My requests (editor history) vs review / All requests are separate UIs.
+        // Own submissions belong under My requests only — not the review inbox.
+        if ($mineAsEditor) {
+            if (! $canSubmit && ! $canViewAll && ! $canReview && ! $canAssign && ! $canChangeStatus) {
+                $query = ChangeRequest::with($with)->whereRaw('0 = 1')->latest();
+            } else {
+                $editorIds = array_values(array_unique(array_filter([
+                    (int) $actorId,
+                    $subjectEditorId ? (int) $subjectEditorId : null,
+                ])));
+                $query = ChangeRequest::with($with)
+                    ->where(function ($q) use ($editorIds, $user) {
+                        if ($editorIds !== []) {
+                            $q->whereIn('editor_id', $editorIds);
+                        }
+                        $q->orWhere('on_behalf_by_user_id', (int) $user->id);
+                    })
+                    ->latest();
+            }
+        } elseif ($canViewAll || $canChangeStatus || $canAssign) {
             $query = ChangeRequest::with($with)->latest();
+            $this->separation->scopeExcludeConflictedFromPickup(
+                $query,
+                $user,
+                'editor_id',
+                'on_behalf_by_user_id',
+                $subjectEditorId ? (int) $subjectEditorId : (int) $actorId,
+            );
             $this->firmVisibility->scopeQueryForActor($query, $user, 'editor', 'approver_id');
-        } elseif ($canReview || $canSubmit) {
-            // Multi-role: UNION of own editor history + eligible review pickup (§2.7.2).
-            $subject = $canSubmit ? $this->actingAdvisors->subjectOrNull($user) : null;
-            $editorId = $subject
-                ? ($this->gate->tenantUserIdOrNull($subject) ?? (int) $subject->id)
-                : null;
+        } elseif ($canReview) {
             $query = ChangeRequest::with($with)
-                ->where(function ($q) use ($actorId, $canReview, $canSubmit, $editorId) {
-                    if ($canReview) {
-                        $q->orWhere(function ($reviewQ) use ($actorId) {
-                            $reviewQ->where(function ($scope) use ($actorId) {
-                                $scope->where('approver_id', $actorId)
-                                    ->orWhere(function ($pending) {
-                                        $pending->where('status', ChangeRequest::STATUS_PENDING)
-                                            ->whereNull('approver_id');
-                                    });
+                ->where(function ($reviewQ) use ($actorId) {
+                    $reviewQ->where(function ($scope) use ($actorId) {
+                        $scope->where('approver_id', $actorId)
+                            ->orWhere(function ($pending) {
+                                $pending->where('status', ChangeRequest::STATUS_PENDING)
+                                    ->whereNull('approver_id');
                             });
-                            $reviewQ->where('editor_id', '!=', $actorId)
-                                ->where(function ($behalf) use ($actorId) {
-                                    $behalf->whereNull('on_behalf_by_user_id')
-                                        ->orWhere('on_behalf_by_user_id', '!=', $actorId);
-                                });
-                        });
-                    }
-                    if ($canSubmit && $editorId) {
-                        $q->orWhere('editor_id', $editorId);
-                    } elseif ($canSubmit && ! $canReview) {
-                        $q->orWhereRaw('0 = 1');
-                    }
+                    });
                 })
                 ->latest();
+            $this->separation->scopeExcludeConflictedFromPickup(
+                $query,
+                $user,
+                'editor_id',
+                'on_behalf_by_user_id',
+                $subjectEditorId ? (int) $subjectEditorId : (int) $actorId,
+            );
             $this->firmVisibility->scopeQueryForActor($query, $user, 'editor', 'approver_id');
         } else {
             $query = ChangeRequest::with($with)->whereRaw('0 = 1')->latest();
