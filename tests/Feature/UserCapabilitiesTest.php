@@ -133,6 +133,17 @@ class UserCapabilitiesTest extends TestCase
         $granted = app(UserCapabilitiesService::class)->roleGrantedKeys($this->hub, $target);
         $this->assertSame(collect($granted)->sort()->values()->all(), collect($keys)->sort()->values()->all());
 
+        $sections = collect($show['role_sections'] ?? []);
+        $this->assertSame(
+            [User::ROLE_MANAGER, User::ROLE_APPROVER],
+            $sections->pluck('role')->all()
+        );
+        $managerKeys = $sections->firstWhere('role', User::ROLE_MANAGER)['rows'] ?? [];
+        $approverKeys = $sections->firstWhere('role', User::ROLE_APPROVER)['rows'] ?? [];
+        $this->assertTrue(collect($managerKeys)->contains(fn ($row) => $row['key'] === 'dashboard_view_hub_users'));
+        $this->assertTrue(collect($approverKeys)->contains(fn ($row) => $row['key'] === 'dashboard_manage_active_sessions'));
+        $this->assertFalse(collect($managerKeys)->contains(fn ($row) => $row['key'] === 'dashboard_manage_active_sessions'));
+
         $capabilities = [];
         foreach ($show['rows'] as $row) {
             $capabilities[$row['key']] = $row['key'] !== 'dashboard_view_hub_users';

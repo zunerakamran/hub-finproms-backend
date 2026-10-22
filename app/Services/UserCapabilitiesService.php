@@ -77,6 +77,21 @@ class UserCapabilitiesService
     }
 
     /**
+     * Roles used when evaluating which capabilities this user may receive.
+     *
+     * @return list<string>
+     */
+    public function evaluationRoles(User $user): array
+    {
+        $acting = app(ActingAdvisorService::class);
+        if ($acting->canActOnBehalf($user) && $acting->actingAdvisor($user)) {
+            return [User::ROLE_ADVISOR];
+        }
+
+        return $user->roleKeys();
+    }
+
+    /**
      * Capability keys granted by ANY of the user's assigned roles on this hub
      * (role matrix only — before per-user denylist / module gates).
      *
@@ -84,13 +99,29 @@ class UserCapabilitiesService
      */
     public function roleGrantedKeys(Hub $hub, User $user): array
     {
+        $byRole = $this->keysGrantedByRole($hub, $user);
         $keys = [];
+        foreach ($byRole as $roleKeys) {
+            foreach ($roleKeys as $key) {
+                $keys[] = $key;
+            }
+        }
+        sort($keys);
 
-        $acting = app(ActingAdvisorService::class);
-        if ($acting->canActOnBehalf($user) && $acting->actingAdvisor($user)) {
-            $roles = [User::ROLE_ADVISOR];
-        } else {
-            $roles = $user->roleKeys();
+        return array_values(array_unique($keys));
+    }
+
+    /**
+     * Map of role → capability keys that role grants for this user on this hub.
+     *
+     * @return array<string, list<string>>
+     */
+    public function keysGrantedByRole(Hub $hub, User $user): array
+    {
+        $roles = $this->evaluationRoles($user);
+        $byRole = [];
+        foreach ($roles as $role) {
+            $byRole[$role] = [];
         }
 
         foreach (Hub::CHECKLIST_DEFINITIONS as $key => $meta) {
@@ -99,102 +130,108 @@ class UserCapabilitiesService
             }
             foreach ($roles as $role) {
                 if ($this->matrix->roleCan($hub, $role, $key)) {
-                    $keys[] = $key;
-                    break;
+                    $byRole[$role][] = $key;
                 }
             }
         }
 
-        // Platform pa_* only when the user holds power_admin and the flag is on.
-        if ($user->hasRole(User::ROLE_POWER_ADMIN)) {
+        if (in_array(User::ROLE_POWER_ADMIN, $roles, true)) {
             foreach (array_keys(PowerAdminCapabilitiesService::DEFINITIONS) as $paKey) {
                 if ($this->powerCapabilities->can($paKey)) {
-                    $keys[] = $paKey;
+                    $byRole[User::ROLE_POWER_ADMIN][] = $paKey;
                 }
             }
         }
 
-        sort($keys);
+        foreach ($byRole as $role => $keys) {
+            $unique = array_values(array_unique($keys));
+            sort($unique);
+            $byRole[$role] = $unique;
+        }
 
-        return array_values(array_unique($keys));
+        return $byRole;
     }
 
     /**
-     * UI payload: only role-granted capabilities, with current enabled state.
+     * UI payload: role-separated capability sections + flat rows for save.
      *
      * @return array{
      *   user: array<string, mixed>,
      *   hub: array{id: int, name: string, slug: string, type: string},
      *   roles: list<string>,
      *   role_labels: list<string>,
-     *   rows: list<array{key: string, label: string, description: string, group: string, group_label: string, enabled: bool, inherited: bool}>,
+     *   rows: list<array{key: string, label: string, description: string, group: string, group_label: string, enabled: bool, inherited: bool, granted_by: list<string>, granted_by_labels: list<string>}>,
+     *   role_sections: list<array{role: string, label: string, is_primary: bool, count: int, rows: list<array{key: string, label: string, description: string, group: string, group_label: string, enabled: bool, inherited: bool, granted_by: list<string>, granted_by_labels: list<string>, shared: bool}>}>,
      *   group_order: list<string>,
-     *   overrides: array<string, false>
+     *   overrides: array<string, false>,
+     *   summary: array{total: int, enabled: int, overridden: int, roles: int}
      * }
      */
     public function matrixForUser(Hub $hub, User $user): array
     {
-        $granted = $this->roleGrantedKeys($hub, $user);
+        $byRole = $this->keysGrantedByRole($hub, $user);
         $overrides = $this->overrides($user);
-        $rows = [];
+        $roles = array_keys($byRole);
+        $primary = (string) ($user->role ?: ($roles[0] ?? ''));
+        $roleLabels = [];
+        foreach ($roles as $role) {
+            $roleLabels[$role] = $hub->roleLabel($role);
+        }
 
-        foreach ($granted as $key) {
-            if (str_starts_with($key, 'pa_')) {
-                $meta = PowerAdminCapabilitiesService::DEFINITIONS[$key] ?? null;
-                $group = 'power_admin';
-                $groupLabel = 'Power Admin (platform)';
-                $label = $meta['label'] ?? $key;
-                $description = $meta['description'] ?? '';
-            } else {
-                $meta = Hub::CHECKLIST_DEFINITIONS[$key] ?? null;
-                $group = (string) ($meta['group'] ?? Hub::GROUP_DASHBOARD_HUB);
-                $groupLabel = Hub::CHECKLIST_GROUPS[$group] ?? $group;
-                $label = $meta['label'] ?? $key;
-                $description = $meta['description'] ?? '';
+        // Reverse index: capability → roles that grant it.
+        $grantedBy = [];
+        foreach ($byRole as $role => $keys) {
+            foreach ($keys as $key) {
+                $grantedBy[$key][] = $role;
             }
+        }
 
-            $inherited = true;
-            $enabled = true;
-            if (array_key_exists($key, $overrides) && $overrides[$key] === false) {
-                $enabled = false;
-                $inherited = false;
+        $rowsByKey = [];
+        foreach ($grantedBy as $key => $grantingRoles) {
+            $rowsByKey[$key] = $this->buildCapabilityRow(
+                (string) $key,
+                $grantingRoles,
+                $roleLabels,
+                $overrides
+            );
+        }
+
+        $rows = array_values($rowsByKey);
+        usort($rows, [$this, 'sortCapabilityRows']);
+
+        $roleSections = [];
+        foreach ($roles as $role) {
+            $sectionRows = [];
+            foreach ($byRole[$role] as $key) {
+                $row = $rowsByKey[$key] ?? null;
+                if (! $row) {
+                    continue;
+                }
+                $sectionRows[] = [
+                    ...$row,
+                    'shared' => count($row['granted_by']) > 1,
+                ];
             }
-
-            $rows[] = [
-                'key' => $key,
-                'label' => $label,
-                'description' => $description,
-                'group' => $group,
-                'group_label' => $groupLabel,
-                'enabled' => $enabled,
-                'inherited' => $inherited,
+            usort($sectionRows, [$this, 'sortCapabilityRows']);
+            $roleSections[] = [
+                'role' => $role,
+                'label' => $roleLabels[$role] ?? $role,
+                'is_primary' => $role === $primary,
+                'count' => count($sectionRows),
+                'rows' => $sectionRows,
             ];
         }
 
-        usort($rows, function (array $a, array $b): int {
-            $order = Hub::MATRIX_GROUP_ORDER;
-            $ga = array_search($a['group'], $order, true);
-            $gb = array_search($b['group'], $order, true);
-            if ($a['group'] === 'power_admin') {
-                $ga = -1;
+        $enabledCount = 0;
+        $overriddenCount = 0;
+        foreach ($rows as $row) {
+            if ($row['enabled']) {
+                $enabledCount++;
             }
-            if ($b['group'] === 'power_admin') {
-                $gb = -1;
+            if (! $row['inherited']) {
+                $overriddenCount++;
             }
-            $ga = $ga === false ? 999 : $ga;
-            $gb = $gb === false ? 999 : $gb;
-            if ($ga !== $gb) {
-                return $ga <=> $gb;
-            }
-
-            return strcmp($a['label'], $b['label']);
-        });
-
-        $roles = $user->roleKeys();
-        $roleLabels = array_map(
-            fn (string $role) => $hub->roleLabel($role),
-            $roles
-        );
+        }
 
         $groupOrder = array_values(array_unique(array_merge(
             ['power_admin'],
@@ -208,8 +245,8 @@ class UserCapabilitiesService
                 'email' => $user->email,
                 'role' => $user->role,
                 'roles' => $roles,
-                'role_labels' => $roleLabels,
-                'primary_role' => $user->role,
+                'role_labels' => array_values($roleLabels),
+                'primary_role' => $primary,
             ],
             'hub' => [
                 'id' => (int) $hub->id,
@@ -218,11 +255,89 @@ class UserCapabilitiesService
                 'type' => $hub->type,
             ],
             'roles' => $roles,
-            'role_labels' => $roleLabels,
+            'role_labels' => array_values($roleLabels),
             'rows' => $rows,
+            'role_sections' => $roleSections,
             'group_order' => $groupOrder,
             'overrides' => $overrides,
+            'summary' => [
+                'total' => count($rows),
+                'enabled' => $enabledCount,
+                'overridden' => $overriddenCount,
+                'roles' => count($roles),
+            ],
         ];
+    }
+
+    /**
+     * @param  list<string>  $grantingRoles
+     * @param  array<string, string>  $roleLabels
+     * @param  array<string, false>  $overrides
+     * @return array{key: string, label: string, description: string, group: string, group_label: string, enabled: bool, inherited: bool, granted_by: list<string>, granted_by_labels: list<string>}
+     */
+    private function buildCapabilityRow(string $key, array $grantingRoles, array $roleLabels, array $overrides): array
+    {
+        if (str_starts_with($key, 'pa_')) {
+            $meta = PowerAdminCapabilitiesService::DEFINITIONS[$key] ?? null;
+            $group = 'power_admin';
+            $groupLabel = 'Power Admin (platform)';
+            $label = $meta['label'] ?? $key;
+            $description = $meta['description'] ?? '';
+        } else {
+            $meta = Hub::CHECKLIST_DEFINITIONS[$key] ?? null;
+            $group = (string) ($meta['group'] ?? Hub::GROUP_DASHBOARD_HUB);
+            $groupLabel = Hub::CHECKLIST_GROUPS[$group] ?? $group;
+            $label = $meta['label'] ?? $key;
+            $description = $meta['description'] ?? '';
+        }
+
+        $inherited = true;
+        $enabled = true;
+        if (array_key_exists($key, $overrides) && $overrides[$key] === false) {
+            $enabled = false;
+            $inherited = false;
+        }
+
+        $grantLabels = [];
+        foreach ($grantingRoles as $role) {
+            $grantLabels[] = $roleLabels[$role] ?? $role;
+        }
+
+        return [
+            'key' => $key,
+            'label' => $label,
+            'description' => $description,
+            'group' => $group,
+            'group_label' => $groupLabel,
+            'enabled' => $enabled,
+            'inherited' => $inherited,
+            'granted_by' => array_values($grantingRoles),
+            'granted_by_labels' => $grantLabels,
+        ];
+    }
+
+    /**
+     * @param  array{group: string, label: string}  $a
+     * @param  array{group: string, label: string}  $b
+     */
+    private function sortCapabilityRows(array $a, array $b): int
+    {
+        $order = Hub::MATRIX_GROUP_ORDER;
+        $ga = array_search($a['group'], $order, true);
+        $gb = array_search($b['group'], $order, true);
+        if ($a['group'] === 'power_admin') {
+            $ga = -1;
+        }
+        if ($b['group'] === 'power_admin') {
+            $gb = -1;
+        }
+        $ga = $ga === false ? 999 : $ga;
+        $gb = $gb === false ? 999 : $gb;
+        if ($ga !== $gb) {
+            return $ga <=> $gb;
+        }
+
+        return strcmp($a['label'], $b['label']);
     }
 
     /**
