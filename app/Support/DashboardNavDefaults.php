@@ -89,13 +89,13 @@ class DashboardNavDefaults
             '/my-dashboard/social-media-compliance' => 'smc',
             '/my-dashboard/social-media-compliance/new' => 'smc',
             '/my-dashboard/social-media-compliance/review' => 'smc',
-            '/my-dashboard/social-media-compliance/queue' => 'smc',
+            '/my-dashboard/social-media-compliance/history' => 'smc',
             '/my-dashboard/social-media-compliance/reports' => 'smc',
             '/my-dashboard/general-compliance' => 'gc',
             '/my-dashboard/general-compliance/new' => 'gc',
             '/my-dashboard/general-compliance/content-types' => 'gc',
             '/my-dashboard/general-compliance/review' => 'gc',
-            '/my-dashboard/general-compliance/queue' => 'gc',
+            '/my-dashboard/general-compliance/history' => 'gc',
             '/my-dashboard/general-compliance/reports' => 'gc',
             '/my-dashboard/support-tickets' => 'st',
             '/my-dashboard/support-tickets/new' => 'st',
@@ -211,13 +211,13 @@ class DashboardNavDefaults
                 '/my-dashboard/social-media-compliance' => 'My requests',
                 '/my-dashboard/social-media-compliance/new' => 'New request',
                 '/my-dashboard/social-media-compliance/review' => 'Requests queue',
-                '/my-dashboard/social-media-compliance/queue' => 'All requests',
+                '/my-dashboard/social-media-compliance/history' => 'All requests',
                 '/my-dashboard/social-media-compliance/reports' => 'Reports',
                 '/my-dashboard/general-compliance' => 'My requests',
                 '/my-dashboard/general-compliance/new' => 'New request',
                 '/my-dashboard/general-compliance/content-types' => 'Content types',
                 '/my-dashboard/general-compliance/review' => 'Requests queue',
-                '/my-dashboard/general-compliance/queue' => 'All requests',
+                '/my-dashboard/general-compliance/history' => 'All requests',
                 '/my-dashboard/general-compliance/reports' => 'Reports',
                 '/my-dashboard/support-tickets' => 'My tickets',
                 '/my-dashboard/support-tickets/new' => 'New ticket',
@@ -417,6 +417,9 @@ class DashboardNavDefaults
 
         $map = [
             '/my-dashboard/invoices' => '/my-dashboard/my-invoices',
+            // SMC / GC “All requests” moved from /queue to /history (WC-aligned).
+            '/my-dashboard/social-media-compliance/queue' => '/my-dashboard/social-media-compliance/history',
+            '/my-dashboard/general-compliance/queue' => '/my-dashboard/general-compliance/history',
         ];
 
         foreach (['items', 'item_groups'] as $bucket) {
@@ -576,12 +579,12 @@ class DashboardNavDefaults
             if (in_array($path, $order, true)) {
                 continue;
             }
-            // New “Requests queue” (/review) should sit above “All requests” (/queue).
+            // New “Requests queue” (/review) should sit above “All requests” (/history).
             if (str_ends_with($path, '/review')) {
-                $queuePath = preg_replace('#/review$#', '/queue', $path);
-                $queueIdx = array_search($queuePath, $order, true);
-                if ($queueIdx !== false) {
-                    array_splice($order, (int) $queueIdx, 0, [$path]);
+                $historyPath = preg_replace('#/review$#', '/history', $path);
+                $historyIdx = array_search($historyPath, $order, true);
+                if ($historyIdx !== false) {
+                    array_splice($order, (int) $historyIdx, 0, [$path]);
 
                     continue;
                 }
