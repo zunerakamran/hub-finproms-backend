@@ -87,11 +87,13 @@ class DashboardNavDefaults
             '/my-dashboard/advisor-invoices' => 'advisors',
             '/my-dashboard/social-media-compliance' => 'smc',
             '/my-dashboard/social-media-compliance/new' => 'smc',
+            '/my-dashboard/social-media-compliance/review' => 'smc',
             '/my-dashboard/social-media-compliance/queue' => 'smc',
             '/my-dashboard/social-media-compliance/reports' => 'smc',
             '/my-dashboard/general-compliance' => 'gc',
             '/my-dashboard/general-compliance/new' => 'gc',
             '/my-dashboard/general-compliance/content-types' => 'gc',
+            '/my-dashboard/general-compliance/review' => 'gc',
             '/my-dashboard/general-compliance/queue' => 'gc',
             '/my-dashboard/general-compliance/reports' => 'gc',
             '/my-dashboard/support-tickets' => 'st',
@@ -206,11 +208,13 @@ class DashboardNavDefaults
                 '/my-dashboard/advisor-invoices' => 'Advisor invoices',
                 '/my-dashboard/social-media-compliance' => 'My requests',
                 '/my-dashboard/social-media-compliance/new' => 'New request',
+                '/my-dashboard/social-media-compliance/review' => 'Requests queue',
                 '/my-dashboard/social-media-compliance/queue' => 'All requests',
                 '/my-dashboard/social-media-compliance/reports' => 'Reports',
                 '/my-dashboard/general-compliance' => 'My requests',
                 '/my-dashboard/general-compliance/new' => 'New request',
                 '/my-dashboard/general-compliance/content-types' => 'Content types',
+                '/my-dashboard/general-compliance/review' => 'Requests queue',
                 '/my-dashboard/general-compliance/queue' => 'All requests',
                 '/my-dashboard/general-compliance/reports' => 'Reports',
                 '/my-dashboard/support-tickets' => 'My tickets',
@@ -567,9 +571,20 @@ class DashboardNavDefaults
             $order[] = $path;
         }
         foreach ($defaults as $path) {
-            if (! in_array($path, $order, true)) {
-                $order[] = $path;
+            if (in_array($path, $order, true)) {
+                continue;
             }
+            // New “Requests queue” (/review) should sit above “All requests” (/queue).
+            if (str_ends_with($path, '/review')) {
+                $queuePath = preg_replace('#/review$#', '/queue', $path);
+                $queueIdx = array_search($queuePath, $order, true);
+                if ($queueIdx !== false) {
+                    array_splice($order, (int) $queueIdx, 0, [$path]);
+
+                    continue;
+                }
+            }
+            $order[] = $path;
         }
 
         return $order;
