@@ -92,5 +92,10 @@ class AppServiceProvider extends ServiceProvider
 
             return Limit::perMinute($perMinute)->by('internal-restore:'.$request->ip());
         });
+
+        // WC advisor embed proxy (incl. hub-scoped remote DB resolve).
+        RateLimiter::for('wc-embed', function (Request $request) {
+            return Limit::perMinute(60)->by('wc-embed:'.$request->ip());
+        });
     }
 }

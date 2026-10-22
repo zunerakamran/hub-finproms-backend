@@ -13,6 +13,7 @@ use App\Services\WebsiteCompliance\AdvisorSectionService;
 use App\Services\WebsiteCompliance\CpanelSyncService;
 use App\Services\WhiteLabelDatabaseService;
 use App\Support\SafeOutboundUrl;
+use App\Support\WcEmbedTicket;
 use App\Support\WebsiteCompliance\BrandColor;
 use App\Support\WebsiteCompliance\HubTemplateCatalog;
 use App\Support\WebsiteCompliance\WcDatabaseContext;
@@ -21,6 +22,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Symfony\Component\HttpFoundation\Cookie as SymfonyCookie;
 
 class PublicController extends Controller
 {
@@ -264,6 +266,43 @@ class PublicController extends Controller
     }
 
     /**
+     * Mint a short-lived hub-scoped embed ticket (authenticated).
+     * Frontend puts embed_path on the iframe src so Central can resolve the
+     * TemplateRequest from the content hub DB without leaving the proxy public.
+     */
+    public function issueEmbedTicket(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user, 401);
+
+        $validated = $request->validate([
+            'hub_id' => ['required', 'integer', 'min:1'],
+            'template_request_id' => ['required', 'integer', 'min:1'],
+        ]);
+
+        $hubId = (int) $validated['hub_id'];
+        $templateRequestId = (int) $validated['template_request_id'];
+
+        abort_unless(
+            WcEmbedTicket::userCanAccessRemoteEmbed($user, $hubId),
+            403,
+            'Not allowed to embed deployments for this hub.'
+        );
+
+        $ticket = WcEmbedTicket::issue($hubId, $templateRequestId);
+        $embedPath = '/api/website-compliance/embed-site/h/'.$hubId.'/'.$templateRequestId
+            .'?'.http_build_query([WcEmbedTicket::QUERY_KEY => $ticket]);
+
+        return response()
+            ->json([
+                'ticket' => $ticket,
+                'expires_in' => WcEmbedTicket::TTL_SECONDS,
+                'embed_path' => $embedPath,
+            ])
+            ->withCookie(WcEmbedTicket::cookie($ticket));
+    }
+
+    /**
      * Reverse-proxy an advisor cPanel site so the hub can iframe it.
      * Live advisor hosts often send X-Frame-Options: SAMEORIGIN ("refused to connect").
      * Only the registered cpanel_domain for this TemplateRequest may be fetched (SSRF-safe).
@@ -271,6 +310,7 @@ class PublicController extends Controller
      * Optional ?hub_id= — when Central Hub embeds a content-hub deployment, TemplateRequest
      * lives on that hub's remote DB (not Central's local tables). Prefer path-based
      * embedAdvisorSiteForHub so the iframe query string stays clean for templates.
+     * Hub-scoped resolve requires Sanctum session or a valid embed ticket (never anonymous).
      */
     public function embedAdvisorSite(Request $request, int $templateRequestId, ?string $path = null): Response
     {
@@ -291,6 +331,11 @@ class PublicController extends Controller
     {
         if (! in_array($request->method(), ['GET', 'HEAD'], true)) {
             abort(405);
+        }
+
+        $embedCookie = null;
+        if ($hubId) {
+            $embedCookie = $this->authorizeHubScopedEmbed($request, $hubId, $templateRequestId);
         }
 
         $templateRequest = $this->resolveEmbedTemplateRequest($templateRequestId, $hubId);
@@ -319,9 +364,9 @@ class PublicController extends Controller
         }
 
         $target = $base.$path;
-        // Forward upstream query params except hub_id (Central-only routing hint).
+        // Forward upstream query params except Central-only routing / ticket hints.
         $forwardQuery = $request->query();
-        unset($forwardQuery['hub_id']);
+        unset($forwardQuery['hub_id'], $forwardQuery[WcEmbedTicket::QUERY_KEY]);
         if ($forwardQuery !== []) {
             $target .= '?'.http_build_query($forwardQuery);
         }
@@ -350,9 +395,11 @@ class PublicController extends Controller
                 ])
                 ->get($target);
         } catch (\Throwable $e) {
-            return response('Upstream advisor site unreachable: '.$e->getMessage(), 502)
+            $fail = response('Upstream advisor site unreachable: '.$e->getMessage(), 502)
                 ->header('Content-Type', 'text/plain; charset=UTF-8')
                 ->header('Content-Security-Policy', $this->embedFrameAncestorsCsp());
+
+            return $embedCookie ? $fail->withCookie($embedCookie) : $fail;
         }
 
         $contentType = (string) ($upstream->header('Content-Type') ?: 'application/octet-stream');
@@ -365,10 +412,41 @@ class PublicController extends Controller
         }
 
         // Drop framing headers from upstream; allow only configured hub frontends.
-        return response($body, $upstream->status())
+        $response = response($body, $upstream->status())
             ->header('Content-Type', $contentType)
             ->header('Cache-Control', 'private, no-store')
             ->header('Content-Security-Policy', $this->embedFrameAncestorsCsp());
+
+        return $embedCookie ? $response->withCookie($embedCookie) : $response;
+    }
+
+    /**
+     * Hub-scoped embeds may open a remote content-hub DB — never anonymously.
+     * Accept a valid ticket (query or cookie) or an authenticated capable session.
+     *
+     * @return SymfonyCookie|null Cookie to refresh on the response when authorized via session
+     */
+    private function authorizeHubScopedEmbed(Request $request, int $hubId, int $templateRequestId): ?SymfonyCookie
+    {
+        $ticket = $request->query(WcEmbedTicket::QUERY_KEY);
+        if (! is_string($ticket) || $ticket === '') {
+            $cookieVal = $request->cookie(WcEmbedTicket::COOKIE);
+            $ticket = is_string($cookieVal) ? $cookieVal : null;
+        }
+
+        if (WcEmbedTicket::verify($ticket, $hubId, $templateRequestId)) {
+            // Refresh cookie so relative iframe asset hits keep working.
+            return WcEmbedTicket::cookie((string) $ticket);
+        }
+
+        $user = $request->user();
+        if ($user && WcEmbedTicket::userCanAccessRemoteEmbed($user, $hubId)) {
+            $issued = WcEmbedTicket::issue($hubId, $templateRequestId);
+
+            return WcEmbedTicket::cookie($issued);
+        }
+
+        abort(401, 'Authentication or embed ticket required for hub-scoped preview');
     }
 
     /** CSP frame-ancestors for embed proxy (never *). */

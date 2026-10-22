@@ -238,6 +238,12 @@ class CpanelSyncService
         $hubApi = self::storageApiUrl();
         $filename = basename(parse_url($path, PHP_URL_PATH) ?: $path);
 
+        // Documents use a protected route — do not rewrite them onto the public
+        // images URL (live sites should embed/copy assets, not rely on hub auth).
+        if ($filename !== '' && str_contains($path, 'uploaded-documents')) {
+            return $hubApi.'/website-compliance/uploaded-documents/'.$filename;
+        }
+
         if ($filename !== '' && (
             str_contains($path, 'uploaded-images')
             || str_contains($path, '/uploads/')

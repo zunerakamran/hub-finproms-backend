@@ -121,7 +121,13 @@ Route::get('/website-compliance/public/pages/{slug}', [WcPublicController::class
 Route::get('/website-compliance/public/templates', [WcPublicController::class, 'listHubTemplates']);
 Route::get('/website-compliance/public/templates/{slug}', [WcPublicController::class, 'getTemplateShowcase']);
 Route::get('/website-compliance/pages/home', [WcPublicController::class, 'getHomePageByAdvisor']);
+// Images stay public (live advisor sites / previews). Document extensions on
+// this path still require auth or a signed URL (legacy uploads).
 Route::get('/website-compliance/uploaded-images/{filename}', [WcUploadController::class, 'show'])
+    ->where('filename', '[A-Za-z0-9._-]+');
+// WC template-content documents — Sanctum session OR temporary signed URL.
+Route::get('/website-compliance/uploaded-documents/{filename}', [WcUploadController::class, 'showDocument'])
+    ->name('wc.uploaded-document')
     ->where('filename', '[A-Za-z0-9._-]+');
 Route::get('/website-compliance/scheduler/publish-scheduled', [WcSchedulerController::class, 'publishScheduled']);
 
@@ -149,14 +155,17 @@ Route::middleware('throttle:internal-hub')->group(function () {
 });
 
 // Hub iframe preview of live advisor sites (bypasses X-Frame-Options on cPanel).
-// Optional /h/{hubId}/ prefix: Central Hub remotes into a content-hub deployment DB.
-Route::match(['GET', 'HEAD'], '/website-compliance/embed-site/h/{hubId}/{templateRequestId}/{path?}', [WcPublicController::class, 'embedAdvisorSiteForHub'])
-    ->whereNumber('hubId')
-    ->whereNumber('templateRequestId')
-    ->where('path', '.*');
-Route::match(['GET', 'HEAD'], '/website-compliance/embed-site/{templateRequestId}/{path?}', [WcPublicController::class, 'embedAdvisorSite'])
-    ->whereNumber('templateRequestId')
-    ->where('path', '.*');
+// Local embed (no hub id) stays public. Hub-scoped /h/{hubId}/ requires Sanctum
+// session or a short-lived embed ticket before any remote DB open (SSRF + DoS).
+Route::middleware('throttle:wc-embed')->group(function () {
+    Route::match(['GET', 'HEAD'], '/website-compliance/embed-site/h/{hubId}/{templateRequestId}/{path?}', [WcPublicController::class, 'embedAdvisorSiteForHub'])
+        ->whereNumber('hubId')
+        ->whereNumber('templateRequestId')
+        ->where('path', '.*');
+    Route::match(['GET', 'HEAD'], '/website-compliance/embed-site/{templateRequestId}/{path?}', [WcPublicController::class, 'embedAdvisorSite'])
+        ->whereNumber('templateRequestId')
+        ->where('path', '.*');
+});
 
 // Taxonomy lists: member catalog OR Central library / dashboard content tools.
 // Central keeps member_browse_catalog off, but Power Admin still needs types /
@@ -296,6 +305,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // Website Compliance — authenticated domain (module + capability gated in controllers / hub_can)
     // acting_wl_wc_db: when hub switcher is on a white-label, read/write that hub's wc_* tables.
     Route::prefix('website-compliance')->middleware('acting_wl_wc_db')->group(function () {
+        Route::post('/embed-ticket', [WcPublicController::class, 'issueEmbedTicket'])
+            ->middleware('throttle:wc-embed');
         Route::post('/upload-image', [WcUploadController::class, 'uploadImage']);
         Route::post('/upload-document', [WcUploadController::class, 'uploadDocument']);
 

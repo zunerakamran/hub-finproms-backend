@@ -1,8 +1,9 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-21 (NFR-SEC: purpose-scoped /internal/* hub keys —
-  restore / GC / deploy-env no longer share backup_token; SSRF embed fix)
+Last updated: 2026-10-21 (NFR-SEC: WC template-content documents require auth
+  or signed URL; images stay public for live sites; hub-scoped embed tickets +
+  purpose-scoped /internal/* keys + SSRF hardening)
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
 IMPORTANT: Backend and frontend are SEPARATE repos — update BOTH when a
@@ -2324,6 +2325,19 @@ SECURITY HARDENING (phase 1 — 2026-10-04)
     promote-to-live validate `cpanel_domain` on write (literal IP/host checks);
     embed + cPanel HTTP clients re-check with DNS resolution before fetch.
     Unit + feature tests cover metadata/loopback rejection.
+[x] Hub-scoped WC embed auth (2026-10-21): `/embed-site/h/{hubId}/...` and
+    `?hub_id=` MUST NOT open a content-hub remote DB anonymously. Require
+    Sanctum session (capable WC role / acting hub) or a short-lived HMAC
+    `embed_ticket` from POST `/api/website-compliance/embed-ticket`; ticket
+    also set as HttpOnly cookie for iframe asset follow-ups. Local embed
+    (no hub id) stays public. Throttle `wc-embed`.
+[x] WC upload access split (2026-10-21): template-content documents
+    (`upload-document` → `/uploaded-documents/{filename}`) require Sanctum
+    session (WC module enabled) or temporary signed URL; `Cache-Control:
+    private, no-store`. Images (`uploaded-images`) remain public for live
+    advisor sites / preview captures. Document extensions on the legacy
+    images path are also gated. Distinct from WC change-request supporting
+    files and Firm Documents.
 [x] Scheduler auth: X-Scheduler-Key header + hash_equals (query key still works)
 [x] Activity log redacts api_key / cpanel_* / hub stripe secrets
 [x] CORS: localhost origins only outside production; CORS_ALLOWED_ORIGINS extra
@@ -2940,6 +2954,10 @@ Product fulfilment
        DNS and fail closed on private answers.
      - Template preview capture already used the same helper; embed + cPanel
        must stay aligned.
+     - Hub-scoped embed (`/embed-site/h/{hubId}/` or `?hub_id=`) MUST
+       authorize before `WhiteLabelDatabaseService` runs: Sanctum session or
+       `embed_ticket` from POST `/api/website-compliance/embed-ticket`
+       (`WcEmbedTicket`). Anonymous remote DB opens are forbidden.
 
   H) Hub machine callbacks — purpose-scoped secrets
      - `/api/internal/*` MUST NOT share one master key across backup, restore,
@@ -2967,6 +2985,10 @@ Acceptance criteria (for “done”)
   [x] Security headers present on API responses (feature test)
   [x] SSRF: SafeOutboundUrl on WC embed + cPanel sync + preview; deploy
       validates cpanel_domain; feature test rejects metadata/loopback embed
+  [x] Hub-scoped embed: anonymous remote DB blocked; ticket + session paths
+      covered by feature tests; throttle wc-embed
+  [x] WC documents: auth or signed URL; images public; feature tests cover
+      anonymous deny + signed/session allow
   [x] Hub /internal/* purpose-scoped secrets (backup ≠ restore ≠ GC ≠ deploy-env);
       unit + GC feature tests assert backup key cannot unlock other purposes
 
