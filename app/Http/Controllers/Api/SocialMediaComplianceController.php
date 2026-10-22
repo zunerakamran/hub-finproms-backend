@@ -112,9 +112,8 @@ class SocialMediaComplianceController extends Controller
         $hub = $this->smcHub($user);
         $this->compliance->assertModuleEnabled($hub);
 
-        $role = $this->matrix->effectiveRoleFor($user);
-        $canOwn = $this->matrix->roleCan($hub, $role, 'smc_view_own_requests')
-            || $this->matrix->roleCan($hub, $role, 'smc_submit_request');
+        $canOwn = $this->matrix->userCan($hub, $user, 'smc_view_own_requests')
+            || $this->matrix->userCan($hub, $user, 'smc_submit_request');
         if (! $canOwn) {
             return response()->json([
                 'message' => 'This capability is disabled for your role on this hub.',
@@ -507,16 +506,17 @@ class SocialMediaComplianceController extends Controller
 
     private function authorizeView($hub, User $user, SocialMediaComplianceRequest $compliance): void
     {
-        $role = $this->matrix->effectiveRoleFor($user);
+        // Use userCan (capability UNION) so multi-role users e.g. advisor+approver
+        // keep review access even when primary role is advisor/user.
         $subject = $this->actingAdvisors->subjectOrNull($user);
         $isOwner = (int) $compliance->user_id === (int) $user->id
             || ($subject && (int) $compliance->user_id === (int) $subject->id);
-        $canOwn = $this->matrix->roleCan($hub, $role, 'smc_view_own_requests')
-            || $this->matrix->roleCan($hub, $role, 'smc_submit_request');
-        $canAll = $this->matrix->roleCan($hub, $role, 'smc_view_all_requests')
-            || $this->matrix->roleCan($hub, $role, 'smc_assign_requests')
-            || $this->matrix->roleCan($hub, $role, 'smc_change_request_status');
-        $canReview = $this->matrix->roleCan($hub, $role, 'smc_review_requests');
+        $canOwn = $this->matrix->userCan($hub, $user, 'smc_view_own_requests')
+            || $this->matrix->userCan($hub, $user, 'smc_submit_request');
+        $canAll = $this->matrix->userCan($hub, $user, 'smc_view_all_requests')
+            || $this->matrix->userCan($hub, $user, 'smc_assign_requests')
+            || $this->matrix->userCan($hub, $user, 'smc_change_request_status');
+        $canReview = $this->matrix->userCan($hub, $user, 'smc_review_requests');
         $isAssignee = (int) ($compliance->assigned_to ?? 0) === (int) $user->id;
         $isUnassigned = empty($compliance->assigned_to);
 

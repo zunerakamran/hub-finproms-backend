@@ -116,9 +116,8 @@ class GeneralComplianceController extends Controller
         $hub = $this->gcHub($user);
         $this->compliance->assertModuleEnabled($hub);
 
-        $role = $this->matrix->effectiveRoleFor($user);
-        $canOwn = $this->matrix->roleCan($hub, $role, 'gc_view_own_requests')
-            || $this->matrix->roleCan($hub, $role, 'gc_submit_request');
+        $canOwn = $this->matrix->userCan($hub, $user, 'gc_view_own_requests')
+            || $this->matrix->userCan($hub, $user, 'gc_submit_request');
         if (! $canOwn) {
             return response()->json([
                 'message' => 'This capability is disabled for your role on this hub.',
@@ -302,9 +301,7 @@ class GeneralComplianceController extends Controller
      */
     private function actorMayDownloadGcAttachments(Hub $hub, User $user): bool
     {
-        $role = $this->matrix->effectiveRoleFor($user);
-
-        return $this->matrix->roleCan($hub, $role, 'gc_download_attachments');
+        return $this->matrix->userCan($hub, $user, 'gc_download_attachments');
     }
 
     /**
@@ -313,16 +310,15 @@ class GeneralComplianceController extends Controller
      */
     private function actorMayViewCompliance(Hub $hub, User $user, GeneralComplianceRequest $compliance): bool
     {
-        $role = $this->matrix->effectiveRoleFor($user);
         $subject = $this->actingAdvisors->subjectOrNull($user);
         $isOwner = (int) $compliance->user_id === (int) $user->id
             || ($subject && (int) $compliance->user_id === (int) $subject->id);
-        $canOwn = $this->matrix->roleCan($hub, $role, 'gc_view_own_requests')
-            || $this->matrix->roleCan($hub, $role, 'gc_submit_request');
-        $canAll = $this->matrix->roleCan($hub, $role, 'gc_view_all_requests')
-            || $this->matrix->roleCan($hub, $role, 'gc_assign_requests')
-            || $this->matrix->roleCan($hub, $role, 'gc_change_request_status');
-        $canReview = $this->matrix->roleCan($hub, $role, 'gc_review_requests');
+        $canOwn = $this->matrix->userCan($hub, $user, 'gc_view_own_requests')
+            || $this->matrix->userCan($hub, $user, 'gc_submit_request');
+        $canAll = $this->matrix->userCan($hub, $user, 'gc_view_all_requests')
+            || $this->matrix->userCan($hub, $user, 'gc_assign_requests')
+            || $this->matrix->userCan($hub, $user, 'gc_change_request_status');
+        $canReview = $this->matrix->userCan($hub, $user, 'gc_review_requests');
         $isAssignee = (int) ($compliance->assigned_to ?? 0) === (int) $user->id;
         $isUnassigned = empty($compliance->assigned_to);
 
@@ -719,16 +715,16 @@ class GeneralComplianceController extends Controller
 
     private function authorizeView($hub, User $user, GeneralComplianceRequest $compliance): void
     {
-        $role = $this->matrix->effectiveRoleFor($user);
+        // userCan = capability UNION across multi-role (advisor+approver, etc.).
         $subject = $this->actingAdvisors->subjectOrNull($user);
         $isOwner = (int) $compliance->user_id === (int) $user->id
             || ($subject && (int) $compliance->user_id === (int) $subject->id);
-        $canOwn = $this->matrix->roleCan($hub, $role, 'gc_view_own_requests')
-            || $this->matrix->roleCan($hub, $role, 'gc_submit_request');
-        $canAll = $this->matrix->roleCan($hub, $role, 'gc_view_all_requests')
-            || $this->matrix->roleCan($hub, $role, 'gc_assign_requests')
-            || $this->matrix->roleCan($hub, $role, 'gc_change_request_status');
-        $canReview = $this->matrix->roleCan($hub, $role, 'gc_review_requests');
+        $canOwn = $this->matrix->userCan($hub, $user, 'gc_view_own_requests')
+            || $this->matrix->userCan($hub, $user, 'gc_submit_request');
+        $canAll = $this->matrix->userCan($hub, $user, 'gc_view_all_requests')
+            || $this->matrix->userCan($hub, $user, 'gc_assign_requests')
+            || $this->matrix->userCan($hub, $user, 'gc_change_request_status');
+        $canReview = $this->matrix->userCan($hub, $user, 'gc_review_requests');
         $isAssignee = (int) ($compliance->assigned_to ?? 0) === (int) $user->id;
         $isUnassigned = empty($compliance->assigned_to);
 

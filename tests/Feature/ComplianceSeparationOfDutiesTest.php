@@ -302,6 +302,40 @@ class ComplianceSeparationOfDutiesTest extends TestCase
         $this->assertContains((int) $theirs->id, $ids);
     }
 
+    public function test_dual_role_assignee_can_open_request_assigned_to_them(): void
+    {
+        $this->createSharedHubWithSmc();
+        $firm = Firm::query()->create([
+            'name' => 'Firm A',
+            'compliance_visible_to_own' => true,
+        ]);
+
+        // Primary advisor/user; secondary approver — must still open assigned reviews.
+        $dual = User::factory()->create([
+            'role' => User::ROLE_USER,
+            'firm_id' => $firm->id,
+        ]);
+        app(UserRolesService::class)->syncRoles(
+            $dual,
+            [User::ROLE_USER, User::ROLE_APPROVER],
+            User::ROLE_USER,
+            log: false,
+        );
+
+        $submitter = User::factory()->create([
+            'role' => User::ROLE_USER,
+            'firm_id' => $firm->id,
+        ]);
+        $request = $this->createPendingSmc($submitter);
+        $request->update(['assigned_to' => $dual->id]);
+
+        \Laravel\Sanctum\Sanctum::actingAs($dual->fresh());
+
+        $this->getJson('/api/client-admin/social-media-compliance/requests/'.$request->id)
+            ->assertOk()
+            ->assertJsonPath('data.id', $request->id);
+    }
+
     public function test_taxonomy_owner_cannot_approve_own_request(): void
     {
         config([
