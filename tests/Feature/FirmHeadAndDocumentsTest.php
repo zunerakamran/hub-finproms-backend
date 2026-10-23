@@ -20,14 +20,21 @@ class FirmHeadAndDocumentsTest extends TestCase
 
     private function createSharedHub(): Hub
     {
+        config([
+            'hub.current_slug' => 'shared',
+            'hub.type' => 'shared',
+            'hub.is_control_plane' => false,
+        ]);
+
         $hub = Hub::query()->create([
             'name' => 'Shared Hub',
-            'slug' => 'shared-firm-docs-'.uniqid(),
+            'slug' => 'shared',
             'type' => Hub::TYPE_SHARED,
             'is_active' => true,
             'checklist' => Hub::defaultChecklist(Hub::TYPE_SHARED),
         ]);
         app(HubService::class)->forgetCurrentCache();
+        app(CapabilitiesMatrixService::class)->forgetResolvedCaches();
 
         return $hub;
     }
@@ -60,26 +67,124 @@ class FirmHeadAndDocumentsTest extends TestCase
         $memberB = User::factory()->create(['firm_id' => $firm->id, 'role' => User::ROLE_USER]);
         User::factory()->create(['role' => User::ROLE_USER]); // outside firm
 
-        $this->putJson('/api/power-admin/firms/'.$firm->id.'/head', [
+        $this->putJson('/api/client-admin/firms/'.$firm->id.'/head', [
             'head_user_id' => $memberA->id,
         ])->assertOk()
             ->assertJsonPath('firm.head_user_id', $memberA->id);
 
         $this->assertDatabaseHas('activity_logs', ['action' => 'firm.head.assign']);
 
-        $this->putJson('/api/power-admin/firms/'.$firm->id.'/head', [
+        $this->putJson('/api/client-admin/firms/'.$firm->id.'/head', [
             'head_user_id' => $memberB->id,
         ])->assertOk()
             ->assertJsonPath('firm.head_user_id', $memberB->id);
 
         $this->assertDatabaseHas('activity_logs', ['action' => 'firm.head.replace']);
 
-        $this->putJson('/api/power-admin/firms/'.$firm->id.'/head', [
+        $this->putJson('/api/client-admin/firms/'.$firm->id.'/head', [
             'head_user_id' => null,
         ])->assertOk()
             ->assertJsonPath('firm.head_user_id', null);
 
         $this->assertDatabaseHas('activity_logs', ['action' => 'firm.head.clear']);
+
+        $memberA->refresh();
+        $memberB->refresh();
+        $this->assertFalse($memberA->hasRole(User::ROLE_FIRM_ADMIN));
+        $this->assertFalse($memberB->hasRole(User::ROLE_FIRM_ADMIN));
+    }
+
+    public function test_assign_head_syncs_firm_admin_role(): void
+    {
+        $hub = $this->createSharedHub();
+        $this->enableCaps($hub, User::ROLE_POWER_ADMIN, [
+            'dashboard_manage_firms',
+            'dashboard_assign_firm_head',
+        ]);
+
+        $admin = User::factory()->powerAdmin()->create();
+        Sanctum::actingAs($admin);
+
+        $firm = Firm::query()->create(['name' => 'Member Co']);
+        $member = User::factory()->create(['firm_id' => $firm->id, 'role' => User::ROLE_USER]);
+
+        $this->putJson('/api/client-admin/firms/'.$firm->id.'/head', [
+            'head_user_id' => $member->id,
+        ])->assertOk();
+
+        $member->refresh();
+        $this->assertTrue($member->hasRole(User::ROLE_FIRM_ADMIN));
+        $this->assertSame((int) $member->id, (int) $firm->fresh()->head_user_id);
+
+        $this->putJson('/api/client-admin/firms/'.$firm->id.'/head', [
+            'head_user_id' => null,
+        ])->assertOk();
+
+        $member->refresh();
+        $this->assertFalse($member->hasRole(User::ROLE_FIRM_ADMIN));
+        $this->assertNull($firm->fresh()->head_user_id);
+    }
+
+    public function test_assign_network_admin_role_sets_central_firm_head(): void
+    {
+        $hub = $this->createSharedHub();
+        $this->enableCaps($hub, User::ROLE_POWER_ADMIN, [
+            'pa_manage_users_roles',
+        ]);
+        // Ensure power admin can manage users on this hub via matrix if needed.
+        $this->enableCaps($hub, User::ROLE_POWER_ADMIN, [
+            'dashboard_view_hub_users',
+        ]);
+
+        $admin = User::factory()->powerAdmin()->create();
+        Sanctum::actingAs($admin);
+
+        $central = Firm::central();
+        $member = User::factory()->create(['firm_id' => $central->id, 'role' => User::ROLE_USER]);
+
+        app(\App\Services\UserRolesService::class)->syncRoles(
+            $member,
+            [User::ROLE_USER, User::ROLE_NETWORK_ADMIN],
+            log: false,
+            actor: $admin,
+            hub: $hub,
+        );
+
+        $member->refresh();
+        $this->assertTrue($member->hasRole(User::ROLE_NETWORK_ADMIN));
+        $this->assertSame((int) $member->id, (int) $central->fresh()->head_user_id);
+
+        $rights = app(\App\Services\FirmDocumentAccessService::class)->effectiveRightsSummary($member, $hub);
+        $this->assertTrue($rights['is_firm_head']);
+        $this->assertSame((int) $central->id, (int) $rights['firm_id']);
+    }
+
+    public function test_cannot_assign_both_network_and_firm_admin(): void
+    {
+        $firm = Firm::query()->create(['name' => 'Acme']);
+        $user = User::factory()->create(['firm_id' => $firm->id, 'role' => User::ROLE_USER]);
+
+        $this->expectException(\Illuminate\Validation\ValidationException::class);
+
+        app(\App\Services\UserRolesService::class)->syncRoles(
+            $user,
+            [User::ROLE_NETWORK_ADMIN, User::ROLE_FIRM_ADMIN],
+            log: false,
+        );
+    }
+
+    public function test_firm_admin_requires_non_central_firm(): void
+    {
+        $central = Firm::central();
+        $user = User::factory()->create(['firm_id' => $central->id, 'role' => User::ROLE_USER]);
+
+        $this->expectException(\Illuminate\Validation\ValidationException::class);
+
+        app(\App\Services\UserRolesService::class)->syncRoles(
+            $user,
+            [User::ROLE_FIRM_ADMIN],
+            log: false,
+        );
     }
 
     public function test_head_can_upload_grant_rights_and_member_can_view(): void
@@ -102,7 +207,7 @@ class FirmHeadAndDocumentsTest extends TestCase
         $member = User::factory()->create(['firm_id' => $firm->id, 'role' => User::ROLE_USER]);
 
         Sanctum::actingAs($admin);
-        $this->putJson('/api/power-admin/firms/'.$firm->id.'/head', [
+        $this->putJson('/api/client-admin/firms/'.$firm->id.'/head', [
             'head_user_id' => $head->id,
         ])->assertOk();
 
@@ -171,7 +276,7 @@ class FirmHeadAndDocumentsTest extends TestCase
         $firm->update(['head_user_id' => $head->id]);
 
         Sanctum::actingAs($admin);
-        $cat = $this->postJson('/api/power-admin/firm-documents/categories', [
+        $cat = $this->postJson('/api/client-admin/firm-documents/categories', [
             'name' => 'Policies',
         ])->assertCreated()->json('category');
 
@@ -309,6 +414,7 @@ class FirmHeadAndDocumentsTest extends TestCase
 
         $this->enableCaps($hub, User::ROLE_POWER_ADMIN, [
             'firm_documents_manage_firm_access',
+            'firm_documents_manage_access_rights',
             'firm_documents_add',
             'firm_documents_view',
         ]);

@@ -28,6 +28,8 @@ class UserRolesService
         User::ROLE_POWER_ADMIN,
         User::ROLE_FINPROMS_ADMIN,
         User::ROLE_CLIENT_ADMIN,
+        User::ROLE_NETWORK_ADMIN,
+        User::ROLE_FIRM_ADMIN,
         User::ROLE_MANAGER,
         User::ROLE_APPROVER,
         User::ROLE_ADMIN_STAFF,
@@ -154,6 +156,7 @@ class UserRolesService
         ?User $actor = null,
         ?Request $request = null,
         ?Hub $hub = null,
+        bool $syncFirmHead = true,
     ): array {
         $normalized = [];
         foreach ($roles as $role) {
@@ -171,6 +174,10 @@ class UserRolesService
         }
 
         $normalized = $this->hubRoles->orderRoles($normalized);
+
+        if ($syncFirmHead) {
+            app(FirmHeadRoleSyncService::class)->assertRolesAllowed($user, $normalized);
+        }
 
         // Legacy column only — not a "primary" role the client can choose.
         $legacy = $this->normalizeRole((string) ($legacyRole ?? ''));
@@ -245,6 +252,24 @@ class UserRolesService
         }
 
         $this->hubRoles->forgetUserCountsCache($hub ? (int) $hub->id : null);
+
+        if ($syncFirmHead && ($assigned !== [] || $removed !== [])) {
+            try {
+                app(FirmHeadRoleSyncService::class)->afterRolesSynced(
+                    $user,
+                    $before,
+                    $normalized,
+                    $actor,
+                    $request,
+                    $hub,
+                );
+            } catch (ValidationException $e) {
+                throw $e;
+            } catch (\Throwable) {
+                // Head sync must not leave roles half-applied silently for validation;
+                // other failures are non-fatal (e.g. missing firms.head_user_id).
+            }
+        }
 
         return [
             'roles' => $normalized,

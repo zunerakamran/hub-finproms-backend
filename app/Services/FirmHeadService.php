@@ -12,15 +12,18 @@ class FirmHeadService
     public function __construct(
         private readonly ActivityLogService $activityLogs,
         private readonly HubService $hubs,
+        private readonly FirmHeadRoleSyncService $headRoles,
     ) {}
 
     /**
      * Appoint, replace, or clear the Head of Firm.
      * Pass null head_user_id to clear.
+     * Syncs network_admin (Central / Network) or firm_admin (member firm).
      */
     public function assign(Firm $firm, ?int $headUserId, User $actor, ?Request $request = null): Firm
     {
         $previousHeadId = $firm->head_user_id ? (int) $firm->head_user_id : null;
+        $headRole = $this->headRoles->headRoleForFirm($firm);
 
         if ($headUserId === null) {
             if ($previousHeadId === null) {
@@ -29,6 +32,15 @@ class FirmHeadService
 
             $firm->head_user_id = null;
             $firm->save();
+
+            $this->headRoles->afterHeadAssigned(
+                $firm,
+                $previousHeadId,
+                null,
+                $actor,
+                $request,
+                $this->hubs->current(),
+            );
 
             $this->activityLogs->log([
                 'action' => 'firm.head.clear',
@@ -42,6 +54,7 @@ class FirmHeadService
                     'firm_id' => $firm->id,
                     'firm_name' => $firm->name,
                     'previous_head_user_id' => $previousHeadId,
+                    'head_role' => $headRole,
                 ],
             ]);
 
@@ -68,11 +81,30 @@ class FirmHeadService
         }
 
         if ($previousHeadId === (int) $head->id) {
+            // Ensure role is present even if head_user_id was already set (legacy).
+            $this->headRoles->afterHeadAssigned(
+                $firm,
+                $previousHeadId,
+                $head,
+                $actor,
+                $request,
+                $this->hubs->current(),
+            );
+
             return $firm->load('headUser:id,name,email');
         }
 
         $firm->head_user_id = $head->id;
         $firm->save();
+
+        $this->headRoles->afterHeadAssigned(
+            $firm,
+            $previousHeadId,
+            $head,
+            $actor,
+            $request,
+            $this->hubs->current(),
+        );
 
         $action = $previousHeadId ? 'firm.head.replace' : 'firm.head.assign';
         $description = $previousHeadId
@@ -94,6 +126,7 @@ class FirmHeadService
                 'head_user_id' => (int) $head->id,
                 'head_user_name' => $head->name,
                 'head_user_email' => $head->email,
+                'head_role' => $headRole,
             ],
         ]);
 

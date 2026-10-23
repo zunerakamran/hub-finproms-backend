@@ -22,6 +22,8 @@ class AdvisorImportService
      */
     public const IMPORTABLE_ROLES = [
         User::ROLE_CLIENT_ADMIN,
+        User::ROLE_NETWORK_ADMIN,
+        User::ROLE_FIRM_ADMIN,
         User::ROLE_MANAGER,
         User::ROLE_APPROVER,
         User::ROLE_ADVISOR,

@@ -179,6 +179,15 @@ class WhiteLabelUserService
 
             if (array_key_exists('firm_id', $fill)) {
                 $fill['firm_id'] = $this->resolveFirmId($connection, $fill['firm_id']);
+                $newFirmId = $fill['firm_id'] !== null ? (int) $fill['firm_id'] : null;
+                if ($newFirmId !== ($user->firm_id ? (int) $user->firm_id : null)) {
+                    $rolesAfter = $roleSet['roles'] ?? $user->roleKeys();
+                    $keepingHead = in_array(User::ROLE_NETWORK_ADMIN, $rolesAfter, true)
+                        || in_array(User::ROLE_FIRM_ADMIN, $rolesAfter, true);
+                    if ($keepingHead) {
+                        app(FirmHeadRoleSyncService::class)->assertFirmMembershipAllowed($user, $newFirmId);
+                    }
+                }
             }
 
             $user->fill($fill);

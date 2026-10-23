@@ -26,6 +26,18 @@ class User extends Authenticatable
     /** White-labelled hub operator. */
     public const ROLE_CLIENT_ADMIN = 'client_admin';
 
+    /**
+     * Head of the hub’s Central / Network firm (`firms.is_central`).
+     * Display name overridable via hub role_display_names (default “Network Admin”).
+     */
+    public const ROLE_NETWORK_ADMIN = 'network_admin';
+
+    /**
+     * Head of the user’s own member firm (`users.firm_id`, non-central).
+     * Display name overridable via hub role_display_names (default “Firm Admin”).
+     */
+    public const ROLE_FIRM_ADMIN = 'firm_admin';
+
     /** Mid-level hub staff. */
     public const ROLE_MANAGER = 'manager';
 
@@ -68,6 +80,8 @@ class User extends Authenticatable
         self::ROLE_POWER_ADMIN => 'Power Admin',
         self::ROLE_FINPROMS_ADMIN => 'FinProms Admin',
         self::ROLE_CLIENT_ADMIN => 'Client Admin',
+        self::ROLE_NETWORK_ADMIN => 'Network Admin',
+        self::ROLE_FIRM_ADMIN => 'Firm Admin',
         self::ROLE_MANAGER => 'Manager',
         self::ROLE_APPROVER => 'Approver',
         self::ROLE_ADVISOR => 'Advisor',
@@ -387,6 +401,16 @@ class User extends Authenticatable
         return $this->hasRole(self::ROLE_CLIENT_ADMIN) || $this->hasRole('admin');
     }
 
+    public function isNetworkAdmin(): bool
+    {
+        return $this->hasRole(self::ROLE_NETWORK_ADMIN);
+    }
+
+    public function isFirmAdmin(): bool
+    {
+        return $this->hasRole(self::ROLE_FIRM_ADMIN);
+    }
+
     public function isManager(): bool
     {
         return $this->hasRole(self::ROLE_MANAGER);
@@ -488,6 +512,8 @@ class User extends Authenticatable
         // Every Excel-importable role (including User) is on the invite list.
         if ($this->hasAnyRole([
             self::ROLE_CLIENT_ADMIN,
+            self::ROLE_NETWORK_ADMIN,
+            self::ROLE_FIRM_ADMIN,
             self::ROLE_MANAGER,
             self::ROLE_APPROVER,
             self::ROLE_ADVISOR,

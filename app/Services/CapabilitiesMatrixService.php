@@ -20,6 +20,8 @@ class CapabilitiesMatrixService
         User::ROLE_POWER_ADMIN,
         User::ROLE_FINPROMS_ADMIN,
         User::ROLE_CLIENT_ADMIN,
+        User::ROLE_NETWORK_ADMIN,
+        User::ROLE_FIRM_ADMIN,
         User::ROLE_MANAGER,
         User::ROLE_APPROVER,
         User::ROLE_ADVISOR,
@@ -996,10 +998,18 @@ class CapabilitiesMatrixService
                 $hubType === Hub::TYPE_WHITE_LABEL;
         }
 
-        // Remaining roles (approver / advisor / admin-staff / user): dashboard & admin-email tools off by default.
-        // Power Admin enables them per hub in the Capabilities matrix.
-        // Security Monitoring also defaults OFF for these roles (hub-admin style ON via checklist defaults).
-        foreach ([User::ROLE_APPROVER, User::ROLE_ADVISOR, User::ROLE_ADMIN_STAFF, User::ROLE_USER] as $role) {
+        // Remaining roles (network/firm admin, approver / advisor / admin-staff / user):
+        // dashboard & admin-email tools off by default. Own-firm Document Repository
+        // head rights come from the role itself (§3.4), not hub-wide firm_documents_* ticks.
+        // Power Admin enables matrix cells per hub. Security Monitoring defaults OFF here.
+        foreach ([
+            User::ROLE_NETWORK_ADMIN,
+            User::ROLE_FIRM_ADMIN,
+            User::ROLE_APPROVER,
+            User::ROLE_ADVISOR,
+            User::ROLE_ADMIN_STAFF,
+            User::ROLE_USER,
+        ] as $role) {
             foreach (array_keys($matrix[$role] ?? []) as $key) {
                 $meta = Hub::CHECKLIST_DEFINITIONS[$key] ?? null;
                 $group = $meta['group'] ?? null;
@@ -1010,6 +1020,18 @@ class CapabilitiesMatrixService
                 ) {
                     $matrix[$role][$key] = false;
                 }
+            }
+        }
+
+        // Explicit: hub-wide firm document caps stay OFF for Network / Firm Admin columns.
+        foreach ([User::ROLE_NETWORK_ADMIN, User::ROLE_FIRM_ADMIN] as $role) {
+            foreach (Hub::FIRM_DOCUMENTS_CAPABILITY_KEYS as $key) {
+                if (isset($matrix[$role][$key])) {
+                    $matrix[$role][$key] = false;
+                }
+            }
+            if (isset($matrix[$role]['dashboard_assign_firm_head'])) {
+                $matrix[$role]['dashboard_assign_firm_head'] = false;
             }
         }
 

@@ -8,6 +8,7 @@ use App\Models\Hub;
 use App\Models\User;
 use App\Services\ActingHubService;
 use App\Services\AdminNewUserRegistrationMailService;
+use App\Services\FirmHeadRoleSyncService;
 use App\Services\FunctionalMailService;
 use App\Services\HubRolesService;
 use App\Services\UserRolesService;
@@ -32,6 +33,8 @@ class PowerAdminUserController extends Controller
         User::ROLE_POWER_ADMIN,
         User::ROLE_FINPROMS_ADMIN,
         User::ROLE_CLIENT_ADMIN,
+        User::ROLE_NETWORK_ADMIN,
+        User::ROLE_FIRM_ADMIN,
         User::ROLE_MANAGER,
         User::ROLE_APPROVER,
         User::ROLE_ADVISOR,
@@ -46,6 +49,8 @@ class PowerAdminUserController extends Controller
      */
     public const WHITE_LABEL_ASSIGNABLE_ROLES = [
         User::ROLE_CLIENT_ADMIN,
+        User::ROLE_NETWORK_ADMIN,
+        User::ROLE_FIRM_ADMIN,
         User::ROLE_MANAGER,
         User::ROLE_APPROVER,
         User::ROLE_ADVISOR,
@@ -344,6 +349,19 @@ class PowerAdminUserController extends Controller
             }
             if (! in_array(User::ROLE_ADMIN_STAFF, $roleSet['roles'], true)) {
                 $payload['acting_advisor_id'] = null;
+            }
+        }
+
+        if (array_key_exists('firm_id', $payload)) {
+            $newFirmId = $payload['firm_id'] !== null ? (int) $payload['firm_id'] : null;
+            if ($newFirmId !== ($model->firm_id ? (int) $model->firm_id : null)) {
+                // If head roles are being revoked in this same request, allow the firm move.
+                $rolesAfter = $roleSet['roles'] ?? $model->roleKeys();
+                $keepingHead = in_array(User::ROLE_NETWORK_ADMIN, $rolesAfter, true)
+                    || in_array(User::ROLE_FIRM_ADMIN, $rolesAfter, true);
+                if ($keepingHead) {
+                    app(FirmHeadRoleSyncService::class)->assertFirmMembershipAllowed($model, $newFirmId);
+                }
             }
         }
 

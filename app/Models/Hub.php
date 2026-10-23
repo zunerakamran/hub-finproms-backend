@@ -1101,7 +1101,7 @@ class Hub extends Model
         ],
         'dashboard_assign_firm_head' => [
             'label' => 'Assign Head of Firm',
-            'description' => 'Appoint, replace, or clear the single Head of Firm for each firm (must be a member of that firm). Not tied to the Firm documents functionality — used only to designate a head. Typical for Power Admin / FinProms admin.',
+            'description' => 'Appoint, replace, or clear the single Head of Firm for each firm (must be a member of that firm). Syncs Network Admin (Central / Network firm) or Firm Admin (member firms). Not tied to the Firm documents functionality. Typical for Power Admin / FinProms admin.',
             'group' => self::GROUP_DASHBOARD_FIRMS,
             'default_shared' => true,
             'default_white_label' => true,

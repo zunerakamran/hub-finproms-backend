@@ -1,8 +1,8 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-22 (Per-user capabilities §2.7.3 + role/user capability
-  activity logs; multi-role §2.7 / §2.7.1 + SoD §2.7.2 already done)
+Last updated: 2026-10-23 (Network Admin + Firm Admin roles §2.7 / §3.4 Document
+  Repository + §5.2 capability matrix; multi-role §2.7.1 already done)
 
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
@@ -371,15 +371,20 @@ roles (see §2.7.1 multi-role rule).
 MULTI-ROLE MODEL (REQUIRED — target behaviour):
 - PREVIOUSLY: each user had exactly ONE role (`users.role`).
 - NOW: each user MAY hold ONE OR MORE roles at the same time on that hub’s
-  user store (e.g. manager + approver, client_admin + approver).
+  user store (e.g. manager + approver, client_admin + approver,
+  advisor + firm_admin).
 - A user MUST always have at least one role.
 - Capability evaluation uses the UNION of all assigned roles (§2.7.1).
-- Canonical role *labels* and matrix columns are unchanged; only the
-  user↔role cardinality changes from 1:1 to many:many.
+- Canonical role keys stay stable; display names remain overridable. New
+  system roles `network_admin` and `firm_admin` are added to the catalog and
+  matrix (§2.7 / §3.4 / §5.2). Multi-role itself only changes user↔role
+  cardinality from 1:1 to many:many.
 - Full rules, equal multi-role model, migration, and affected areas:
   see §2.7.1.
 
-ROLES (canonical list — role keys unchanged):
+ROLES (canonical list — role keys are stable; display names are overridable
+via hub `role_display_names` / Manage roles — including Network Admin and
+Firm Admin):
 
   1) POWER ADMIN (power_admin) — platform developers / us
      - Logs into CENTRAL HUB CONTROLLER (control plane).
@@ -407,23 +412,58 @@ ROLES (canonical list — role keys unchanged):
      - Restricted vs FinProms admin; only tools Power Admin enables for that hub.
      - Uses the same hub-admin shell; capabilities from THAT hub's dashboard checklist.
 
-  4) MANAGER (manager) — hub staff (Shared or White-label)
+  4) NETWORK ADMIN (network_admin) — head of the Central / Network firm
+     - NEW system role (multi-role compatible). Default display name
+       “Network Admin” (renameable per hub).
+     - Means: this user is the Head of the hub’s single Central / Network firm
+       (`firms.is_central = true`, default name “Central / Network”).
+     - User MUST be a member of that Central / Network firm (`users.firm_id`
+       points at the central firm). Assigning `network_admin` to a user of a
+       non-central firm is rejected.
+     - ONE Network Admin / Head of Central firm per hub (same one-head rule as
+       other firms). Assigning a new Network Admin replaces the previous head
+       (clears previous `firms.head_user_id` and revokes `network_admin` from
+       the previous holder when that was their head-designation path).
+     - Unlocks Document Repository (Firm Documents) full rights for the
+       Central / Network firm only — see §3.4.
+     - Other screens still follow the §5.2 matrix UNION for this role column
+       (hub-wide firm_documents_* caps remain separate from own-firm head rights).
+     - May be combined with other non–control-plane roles (e.g. manager,
+       approver, user).
+
+  5) FIRM ADMIN (firm_admin) — head of a member firm
+     - NEW system role (multi-role compatible). Default display name
+       “Firm Admin” (renameable per hub).
+     - Means: this user is the Head of THEIR firm — the firm on
+       `users.firm_id`. Example: user belongs to Firm1 and is assigned
+       `firm_admin` → they are Head of Firm1.
+     - User MUST belong to a non-central firm. Do NOT assign `firm_admin` to
+       Central / Network firm members — use `network_admin` instead.
+     - ONE Firm Admin / Head per firm. Assigning `firm_admin` to another
+       member of the same firm replaces the previous head for that firm.
+     - Unlocks Document Repository (Firm Documents) full rights for THEIR
+       firm only — see §3.4.
+     - Other screens follow the §5.2 matrix column for `firm_admin`.
+     - May be combined with other roles (e.g. advisor + firm_admin,
+       manager + firm_admin).
+
+  6) MANAGER (manager) — hub staff (Shared or White-label)
      - Mid-level operational role (e.g. content/ops management without full
        client_admin rights). Exact screens TBD; gated by hub dashboard checklist
        and/or future manager-specific flags.
 
-  5) APPROVER (approver) — compliance / review
+  7) APPROVER (approver) — compliance / review
      - Reviews/approves content (ties to compliance check flow, section 3.3).
      - Not a full hub admin by default; approval UI to be built later.
 
-  6) ADVISOR (advisor) — reserved role label in the capabilities matrix
+  8) ADVISOR (advisor) — reserved role label in the capabilities matrix
      - Not assigned automatically on plan subscribe or Excel import.
      - White-label invited advisors keep role=user (may add other roles later);
        Excel import sets is_advisor and has_unlimited_credits when hub
        behaviour allows.
      - Uses member UI (same as user) unless other assigned roles unlock more.
 
-  7) USER (user) — general user / subscriber
+  9) USER (user) — general user / subscriber
      - Browse / subscribe / buy / download as user capability checklist allows.
      - After a paid public-hub plan subscription, the user role remains
        (credits only); other roles already assigned are NOT removed.
@@ -431,7 +471,7 @@ ROLES (canonical list — role keys unchanged):
        them) unless staff explicitly assign additional roles.
      - Label in the Capabilities matrix is "User" (not "Member").
 
-  8) ADMIN-STAFF (admin_staff) — firm-scoped staff (see User model / matrix)
+  10) ADMIN-STAFF (admin_staff) — firm-scoped staff (see User model / matrix)
      - Submit compliance and related work on behalf of advisors when allowed.
      - Display name overridable via hub role_display_names.
 
@@ -442,12 +482,17 @@ Notes:
   finproms_admin; may later hold additional roles if needed).
 - Advisor import keeps role=user (as one of the user’s roles) and sets
   is_advisor / unlimited flags; import UI MUST support assigning multiple
-  roles when the multi-role model is live (see §2.7.1).
+  roles when the multi-role model is live (see §2.7.1), including optional
+  `firm_admin` / `network_admin` when firm membership qualifies.
 - Public plan subscribe does NOT strip or replace other roles; it does not
   invent new roles beyond keeping `user` as needed for member access.
 - Roles alone do not unlock every screen — Power Admin checklists (on Central
   Hub) still gate member UI, hub-admin UI, and power_admin UI via the matrix
-  UNION rule in §2.7.1.
+  UNION rule in §2.7.1. Exception: Document Repository own-firm head rights
+  for Network Admin / Firm Admin are role + firm-membership based (§3.4),
+  not matrix ticks.
+- Head of Firm appointment UI (`dashboard_assign_firm_head`) and role
+  assignment MUST stay in sync — see §3.4.1 / §3.4.2.
 - LEGACY NOTE: Older builds treated Shared Hub as the control plane. Target
   architecture moves the control plane to Central Hub Controller; Shared Hub
   becomes a controllable content hub only.
@@ -464,8 +509,10 @@ are followed so security and audit stay clear.
 WHY THIS IS FINE:
 - The matrix already models rights per role column; multi-role only changes
   how a user’s effective rights are computed (UNION), not the matrix itself.
-- Head of Firm, modules, and firm-document rights are already membership /
-  flag based — not single-role hard-codes — so they remain compatible.
+- Modules remain functionality-flag based. Document Repository own-firm head
+  rights are now ALSO expressed as system roles (`network_admin` /
+  `firm_admin`) synced with `firms.head_user_id` — still firm-scoped, not
+  hub-wide matrix ticks (§3.4).
 - Risk is mainly migration + replacing “single `users.role`” assumptions in
   APIs, UI, imports, and audit display — not a redesign of the permission
   model.
@@ -489,8 +536,8 @@ EQUAL ROLES (no primary / secondary):
 - When a single string is required (activity_logs.user_role, compliance
   audit actor role, uploaded_by_role, Excel single-cell fallback), derive
   a privilege-ordered legacy mirror automatically:
-  power_admin > finproms_admin > client_admin > manager > approver >
-  admin_staff > advisor > user.
+  power_admin > finproms_admin > client_admin > network_admin >
+  firm_admin > manager > approver > admin_staff > advisor > user.
 - That mirror does NOT limit capabilities and is NOT editable as “primary”.
 - Capabilities always use the UNION of ALL assigned roles (below).
 - UI badges / Hub → Users / Access Control show all role labels equally
@@ -516,6 +563,10 @@ COMBINATION RULES:
   applies (cannot remove the only power_admin on a connection).
 - `finproms_admin` / `client_admin` may be combined with operational roles
   (manager, approver, …) so one person can admin and review.
+- `network_admin` and `firm_admin` may be combined with other non–control-plane
+  roles, but a user MUST NOT hold both `network_admin` and `firm_admin` at
+  once (Central vs member-firm head are mutually exclusive). Firm membership
+  must match the role (§2.7 / §3.4).
 - Duplicate role keys on one user are ignored.
 - Removing a role from a user is blocked if it would leave them with zero
   roles; the legacy `users.role` mirror is recomputed from remaining roles
@@ -565,23 +616,30 @@ AFFECTED FUNCTIONALITIES (checklist for backend + frontend):
   11) Compliance audit trail (SMC / GC / WC) — actor / related role display
   12) Supporting-files uploaded_by_role — legacy mirror or derived label
   13) Support Tickets / Security Monitoring role gates — via userCan union
-  14) Firm Head / firm documents — unchanged (membership-based) but any
-      role-gated side paths must use hasRole / userCan
+  14) Firm Head / Document Repository — sync `network_admin` /
+      `firm_admin` with `firms.head_user_id`; own-firm rights via hasRole +
+      firm membership; hub-wide caps still userCan (§3.4)
   15) Acting hub / control-plane role detection — hasRole(power_admin) etc.
   16) Last power_admin / last finproms_admin guards — count users who HOLD
       that role (any assigned role), not a single-column-only check
   17) Discontinue / suspend / GDPR erasure — role fields in denormalised
-      logs remain historical snapshots
+      logs remain historical snapshots; clearing firm head also revokes
+      network_admin / firm_admin when that was the head designation
   18) Frontend nav, badges, user forms, filters, import help copy
-      (equal multi-role chips; no Primary role control)
-  19) Automated tests — factories, feature tests that assume one role
+      (equal multi-role chips; no Primary role control; show Network Admin /
+      Firm Admin labels)
+  19) Automated tests — factories, feature tests that assume one role;
+      head/role sync tests for Document Repository
+  20) Capabilities matrix / Manage roles — add `network_admin` and
+      `firm_admin` system columns + defaults (§5.2)
 
 OUT OF SCOPE / UNCHANGED:
-- Role keys and display-name overrides (§5.2 Manage roles)
+- Display-name overrides for all roles including the two new ones (§5.2
+  Manage roles)
 - Hub Functionalities / Modules checklists (5.1 / 5.1A)
 - Power Admin pa_* checklist shape (5.3) — still applies when user holds
   power_admin
-- Head of Firm appointment (still membership-based, any role(s))
+- ONE Head of Firm per firm rule (still enforced; now also via role sync)
 
 
 2.7.2 Separation of duties (multi-role conflicts) — REQUIRED
@@ -864,50 +922,106 @@ IMPLEMENTATION: UserCapabilitiesService; wired in CapabilitiesMatrixService
      - Capabilities in group “Website Content Pre Approval” are blurred while
        this module is off.
 
-3.4 Firm Head of Firm & Firm Documents
+3.4 Document Repository (Firm Documents) — Network Admin / Firm Admin / Head
+--------------------------------------------------------------------
+Product name: Document Repository (UI / nav may say “Firm documents” /
+“Documents”). Same module as today’s firm-scoped documents library.
+
 - Firms already exist on hub databases (`firms` + `users.firm_id`; capability
-  `dashboard_manage_firms`). This section adds Head of Firm allocation and a
-  firm-scoped Documents library (attachments) with per-member rights.
+  `dashboard_manage_firms`). Each hub has exactly ONE Central / Network firm
+  (`firms.is_central = true`, default name “Central / Network”) plus any
+  number of member firms.
+- This section covers: designating heads via **roles** (preferred with
+  multi-role) and/or Assign Head of Firm UI; and the firm-scoped Document
+  Repository with per-member rights.
 - Applies on Shared and White-labelled hubs (each hub’s own firms / members).
   Backend and frontend both required.
 
 3.4.0 Functionality gate (hub-wide matrix only)
-- Hub Functionalities checklist flag: `firm_documents` (“Firm documents”).
-  Default OFF. Power Admin enables it per hub on Functionalities (often from
-  Central Hub Controller → Hub Functionalities for that hub).
-- While OFF, firm-document Capabilities (view / add / delete / archive for ALL
-  firms) are blurred / inactive on the Capabilities matrix.
-- Head of Firm does NOT need this flag — appointing a Head unlocks Firm
-  documents for that user on their firm immediately.
+- Hub Functionalities checklist flag: `firm_documents` (“Firm documents” /
+  Document Repository). Default OFF. Power Admin enables it per hub on
+  Functionalities (often from Central Hub Controller → Hub Functionalities).
+- While OFF, hub-wide firm-document Capabilities (view / add / delete /
+  archive for ALL firms) are blurred / inactive on the Capabilities matrix.
+- Network Admin / Firm Admin (Head of their firm) do NOT need this flag —
+  holding the head role unlocks Document Repository for THAT firm immediately.
 - Assign Head of Firm (`dashboard_assign_firm_head`) is NOT gated by this flag.
 - Central control: toggling this flag on Central MUST sync to the content hub’s
-  own database (remote DB wiring). The Head logs into the content hub site
+  own database (remote DB wiring). Heads log into the content hub site
   (Shared / White-label), not Central — that hub’s API must have the same
-  Firm Documents / Head code deployed.
+  Document Repository / Head code deployed.
 
-3.4.1 Who can appoint a Head of Firm
-- Capability (Capabilities matrix): `dashboard_assign_firm_head`
-  (“Assign Head of Firm”) — typically Power Admin / FinProms admin.
-- Not part of the document rights model; only designates the head.
-- ONE Head of Firm per firm; must already be a member of that firm.
-- Head may be ANY role (manager, advisor, approver, client_admin, …).
+3.4.1 Who is Head — Network Admin vs Firm Admin (REQUIRED)
+Two system roles designate firm heads (display names renameable per hub):
 
-3.4.2 Head of Firm rights (own firm only)
-- Head of Firm can be ANY role (manager, advisor, approver, client_admin,
-  admin-staff, user, …). Appointment is membership-based, not role-based.
-- As soon as a user is appointed Head of Firm, they unlock “Firm documents”
-  in the dashboard and have ALL document rights for THEIR firm: add, view,
-  delete, archive, and granting those rights to firm members — no matrix tick
-  and no Functionalities flag required.
-- Documents are scoped to the firm.
-- Frontend unlocks “Firm documents” via `firm_document_rights.is_firm_head` /
-  merged `firm_documents_*` effective capabilities (any role).
+  A) NETWORK ADMIN (`network_admin`)
+     - Head of the Central / Network firm only.
+     - User MUST have `users.firm_id` = the hub’s central firm.
+     - ONE Network Admin per hub (one head for the central firm).
+
+  B) FIRM ADMIN (`firm_admin`)
+     - Head of the user’s own member firm (`users.firm_id`).
+     - Example: member of Firm1 + role `firm_admin` → Head of Firm1.
+     - ONE Firm Admin per member firm.
+     - Must NOT be used for the Central / Network firm (use `network_admin`).
+
+Rules:
+- A user MUST NOT hold both `network_admin` and `firm_admin` at once.
+- Head designation is firm-scoped by membership — assigning `firm_admin` does
+  not make someone head of a firm they do not belong to.
+- Users may still hold other roles at the same time (multi-role UNION), e.g.
+  advisor + firm_admin, manager + network_admin.
+- Changing a user’s firm membership while they hold `network_admin` /
+  `firm_admin` MUST either: move/clear headship consistently, or reject the
+  firm change until the head role is revoked.
+
+3.4.1a Appointing / syncing Head (two equivalent paths)
+Either path designates the same Head; both MUST stay in sync:
+
+  Path 1 — Assign Head of Firm UI / API
+  - Capability: `dashboard_assign_firm_head` (“Assign Head of Firm”) —
+    typically Power Admin / FinProms admin / Client admin as matrix allows.
+  - Sets `firms.head_user_id` (must already be a member of that firm).
+  - MUST also assign the matching role on that user:
+      central firm → add `network_admin` (and remove from previous head)
+      member firm  → add `firm_admin` (and remove from previous head)
+  - Clearing the head clears `head_user_id` AND revokes that head role from
+    the previous holder (does not remove their other roles).
+
+  Path 2 — Role assign (Hub → Users / multi-role UI / Excel when supported)
+  - Assigning `network_admin` or `firm_admin` MUST set that firm’s
+    `head_user_id` to the user (replacing any previous head) when firm
+    membership qualifies; otherwise reject the role assign.
+  - Revoking the last head role for that firm clears `head_user_id`.
+
+- `is_firm_head` / Document Repository unlock = user is `firms.head_user_id`
+  for their firm OR holds the matching head role with matching firm
+  membership (implementations should treat these as one state).
+- LEGACY: older “Head may be ANY role without network_admin/firm_admin” is
+  superseded — new appointments always create/sync the head role. Existing
+  heads without the role SHOULD be migrated (backfill `network_admin` /
+  `firm_admin` from `head_user_id` + firm.is_central).
+
+3.4.2 Head rights (own firm only) — Document Repository
+- As soon as a user is Network Admin or Firm Admin (Head) for a firm, they
+  unlock Document Repository in the dashboard and have ALL document rights
+  for THEIR firm: add, view, delete, archive, granting those rights to firm
+  members, and setting that firm’s visible-firms allowlist — no matrix tick
+  and no Functionalities flag required for own-firm access.
+- Documents are scoped to the firm. Network Admin’s own-firm scope is the
+  Central / Network firm only (NOT automatic hub-wide access to every firm).
+- Hub-wide access to ALL firms still requires §3.4.4 matrix caps
+  (`firm_documents_view` / `_add` / …) on any role column (including the
+  Network Admin / Firm Admin columns if Power Admin ticks them).
+- Frontend unlocks via `firm_document_rights.is_firm_head` / merged
+  `firm_documents_*` effective capabilities.
 
 3.4.3 Head grants rights to firm members (per document)
 - Member rights are PER DOCUMENT (not firm-wide for view/delete/archive).
-- The Head opens access rights from a key icon on each document row; popup
-  grants / revokes any combination of add / view / delete / archive for that
-  document to members of THEIR firm. Members only receive what the head grants.
+- The Head (Network Admin or Firm Admin for that firm) opens access rights
+  from a key icon on each document row; popup grants / revokes any
+  combination of add / view / delete / archive for that document to members
+  of THEIR firm. Members only receive what the head grants.
 - Granting `can_add` on a document also unlocks firm-level upload for that member.
 - Cleared when a user leaves the firm or is discontinued.
 
@@ -933,7 +1047,8 @@ IMPLEMENTATION: UserCapabilitiesService; wired in CapabilitiesMatrixService
   Content catalog capabilities. One request capability covers:
   - SM Templates Library category or tag
   - Generic Compliance content type (GC module must be on)
-  - Firm document category (Firm documents functionality must be on)
+  - Firm document category (Firm documents / Document Repository functionality
+    must be on)
 - Capability `taxonomy_request_manage` (“Manage taxonomy requests”) — see the
   queue. Reviewers create the option manually on the existing Manage
   categories / tags / GC content types / firm document categories pages,
@@ -945,8 +1060,14 @@ IMPLEMENTATION: UserCapabilitiesService; wired in CapabilitiesMatrixService
   admin `GET .../taxonomy-add-requests` + `POST .../approve|reject`
   under client-admin / power-admin / admin (gated by taxonomy_request_manage).
 
-3.4.4 Capabilities matrix — hub-wide (all firms)
-- When Firm documents functionality is ON, these Capabilities are editable:
+3.4.4 Capabilities matrix — hub-wide (all firms) + new role columns
+- Matrix MUST include columns for `network_admin` and `firm_admin` (system
+  roles; addable via Manage roles if dormant on a hub). Defaults for those
+  columns: hub-wide `firm_documents_*` OFF (own-firm head rights come from
+  the role itself, not these ticks). Other dashboard caps default OFF unless
+  listed in §5.2 defaults for these roles.
+- When Firm documents functionality is ON, these Capabilities are editable
+  for EVERY role column (including Network Admin / Firm Admin):
   - `firm_documents_view` — view documents for ANY firm on the hub
   - `firm_documents_add` — upload documents for ANY firm on the hub
     (Head always has add for their own firm; not grantable via key icon)
@@ -958,11 +1079,14 @@ IMPLEMENTATION: UserCapabilitiesService; wired in CapabilitiesMatrixService
   - `firm_documents_manage_categories` — add/edit/delete category options
   - `firm_documents_manage_firm_access` — decide which firms may see a
     firm’s documents (allowlist). Blurred while Firm documents is off.
-- These are hub-wide admin tools, distinct from Head / member per-document grants.
+- These hub-wide admin tools are distinct from Head / member per-document
+  grants. Ticking them on Network Admin does NOT replace Firm Admin rights
+  on other firms unless the tick is hub-wide.
 
 3.4.4a Visible firms + mixed access rights (every firm)
 - Two-step model for ANY firm’s documents:
-  1) Visible firms allowlist — Head of that firm, OR any role with
+  1) Visible firms allowlist — Head of that firm (Network Admin for central /
+     Firm Admin for member firms), OR any role with
      `firm_documents_manage_firm_access`, chooses which other firms may see
      that firm’s documents (`GET/PUT /api/firm-documents/visible-firms`).
   2) Per-document access rights (key icon) — lists OWN-firm users (3.4.3)
@@ -975,14 +1099,17 @@ IMPLEMENTATION: UserCapabilitiesService; wired in CapabilitiesMatrixService
 3.4.5 Activity logs (required for the whole flow)
 - Every mutation in this flow is written to `activity_logs` (same hub audit
   trail as section 6A). Suggested action keys:
-  - `firm.head.assign` — Head of Firm appointed
+  - `firm.head.assign` — Head of Firm appointed (include role key
+    network_admin | firm_admin in payload)
   - `firm.head.replace` — Head of Firm replaced
   - `firm.head.clear` — Head of Firm cleared
+  - `user.role_assigned` / `user.role_removed` — when headship is changed via
+    multi-role assign (already logged by role service; correlate with firm id)
   - `firm.documents.member_rights.grant` — member document rights granted/updated
   - `firm.documents.member_rights.revoke` — member document rights revoked
-  - `firm.documents.visible_firms.sync` — Central visible-firms allowlist updated
-  - `firm.documents.firm_rights.grant` — firm-level Central doc access granted/updated
-  - `firm.documents.firm_rights.revoke` — firm-level Central doc access revoked
+  - `firm.documents.visible_firms.sync` — visible-firms allowlist updated
+  - `firm.documents.firm_rights.grant` — firm-level doc access granted/updated
+  - `firm.documents.firm_rights.revoke` — firm-level doc access revoked
   - `firm.documents.add` — document uploaded / created
   - `firm.documents.folder.create` — folder created
   - `firm.documents.view` — optional: record sensitive downloads if product
@@ -990,9 +1117,9 @@ IMPLEMENTATION: UserCapabilitiesService; wired in CapabilitiesMatrixService
   - `firm.documents.delete` — document permanently deleted
   - `firm.documents.archive` / `firm.documents.unarchive` — archive toggles
 - Log payloads should identify firm id/name, actor, target user (for head /
-  rights changes), grantee firm (for firm-level access), document id/name
-  (for document actions), and granted rights flags — never store file binary
-  contents; redact secrets.
+  rights changes), head role key, grantee firm (for firm-level access),
+  document id/name (for document actions), and granted rights flags — never
+  store file binary contents; redact secrets.
 
 3.5 Other Features (later)
 - Additional features to be added over time; keep architecture flexible.
@@ -1372,20 +1499,27 @@ IMPLEMENTATION: UserCapabilitiesService; wired in CapabilitiesMatrixService
   on this hub (then module / acting-advisor / functionality gates apply).
   The matrix itself stays role × capability — columns are still one per role,
   not one per user.
+- System role keys in the matrix catalog (left → right order for defaults):
+  power_admin, finproms_admin, client_admin, network_admin, firm_admin,
+  manager, approver, advisor, admin_staff, user — plus any custom roles.
 - Matrix COLUMNS = roles currently present on that hub (users who HOLD that
   role exist on the hub’s user store / remote DB — a multi-role user counts
   toward every role they hold) UNION roles Power Admin has explicitly added
   for THAT hub UNION must roles (power_admin, finproms_admin) which are always
-  present on every hub. Do NOT always show every other system role.
+  present on every hub. Do NOT always show every other system role — but
+  `network_admin` and `firm_admin` SHOULD be addable as dormant system roles
+  via Manage roles and appear once added or once any user holds them.
 - “Manage roles” page (`/my-dashboard/role-display-names`, capability
   `dashboard_manage_role_display_names` labeled Manage roles):
   - List roles on the CURRENT hub with total users per role (count users who
     HOLD that role; multi-role users are counted once per role they hold)
-  - Add a dormant system role or create a custom role for the CURRENT hub
+  - Add a dormant system role (including Network Admin / Firm Admin) or create
+    a custom role for the CURRENT hub
   - Delete a role from this hub’s matrix when it has 0 users (blocked while users
     still hold the role; power_admin and finproms_admin are must roles and can
     never be deleted on any hub — display names may still be renamed)
-  - Rename role display titles for that hub
+  - Rename role display titles for that hub (Network Admin / Firm Admin
+    titles are renameable like every other role)
   - Same capability gates add, delete, and rename
   - Does NOT automatically add/remove the role on other hubs — switch hub and act again
   - Custom role definitions are shared platform-wide; enabling a column is per hub
@@ -1393,7 +1527,8 @@ IMPLEMENTATION: UserCapabilitiesService; wired in CapabilitiesMatrixService
 
   Member-facing (end users / advisors / staff columns):
   - Browse catalog / posts / reels — available for ALL roles in the matrix
-    (Power Admin, FinProms admin, client admin, manager, approver, advisor, user)
+    (Power Admin, FinProms admin, client admin, Network Admin, Firm Admin,
+    manager, approver, advisor, admin-staff, user)
   - Browse bundles — show/hide Bundles on the public website (nav + pages);
     turn off for every role to hide bundles for the whole hub
   - View plans / self-serve subscribe
@@ -1481,11 +1616,23 @@ IMPLEMENTATION: UserCapabilitiesService; wired in CapabilitiesMatrixService
     and set compliance visibility between firms — same roles
   - Assign Head of Firm (`dashboard_assign_firm_head`) — appoint / replace /
     clear the single Head of Firm for each firm (must be a member of that firm);
-    not gated by Firm documents functionality
-  - Firm Documents (hub-wide matrix caps, blurred while Functionalities →
-    Firm documents is off): view / add / delete / archive for ALL firms.
-    Head of Firm has full rights for their own firm and may grant those rights
-    to firm members (section 3.4)
+    syncs `network_admin` (Central / Network firm) or `firm_admin` (member
+    firm) on the head user — see §3.4.1a; not gated by Firm documents
+    functionality. Defaults ON for hub-admin style roles (power_admin when
+    acting, finproms_admin, client_admin); defaults OFF for network_admin,
+    firm_admin, manager, approver, advisor, admin_staff, user unless Power
+    Admin enables
+  - Document Repository / Firm Documents (hub-wide matrix caps, blurred while
+    Functionalities → Firm documents is off): view / add / delete / archive /
+    manage access rights / manage categories / manage firm access for ALL
+    firms. Network Admin and Firm Admin always have full own-firm Document
+    Repository rights without these ticks (section 3.4). Defaults for
+    hub-wide `firm_documents_*` on network_admin / firm_admin columns: OFF
+  - Network Admin / Firm Admin matrix defaults (non–document-repository):
+    member general options follow User-like defaults (subscription / credits /
+    invoices / purchases as for user column unless Power Admin changes);
+    hub-admin dashboard tools OFF by default; compliance / support caps OFF
+    until enabled — Power Admin may broaden these columns per hub
   - AI content generation / control hubs remotely — same roles
     (typically Power Admin on Central Hub; Shared-only where appropriate)
   - Any other admin dashboard screens/actions
@@ -1749,10 +1896,10 @@ How this relates to Security Monitoring (6F) — READ THIS
   - Successful mutating API actions (POST / PUT / PATCH / DELETE): content,
     plans, settings, advisor import/discontinue, billing, capabilities, hubs,
     purchases, subscriptions, etc.
-  - Firm Head & Firm Documents (section 3.4): appoint/replace/clear head,
-    grant/revoke member document rights, and document add / delete / archive
-    (and view/download if audited) — action keys `firm.head.*` and
-    `firm.documents.*`
+  - Document Repository / Firm Head (section 3.4): appoint/replace/clear head
+    (sync network_admin / firm_admin), grant/revoke member document rights,
+    and document add / delete / archive (and view/download if audited) —
+    action keys `firm.head.*` and `firm.documents.*`
 - Sensitive fields (passwords, secrets, card data) are NEVER stored; payloads
   are redacted / truncated.
 - Activity report (aggregates): totals, unique users/actions, counts by action,
@@ -2270,10 +2417,11 @@ Out of scope for v1 of this module
 - Single codebase for Central Hub Controller + Shared hub(s) + all White-labels.
 - Three instance roles: central (control plane), shared (public/content hub),
   white_label (private client hub).
-- Roles: power_admin, finproms_admin, client_admin, manager, approver,
-  admin_staff, advisor, user. Each user may hold MULTIPLE roles; effective
-  capabilities = UNION of assigned roles (§2.7.1). All assigned roles are
-  equal (no primary / secondary).
+- Roles: power_admin, finproms_admin, client_admin, network_admin, firm_admin,
+  manager, approver, admin_staff, advisor, user. Each user may hold MULTIPLE
+  roles; effective capabilities = UNION of assigned roles (§2.7.1). All
+  assigned roles are equal (no primary / secondary). Network Admin / Firm
+  Admin designate Document Repository firm heads (§3.4).
 - Separate frontend shells: member catalog app (on Shared / White-label), and
   one universal Dashboard shell at /my-dashboard (tools from Capabilities +
   Power Admin pa_* checklist on Central Hub).
@@ -2288,7 +2436,8 @@ Out of scope for v1 of this module
 - New Shared and White-label instances are spawned by copying code to another
   cPanel and registering them on Central Hub.
 - Design for future: AI generation (FinProms admin), in-app edit, compliance,
-  firm head + firm documents, more features.
+  Document Repository (Network Admin / Firm Admin + firm documents), more
+  features.
 - UK GDPR tooling (section 6E): privacy notice separate from Terms; DSAR
   export; anonymising erasure that preserves FCA-style audit integrity;
   retention prune jobs. Build in the phased order in 6E.1.
@@ -2445,6 +2594,9 @@ STEP 1 — Shared hub core (content hub)
 [x] Wire member nav/actions to member capability checklist
 [x] Roles documented: power_admin, finproms_admin, client_admin, manager,
     approver, advisor, user (admin_staff also in matrix / User model)
+[x] Roles documented + wired: network_admin (Network Admin), firm_admin
+    (Firm Admin) — Document Repository heads; matrix columns; renameable
+    display names (§2.7 / §3.4 / §5.2)
 [x] MULTI-ROLE USERS (§2.7 / §2.7.1) — backend: user_roles pivot; all roles
     equal (no primary/secondary); users.role = privilege-ordered legacy mirror
     only; capability UNION in userCan; UserRolesService sync + activity logs
@@ -2543,8 +2695,9 @@ STEP 1 — Shared hub core (content hub)
 [x] Frontend: separate nav sections for Website Template Library vs Content Pre Approval
 [x] Firm Head of Firm — capability `dashboard_assign_firm_head`; one head per
     firm appointed from that firm’s members (section 3.4.1)
-[x] Firm Documents library — head can add attachments (images, Word, PDF, etc.)
-    and has all add/view/delete/archive rights (section 3.4.2–3.4.4)
+[x] Firm Documents / Document Repository library — head can add attachments
+    (images, Word, PDF, etc.) and has all add/view/delete/archive rights
+    (section 3.4.2–3.4.4)
 [x] Folders / subfolders + nested expand/collapse library; upload above table
 [x] Document categories (`firm_documents_manage_categories`, GC-style admin CRUD)
 [x] Taxonomy add requests (`taxonomy_request_add` + `taxonomy_request_manage`) —
@@ -2558,6 +2711,18 @@ STEP 1 — Shared hub core (content hub)
 [x] Firm Head & Firm Documents activity logs (`firm.head.*`, `firm.documents.*`)
 [x] Frontend: Assign Head of Firm + Firm Documents UI (rights-gated; mixed
     access rights + which-firms-can-see-documents for every firm)
+[x] Network Admin (`network_admin`) + Firm Admin (`firm_admin`) system roles —
+    User model / ROLE_LABELS / HubRolesService / Manage roles / privilege order
+    (§2.7); display names renameable
+[x] Head ↔ role sync: Assign Head sets/clears network_admin|firm_admin;
+    assigning those roles sets/clears firms.head_user_id; mutual exclusion;
+    migrate existing heads (section 3.4.1 / 3.4.1a)
+[x] Capabilities matrix: add network_admin + firm_admin columns + defaults
+    (hub-wide firm_documents_* OFF; §5.2)
+[x] Document Repository: treat Network Admin / Firm Admin as is_firm_head for
+    own firm; hub-wide caps unchanged (§3.4.2 / 3.4.4)
+[x] Frontend: multi-role assign shows Network Admin / Firm Admin; Firms /
+    Head UI reflects synced roles; Document Repository nav labels as needed
 [x] Support Tickets functionality (`support_tickets`) + APIs (submit with
     module/screenshots, queue, change status, comments) + `st_*` capabilities
 [x] Frontend: Support Tickets nav (My tickets / New ticket / All tickets) + pages

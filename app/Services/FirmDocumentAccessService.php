@@ -62,22 +62,31 @@ class FirmDocumentAccessService
 
     public function isHeadOfFirm(User $user, Firm $firm): bool
     {
-        if ($firm->head_user_id === null) {
-            return false;
+        if ($firm->head_user_id !== null) {
+            if ((int) $firm->head_user_id === (int) $user->id) {
+                return true;
+            }
+
+            if (filled($user->email)) {
+                $head = User::query()->find($firm->head_user_id);
+                if ($head !== null
+                    && strcasecmp((string) $head->email, (string) $user->email) === 0) {
+                    return true;
+                }
+            }
         }
 
-        if ((int) $firm->head_user_id === (int) $user->id) {
-            return true;
+        // Role-based headship when head_user_id is missing or out of sync.
+        if ($user->firm_id && (int) $user->firm_id === (int) $firm->id) {
+            if ($firm->isCentral() && $user->hasRole(User::ROLE_NETWORK_ADMIN)) {
+                return true;
+            }
+            if (! $firm->isCentral() && $user->hasRole(User::ROLE_FIRM_ADMIN)) {
+                return true;
+            }
         }
 
-        if (! filled($user->email)) {
-            return false;
-        }
-
-        $head = User::query()->find($firm->head_user_id);
-
-        return $head !== null
-            && strcasecmp((string) $head->email, (string) $user->email) === 0;
+        return false;
     }
 
     public function can(User $user, Firm $firm, string $right, ?Hub $hub = null, ?FirmDocument $document = null): bool
@@ -573,6 +582,12 @@ class FirmDocumentAccessService
             }
         }
 
+        // Role-based headship (network_admin / firm_admin) when head_user_id not yet synced.
+        $fromRole = $this->headedFirmIdFromRole($user);
+        if ($fromRole) {
+            return $fromRole;
+        }
+
         if ($hub->isContentHub() && $hub->hasRemoteDatabaseConfigured()) {
             try {
                 return app(WhiteLabelDatabaseService::class)->run($hub, function (string $connection) use ($user) {
@@ -606,6 +621,31 @@ class FirmDocumentAccessService
         return null;
     }
 
+    /**
+     * Resolve headed firm from network_admin / firm_admin + firm membership.
+     */
+    private function headedFirmIdFromRole(User $user): ?int
+    {
+        if (! $user->firm_id) {
+            return null;
+        }
+
+        $firm = Firm::query()->find((int) $user->firm_id);
+        if (! $firm) {
+            return null;
+        }
+
+        if ($firm->isCentral() && $user->hasRole(User::ROLE_NETWORK_ADMIN)) {
+            return (int) $firm->id;
+        }
+
+        if (! $firm->isCentral() && $user->hasRole(User::ROLE_FIRM_ADMIN)) {
+            return (int) $firm->id;
+        }
+
+        return null;
+    }
+
     public function clearGrantsForUser(User $user): void
     {
         if (! Schema::hasTable('firm_document_member_rights')) {
@@ -622,6 +662,23 @@ class FirmDocumentAccessService
         }
 
         Firm::query()->where('head_user_id', $user->id)->update(['head_user_id' => null]);
+
+        // Drop head designation roles if still present (e.g. discontinue / import clear).
+        $roles = app(UserRolesService::class);
+        $keys = array_values(array_filter(
+            $roles->roleKeys($user),
+            fn (string $key) => ! in_array($key, [User::ROLE_NETWORK_ADMIN, User::ROLE_FIRM_ADMIN], true)
+        ));
+        if ($keys !== $roles->roleKeys($user)) {
+            if ($keys === []) {
+                $keys = [User::ROLE_USER];
+            }
+            try {
+                $roles->syncRoles($user, $keys, log: false, syncFirmHead: false);
+            } catch (\Throwable) {
+                // Non-fatal during discontinue / import cleanup.
+            }
+        }
     }
 
     private function grantAllows(FirmDocumentMemberRight $grant, string $right): bool
