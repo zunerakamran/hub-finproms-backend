@@ -78,7 +78,13 @@ class FirmHeadController extends Controller
                     $previous = null;
                 }
 
-                $updated = $this->whiteLabelFirms->assignHead($hub, $firm, $headUserId);
+                $updated = $this->whiteLabelFirms->assignHead(
+                    $hub,
+                    $firm,
+                    $headUserId,
+                    $request->user(),
+                    $request,
+                );
             } catch (InvalidArgumentException $e) {
                 $notFound = str_contains(strtolower($e->getMessage()), 'not found');
 

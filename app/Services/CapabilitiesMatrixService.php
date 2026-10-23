@@ -945,6 +945,7 @@ class CapabilitiesMatrixService
             'dashboard_manage_subscriber_credits',
             'dashboard_manage_modules',
             'dashboard_manage_module_pricing',
+            'dashboard_manage_module_packages',
             'dashboard_view_module_invoices',
             'dashboard_mark_module_invoices_paid',
             ActingHubService::CAPABILITY,

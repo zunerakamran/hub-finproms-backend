@@ -13,8 +13,7 @@ class PowerAdminModulePricingController extends Controller
 {
     public function __construct(
         private readonly ModulePricingService $pricing,
-        private readonly ActingHubService $actingHubs,
-        private readonly \App\Services\ModulePackageService $packages
+        private readonly ActingHubService $actingHubs
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -22,22 +21,34 @@ class PowerAdminModulePricingController extends Controller
         $hub = $this->actingHubs->targetHub($request->user());
 
         return response()->json([
-            'pricing' => $this->pricing->listPricing(),
-            'packages' => $this->packages->listPackages(activeOnly: false),
+            'pricing' => $this->pricing->listPricingForHub($hub),
             'recurring_tiers' => $this->pricing->listRecurringTiers(),
-            'formula' => 'one_time on module/package enable; package price replaces individual enable invoices for covered modules; recurring Option B = rate(total active users with module) × batch',
+            'formula' => 'one_time on module enable; catalogue filtered to this hub type; recurring Option B = rate(total active users with module) × batch',
             'target_hub' => [
                 'id' => $hub->id,
                 'name' => $hub->name,
                 'slug' => $hub->slug,
+                'type' => $hub->type,
                 'charge_amount_per_module' => $hub->can('charge_amount_per_module'),
                 'charge_recurring_per_module' => $hub->can('charge_recurring_per_module'),
+                'module_keys' => $hub->moduleKeysForPage(),
             ],
         ]);
     }
 
     public function update(Request $request, ModulePricing $pricing): JsonResponse
     {
+        $hub = $this->actingHubs->targetHub($request->user());
+        if (! $this->pricing->pricingAppliesToHub($pricing, $hub)) {
+            return response()->json([
+                'message' => sprintf(
+                    '“%s” pricing does not apply to this %s hub. Switch hub type / acting hub to edit it.',
+                    $pricing->module_key,
+                    $hub->type
+                ),
+            ], 422);
+        }
+
         $validated = $request->validate([
             'amount' => ['sometimes', 'numeric', 'min:0'],
             'billing_unit' => ['sometimes', 'string', 'in:one_time,per_website'],

@@ -181,6 +181,28 @@ class ModulePricingService
     }
 
     /**
+     * Catalogue rows that apply to this hub type only.
+     * Central → Central Hub Controller; Shared → Shared Hub + product modules;
+     * White-label → White Label Hub + product modules.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function listPricingForHub(Hub $hub): array
+    {
+        $allowed = array_fill_keys($hub->moduleKeysForPage(), true);
+
+        return array_values(array_filter(
+            $this->listPricing(),
+            fn (array $row) => isset($allowed[$row['module_key'] ?? ''])
+        ));
+    }
+
+    public function pricingAppliesToHub(ModulePricing $pricing, Hub $hub): bool
+    {
+        return in_array((string) $pricing->module_key, $hub->moduleKeysForPage(), true);
+    }
+
+    /**
      * @return array{
      *   module_key: string,
      *   amount: float,

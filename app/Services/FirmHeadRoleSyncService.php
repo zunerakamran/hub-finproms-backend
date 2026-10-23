@@ -59,7 +59,7 @@ class FirmHeadRoleSyncService
             ]);
         }
 
-        $firm = Firm::query()->find((int) $user->firm_id);
+        $firm = Firm::on($user->getConnectionName())->find((int) $user->firm_id);
         if (! $firm) {
             throw ValidationException::withMessages([
                 'roles' => 'The user’s firm was not found.',
@@ -99,7 +99,8 @@ class FirmHeadRoleSyncService
         ?Request $request = null,
         ?Hub $hub = null,
     ): void {
-        if ($this->syncing || ! Schema::hasColumn('firms', 'head_user_id')) {
+        $connection = $user->getConnectionName();
+        if ($this->syncing || ! $this->hasHeadColumn($connection)) {
             return;
         }
 
@@ -114,7 +115,7 @@ class FirmHeadRoleSyncService
 
         if ($gainedNetwork || $gainedFirm) {
             $this->assertRolesAllowed($user, $after);
-            $firm = Firm::query()->find((int) $user->firm_id);
+            $firm = Firm::on($connection)->find((int) $user->firm_id);
             if (! $firm) {
                 return;
             }
@@ -125,7 +126,7 @@ class FirmHeadRoleSyncService
         }
 
         if ($lostNetwork || $lostFirm) {
-            $headed = Firm::query()->where('head_user_id', $user->id)->get();
+            $headed = Firm::on($connection)->where('head_user_id', $user->id)->get();
             foreach ($headed as $firm) {
                 $expected = $this->headRoleForFirm($firm);
                 $lostExpected = ($expected === User::ROLE_NETWORK_ADMIN && $lostNetwork)
@@ -152,7 +153,8 @@ class FirmHeadRoleSyncService
         ?Request $request = null,
         ?Hub $hub = null,
     ): void {
-        if ($this->syncing || ! Schema::hasColumn('firms', 'head_user_id')) {
+        $connection = $firm->getConnectionName();
+        if ($this->syncing || ! $this->hasHeadColumn($connection)) {
             return;
         }
 
@@ -163,8 +165,8 @@ class FirmHeadRoleSyncService
             $roles = app(UserRolesService::class);
 
             if ($previousHeadId && (! $newHead || (int) $previousHeadId !== (int) $newHead->id)) {
-                $previous = User::query()->find($previousHeadId);
-                if ($previous && $previous->hasRole($role)) {
+                $previous = User::on($connection)->find($previousHeadId);
+                if ($previous) {
                     $next = array_values(array_filter(
                         $roles->roleKeys($previous),
                         fn (string $key) => $key !== $role
@@ -185,6 +187,11 @@ class FirmHeadRoleSyncService
             }
 
             if ($newHead) {
+                // Ensure the new head is loaded on the same connection as the firm.
+                if ($newHead->getConnectionName() !== $connection) {
+                    $newHead = User::on($connection)->find($newHead->id) ?? $newHead;
+                }
+
                 $keys = $roles->roleKeys($newHead);
                 $otherHead = $role === User::ROLE_NETWORK_ADMIN
                     ? User::ROLE_FIRM_ADMIN
@@ -225,7 +232,7 @@ class FirmHeadRoleSyncService
             ]);
         }
 
-        $firm = Firm::query()->find($newFirmId);
+        $firm = Firm::on($user->getConnectionName())->find($newFirmId);
         if (! $firm) {
             throw ValidationException::withMessages([
                 'firm_id' => 'The selected firm was not found.',
@@ -271,9 +278,10 @@ class FirmHeadRoleSyncService
             $firm->save();
 
             if ($clearPreviousRole && $previousHeadId) {
-                $previous = User::query()->find($previousHeadId);
+                $connection = $firm->getConnectionName();
+                $previous = User::on($connection)->find($previousHeadId);
                 $role = $this->headRoleForFirm($firm);
-                if ($previous && $previous->hasRole($role)) {
+                if ($previous) {
                     $roles = app(UserRolesService::class);
                     $next = array_values(array_filter(
                         $roles->roleKeys($previous),
@@ -295,6 +303,17 @@ class FirmHeadRoleSyncService
             }
         } finally {
             $this->syncing = false;
+        }
+    }
+
+    private function hasHeadColumn(?string $connection): bool
+    {
+        try {
+            return $connection
+                ? Schema::connection($connection)->hasColumn('firms', 'head_user_id')
+                : Schema::hasColumn('firms', 'head_user_id');
+        } catch (\Throwable) {
+            return false;
         }
     }
 }

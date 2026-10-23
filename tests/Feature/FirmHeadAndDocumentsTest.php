@@ -8,8 +8,13 @@ use App\Models\Hub;
 use App\Models\User;
 use App\Services\CapabilitiesMatrixService;
 use App\Services\HubService;
+use App\Services\WhiteLabelDatabaseService;
+use App\Services\WhiteLabelFirmService;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -17,6 +22,17 @@ use Tests\TestCase;
 class FirmHeadAndDocumentsTest extends TestCase
 {
     use RefreshDatabase;
+
+    private ?string $remoteSqlitePath = null;
+
+    protected function tearDown(): void
+    {
+        if ($this->remoteSqlitePath && is_file($this->remoteSqlitePath)) {
+            @unlink($this->remoteSqlitePath);
+        }
+
+        parent::tearDown();
+    }
 
     private function createSharedHub(): Hub
     {
@@ -70,16 +86,24 @@ class FirmHeadAndDocumentsTest extends TestCase
         $this->putJson('/api/client-admin/firms/'.$firm->id.'/head', [
             'head_user_id' => $memberA->id,
         ])->assertOk()
-            ->assertJsonPath('firm.head_user_id', $memberA->id);
+            ->assertJsonPath('firm.head_user_id', $memberA->id)
+            ->assertJsonPath('assigned_role', 'firm_admin');
 
         $this->assertDatabaseHas('activity_logs', ['action' => 'firm.head.assign']);
+        $memberA->refresh();
+        $this->assertTrue($memberA->hasRole(User::ROLE_FIRM_ADMIN));
 
         $this->putJson('/api/client-admin/firms/'.$firm->id.'/head', [
             'head_user_id' => $memberB->id,
         ])->assertOk()
-            ->assertJsonPath('firm.head_user_id', $memberB->id);
+            ->assertJsonPath('firm.head_user_id', $memberB->id)
+            ->assertJsonPath('assigned_role', 'firm_admin');
 
         $this->assertDatabaseHas('activity_logs', ['action' => 'firm.head.replace']);
+        $memberA->refresh();
+        $memberB->refresh();
+        $this->assertFalse($memberA->hasRole(User::ROLE_FIRM_ADMIN));
+        $this->assertTrue($memberB->hasRole(User::ROLE_FIRM_ADMIN));
 
         $this->putJson('/api/client-admin/firms/'.$firm->id.'/head', [
             'head_user_id' => null,
@@ -527,5 +551,142 @@ class FirmHeadAndDocumentsTest extends TestCase
         $this->getJson('/api/firm-documents?firm_id='.$central->id)->assertStatus(403);
         $listOut = $this->getJson('/api/firm-documents?firm_id='.$firm2->id)->assertOk();
         $this->assertNotContains('Network policy', collect($listOut->json('documents'))->pluck('title')->all());
+    }
+
+    public function test_white_label_assign_head_syncs_firm_admin_roles_on_remote_db(): void
+    {
+        $hub = $this->makeWiredWhiteLabelHubWithFirms();
+
+        $remote = app(WhiteLabelDatabaseService::class);
+        $connection = $remote->connect($hub);
+
+        try {
+            $firmId = (int) DB::connection($connection)->table('firms')->where('name', 'Member Co')->value('id');
+            $userA = (int) DB::connection($connection)->table('users')->where('email', 'a@example.com')->value('id');
+            $userB = (int) DB::connection($connection)->table('users')->where('email', 'b@example.com')->value('id');
+        } finally {
+            $remote->disconnect($hub);
+        }
+
+        $service = app(WhiteLabelFirmService::class);
+
+        $service->assignHead($hub, $firmId, $userA);
+        $connection = $remote->connect($hub);
+        try {
+            $this->assertSame($userA, (int) DB::connection($connection)->table('firms')->where('id', $firmId)->value('head_user_id'));
+            $this->assertTrue(
+                DB::connection($connection)->table('user_roles')
+                    ->where('user_id', $userA)->where('role', User::ROLE_FIRM_ADMIN)->exists()
+            );
+            $this->assertSame(User::ROLE_FIRM_ADMIN, DB::connection($connection)->table('users')->where('id', $userA)->value('role'));
+        } finally {
+            $remote->disconnect($hub);
+        }
+
+        $service->assignHead($hub, $firmId, $userB);
+        $connection = $remote->connect($hub);
+        try {
+            $this->assertSame($userB, (int) DB::connection($connection)->table('firms')->where('id', $firmId)->value('head_user_id'));
+            $this->assertFalse(
+                DB::connection($connection)->table('user_roles')
+                    ->where('user_id', $userA)->where('role', User::ROLE_FIRM_ADMIN)->exists()
+            );
+            $this->assertTrue(
+                DB::connection($connection)->table('user_roles')
+                    ->where('user_id', $userB)->where('role', User::ROLE_FIRM_ADMIN)->exists()
+            );
+            $this->assertSame(User::ROLE_USER, DB::connection($connection)->table('users')->where('id', $userA)->value('role'));
+            $this->assertSame(User::ROLE_FIRM_ADMIN, DB::connection($connection)->table('users')->where('id', $userB)->value('role'));
+        } finally {
+            $remote->disconnect($hub);
+        }
+    }
+
+    private function makeWiredWhiteLabelHubWithFirms(): Hub
+    {
+        $this->remoteSqlitePath = sys_get_temp_dir().DIRECTORY_SEPARATOR.'wl-firm-head-'.uniqid('', true).'.sqlite';
+        touch($this->remoteSqlitePath);
+
+        $hub = Hub::query()->create([
+            'name' => 'My Hub',
+            'slug' => 'myhub',
+            'type' => Hub::TYPE_WHITE_LABEL,
+            'is_active' => true,
+            'checklist' => Hub::defaultChecklist(Hub::TYPE_WHITE_LABEL),
+            'frontend_url' => 'https://myhub.fin-proms.com',
+            'db_driver' => 'sqlite',
+            'db_host' => 'localhost',
+            'db_port' => 3306,
+            'db_database' => $this->remoteSqlitePath,
+            'db_username' => 'test',
+            'db_password' => 'secret',
+        ]);
+
+        $remote = app(WhiteLabelDatabaseService::class);
+        $connection = $remote->connect($hub);
+
+        Schema::connection($connection)->create('firms', function (Blueprint $table) {
+            $table->id();
+            $table->string('name');
+            $table->boolean('is_central')->default(false);
+            $table->boolean('compliance_visible_to_own')->default(true);
+            $table->boolean('compliance_visible_to_central')->default(false);
+            $table->unsignedBigInteger('compliance_visible_to_firm_id')->nullable();
+            $table->unsignedBigInteger('head_user_id')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::connection($connection)->create('users', function (Blueprint $table) {
+            $table->id();
+            $table->string('name');
+            $table->string('email')->unique();
+            $table->string('password')->nullable();
+            $table->string('role')->default('user');
+            $table->unsignedBigInteger('firm_id')->nullable();
+            $table->boolean('is_discontinued')->default(false);
+            $table->timestamps();
+        });
+
+        Schema::connection($connection)->create('user_roles', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('user_id');
+            $table->string('role');
+            $table->timestamps();
+            $table->unique(['user_id', 'role']);
+        });
+
+        $firmId = DB::connection($connection)->table('firms')->insertGetId([
+            'name' => 'Member Co',
+            'is_central' => false,
+            'compliance_visible_to_own' => true,
+            'compliance_visible_to_central' => false,
+            'compliance_visible_to_firm_id' => null,
+            'head_user_id' => null,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        foreach ([['A User', 'a@example.com'], ['B User', 'b@example.com']] as [$name, $email]) {
+            $userId = DB::connection($connection)->table('users')->insertGetId([
+                'name' => $name,
+                'email' => $email,
+                'password' => bcrypt('password'),
+                'role' => User::ROLE_USER,
+                'firm_id' => $firmId,
+                'is_discontinued' => false,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+            DB::connection($connection)->table('user_roles')->insert([
+                'user_id' => $userId,
+                'role' => User::ROLE_USER,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        $remote->disconnect($hub);
+
+        return $hub;
     }
 }

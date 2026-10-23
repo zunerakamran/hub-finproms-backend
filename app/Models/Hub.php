@@ -726,6 +726,7 @@ class Hub extends Model
      */
     public const MODULE_PRICING_CAPABILITY_KEYS = [
         'dashboard_manage_module_pricing',
+        'dashboard_manage_module_packages',
         'dashboard_view_module_invoices',
         'dashboard_mark_module_invoices_paid',
     ];
@@ -1403,7 +1404,14 @@ class Hub extends Model
         // --- Modules pricing (blurred while one-time AND recurring charge flags are off) ---
         'dashboard_manage_module_pricing' => [
             'label' => 'Set module prices (one-time + recurring)',
-            'description' => 'Configure one-time and recurring catalogue amounts / slot tables for each product module, and create module packages (bundled modules with their own one-time package price).',
+            'description' => 'Configure one-time and recurring catalogue amounts / slot tables for product modules that apply to this hub type (Shared base + products on Shared; White Label base + products on WL; Central base only on Central).',
+            'group' => self::GROUP_MODULE_PRICING,
+            'default_shared' => false,
+            'default_white_label' => true,
+        ],
+        'dashboard_manage_module_packages' => [
+            'label' => 'Manage module packages',
+            'description' => 'Create, edit, and delete catalogue packages that bundle product modules at a single one-time package price. Packages are enabled per hub on the Modules page.',
             'group' => self::GROUP_MODULE_PRICING,
             'default_shared' => false,
             'default_white_label' => true,

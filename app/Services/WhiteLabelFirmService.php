@@ -2,8 +2,12 @@
 
 namespace App\Services;
 
+use App\Models\Firm;
 use App\Models\Hub;
+use App\Models\User;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
 
 /**
@@ -13,7 +17,8 @@ use InvalidArgumentException;
 class WhiteLabelFirmService
 {
     public function __construct(
-        private readonly WhiteLabelDatabaseService $remoteDb
+        private readonly WhiteLabelDatabaseService $remoteDb,
+        private readonly FirmHeadRoleSyncService $headRoles,
     ) {}
 
     public function assertTarget(Hub $hub): void
@@ -338,54 +343,78 @@ class WhiteLabelFirmService
     }
 
     /**
-     * Appoint / replace / clear Head of Firm on the remote hub DB.
+     * Appoint / replace / clear firm admin (Head of Firm) on the remote hub DB.
+     * Syncs network_admin (Central / Network) or firm_admin (member firm) on that DB.
      *
      * @return array<string, mixed>
      */
-    public function assignHead(Hub $hub, int $firmId, ?int $headUserId): array
-    {
+    public function assignHead(
+        Hub $hub,
+        int $firmId,
+        ?int $headUserId,
+        ?User $actor = null,
+        ?Request $request = null,
+    ): array {
         $this->assertTarget($hub);
 
-        return $this->remoteDb->run($hub, function (string $connection) use ($firmId, $headUserId) {
-            if (! DB::connection($connection)->getSchemaBuilder()->hasColumn('firms', 'head_user_id')) {
+        return $this->remoteDb->run($hub, function (string $connection) use ($firmId, $headUserId, $hub, $actor, $request) {
+            if (! Schema::connection($connection)->hasColumn('firms', 'head_user_id')) {
                 throw new InvalidArgumentException(
                     'This hub has not been migrated for Head of Firm yet. Run migrations on that hub’s database.'
                 );
             }
 
-            $row = DB::connection($connection)->table('firms')->where('id', $firmId)->first();
-            if (! $row) {
+            $firm = Firm::on($connection)->find($firmId);
+            if (! $firm) {
                 throw new InvalidArgumentException('Firm not found on this hub.');
             }
 
+            $previousHeadId = $firm->head_user_id ? (int) $firm->head_user_id : null;
+
             if ($headUserId === null) {
-                DB::connection($connection)->table('firms')->where('id', $firmId)->update([
-                    'head_user_id' => null,
-                    'updated_at' => now(),
-                ]);
+                if ($previousHeadId === null) {
+                    return $this->serializeRow($connection, $firmId);
+                }
+
+                $firm->head_user_id = null;
+                $firm->save();
+
+                $this->headRoles->afterHeadAssigned(
+                    $firm,
+                    $previousHeadId,
+                    null,
+                    $actor,
+                    $request,
+                    $hub,
+                );
 
                 return $this->serializeRow($connection, $firmId);
             }
 
-            $user = DB::connection($connection)->table('users')->where('id', $headUserId)->first();
-            if (! $user) {
+            $head = User::on($connection)->find($headUserId);
+            if (! $head) {
                 throw new InvalidArgumentException('The selected user was not found on this hub.');
             }
 
-            if ((int) ($user->firm_id ?? 0) !== (int) $firmId) {
+            if ($head->firm_id === null || (int) $head->firm_id !== (int) $firmId) {
                 throw new InvalidArgumentException('The Head of Firm must be a member of this firm.');
             }
 
-            if (DB::connection($connection)->getSchemaBuilder()->hasColumn('users', 'is_discontinued')
-                && (bool) ($user->is_discontinued ?? false)
-            ) {
+            if ($head->isDiscontinued()) {
                 throw new InvalidArgumentException('A discontinued user cannot be Head of Firm.');
             }
 
-            DB::connection($connection)->table('firms')->where('id', $firmId)->update([
-                'head_user_id' => $headUserId,
-                'updated_at' => now(),
-            ]);
+            $firm->head_user_id = $head->id;
+            $firm->save();
+
+            $this->headRoles->afterHeadAssigned(
+                $firm,
+                $previousHeadId,
+                $head,
+                $actor,
+                $request,
+                $hub,
+            );
 
             return $this->serializeRow($connection, $firmId);
         });
