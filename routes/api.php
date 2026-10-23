@@ -637,6 +637,9 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/module-pricing', [PowerAdminModulePricingController::class, 'index']);
             Route::put('/module-pricing/{pricing}', [PowerAdminModulePricingController::class, 'update']);
             Route::put('/module-recurring-tiers/{tier}', [PowerAdminModulePricingController::class, 'updateTier']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_module_packages')->group(function () {
             Route::get('/module-packages', [PowerAdminModulePackageController::class, 'index']);
             Route::post('/module-packages', [PowerAdminModulePackageController::class, 'store']);
             Route::put('/module-packages/{modulePackage}', [PowerAdminModulePackageController::class, 'update']);
@@ -1032,6 +1035,9 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/module-pricing', [PowerAdminModulePricingController::class, 'index']);
             Route::put('/module-pricing/{pricing}', [PowerAdminModulePricingController::class, 'update']);
             Route::put('/module-recurring-tiers/{tier}', [PowerAdminModulePricingController::class, 'updateTier']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_module_packages')->group(function () {
             Route::get('/module-packages', [PowerAdminModulePackageController::class, 'index']);
             Route::post('/module-packages', [PowerAdminModulePackageController::class, 'store']);
             Route::put('/module-packages/{modulePackage}', [PowerAdminModulePackageController::class, 'update']);

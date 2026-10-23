@@ -45,6 +45,7 @@ class ModulePackageTest extends TestCase
     {
         $admin = User::factory()->powerAdmin()->create();
         Sanctum::actingAs($admin);
+        $this->grantPackageCapability($this->central);
         app(ModulePricingService::class)->seedDefaultsIfEmpty();
 
         $response = $this->postJson('/api/power-admin/module-packages', [
@@ -67,6 +68,7 @@ class ModulePackageTest extends TestCase
     {
         $admin = User::factory()->powerAdmin()->create();
         Sanctum::actingAs($admin);
+        $this->grantPackageCapability($this->central);
 
         $this->postJson('/api/power-admin/module-packages', [
             'name' => 'Bad',
@@ -283,6 +285,7 @@ class ModulePackageTest extends TestCase
         $hub = $this->createSharedHub();
         $admin = User::factory()->powerAdmin()->create(['acting_hub_id' => $hub->id]);
         Sanctum::actingAs($admin);
+        $this->grantPackageCapability($this->central);
 
         $package = app(ModulePackageService::class)->create([
             'name' => 'Temp Pack',
@@ -300,6 +303,36 @@ class ModulePackageTest extends TestCase
 
         $this->assertDatabaseMissing('module_packages', ['id' => $package->id]);
         $this->assertSame([], $hub->fresh()->enabledModulePackageIds());
+    }
+
+    public function test_module_pricing_index_filters_by_hub_type(): void
+    {
+        $wl = $this->createWhiteLabelHub();
+        $admin = User::factory()->powerAdmin()->create(['acting_hub_id' => $wl->id]);
+        Sanctum::actingAs($admin);
+        app(ModulePricingService::class)->seedDefaultsIfEmpty();
+
+        $caps = $this->matrix->resolvedRoleCapabilities($this->central);
+        $caps[User::ROLE_POWER_ADMIN]['dashboard_manage_module_pricing'] = true;
+        $this->central->role_capabilities = $caps;
+        $this->central->save();
+
+        $response = $this->getJson('/api/power-admin/module-pricing');
+        $response->assertOk();
+        $keys = collect($response->json('pricing'))->pluck('module_key')->all();
+        $this->assertContains('module_white_label_hub', $keys);
+        $this->assertNotContains('module_shared_hub', $keys);
+        $this->assertNotContains('module_central_hub', $keys);
+        $this->assertContains('module_social_media_template_library', $keys);
+        $this->assertSame(Hub::TYPE_WHITE_LABEL, $response->json('target_hub.type'));
+    }
+
+    private function grantPackageCapability(Hub $hub): void
+    {
+        $caps = $this->matrix->resolvedRoleCapabilities($hub);
+        $caps[User::ROLE_POWER_ADMIN]['dashboard_manage_module_packages'] = true;
+        $hub->role_capabilities = $caps;
+        $hub->save();
     }
 
     private function createSharedHub(array $extra = []): Hub

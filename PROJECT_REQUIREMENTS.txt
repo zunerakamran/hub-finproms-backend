@@ -1526,12 +1526,15 @@ Either path designates the same Head; both MUST stay in sync:
 - Stored in `module_pricing` (+ recurring_* columns) and `module_recurring_tiers`.
 - Capabilities group “Modules pricing” (blurred while BOTH charge flags off):
   - `dashboard_manage_module_pricing` — Set one-time + recurring catalogue / slots
-    AND create/edit/delete module packages (bundled product modules with their
-    own one-time package price)
+    for modules that apply to the current hub type only (Shared base + products
+    on Shared; White Label base + products on WL; Central base on Central)
+  - `dashboard_manage_module_packages` — Create/edit/delete module packages
+    (bundled product modules with their own one-time package price); separate
+    page `/my-dashboard/module-packages`
   - `dashboard_view_module_invoices` — Who can see module invoices
   - `dashboard_mark_module_invoices_paid` — Manually mark unpaid module invoices paid
-- APIs: GET/PUT module-pricing; PUT module-recurring-tiers/{id};
-  GET/POST/PUT/DELETE module-packages; module-invoices…
+- APIs: GET/PUT module-pricing (filtered by hub type); PUT module-recurring-tiers/{id};
+  GET/POST/PUT/DELETE module-packages (capability-gated separately); module-invoices…
 - Invoice types: `module_billing` (one_time), `module_recurring` (recurring)
 - Scheduler: `billing:process-module-cycles` daily — anniversary invoices, renew-day
   card collection, grace penalties
@@ -1540,7 +1543,9 @@ Either path designates the same Head; both MUST stay in sync:
   page under Advisors
 
 5.1C Module packages (bundled product modules)
-- Power Admin can create catalogue packages of the 5 optional product modules
+- Separate page `/my-dashboard/module-packages` gated by capability
+  `dashboard_manage_module_packages` (Modules pricing group).
+- Capable roles can create catalogue packages of the 5 optional product modules
   (base Shared / White Label Hub is never packaged — it stays mandatory/locked).
 - Package rules:
   - Must include ≥1 product module; dependency parents are auto-included
@@ -1566,6 +1571,9 @@ Either path designates the same Head; both MUST stay in sync:
     invoices (same pattern as individual module re-enable).
   - Recurring charges still use per-module catalogue rates for modules that
     are effectively on (package is a one-time packaging discount/bundle only).
+- Module prices page (`/my-dashboard/module-pricing`) lists catalogue rows for
+  the **acting hub type only** (WL → White Label Hub + 5 products; Shared →
+  Shared Hub + 5 products; Central → Central Hub Controller only).
 
 5.2 User capabilities matrix (REQUIRED — Power Admin → Capabilities)
 - Power Admin manages what users can do from their dashboards / member UI,
@@ -1757,8 +1765,10 @@ Either path designates the same Head; both MUST stay in sync:
   - Manage hub modules (`dashboard_manage_modules`) — who may enable/disable
     Social Media / Website / General Compliance modules for that hub
 
-  Modules pricing (blurred while charge_amount_per_module is off):
+  Modules pricing (blurred while BOTH charge flags off; Central catalogue still manageable):
   - `dashboard_manage_module_pricing` — set catalogue amounts / billing unit
+    (rows filtered to the acting hub type)
+  - `dashboard_manage_module_packages` — create/edit/delete module packages
   - `dashboard_view_module_invoices` — view one-time module enablement invoices
   - `dashboard_mark_module_invoices_paid` — mark unpaid module invoices paid with
     required settlement info + optional attachment; details remain viewable later
