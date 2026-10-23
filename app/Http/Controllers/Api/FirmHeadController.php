@@ -44,9 +44,13 @@ class FirmHeadController extends Controller
 
         $model = Firm::query()->findOrFail($firm);
 
+        $payload = $model->load('headUser:id,name,email')->toApiArray();
+
         return response()->json([
-            'firm' => $model->load('headUser:id,name,email')->toApiArray(),
+            'firm' => $payload,
             'members' => $this->heads->eligibleMembers($model),
+            'admin_role' => $model->isCentral() ? 'network_admin' : 'firm_admin',
+            'admin_role_label' => $model->isCentral() ? 'Network Admin' : 'Firm Admin',
             'acting_on_white_label' => false,
         ]);
     }
@@ -83,13 +87,17 @@ class FirmHeadController extends Controller
 
             $this->logRemoteHeadChange($request, $updated, $previous);
 
+            $roleLabel = ! empty($updated['is_central']) ? 'Network Admin' : 'Firm Admin';
             $message = ($updated['head_user_id'] ?? null)
-                ? 'Head of Firm updated successfully.'
-                : 'Head of Firm cleared successfully.';
+                ? 'Firm admin updated successfully. Selected user now has the '.$roleLabel.' role.'
+                : 'Firm admin cleared successfully. The '.$roleLabel.' role was removed from the previous admin.';
 
             return response()->json([
                 'message' => $message,
                 'firm' => $updated,
+                'assigned_role' => ($updated['head_user_id'] ?? null)
+                    ? (! empty($updated['is_central']) ? 'network_admin' : 'firm_admin')
+                    : null,
                 'target_hub' => $this->targetHubPayload($hub),
                 'acting_on_white_label' => true,
             ]);
@@ -110,13 +118,16 @@ class FirmHeadController extends Controller
             $request,
         );
 
+        $roleKey = $updated->isCentral() ? 'network_admin' : 'firm_admin';
+        $roleLabel = $updated->isCentral() ? 'Network Admin' : 'Firm Admin';
         $message = $updated->head_user_id
-            ? 'Head of Firm updated successfully.'
-            : 'Head of Firm cleared successfully.';
+            ? 'Firm admin updated successfully. Selected user now has the '.$roleLabel.' role.'
+            : 'Firm admin cleared successfully. The '.$roleLabel.' role was removed from the previous admin.';
 
         return response()->json([
             'message' => $message,
             'firm' => $updated->toApiArray(),
+            'assigned_role' => $updated->head_user_id ? $roleKey : null,
             'acting_on_white_label' => false,
         ]);
     }
@@ -134,16 +145,18 @@ class FirmHeadController extends Controller
             return;
         }
 
+        $roleLabel = ! empty($firm['is_central']) ? 'Network Admin' : 'Firm Admin';
+
         if ($next === null) {
             $action = 'firm.head.clear';
-            $description = 'Cleared Head of Firm for “'.($firm['name'] ?? '').'” (remote hub)';
+            $description = 'Cleared firm admin ('.$roleLabel.') for “'.($firm['name'] ?? '').'” (remote hub)';
         } elseif ($prev === null) {
             $action = 'firm.head.assign';
-            $description = 'Appointed '.($firm['head_user']['name'] ?? 'user')
-                .' as Head of Firm for “'.($firm['name'] ?? '').'” (remote hub)';
+            $description = 'Set '.($firm['head_user']['name'] ?? 'user')
+                .' as firm admin ('.$roleLabel.') for “'.($firm['name'] ?? '').'” (remote hub)';
         } else {
             $action = 'firm.head.replace';
-            $description = 'Replaced Head of Firm for “'.($firm['name'] ?? '').'” (remote hub)';
+            $description = 'Replaced firm admin ('.$roleLabel.') for “'.($firm['name'] ?? '').'” (remote hub)';
         }
 
         /** @var User|null $actor */

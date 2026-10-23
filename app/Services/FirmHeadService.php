@@ -16,7 +16,7 @@ class FirmHeadService
     ) {}
 
     /**
-     * Appoint, replace, or clear the Head of Firm.
+     * Appoint, replace, or clear the firm admin (Head of Firm).
      * Pass null head_user_id to clear.
      * Syncs network_admin (Central / Network) or firm_admin (member firm).
      */
@@ -24,6 +24,7 @@ class FirmHeadService
     {
         $previousHeadId = $firm->head_user_id ? (int) $firm->head_user_id : null;
         $headRole = $this->headRoles->headRoleForFirm($firm);
+        $roleLabel = $firm->isCentral() ? 'Network Admin' : 'Firm Admin';
 
         if ($headUserId === null) {
             if ($previousHeadId === null) {
@@ -44,7 +45,7 @@ class FirmHeadService
 
             $this->activityLogs->log([
                 'action' => 'firm.head.clear',
-                'description' => 'Cleared Head of Firm for “'.$firm->name.'”',
+                'description' => 'Cleared firm admin ('.$roleLabel.') for “'.$firm->name.'”',
                 'user' => $actor,
                 'hub' => $this->hubs->current(),
                 'subject' => $firm,
@@ -70,13 +71,13 @@ class FirmHeadService
 
         if ($head->firm_id === null || (int) $head->firm_id !== (int) $firm->id) {
             throw ValidationException::withMessages([
-                'head_user_id' => 'The Head of Firm must be a member of this firm.',
+                'head_user_id' => 'The firm admin must be a member of this firm.',
             ]);
         }
 
         if ($head->isDiscontinued()) {
             throw ValidationException::withMessages([
-                'head_user_id' => 'A discontinued user cannot be Head of Firm.',
+                'head_user_id' => 'A discontinued user cannot be firm admin.',
             ]);
         }
 
@@ -108,8 +109,8 @@ class FirmHeadService
 
         $action = $previousHeadId ? 'firm.head.replace' : 'firm.head.assign';
         $description = $previousHeadId
-            ? 'Replaced Head of Firm for “'.$firm->name.'” with '.$head->name
-            : 'Appointed '.$head->name.' as Head of Firm for “'.$firm->name.'”';
+            ? 'Replaced firm admin ('.$roleLabel.') for “'.$firm->name.'” with '.$head->name
+            : 'Set '.$head->name.' as firm admin ('.$roleLabel.') for “'.$firm->name.'”';
 
         $this->activityLogs->log([
             'action' => $action,
@@ -134,7 +135,7 @@ class FirmHeadService
     }
 
     /**
-     * Members eligible to become Head of Firm.
+     * Members eligible to become firm admin (Network Admin / Firm Admin).
      *
      * @return list<array{id: int, name: string, email: string}>
      */

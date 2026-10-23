@@ -1694,10 +1694,10 @@ Either path designates the same Head; both MUST stay in sync:
     (distinct from My invoices / Module invoices / Advisor invoices) — same roles
   - Manage firms — create/edit firms, assign users’ firm membership context,
     and set compliance visibility between firms — same roles
-  - Assign Head of Firm (`dashboard_assign_firm_head`) — appoint / replace /
-    clear the single Head of Firm for each firm (must be a member of that firm);
-    syncs `network_admin` (Central / Network firm) or `firm_admin` (member
-    firm) on the head user — see §3.4.1a; not gated by Firm documents
+  - Update admin of this firm (`dashboard_assign_firm_head`) — Firms page
+    action to appoint / replace / clear the firm admin (must be a member of
+    that firm). Selected user receives `network_admin` (Central / Network) or
+    `firm_admin` (member firm) — see §3.4.1a; not gated by Firm documents
     functionality. Defaults ON for hub-admin style roles (power_admin when
     acting, finproms_admin, client_admin); defaults OFF for network_admin,
     firm_admin, manager, approver, advisor, admin_staff, user unless Power
