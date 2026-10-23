@@ -5,29 +5,25 @@ namespace App\Services;
 use App\Models\Firm;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Resolves which firms may see / review / report on compliance requests
- * submitted by users of a given firm, based on that firm's visibility settings.
+ * submitted by users of a given firm (Delegated compliance access §2.7.0a).
  *
- * Who is firm-scoped (own firm only, plus firm visibility settings):
- * - Member-firm users (Firm Admin, Top Management, Auditor, Accounts Admin,
- *   manager, approver, advisor, admin_staff, user, …) with a non-central firm_id
- *   — including when they have "view all" capabilities.
+ * Who is firm-scoped (own firm + delegated authority firms):
+ * - Member-firm users with a non-central firm_id — including when they have
+ *   "view all" capabilities.
  *
  * Who bypasses firm scope (sees everything their capabilities allow):
  * - power_admin, finproms_admin
  * - Central / Network firm members who hold network_admin, top_management,
- *   auditor, or accounts_admin (network can manage the network and all firms)
- *
- * Public self-registered users (no firm) are outside the firm model: their
- * requests are not part of firm queues, and staff without a firm only see
- * their own / assigned items (not other firms' queues).
+ *   auditor, accounts_admin, or approver
  *
  * Settings on the *submitter's firm*:
- * - visible_to_own      → staff in the same firm
- * - visible_to_central  → staff in the Central / Network firm
- * - visible_to_firm_id  → staff in one other named firm
+ * - compliance_visible_to_own → staff in the same firm
+ * - firm_compliance_authorities pivot → other firms (incl. Central) that may
+ *   review / assign / report / audit (one-way)
  */
 class FirmComplianceVisibilityService
 {
@@ -42,6 +38,7 @@ class FirmComplianceVisibilityService
         User::ROLE_TOP_MANAGEMENT,
         User::ROLE_AUDITOR,
         User::ROLE_ACCOUNTS_ADMIN,
+        User::ROLE_APPROVER,
     ];
 
     /**
@@ -83,13 +80,21 @@ class FirmComplianceVisibilityService
             return true;
         }
 
-        if ($submitterFirm->compliance_visible_to_central && $viewerIsCentral) {
+        $authorityIds = $submitterFirm->complianceAuthorityFirmIds();
+        if (in_array((int) $viewerFirmId, $authorityIds, true)) {
             return true;
         }
 
-        if ($submitterFirm->compliance_visible_to_firm_id
-            && (int) $viewerFirmId === (int) $submitterFirm->compliance_visible_to_firm_id) {
-            return true;
+        // Legacy fallback when pivot empty but old columns still set.
+        if ($authorityIds === []) {
+            if ($submitterFirm->compliance_visible_to_central && $viewerIsCentral) {
+                return true;
+            }
+
+            if ($submitterFirm->compliance_visible_to_firm_id
+                && (int) $viewerFirmId === (int) $submitterFirm->compliance_visible_to_firm_id) {
+                return true;
+            }
         }
 
         return false;
@@ -147,6 +152,7 @@ class FirmComplianceVisibilityService
 
         $centralId = Firm::query()->where('is_central', true)->value('id');
         $viewerIsCentral = $centralId !== null && (int) $centralId === $viewerFirmId;
+        $hasPivot = Schema::hasTable('firm_compliance_authorities');
 
         $query->where(function (Builder $outer) use (
             $actor,
@@ -154,7 +160,8 @@ class FirmComplianceVisibilityService
             $assignedColumn,
             $viewerFirmId,
             $viewerIsCentral,
-            $submitterKey
+            $submitterKey,
+            $hasPivot
         ) {
             $outer->where($submitterKey, $actor->id);
 
@@ -163,20 +170,37 @@ class FirmComplianceVisibilityService
             }
 
             // Requests from firms whose settings allow this actor's firm.
-            $outer->orWhereHas($userRelation, function (Builder $userQ) use ($viewerFirmId, $viewerIsCentral) {
+            $outer->orWhereHas($userRelation, function (Builder $userQ) use (
+                $viewerFirmId,
+                $viewerIsCentral,
+                $hasPivot
+            ) {
                 $userQ->whereNotNull('firm_id')
-                    ->whereHas('firm', function (Builder $firmQ) use ($viewerFirmId, $viewerIsCentral) {
-                        $firmQ->where(function (Builder $vis) use ($viewerFirmId, $viewerIsCentral) {
+                    ->whereHas('firm', function (Builder $firmQ) use (
+                        $viewerFirmId,
+                        $viewerIsCentral,
+                        $hasPivot
+                    ) {
+                        $firmQ->where(function (Builder $vis) use (
+                            $viewerFirmId,
+                            $viewerIsCentral,
+                            $hasPivot
+                        ) {
                             $vis->where(function (Builder $own) use ($viewerFirmId) {
                                 $own->where('compliance_visible_to_own', true)
                                     ->where('firms.id', $viewerFirmId);
                             });
 
-                            if ($viewerIsCentral) {
-                                $vis->orWhere('compliance_visible_to_central', true);
+                            if ($hasPivot) {
+                                $vis->orWhereHas('complianceAuthorityFirms', function (Builder $auth) use ($viewerFirmId) {
+                                    $auth->where('firms.id', $viewerFirmId);
+                                });
+                            } else {
+                                if ($viewerIsCentral) {
+                                    $vis->orWhere('compliance_visible_to_central', true);
+                                }
+                                $vis->orWhere('compliance_visible_to_firm_id', $viewerFirmId);
                             }
-
-                            $vis->orWhere('compliance_visible_to_firm_id', $viewerFirmId);
                         });
                     });
             });
@@ -230,7 +254,7 @@ class FirmComplianceVisibilityService
 
     /**
      * Firm IDs whose staff may be assigned to compliance work from $submitterFirm,
-     * based on that firm's visibility settings.
+     * based on that firm's visibility / delegated access settings.
      *
      * @return list<int>
      */
@@ -246,15 +270,23 @@ class FirmComplianceVisibilityService
             $ids[] = (int) $submitterFirm->id;
         }
 
-        if ($submitterFirm->compliance_visible_to_central) {
-            $centralId = Firm::query()->where('is_central', true)->value('id');
-            if ($centralId) {
-                $ids[] = (int) $centralId;
-            }
+        $authorityIds = $submitterFirm->complianceAuthorityFirmIds();
+        foreach ($authorityIds as $authorityId) {
+            $ids[] = (int) $authorityId;
         }
 
-        if ($submitterFirm->compliance_visible_to_firm_id) {
-            $ids[] = (int) $submitterFirm->compliance_visible_to_firm_id;
+        // Legacy fallback when pivot empty.
+        if ($authorityIds === []) {
+            if ($submitterFirm->compliance_visible_to_central) {
+                $centralId = Firm::query()->where('is_central', true)->value('id');
+                if ($centralId) {
+                    $ids[] = (int) $centralId;
+                }
+            }
+
+            if ($submitterFirm->compliance_visible_to_firm_id) {
+                $ids[] = (int) $submitterFirm->compliance_visible_to_firm_id;
+            }
         }
 
         return array_values(array_unique($ids));
@@ -262,7 +294,7 @@ class FirmComplianceVisibilityService
 
     /**
      * Whether $candidate may be assigned to a request from $submitterFirm.
-     * Power Admin / FinProms Admin are always eligible.
+     * Power Admin / FinProms Admin and Central oversight roles are always eligible.
      */
     public function userIsEligibleAssignee(User $candidate, ?Firm $submitterFirm): bool
     {

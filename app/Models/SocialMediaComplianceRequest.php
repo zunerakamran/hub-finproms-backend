@@ -157,13 +157,7 @@ class SocialMediaComplianceRequest extends Model
                     'id' => (int) $this->user->firm->id,
                     'name' => $this->user->firm->name,
                     'is_central' => (bool) $this->user->firm->is_central,
-                    'compliance_visibility' => [
-                        'visible_to_own' => (bool) $this->user->firm->compliance_visible_to_own,
-                        'visible_to_central' => (bool) $this->user->firm->compliance_visible_to_central,
-                        'visible_to_firm_id' => $this->user->firm->compliance_visible_to_firm_id
-                            ? (int) $this->user->firm->compliance_visible_to_firm_id
-                            : null,
-                    ],
+                    'compliance_visibility' => $this->user->firm->complianceVisibilityForApi(),
                 ] : null,
             ] : null,
             'on_behalf_by' => $this->onBehalfBy ? [

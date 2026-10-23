@@ -136,10 +136,6 @@ class WhiteLabelFirmService
      */
     private function mapListRow(object $row, $counts, $byId, ?string $connection = null): array
     {
-        $other = $row->compliance_visible_to_firm_id
-            ? $byId->get($row->compliance_visible_to_firm_id)
-            : null;
-
         $headUser = null;
         $headUserId = isset($row->head_user_id) && $row->head_user_id
             ? (int) $row->head_user_id
@@ -164,16 +160,11 @@ class WhiteLabelFirmService
             'users_count' => (int) ($counts[$row->id] ?? 0),
             'head_user_id' => $headUserId,
             'head_user' => $headUser,
-            'compliance_visibility' => [
-                'visible_to_own' => (bool) ($row->compliance_visible_to_own ?? true),
-                'visible_to_central' => (bool) ($row->compliance_visible_to_central ?? false),
-                'visible_to_firm_id' => $row->compliance_visible_to_firm_id
-                    ? (int) $row->compliance_visible_to_firm_id
-                    : null,
-                'visible_to_firm' => $other
-                    ? ['id' => (int) $other->id, 'name' => (string) $other->name]
-                    : null,
-            ],
+            'compliance_visibility' => $this->complianceVisibilityPayload(
+                $connection,
+                $row,
+                $byId
+            ),
         ];
     }
 
@@ -193,26 +184,20 @@ class WhiteLabelFirmService
                 throw new InvalidArgumentException('A firm with that name already exists on this hub.');
             }
 
-            $otherId = $payload['compliance_visible_to_firm_id'] ?? null;
-            if ($otherId !== null && $otherId !== '') {
-                $otherId = (int) $otherId;
-                if (! DB::connection($connection)->table('firms')->where('id', $otherId)->exists()) {
-                    throw new InvalidArgumentException('The selected visibility firm is invalid on this hub.');
-                }
-            } else {
-                $otherId = null;
-            }
+            $authorityIds = $this->resolveRemoteAuthorityFirmIds($connection, $payload, null);
 
             $now = now();
             $id = (int) DB::connection($connection)->table('firms')->insertGetId([
                 'name' => $name,
                 'is_central' => false,
                 'compliance_visible_to_own' => (bool) ($payload['compliance_visible_to_own'] ?? true),
-                'compliance_visible_to_central' => (bool) ($payload['compliance_visible_to_central'] ?? false),
-                'compliance_visible_to_firm_id' => $otherId,
+                'compliance_visible_to_central' => false,
+                'compliance_visible_to_firm_id' => null,
                 'created_at' => $now,
                 'updated_at' => $now,
             ]);
+
+            $this->syncRemoteComplianceAuthorities($connection, $id, $authorityIds ?? []);
 
             return $this->serializeRow($connection, $id);
         });
@@ -249,28 +234,26 @@ class WhiteLabelFirmService
             if (array_key_exists('compliance_visible_to_own', $payload)) {
                 $update['compliance_visible_to_own'] = (bool) $payload['compliance_visible_to_own'];
             }
-            if (array_key_exists('compliance_visible_to_central', $payload)) {
-                $update['compliance_visible_to_central'] = (bool) $payload['compliance_visible_to_central'];
-            }
-            if (array_key_exists('compliance_visible_to_firm_id', $payload)) {
-                $otherId = $payload['compliance_visible_to_firm_id'];
-                if ($otherId === null || $otherId === '') {
-                    $update['compliance_visible_to_firm_id'] = null;
-                } else {
-                    $otherId = (int) $otherId;
-                    if ($otherId === $firmId) {
+
+            $authorityIds = $this->resolveRemoteAuthorityFirmIds($connection, $payload, $row);
+            if ($authorityIds !== null) {
+                foreach ($authorityIds as $authorityId) {
+                    if ((int) $authorityId === $firmId) {
                         throw new InvalidArgumentException(
-                            'A firm cannot select itself as the other visibility firm. Use “own firm” instead.'
+                            'A firm cannot select itself under Delegated compliance access. Use “Within the Firm” instead.'
                         );
                     }
-                    if (! DB::connection($connection)->table('firms')->where('id', $otherId)->exists()) {
-                        throw new InvalidArgumentException('The selected visibility firm is invalid on this hub.');
+                    if (! DB::connection($connection)->table('firms')->where('id', $authorityId)->exists()) {
+                        throw new InvalidArgumentException('The selected authority firm is invalid on this hub.');
                     }
-                    $update['compliance_visible_to_firm_id'] = $otherId;
                 }
             }
 
             DB::connection($connection)->table('firms')->where('id', $firmId)->update($update);
+
+            if ($authorityIds !== null) {
+                $this->syncRemoteComplianceAuthorities($connection, $firmId, $authorityIds);
+            }
 
             return $this->serializeRow($connection, $firmId);
         });
@@ -295,6 +278,13 @@ class WhiteLabelFirmService
             $inUse = DB::connection($connection)->table('users')->where('firm_id', $firmId)->exists();
             if ($inUse) {
                 throw new InvalidArgumentException('Cannot delete a firm that is assigned to users.');
+            }
+
+            if (Schema::connection($connection)->hasTable('firm_compliance_authorities')) {
+                DB::connection($connection)->table('firm_compliance_authorities')
+                    ->where('subject_firm_id', $firmId)
+                    ->orWhere('authority_firm_id', $firmId)
+                    ->delete();
             }
 
             DB::connection($connection)->table('firms')->where('id', $firmId)->delete();
@@ -520,10 +510,8 @@ class WhiteLabelFirmService
     private function serializeRow(string $connection, int $firmId): array
     {
         $row = DB::connection($connection)->table('firms')->where('id', $firmId)->first();
-        $other = $row->compliance_visible_to_firm_id
-            ? DB::connection($connection)->table('firms')->where('id', $row->compliance_visible_to_firm_id)->first()
-            : null;
         $usersCount = (int) DB::connection($connection)->table('users')->where('firm_id', $firmId)->count();
+        $byId = DB::connection($connection)->table('firms')->get()->keyBy('id');
 
         $headUser = null;
         if (isset($row->head_user_id) && $row->head_user_id) {
@@ -548,16 +536,198 @@ class WhiteLabelFirmService
                 ? (int) $row->head_user_id
                 : null,
             'head_user' => $headUser,
-            'compliance_visibility' => [
-                'visible_to_own' => (bool) ($row->compliance_visible_to_own ?? true),
-                'visible_to_central' => (bool) ($row->compliance_visible_to_central ?? false),
-                'visible_to_firm_id' => $row->compliance_visible_to_firm_id
-                    ? (int) $row->compliance_visible_to_firm_id
-                    : null,
-                'visible_to_firm' => $other
-                    ? ['id' => (int) $other->id, 'name' => (string) $other->name]
-                    : null,
-            ],
+            'compliance_visibility' => $this->complianceVisibilityPayload($connection, $row, $byId),
         ];
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int|string, mixed>|null  $byId
+     * @return array<string, mixed>
+     */
+    private function complianceVisibilityPayload(?string $connection, object $row, $byId = null): array
+    {
+        $authorityFirms = $this->loadRemoteAuthorityFirms($connection, (int) $row->id, $byId, $row);
+
+        $centralAuthority = collect($authorityFirms)->first(fn ($f) => (bool) ($f['is_central'] ?? false));
+        $firstPeer = collect($authorityFirms)->first(fn ($f) => ! (bool) ($f['is_central'] ?? false));
+
+        return [
+            'visible_to_own' => (bool) ($row->compliance_visible_to_own ?? true),
+            'authority_firm_ids' => array_map(
+                static fn ($f) => (int) $f['id'],
+                $authorityFirms
+            ),
+            'authority_firms' => $authorityFirms,
+            'visible_to_central' => $centralAuthority !== null,
+            'visible_to_firm_id' => $firstPeer ? (int) $firstPeer['id'] : null,
+            'visible_to_firm' => $firstPeer
+                ? ['id' => (int) $firstPeer['id'], 'name' => (string) $firstPeer['name']]
+                : null,
+        ];
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int|string, mixed>|null  $byId
+     * @return list<array{id: int, name: string, is_central: bool}>
+     */
+    private function loadRemoteAuthorityFirms(
+        ?string $connection,
+        int $subjectFirmId,
+        $byId = null,
+        ?object $row = null
+    ): array {
+        $firms = [];
+
+        if ($connection
+            && Schema::connection($connection)->hasTable('firm_compliance_authorities')
+        ) {
+            $authorityIds = DB::connection($connection)->table('firm_compliance_authorities')
+                ->where('subject_firm_id', $subjectFirmId)
+                ->pluck('authority_firm_id')
+                ->map(static fn ($id) => (int) $id)
+                ->all();
+
+            foreach ($authorityIds as $authorityId) {
+                $other = $byId?->get($authorityId)
+                    ?? DB::connection($connection)->table('firms')->where('id', $authorityId)->first();
+                if ($other) {
+                    $firms[] = [
+                        'id' => (int) $other->id,
+                        'name' => (string) $other->name,
+                        'is_central' => (bool) ($other->is_central ?? false),
+                    ];
+                }
+            }
+
+            return $firms;
+        }
+
+        // Legacy fallback.
+        if ($row && (bool) ($row->compliance_visible_to_central ?? false) && $connection) {
+            $central = $byId
+                ? $byId->first(fn ($f) => (bool) ($f->is_central ?? false))
+                : DB::connection($connection)->table('firms')->where('is_central', true)->first();
+            if ($central && (int) $central->id !== $subjectFirmId) {
+                $firms[] = [
+                    'id' => (int) $central->id,
+                    'name' => (string) $central->name,
+                    'is_central' => true,
+                ];
+            }
+        }
+        if ($row && $row->compliance_visible_to_firm_id) {
+            $peerId = (int) $row->compliance_visible_to_firm_id;
+            $other = $byId?->get($peerId)
+                ?? ($connection
+                    ? DB::connection($connection)->table('firms')->where('id', $peerId)->first()
+                    : null);
+            if ($other && (int) $other->id !== $subjectFirmId) {
+                $firms[] = [
+                    'id' => (int) $other->id,
+                    'name' => (string) $other->name,
+                    'is_central' => (bool) ($other->is_central ?? false),
+                ];
+            }
+        }
+
+        return $firms;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return list<int>|null
+     */
+    private function resolveRemoteAuthorityFirmIds(
+        string $connection,
+        array $payload,
+        ?object $existing
+    ): ?array {
+        if (array_key_exists('compliance_authority_firm_ids', $payload)) {
+            return array_values(array_unique(array_map(
+                static fn ($id) => (int) $id,
+                $payload['compliance_authority_firm_ids'] ?? []
+            )));
+        }
+
+        $hasLegacy = array_key_exists('compliance_visible_to_central', $payload)
+            || array_key_exists('compliance_visible_to_firm_id', $payload);
+
+        if (! $hasLegacy) {
+            return $existing ? null : [];
+        }
+
+        $ids = [];
+        $wantCentral = array_key_exists('compliance_visible_to_central', $payload)
+            ? (bool) $payload['compliance_visible_to_central']
+            : (bool) ($existing->compliance_visible_to_central ?? false);
+
+        if ($wantCentral) {
+            $centralId = DB::connection($connection)->table('firms')->where('is_central', true)->value('id');
+            if ($centralId) {
+                $ids[] = (int) $centralId;
+            }
+        }
+
+        $peerId = array_key_exists('compliance_visible_to_firm_id', $payload)
+            ? $payload['compliance_visible_to_firm_id']
+            : ($existing->compliance_visible_to_firm_id ?? null);
+
+        if ($peerId !== null && $peerId !== '') {
+            $ids[] = (int) $peerId;
+        }
+
+        return array_values(array_unique(array_filter($ids)));
+    }
+
+    /**
+     * @param  list<int>  $authorityFirmIds
+     */
+    private function syncRemoteComplianceAuthorities(
+        string $connection,
+        int $subjectFirmId,
+        array $authorityFirmIds
+    ): void {
+        $ids = array_values(array_unique(array_filter(
+            array_map(static fn ($id) => (int) $id, $authorityFirmIds),
+            static fn (int $id) => $id > 0 && $id !== $subjectFirmId
+        )));
+
+        $validIds = DB::connection($connection)->table('firms')
+            ->whereIn('id', $ids)
+            ->pluck('id')
+            ->map(static fn ($id) => (int) $id)
+            ->all();
+
+        $centralId = DB::connection($connection)->table('firms')->where('is_central', true)->value('id');
+        $centralId = $centralId ? (int) $centralId : null;
+        $hasCentral = $centralId !== null && in_array($centralId, $validIds, true);
+        $peerIds = array_values(array_filter(
+            $validIds,
+            static fn (int $id) => $centralId === null || $id !== $centralId
+        ));
+
+        DB::connection($connection)->table('firms')->where('id', $subjectFirmId)->update([
+            'compliance_visible_to_central' => $hasCentral,
+            'compliance_visible_to_firm_id' => $peerIds[0] ?? null,
+            'updated_at' => now(),
+        ]);
+
+        if (! Schema::connection($connection)->hasTable('firm_compliance_authorities')) {
+            return;
+        }
+
+        DB::connection($connection)->table('firm_compliance_authorities')
+            ->where('subject_firm_id', $subjectFirmId)
+            ->delete();
+
+        $now = now();
+        foreach ($validIds as $authorityId) {
+            DB::connection($connection)->table('firm_compliance_authorities')->insert([
+                'subject_firm_id' => $subjectFirmId,
+                'authority_firm_id' => $authorityId,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+        }
     }
 }

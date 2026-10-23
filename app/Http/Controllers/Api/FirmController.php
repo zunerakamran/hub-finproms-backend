@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\WhiteLabelFirmService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 use InvalidArgumentException;
 
@@ -59,7 +60,11 @@ class FirmController extends Controller
             ->pluck('users_count', 'firm_id');
 
         $query = Firm::query()
-            ->with(['complianceVisibleToFirm:id,name', 'headUser:id,name,email'])
+            ->with([
+                'complianceAuthorityFirms:id,name,is_central',
+                'complianceVisibleToFirm:id,name',
+                'headUser:id,name,email',
+            ])
             ->orderByDesc('created_at')
             ->orderByDesc('id');
 
@@ -115,18 +120,23 @@ class FirmController extends Controller
         }
 
         $validated = $this->validatedFirmPayload($request);
+        $authorityIds = $this->resolveAuthorityFirmIds($validated);
 
         $firm = Firm::query()->create([
             'name' => trim($validated['name']),
             'is_central' => false,
             'compliance_visible_to_own' => $validated['compliance_visible_to_own'] ?? true,
-            'compliance_visible_to_central' => $validated['compliance_visible_to_central'] ?? false,
-            'compliance_visible_to_firm_id' => $validated['compliance_visible_to_firm_id'] ?? null,
+            'compliance_visible_to_central' => false,
+            'compliance_visible_to_firm_id' => null,
         ]);
+
+        $firm->syncComplianceAuthorities($authorityIds ?? []);
 
         return response()->json([
             'message' => 'Firm created successfully.',
-            'firm' => $firm->load('complianceVisibleToFirm:id,name')->toApiArray(),
+            'firm' => $firm->fresh()
+                ->load(['complianceAuthorityFirms:id,name,is_central', 'complianceVisibleToFirm:id,name'])
+                ->toApiArray(),
             'acting_on_white_label' => false,
         ], 201);
     }
@@ -154,13 +164,16 @@ class FirmController extends Controller
 
         $model = Firm::query()->findOrFail($firm);
         $validated = $this->validatedFirmPayload($request, $model);
+        $authorityIds = $this->resolveAuthorityFirmIds($validated, $model);
 
-        if (array_key_exists('compliance_visible_to_firm_id', $validated)
-            && $validated['compliance_visible_to_firm_id'] !== null
-            && (int) $validated['compliance_visible_to_firm_id'] === (int) $model->id) {
-            return response()->json([
-                'message' => 'A firm cannot select itself as the other visibility firm. Use “own firm” instead.',
-            ], 422);
+        if ($authorityIds !== null) {
+            foreach ($authorityIds as $authorityId) {
+                if ((int) $authorityId === (int) $model->id) {
+                    return response()->json([
+                        'message' => 'A firm cannot select itself under Delegated compliance access. Use “Within the Firm” instead.',
+                    ], 422);
+                }
+            }
         }
 
         $payload = [
@@ -170,18 +183,18 @@ class FirmController extends Controller
         if (array_key_exists('compliance_visible_to_own', $validated)) {
             $payload['compliance_visible_to_own'] = (bool) $validated['compliance_visible_to_own'];
         }
-        if (array_key_exists('compliance_visible_to_central', $validated)) {
-            $payload['compliance_visible_to_central'] = (bool) $validated['compliance_visible_to_central'];
-        }
-        if (array_key_exists('compliance_visible_to_firm_id', $validated)) {
-            $payload['compliance_visible_to_firm_id'] = $validated['compliance_visible_to_firm_id'];
-        }
 
         $model->update($payload);
 
+        if ($authorityIds !== null) {
+            $model->syncComplianceAuthorities($authorityIds);
+        }
+
         return response()->json([
             'message' => 'Firm updated successfully.',
-            'firm' => $model->fresh()->load('complianceVisibleToFirm:id,name')->toApiArray(),
+            'firm' => $model->fresh()
+                ->load(['complianceAuthorityFirms:id,name,is_central', 'headUser:id,name,email', 'complianceVisibleToFirm:id,name'])
+                ->toApiArray(),
             'acting_on_white_label' => false,
         ]);
     }
@@ -247,11 +260,87 @@ class FirmController extends Controller
             $otherFirmRules[] = Rule::exists('firms', 'id');
         }
 
+        $authorityIdRules = ['integer'];
+        if (! $skipUnique) {
+            $authorityIdRules[] = Rule::exists('firms', 'id');
+        }
+
         return $request->validate([
             'name' => $nameRules,
             'compliance_visible_to_own' => ['sometimes', 'boolean'],
+            'compliance_authority_firm_ids' => ['sometimes', 'array'],
+            'compliance_authority_firm_ids.*' => $authorityIdRules,
+            // Legacy fields (still accepted; merged into multi-select).
             'compliance_visible_to_central' => ['sometimes', 'boolean'],
             'compliance_visible_to_firm_id' => $otherFirmRules,
         ]);
+    }
+
+    /**
+     * Build authority firm IDs from new multi-select and/or legacy fields.
+     *
+     * @param  array<string, mixed>  $validated
+     * @return list<int>|null  null = do not change authorities on update
+     */
+    private function resolveAuthorityFirmIds(array $validated, ?Firm $existing = null): ?array
+    {
+        if (array_key_exists('compliance_authority_firm_ids', $validated)) {
+            return array_values(array_unique(array_map(
+                static fn ($id) => (int) $id,
+                $validated['compliance_authority_firm_ids'] ?? []
+            )));
+        }
+
+        $hasLegacy = array_key_exists('compliance_visible_to_central', $validated)
+            || array_key_exists('compliance_visible_to_firm_id', $validated);
+
+        if (! $hasLegacy) {
+            // Create with no authority fields → empty list; update → leave unchanged.
+            return $existing ? null : [];
+        }
+
+        $ids = [];
+        $wantCentral = array_key_exists('compliance_visible_to_central', $validated)
+            ? (bool) $validated['compliance_visible_to_central']
+            : (bool) ($existing?->compliance_visible_to_central);
+
+        if ($wantCentral) {
+            $centralId = Firm::query()->where('is_central', true)->value('id');
+            if ($centralId) {
+                $ids[] = (int) $centralId;
+            }
+        }
+
+        $peerId = array_key_exists('compliance_visible_to_firm_id', $validated)
+            ? $validated['compliance_visible_to_firm_id']
+            : $existing?->compliance_visible_to_firm_id;
+
+        if ($peerId !== null && $peerId !== '') {
+            $ids[] = (int) $peerId;
+        }
+
+        // When only one legacy field is patched, keep other authorities from existing pivot.
+        if ($existing && Schema::hasTable('firm_compliance_authorities')) {
+            $current = $existing->complianceAuthorityFirmIds();
+            $centralId = Firm::query()->where('is_central', true)->value('id');
+            $centralId = $centralId ? (int) $centralId : null;
+
+            if (! array_key_exists('compliance_visible_to_central', $validated) && $centralId) {
+                foreach ($current as $id) {
+                    if ((int) $id === $centralId) {
+                        $ids[] = $centralId;
+                    }
+                }
+            }
+            if (! array_key_exists('compliance_visible_to_firm_id', $validated)) {
+                foreach ($current as $id) {
+                    if ($centralId === null || (int) $id !== $centralId) {
+                        $ids[] = (int) $id;
+                    }
+                }
+            }
+        }
+
+        return array_values(array_unique(array_filter($ids)));
     }
 }

@@ -529,16 +529,12 @@ class AuthController extends Controller
 
         $user->loadMissing([
             'firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
+            'firm.complianceAuthorityFirms:id,name,is_central',
             'roleAssignments',
         ]);
         if ($user->firm) {
-            $user->firm->setAttribute('compliance_visibility', [
-                'visible_to_own' => (bool) $user->firm->compliance_visible_to_own,
-                'visible_to_central' => (bool) $user->firm->compliance_visible_to_central,
-                'visible_to_firm_id' => $user->firm->compliance_visible_to_firm_id
-                    ? (int) $user->firm->compliance_visible_to_firm_id
-                    : null,
-            ]);
+            $api = $user->firm->toApiArray();
+            $user->firm->setAttribute('compliance_visibility', $api['compliance_visibility']);
         }
 
         return $user;

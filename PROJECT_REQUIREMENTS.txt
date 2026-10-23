@@ -1,8 +1,8 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-23 (Top Management / Auditor / Accounts Admin §2.7 +
-  firm vs network scope; Network/Firm Admin + Document Repository already done)
+Last updated: 2026-10-23 (Delegated compliance access implemented — multi-firm
+  pivot + UI rename; firm/network role scope; Network/Firm Admin done)
 
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
@@ -448,34 +448,41 @@ Firm Admin):
        manager + firm_admin).
 
   6) TOP MANAGEMENT (top_management) — reports oversight
-     - Default display name “Top Management” (renameable).
      - Default matrix ON: `smc_view_reports`, `gc_view_reports`,
        `wc_view_platform_report` (all report types).
-     - SCOPE: member-firm users see reports for their firm only (firm
-       visibility rules). Central / Network firm users with this role see
-       hub-wide / all firms (see §2.7.0 Firm vs Network scope).
+     - SCOPE: own firm + firms that delegated access TO this user’s firm
+       (§2.7.0 / §2.7.0a). Central / Network Top Management also hub-wide
+       for all firms (§2.7.0 B).
 
   7) ACCOUNTS ADMIN (accounts_admin) — billing / invoices
-     - Default display name “Accounts Admin” (renameable).
      - Default matrix ON: one-time / module / advisor invoices, mark module
        invoices paid, confirm bank transfers, billing renew+grace,
        general_show_invoices. May manage WL Payment card (with client_admin).
-     - SCOPE: same firm vs network rule as Top Management (§2.7.0).
+     - SCOPE: same firm vs network + delegated-access pattern as Top
+       Management where invoices are firm-filtered (§2.7.0).
 
   8) AUDITOR (auditor) — activity logs & audit trails
-     - Default display name “Auditor” (renameable).
      - Default matrix ON: `dashboard_view_activity_logs`,
        `dashboard_view_compliance_audit_trail`, `wc_view_activity_logs`.
-     - SCOPE: same firm vs network rule as Top Management (§2.7.0).
+     - SCOPE: own firm + firms that delegated access TO this user’s firm
+       (§2.7.0a). Central / Network Auditor also hub-wide (§2.7.0 B).
 
   9) MANAGER (manager) — hub staff (Shared or White-label)
-     - Mid-level operational role (e.g. content/ops management without full
-       client_admin rights). Exact screens TBD; gated by hub dashboard checklist
-       and/or future manager-specific flags.
+     - Mid-level operational role; gated by hub dashboard checklist.
+     - SCOPE: own firm + delegated-access firms (§2.7.0a) for assign /
+       change-status / view-all within caps. Central manager without a
+       hub-wide oversight role (§2.7.0 B) uses the same allowlist (firms
+       that checked Central / Network).
 
   10) APPROVER (approver) — compliance / review
-     - Reviews/approves content (ties to compliance check flow, section 3.3).
-     - Not a full hub admin by default; approval UI to be built later.
+     - Reviews/approves content (§3.3). Not a full hub admin by default.
+     - SCOPE (REQUIRED — §2.7.0 / §2.7.0a):
+       • Member-firm Approver → own firm’s requests PLUS any other firm
+         that listed this firm under Delegated compliance access.
+       • Central / Network Approver → hub-wide (all firms + network) per
+         §2.7.0 B, within capabilities.
+     - Still subject to SoD (§2.7.2). Multi-role = UNION caps; data scope
+       still from `users.firm_id` + delegated access.
 
   11) ADVISOR (advisor) — reserved role label in the capabilities matrix
      - Not assigned automatically on plan subscribe or Excel import.
@@ -498,27 +505,148 @@ Firm Admin):
 
 2.7.0 Firm vs Network scope (REQUIRED)
 --------------------------------------------------------------------
-Applies to compliance queues, reports, and other firm-filtered tools:
+Two layers decide what firm-filtered work a user can touch:
 
-  A) MEMBER FIRM USER (users.firm_id → non-central firm)
-     - Manages / sees ONLY their own firm (plus that firm’s compliance
-       visibility allowlist: own / central / named firm).
-     - Includes Firm Admin, Top Management, Auditor, Accounts Admin,
-       manager, approver, etc. when they belong to a member firm.
+  Layer 1 — ROLE + FIRM MEMBERSHIP (this section)
+  Layer 2 — DELEGATED COMPLIANCE ACCESS multi-firm allowlist (§2.7.0a)
+             (formerly UI label “Compliance check authority” — RENAME)
+
+Roles unlock tools via Capabilities matrix UNION (§2.7.1). Firm membership
++ delegated access decide WHOSE firm data those tools reach.
+
+Applies to: compliance queues (review / assign / change-status), reports,
+activity logs / compliance audit trails, and other firm-filtered tools.
+
+  A) MEMBER FIRM USER (users.firm_id → non-central firm, e.g. Firm1)
+     - Baseline: own firm only.
+     - PLUS every other firm that listed Firm1 (or this user’s firm) in
+       its Delegated compliance access multi-select (§2.7.0a) — one-way.
+     - Does NOT automatically see Central / Network or peer firms unless
+       those firms delegated access TO Firm1.
+     - Examples (caps permitting):
+       • Approver Firm1 → Firm1 requests; also Firm3 if Firm3 checked Firm1.
+       • Auditor Firm1 → Firm1 logs/trails (+ delegated firms’ trails).
+       • Top Management Firm1 → Firm1 reports (+ delegated firms’ reports).
+       • Manager Firm1 → assign / change-status for Firm1 (+ delegated).
 
   B) NETWORK / CENTRAL FIRM USER (users.firm_id → firms.is_central)
-     - Manages the Central / Network firm.
-     - When they also hold `network_admin`, `top_management`, `auditor`, or
-       `accounts_admin`, they MAY manage / see ALL firms on the hub
-       (bypass firm scope for capability-gated tools) — “network can manage
-       the network or all firms”.
-     - Other roles on the central firm still follow visible_to_central /
-       visibility settings only (no automatic hub-wide bypass).
+     - When they hold ANY of: `network_admin`, `top_management`, `auditor`,
+       `accounts_admin`, or `approver` → hub-wide for those capability-gated
+       tools (all member firms + Central / Network) — “network oversights
+       the whole network”. Does NOT require each firm to check Central.
+     - Examples:
+       • Central Approver → all firms’ + network requests.
+       • Central Auditor → all activity logs + audit trails.
+       • Central Top Management → all firms’ / hub-wide reports.
+     - Other Central roles (e.g. manager without an oversight role above,
+       plain `user` / `advisor`) do NOT get automatic hub-wide bypass.
+       They only see Central’s own work PLUS firms that checked
+       Central / Network in Delegated compliance access (§2.7.0a).
 
-  C) Control-plane bypass (unchanged): power_admin, finproms_admin always
-     bypass firm scope when their capabilities allow.
+  C) Control-plane bypass: power_admin, finproms_admin always bypass firm
+     scope when their capabilities allow (ignore allowlist).
+
+  D) Multi-role does NOT widen firm membership: Firm1 manager+approver
+     still scoped as Firm1 (+ delegated). Central auditor+approver is
+     hub-wide for both tools. Breadth of tools = role UNION.
+
+2.7.0a Delegated compliance access (REQUIRED — rename + multi-firm)
+--------------------------------------------------------------------
+UI rename (Manage firms create/edit):
+  OLD: “Compliance check authority”
+  NEW: “Delegated compliance access”
+  Help text: “Choose which firms (including Central / Network) may review,
+  assign, see reports, and see audit trails for requests submitted by users
+  of this firm. Access is one-way only.”
+
+WHERE SET:
+- On create / update of a firm (Manage firms). Capability:
+  `dashboard_manage_firms` (unchanged gate).
+
+UI CONTROL:
+- Multi-select checklist of ALL other firms on the hub, INCLUDING the
+  Central / Network firm (`firms.is_central`).
+- Exclude the firm being edited (cannot delegate to self via this list;
+  own-firm staff access is separate — see OWN FIRM below).
+- ZERO or MORE firms may be checked (multiple peers + Central allowed).
+
+MEANING (one-way):
+- Settings live on the SUBJECT firm (the firm whose users submit work).
+- Every CHECKED authority firm may work that subject firm’s compliance
+  data — for staff of the authority firm who have the matching
+  capabilities / roles (approver → review; manager → assign; auditor →
+  audit trails; top_management → reports; etc.).
+- NOT vice versa. Checking Firm2 on Firm1 does NOT let Firm1 touch Firm2.
+
+EXAMPLE:
+  Creating/updating Firm1 with Central / Network AND Firm2 checked:
+  → Central / Network staff (within their caps; and Central oversight
+    roles are already hub-wide per §2.7.0 B) and Firm2 staff may
+    review, assign, see reports, and see audit trails for Firm1.
+  → Firm1 staff still cannot review Firm2 or Central unless those firms
+    separately list Firm1 on their own Delegated compliance access.
+
+OWN FIRM:
+- Staff of the subject firm always retain access to their OWN firm’s
+  compliance work when their role/caps allow (legacy
+  `compliance_visible_to_own`, default ON). Own firm is NOT removed by
+  clearing the delegated multi-select.
+- Optional: keep an explicit “Own firm staff” toggle if product still
+  needs to hide own-firm queues; default ON.
+
+RIGHTS GRANTED TO AUTHORITY FIRMS (when checked):
+  For subject-firm submissions, authority-firm staff may (caps permitting):
+  - Review / approve / reject / pick (approver caps)
+  - Assign / unassign / change-status (manager / assign caps)
+  - See compliance reports (report caps / top_management)
+  - See compliance audit trails and related activity scoped to that firm
+    (auditor / audit-trail caps)
+  They do NOT gain Document Repository headship, Hub Users admin, or
+  other non-compliance tools via this setting alone.
+
+DATA MODEL (target — replace single peer):
+- LEGACY: `compliance_visible_to_central` (bool) +
+  `compliance_visible_to_firm_id` (single nullable FK).
+- TARGET: many-to-many authorities, e.g. pivot
+  `firm_compliance_authorities` (subject_firm_id, authority_firm_id)
+  where authority_firm_id may be the Central firm OR any member firm.
+  Keep `compliance_visible_to_own` (bool, default true).
+- Migration: if `visible_to_central` was true → insert pivot row to
+  Central firm; if `visible_to_firm_id` set → insert that peer row;
+  drop or stop writing the old single-FK / central bool after backfill.
+- API: accept `compliance_authority_firm_ids: number[]` (multi); expose
+  the same on firm payloads. Keep legacy fields read-only during
+  transition if needed, then remove.
+
+SCENARIO MATRIX (caps assumed ON for the named role):
+
+  | Actor                         | Sees Firm1 work?                                      |
+  |-------------------------------|-------------------------------------------------------|
+  | Firm1 Approver/Manager/…      | Yes (own firm)                                        |
+  | Firm2 Approver, Firm1 checked Firm2 | Yes (delegated)                                 |
+  | Firm2 Approver, Firm1 did NOT check Firm2 | No                                        |
+  | Firm1 Approver after Firm2 checked Firm1 only | Firm1 yes; Firm2 no (one-way)           |
+  | Central Approver (oversight)  | Yes all firms (hub-wide §2.7.0 B)                      |
+  | Central Manager (no oversight role), Firm1 checked Central | Yes Firm1 |
+  | Central Manager, Firm1 did NOT check Central | Only Central’s own work             |
+  | Firm3 never listed anywhere   | Only Firm3’s own work                                 |
+  | power_admin / finproms_admin  | Yes all (control-plane bypass)                        |
+
+INTERACTION WITH §2.7.0 B:
+- Hub-wide Central oversight roles (approver / auditor / top_management /
+  accounts_admin / network_admin) do NOT depend on the multi-select.
+- The multi-select is the path for peer firms (Firm2→Firm1) and for
+  Central staff who are NOT in that oversight set (e.g. Central manager).
+
+SODs / MULTI-ROLE:
+- Delegated access never overrides separation of duties (§2.7.2).
+- Document Repository visible-firms allowlist (§3.4) is SEPARATE — do not
+  conflate with Delegated compliance access.
 
 Notes:
+- Cross-firm compliance review/assign/reports/audit is configured via
+  Delegated compliance access (§2.7.0a), not by sharing Document Repository
+  allowlists.
 - Former "admin" → client_admin. Shared hub operator should use finproms_admin
   going forward (existing client_admin on shared may be migrated).
 - Seeded shared-hub FinProms admin: finproms@hubfinproms.com (holds
@@ -656,8 +784,9 @@ AFFECTED FUNCTIONALITIES (checklist for backend + frontend):
   8) Advisor Excel import / template / submit — multi-role cell support
   9) White-label user create/update services — accept roles[]
   10) Activity logs & reports — legacy mirror or joined roles string;
-      filters by role match any held role
-  11) Compliance audit trail (SMC / GC / WC) — actor / related role display
+      filters by role match any held role; firm filter via §2.7.0 / §2.7.0a
+  11) Compliance audit trail (SMC / GC / WC) — actor / related role display;
+      firm filter via delegated access
   12) Supporting-files uploaded_by_role — legacy mirror or derived label
   13) Support Tickets / Security Monitoring role gates — via userCan union
   14) Firm Head / Document Repository — sync `network_admin` /
@@ -673,9 +802,13 @@ AFFECTED FUNCTIONALITIES (checklist for backend + frontend):
       (equal multi-role chips; no Primary role control; show Network Admin /
       Firm Admin labels)
   19) Automated tests — factories, feature tests that assume one role;
-      head/role sync tests for Document Repository
+      head/role sync tests for Document Repository; delegated multi-firm
+      visibility tests (§2.7.0a)
   20) Capabilities matrix / Manage roles — add `network_admin` and
       `firm_admin` system columns + defaults (§5.2)
+  21) Delegated compliance access (§2.7.0a) — Manage firms multi-select;
+      pivot migration; FirmComplianceVisibilityService; add `approver` to
+      NETWORK_HUB_WIDE_ROLES for Central oversight; frontend rename + API
 
 OUT OF SCOPE / UNCHANGED:
 - Display-name overrides for all roles including the two new ones (§5.2
@@ -1710,7 +1843,9 @@ Either path designates Heads; both MUST stay in sync. Multiple admins OK:
     charges); sidebar “One-time invoices” at `/my-dashboard/one-time-invoices`
     (distinct from My invoices / Module invoices / Advisor invoices) — same roles
   - Manage firms — create/edit firms, assign users’ firm membership context,
-    and set compliance visibility between firms — same roles
+    and set Delegated compliance access (multi-select of other firms +
+    Central / Network; one-way review/assign/reports/audit — §2.7.0a;
+    UI rename from “Compliance check authority”) — same roles
   - Update admin of this firm (`dashboard_assign_firm_head`) — Firms page
     action to appoint / replace / clear the firm admin (must be a member of
     that firm). Selected user receives `network_admin` (Central / Network) or
@@ -2528,9 +2663,11 @@ Out of scope for v1 of this module
   advisor, user. Each user may hold MULTIPLE roles; effective capabilities =
   UNION of assigned roles (§2.7.1). All assigned roles are equal (no primary /
   secondary). Network Admin / Firm Admin designate Document Repository firm
-  heads (§3.4). Member-firm users are firm-scoped; Central / Network firm
-  users with network_admin / top_management / auditor / accounts_admin may
-  manage hub-wide (§2.7.0).
+  heads (§3.4). Member-firm users are firm-scoped plus one-way Delegated
+  compliance access (§2.7.0a). Central / Network users with network_admin /
+  top_management / auditor / accounts_admin / approver may manage / review
+  hub-wide (§2.7.0 B); peer / non-oversight Central staff use the multi-firm
+  allowlist.
 - Separate frontend shells: member catalog app (on Shared / White-label), and
   one universal Dashboard shell at /my-dashboard (tools from Capabilities +
   Power Admin pa_* checklist on Central Hub).
@@ -2708,6 +2845,12 @@ STEP 1 — Shared hub core (content hub)
     display names (§2.7 / §3.4 / §5.2)
 [x] Roles documented + wired: top_management, accounts_admin, auditor —
     report / invoice / audit defaults; firm vs network scope (§2.7 / §2.7.0)
+[x] DELEGATED COMPLIANCE ACCESS (§2.7.0a) — rename UI from “Compliance
+    check authority”; multi-select authority firms including Central /
+    Network (firm_compliance_authorities pivot; legacy columns mirrored);
+    one-way review/assign/reports/audit; FirmComplianceVisibilityService
+    (+ Central Approver in NETWORK_HUB_WIDE_ROLES); frontend AdminFirms
+    multi-checkbox + firmAssigneeFilter. Backend + frontend.
 [x] MULTI-ROLE USERS (§2.7 / §2.7.1) — backend: user_roles pivot; all roles
     equal (no primary/secondary); users.role = privilege-ordered legacy mirror
     only; capability UNION in userCan; UserRolesService sync + activity logs

@@ -227,13 +227,7 @@ class ChangeRequest extends Model
                     'id' => (int) $this->editor->firm->id,
                     'name' => $this->editor->firm->name,
                     'is_central' => (bool) $this->editor->firm->is_central,
-                    'compliance_visibility' => [
-                        'visible_to_own' => (bool) $this->editor->firm->compliance_visible_to_own,
-                        'visible_to_central' => (bool) $this->editor->firm->compliance_visible_to_central,
-                        'visible_to_firm_id' => $this->editor->firm->compliance_visible_to_firm_id
-                            ? (int) $this->editor->firm->compliance_visible_to_firm_id
-                            : null,
-                    ],
+                    'compliance_visibility' => $this->editor->firm->complianceVisibilityForApi(),
                 ] : null,
             ] : null,
             'on_behalf_by' => $this->onBehalfBy ? [

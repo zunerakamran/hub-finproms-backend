@@ -30,11 +30,11 @@ class FirmComplianceVisibilityTest extends TestCase
         return $hub;
     }
 
-    private function enableManageFirms(Hub $hub): void
+    private function enableManageFirms(Hub $hub, string $role = User::ROLE_CLIENT_ADMIN): void
     {
         $matrix = app(CapabilitiesMatrixService::class);
         $caps = $matrix->resolvedRoleCapabilities($hub);
-        $caps[User::ROLE_POWER_ADMIN]['dashboard_manage_firms'] = true;
+        $caps[$role]['dashboard_manage_firms'] = true;
         $hub->role_capabilities = $caps;
         $hub->save();
         app(HubService::class)->forgetCurrentCache();
@@ -44,85 +44,98 @@ class FirmComplianceVisibilityTest extends TestCase
     {
         $hub = $this->createSharedHub();
         $this->enableManageFirms($hub);
-        $admin = User::factory()->powerAdmin()->create();
+        $admin = User::factory()->create(['role' => User::ROLE_CLIENT_ADMIN]);
         Sanctum::actingAs($admin);
 
-        $index = $this->getJson('/api/power-admin/firms')->assertOk();
+        $index = $this->getJson('/api/client-admin/firms')->assertOk();
         $centralId = (int) $index->json('central_firm_id');
         $this->assertGreaterThan(0, $centralId);
         $this->assertTrue(collect($index->json('firms'))->contains(
             fn ($f) => ($f['is_central'] ?? false) === true
         ));
 
-        $this->putJson('/api/power-admin/firms/'.$centralId, [
+        $this->putJson('/api/client-admin/firms/'.$centralId, [
             'name' => 'Network HQ',
             'compliance_visible_to_own' => true,
-            'compliance_visible_to_central' => true,
+            'compliance_authority_firm_ids' => [],
         ])->assertOk()
             ->assertJsonPath('firm.name', 'Network HQ')
             ->assertJsonPath('firm.is_central', true);
 
-        $this->deleteJson('/api/power-admin/firms/'.$centralId)
+        $this->deleteJson('/api/client-admin/firms/'.$centralId)
             ->assertStatus(422);
     }
 
-    public function test_firm_compliance_visibility_settings_saved(): void
+    public function test_firm_delegated_compliance_access_multi_select_saved(): void
     {
         $hub = $this->createSharedHub();
         $this->enableManageFirms($hub);
         $central = Firm::central();
-        $admin = User::factory()->powerAdmin()->create();
+        $admin = User::factory()->create(['role' => User::ROLE_CLIENT_ADMIN]);
         Sanctum::actingAs($admin);
 
-        $created = $this->postJson('/api/power-admin/firms', [
+        $peer = Firm::query()->create(['name' => 'Peer Firm']);
+        $peer2 = Firm::query()->create(['name' => 'Peer Firm 2']);
+
+        $created = $this->postJson('/api/client-admin/firms', [
             'name' => 'Acme Wealth',
             'compliance_visible_to_own' => true,
-            'compliance_visible_to_central' => true,
-            'compliance_visible_to_firm_id' => null,
+            'compliance_authority_firm_ids' => [$central->id, $peer->id, $peer2->id],
         ])->assertCreated();
 
         $firmId = (int) $created->json('firm.id');
+        $authorityIds = $created->json('firm.compliance_visibility.authority_firm_ids');
+        $this->assertEqualsCanonicalizing(
+            [(int) $central->id, (int) $peer->id, (int) $peer2->id],
+            array_map('intval', $authorityIds)
+        );
+        $this->assertTrue($created->json('firm.compliance_visibility.visible_to_central'));
 
-        $peer = Firm::query()->create(['name' => 'Peer Firm']);
-
-        $this->putJson('/api/power-admin/firms/'.$firmId, [
+        $this->putJson('/api/client-admin/firms/'.$firmId, [
             'name' => 'Acme Wealth',
             'compliance_visible_to_own' => false,
-            'compliance_visible_to_central' => true,
-            'compliance_visible_to_firm_id' => $peer->id,
+            'compliance_authority_firm_ids' => [$peer->id],
         ])->assertOk()
             ->assertJsonPath('firm.compliance_visibility.visible_to_own', false)
-            ->assertJsonPath('firm.compliance_visibility.visible_to_central', true)
-            ->assertJsonPath('firm.compliance_visibility.visible_to_firm_id', $peer->id);
+            ->assertJsonPath('firm.compliance_visibility.visible_to_central', false);
 
-        $this->assertNotNull($central->id);
+        $listed = collect($this->getJson('/api/client-admin/firms')->json('firms'))
+            ->firstWhere('id', $firmId);
+        $this->assertEqualsCanonicalizing(
+            [(int) $peer->id],
+            array_map('intval', $listed['compliance_visibility']['authority_firm_ids'])
+        );
     }
 
-    public function test_visibility_service_respects_own_central_and_other_firm(): void
+    public function test_visibility_service_respects_own_and_multi_authority_firms(): void
     {
         $central = Firm::central();
         $acme = Firm::query()->create([
             'name' => 'Acme',
             'compliance_visible_to_own' => true,
-            'compliance_visible_to_central' => true,
-            'compliance_visible_to_firm_id' => null,
         ]);
         $other = Firm::query()->create(['name' => 'Other']);
         $peer = Firm::query()->create(['name' => 'Peer']);
+        $peer2 = Firm::query()->create(['name' => 'Peer 2']);
+
+        $acme->syncComplianceAuthorities([(int) $central->id, (int) $peer->id, (int) $peer2->id]);
+        $acme->refresh();
 
         $visibility = app(FirmComplianceVisibilityService::class);
 
         $this->assertTrue($visibility->viewerFirmCanSee($acme->id, $acme, false));
         $this->assertFalse($visibility->viewerFirmCanSee($other->id, $acme, false));
         $this->assertTrue($visibility->viewerFirmCanSee($central->id, $acme, true));
+        $this->assertTrue($visibility->viewerFirmCanSee($peer->id, $acme, false));
+        $this->assertTrue($visibility->viewerFirmCanSee($peer2->id, $acme, false));
         $this->assertFalse($visibility->viewerFirmCanSee(null, $acme, false));
         $this->assertFalse($visibility->viewerFirmCanSee($acme->id, null, false));
 
-        $acme->update([
-            'compliance_visible_to_own' => false,
-            'compliance_visible_to_central' => false,
-            'compliance_visible_to_firm_id' => $peer->id,
-        ]);
+        // One-way: peer cannot see other firms just because Acme delegated to peer.
+        $this->assertFalse($visibility->viewerFirmCanSee($acme->id, $peer, false));
+
+        $acme->update(['compliance_visible_to_own' => false]);
+        $acme->syncComplianceAuthorities([(int) $peer->id]);
         $acme->refresh();
 
         $this->assertFalse($visibility->viewerFirmCanSee($acme->id, $acme, false));
@@ -142,17 +155,37 @@ class FirmComplianceVisibilityTest extends TestCase
         $this->assertFalse($visibility->actorBypassesFirmScope($manager));
     }
 
+    public function test_central_approver_bypasses_firm_scope(): void
+    {
+        $central = Firm::central();
+        $visibility = app(FirmComplianceVisibilityService::class);
+
+        $approver = User::factory()->create([
+            'role' => User::ROLE_APPROVER,
+            'firm_id' => $central->id,
+        ]);
+        $approver->setRelation('firm', $central);
+
+        $this->assertTrue($visibility->actorBypassesFirmScope($approver));
+
+        $memberFirm = Firm::query()->create(['name' => 'Member']);
+        $memberApprover = User::factory()->create([
+            'role' => User::ROLE_APPROVER,
+            'firm_id' => $memberFirm->id,
+        ]);
+        $memberApprover->setRelation('firm', $memberFirm);
+        $this->assertFalse($visibility->actorBypassesFirmScope($memberApprover));
+    }
+
     public function test_manager_with_firm_only_sees_allowed_firm_requests(): void
     {
         $firmX = Firm::query()->create([
             'name' => 'Firm X',
             'compliance_visible_to_own' => true,
-            'compliance_visible_to_central' => false,
         ]);
         $firmY = Firm::query()->create([
             'name' => 'Firm Y',
             'compliance_visible_to_own' => true,
-            'compliance_visible_to_central' => false,
         ]);
 
         $manager = User::factory()->create([
@@ -167,6 +200,10 @@ class FirmComplianceVisibilityTest extends TestCase
         $this->assertFalse($visibility->actorCanSeeSubmitterFirm($manager, $firmY));
         $this->assertFalse($visibility->actorCanSeeSubmitterFirm($manager, null));
 
+        $firmY->syncComplianceAuthorities([(int) $firmX->id]);
+        $firmY->refresh();
+        $this->assertTrue($visibility->actorCanSeeSubmitterFirm($manager, $firmY));
+
         $power = User::factory()->powerAdmin()->create();
         $this->assertTrue($visibility->actorCanSeeSubmitterFirm($power, $firmY));
         $this->assertTrue($visibility->actorCanViewRequest($power, 99, $firmY->id, null));
@@ -177,12 +214,10 @@ class FirmComplianceVisibilityTest extends TestCase
         $firmX = Firm::query()->create([
             'name' => 'Firm X',
             'compliance_visible_to_own' => true,
-            'compliance_visible_to_central' => false,
         ]);
         $firmY = Firm::query()->create([
             'name' => 'Firm Y',
             'compliance_visible_to_own' => true,
-            'compliance_visible_to_central' => false,
         ]);
 
         $admin = User::factory()->create([
@@ -207,13 +242,12 @@ class FirmComplianceVisibilityTest extends TestCase
         $acme = Firm::query()->create([
             'name' => 'Acme',
             'compliance_visible_to_own' => true,
-            'compliance_visible_to_central' => true,
-            'compliance_visible_to_firm_id' => null,
         ]);
         $other = Firm::query()->create([
             'name' => 'Other',
             'compliance_visible_to_own' => true,
         ]);
+        $acme->syncComplianceAuthorities([(int) $central->id]);
 
         $visibility = app(FirmComplianceVisibilityService::class);
 
@@ -234,6 +268,7 @@ class FirmComplianceVisibilityTest extends TestCase
             'role' => User::ROLE_APPROVER,
             'firm_id' => $central->id,
         ]);
+        $centralReviewer->setRelation('firm', $central);
         $power = User::factory()->powerAdmin()->create(['firm_id' => null]);
 
         $this->assertTrue($visibility->userIsEligibleAssignee($acmeReviewer, $acme));
