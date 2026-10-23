@@ -378,7 +378,6 @@ class SecurityMonitoringController extends Controller
                 'role' => $u->role,
                 'roles' => $u->roleKeys(),
                 'role_labels' => $u->role_labels,
-                'primary_role' => $u->role,
             ])->values(),
             'meta' => [
                 'current_page' => $paginator->currentPage(),
@@ -407,7 +406,6 @@ class SecurityMonitoringController extends Controller
                 'role' => $target->role,
                 'roles' => $target->roleKeys(),
                 'role_labels' => $target->role_labels,
-                'primary_role' => $target->role,
             ],
             'data' => $settings->exists
                 ? $settings->toAccessRestrictionApiArray()
@@ -464,7 +462,6 @@ class SecurityMonitoringController extends Controller
                 'role' => $target->role,
                 'roles' => $target->roleKeys(),
                 'role_labels' => $target->role_labels,
-                'primary_role' => $target->role,
             ],
             'data' => $settings->toAccessRestrictionApiArray(),
             'self_lockout_preview' => $preview,
@@ -505,7 +502,6 @@ class SecurityMonitoringController extends Controller
                 'role' => $target->role,
                 'roles' => $target->roleKeys(),
                 'role_labels' => $target->role_labels,
-                'primary_role' => $target->role,
             ] : null;
             $payload['scope'] = 'user';
         } else {

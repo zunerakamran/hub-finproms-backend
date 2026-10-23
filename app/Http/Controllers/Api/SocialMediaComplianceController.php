@@ -507,7 +507,7 @@ class SocialMediaComplianceController extends Controller
     private function authorizeView($hub, User $user, SocialMediaComplianceRequest $compliance): void
     {
         // Use userCan (capability UNION) so multi-role users e.g. advisor+approver
-        // keep review access even when primary role is advisor/user.
+        // keep review access even when other held roles are advisor/user.
         $subject = $this->actingAdvisors->subjectOrNull($user);
         $isOwner = (int) $compliance->user_id === (int) $user->id
             || ($subject && (int) $compliance->user_id === (int) $subject->id);

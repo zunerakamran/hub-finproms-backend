@@ -160,7 +160,7 @@ class User extends Authenticatable
         // activity logs. Admin create/update call UserRolesService::syncRoles (logged).
         static::created(function (User $user): void {
             try {
-                app(UserRolesService::class)->ensurePrimaryInPivot($user);
+                app(UserRolesService::class)->ensureRoleInPivot($user);
             } catch (\Throwable) {
                 // Pivot may not exist yet during early migrate / seed.
             }
@@ -173,7 +173,7 @@ class User extends Authenticatable
     }
 
     /**
-     * All role keys this user holds (ordered). Primary is users.role.
+     * All role keys this user holds (ordered). All roles are equal.
      *
      * @return list<string>
      */

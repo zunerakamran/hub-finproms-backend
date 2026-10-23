@@ -53,7 +53,7 @@ class UserMultiRoleTest extends TestCase
         app(HubService::class)->forgetCurrentCache();
     }
 
-    public function test_user_create_seeds_primary_role_into_pivot(): void
+    public function test_user_create_seeds_role_into_pivot(): void
     {
         $user = User::factory()->create(['role' => User::ROLE_MANAGER]);
 
@@ -76,13 +76,13 @@ class UserMultiRoleTest extends TestCase
         $service->syncRoles(
             $user,
             [User::ROLE_MANAGER, User::ROLE_APPROVER],
-            User::ROLE_MANAGER,
             log: true,
             actor: $actor,
             hub: $this->hub,
         );
 
         $user->refresh();
+        // Legacy users.role mirrors privilege order (manager > approver); not a selectable primary.
         $this->assertSame(User::ROLE_MANAGER, $user->role);
         $this->assertTrue($user->hasRole(User::ROLE_MANAGER));
         $this->assertTrue($user->hasRole(User::ROLE_APPROVER));
@@ -119,7 +119,6 @@ class UserMultiRoleTest extends TestCase
         app(UserRolesService::class)->syncRoles(
             $user,
             [User::ROLE_MANAGER, User::ROLE_APPROVER],
-            User::ROLE_APPROVER,
             log: false,
         );
 
@@ -144,7 +143,6 @@ class UserMultiRoleTest extends TestCase
             'email' => 'multi.role@example.com',
             'password' => 'Password1!',
             'roles' => [User::ROLE_MANAGER, User::ROLE_APPROVER],
-            'primary_role' => User::ROLE_MANAGER,
         ]);
 
         if ($response->status() === 403 || $response->status() === 401) {
@@ -153,9 +151,13 @@ class UserMultiRoleTest extends TestCase
 
         $response->assertCreated();
         $payload = $response->json('user');
-        $this->assertSame(User::ROLE_MANAGER, $payload['role']);
+        $this->assertArrayNotHasKey('primary_role', $payload);
         $this->assertContains(User::ROLE_MANAGER, $payload['roles']);
         $this->assertContains(User::ROLE_APPROVER, $payload['roles']);
+        $this->assertEqualsCanonicalizing(
+            [User::ROLE_MANAGER, User::ROLE_APPROVER],
+            $payload['roles']
+        );
 
         $created = User::query()->where('email', 'multi.role@example.com')->first();
         $this->assertNotNull($created);
@@ -179,7 +181,6 @@ class UserMultiRoleTest extends TestCase
         app(UserRolesService::class)->syncRoles(
             $approver,
             [User::ROLE_MANAGER, User::ROLE_APPROVER],
-            User::ROLE_MANAGER,
             log: false,
         );
         $this->assertFalse($approver->fresh()->isApproverScopedOnly());

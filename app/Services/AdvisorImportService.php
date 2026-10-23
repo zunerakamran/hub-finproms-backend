@@ -117,7 +117,7 @@ class AdvisorImportService
                 ];
                 continue;
             }
-            $role = $this->userRoles->pickPrimary($roles);
+            $role = $this->userRoles->canonicalLegacyRole($roles);
 
             if ($firmName === '') {
                 $skipped[] = [
@@ -274,7 +274,7 @@ class AdvisorImportService
                 fn (string $r) => in_array($r, self::IMPORTABLE_ROLES, true)
             ));
             $role = $roles !== []
-                ? $this->userRoles->pickPrimary($roles)
+                ? $this->userRoles->canonicalLegacyRole($roles)
                 : trim((string) ($row['role'] ?? ''));
             $firmId = isset($row['firm_id']) && $row['firm_id'] !== null && $row['firm_id'] !== ''
                 ? (int) $row['firm_id']
@@ -357,7 +357,7 @@ class AdvisorImportService
                             $user->allows_admin_staff_acting = false;
                         }
                         $user->save();
-                        $this->userRoles->syncRoles($user, $roles, $role, log: true, hub: $hub);
+                        $this->userRoles->syncRoles($user, $roles, log: true, hub: $hub);
 
                         if ($isAdvisor) {
                             $this->ensureAdvisorSubscription($user);
@@ -398,7 +398,7 @@ class AdvisorImportService
                     ]);
 
                     $this->userRoles->resetPivotForLoggedSync($user);
-                    $this->userRoles->syncRoles($user, $roles, $role, log: true, hub: $hub);
+                    $this->userRoles->syncRoles($user, $roles, log: true, hub: $hub);
 
                     if ($isAdvisor) {
                         $this->ensureAdvisorSubscription($user);

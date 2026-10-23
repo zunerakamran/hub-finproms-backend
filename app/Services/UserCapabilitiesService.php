@@ -161,7 +161,7 @@ class UserCapabilitiesService
      *   roles: list<string>,
      *   role_labels: list<string>,
      *   rows: list<array{key: string, label: string, description: string, group: string, group_label: string, enabled: bool, inherited: bool, granted_by: list<string>, granted_by_labels: list<string>}>,
-     *   role_sections: list<array{role: string, label: string, is_primary: bool, count: int, rows: list<array{key: string, label: string, description: string, group: string, group_label: string, enabled: bool, inherited: bool, granted_by: list<string>, granted_by_labels: list<string>, shared: bool}>}>,
+     *   role_sections: list<array{role: string, label: string, count: int, rows: list<array{key: string, label: string, description: string, group: string, group_label: string, enabled: bool, inherited: bool, granted_by: list<string>, granted_by_labels: list<string>, shared: bool}>}>,
      *   group_order: list<string>,
      *   overrides: array<string, false>,
      *   summary: array{total: int, enabled: int, overridden: int, roles: int}
@@ -172,7 +172,7 @@ class UserCapabilitiesService
         $byRole = $this->keysGrantedByRole($hub, $user);
         $overrides = $this->overrides($user);
         $roles = array_keys($byRole);
-        $primary = (string) ($user->role ?: ($roles[0] ?? ''));
+        $legacyRole = (string) ($user->role ?: ($roles[0] ?? ''));
         $roleLabels = [];
         foreach ($roles as $role) {
             $roleLabels[$role] = $hub->roleLabel($role);
@@ -216,7 +216,6 @@ class UserCapabilitiesService
             $roleSections[] = [
                 'role' => $role,
                 'label' => $roleLabels[$role] ?? $role,
-                'is_primary' => $role === $primary,
                 'count' => count($sectionRows),
                 'rows' => $sectionRows,
             ];
@@ -243,10 +242,9 @@ class UserCapabilitiesService
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
-                'role' => $user->role,
+                'role' => $legacyRole,
                 'roles' => $roles,
                 'role_labels' => array_values($roleLabels),
-                'primary_role' => $primary,
             ],
             'hub' => [
                 'id' => (int) $hub->id,

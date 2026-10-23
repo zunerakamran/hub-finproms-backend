@@ -376,7 +376,7 @@ MULTI-ROLE MODEL (REQUIRED — target behaviour):
 - Capability evaluation uses the UNION of all assigned roles (§2.7.1).
 - Canonical role *labels* and matrix columns are unchanged; only the
   user↔role cardinality changes from 1:1 to many:many.
-- Full rules, primary-role / audit display, migration, and affected areas:
+- Full rules, equal multi-role model, migration, and affected areas:
   see §2.7.1.
 
 ROLES (canonical list — role keys unchanged):
@@ -475,24 +475,26 @@ CARDINALITY & STORAGE (target):
 - Prefer a pivot (`user_roles`: user_id, role) OR an equivalent durable
   multi-value store. Do NOT keep only a single `users.role` column as the
   source of truth once multi-role ships.
-- Migration: existing `users.role` becomes the user’s initial (and primary)
-  role; every current user gets exactly one pivot row matching today’s value.
-- Backward-compatible API during rollout: keep `role` (= primary role) AND
-  add `roles: string[]` (and optionally `role_labels`). Frontend must switch
-  to multi-select assign UI and read `roles`.
+- Migration: existing `users.role` becomes the user’s initial role; every
+  current user gets exactly one pivot row matching today’s value.
+- API: expose `roles: string[]` (and optionally `role_labels`). Keep legacy
+  `role` as a privilege-ordered single-string mirror for old call sites /
+  audit columns only — NOT a selectable “primary” role. Frontend must use
+  multi-select assign UI and read `roles`. There is NO primary / secondary
+  role concept; every assigned role is equal.
 
-PRIMARY ROLE (display / audit only — NOT a second permission system):
-- Each user has exactly one PRIMARY role chosen from their assigned roles.
-- Primary is used for: activity_logs.user_role, compliance audit actor role,
-  uploaded_by_role style labels when a single string is required, default
-  badge on Hub → Users, Excel “Role” single-cell display when needed.
-- Primary does NOT limit capabilities — capabilities always use the UNION
-  of ALL assigned roles (below).
-- Default primary on create/import = first assigned role, or the highest
-  privilege in this order when not specified:
+EQUAL ROLES (no primary / secondary):
+- Each assigned role is a separate, equal role for that user.
+- Do NOT label, select, or store a “primary” vs “secondary” role.
+- When a single string is required (activity_logs.user_role, compliance
+  audit actor role, uploaded_by_role, Excel single-cell fallback), derive
+  a privilege-ordered legacy mirror automatically:
   power_admin > finproms_admin > client_admin > manager > approver >
   admin_staff > advisor > user.
-- Staff with manage-users rights may change which assigned role is primary.
+- That mirror does NOT limit capabilities and is NOT editable as “primary”.
+- Capabilities always use the UNION of ALL assigned roles (below).
+- UI badges / Hub → Users / Access Control show all role labels equally
+  (chips or joined list) — no Primary badge or Primary role dropdown.
 
 EFFECTIVE CAPABILITIES (UNION / OR):
 - `userCan(hub, user, flag)` is TRUE if ANY of the user’s assigned roles
@@ -501,7 +503,7 @@ EFFECTIVE CAPABILITIES (UNION / OR):
 - Dashboard nav / home cards = union of tools unlocked by any role.
 - Admin-staff “act as advisor” continues to mirror the subject advisor’s
   effective capabilities when acting; having admin_staff among roles is
-  what enables acting, not primary alone.
+  what enables acting.
 - Control-plane access: if the user holds `power_admin` among their roles,
   Central / pa_* rules apply as today for that role; other roles still
   contribute their hub matrix caps when acting on a content hub.
@@ -516,8 +518,8 @@ COMBINATION RULES:
   (manager, approver, …) so one person can admin and review.
 - Duplicate role keys on one user are ignored.
 - Removing a role from a user is blocked if it would leave them with zero
-  roles; removing primary auto-promotes another assigned role (use
-  privilege order above).
+  roles; the legacy `users.role` mirror is recomputed from remaining roles
+  (privilege order above).
 
 MANAGE ROLES / MATRIX COLUMNS:
 - “Users per role” counts users who HOLD that role (a user with two roles
@@ -528,7 +530,7 @@ MANAGE ROLES / MATRIX COLUMNS:
 
 USER MANAGEMENT & IMPORT:
 - Hub → Users / Power Admin manage-users: role field becomes multi-select
-  (assign / revoke roles; set primary).
+  (assign / revoke roles only — no “set primary”).
 - Advisor Excel import: Role column SHOULD accept one role (current) and,
   when multi-role is live, optionally a delimited list (e.g. manager|approver)
   or repeated role columns; imported set replaces only the roles specified
@@ -548,29 +550,30 @@ HARD-CODED ROLE CHECKS (must be updated):
   union-friendly behaviour).
 
 AFFECTED FUNCTIONALITIES (checklist for backend + frontend):
-  1) Data model & migrations — users.role → multi-role store + primary
+  1) Data model & migrations — users.role → multi-role store (equal roles)
   2) User model helpers — isPowerAdmin / isManager / … → hasRole / roles
   3) CapabilitiesMatrixService — userCan / effectiveRoleFor → union of roles
      (acting-advisor path preserved)
-  4) Auth /me and session payloads — roles[] + primary role + labels
+  4) Auth /me and session payloads — roles[] + labels (no primary_role)
   5) Hub → Users / pa_manage_users_roles — multi-assign UI + APIs
   6) Manage roles page — user counts per role (multi-count OK)
   7) Capabilities matrix — no column redesign; evaluation only
   8) Advisor Excel import / template / submit — multi-role cell support
   9) White-label user create/update services — accept roles[]
-  10) Activity logs & reports — store primary (or joined roles string);
+  10) Activity logs & reports — legacy mirror or joined roles string;
       filters by role match any held role
   11) Compliance audit trail (SMC / GC / WC) — actor / related role display
-  12) Supporting-files uploaded_by_role — primary or derived label
+  12) Supporting-files uploaded_by_role — legacy mirror or derived label
   13) Support Tickets / Security Monitoring role gates — via userCan union
   14) Firm Head / firm documents — unchanged (membership-based) but any
       role-gated side paths must use hasRole / userCan
   15) Acting hub / control-plane role detection — hasRole(power_admin) etc.
   16) Last power_admin / last finproms_admin guards — count users who HOLD
-      that role, not primary-only
+      that role (any assigned role), not a single-column-only check
   17) Discontinue / suspend / GDPR erasure — role fields in denormalised
       logs remain historical snapshots
   18) Frontend nav, badges, user forms, filters, import help copy
+      (equal multi-role chips; no Primary role control)
   19) Automated tests — factories, feature tests that assume one role
 
 OUT OF SCOPE / UNCHANGED:
@@ -611,7 +614,7 @@ LIST / QUEUE BEHAVIOUR (SMC / GC — same pattern as Website Compliance):
 
 REVIEWER LOOKUPS:
 - Eligible reviewers = users who HOLD any role with the review capability
-  (user_roles / multi-role), not primary users.role alone.
+  (user_roles / multi-role), not the legacy users.role column alone.
 - Always exclude conflicted user ids for the request being assigned.
 
 TAXONOMY ADD REQUESTS:
@@ -1550,8 +1553,8 @@ IMPLEMENTATION: UserCapabilitiesService; wired in CapabilitiesMatrixService
   - Manage hub Functionalities and Modules checklists
   - Manage payment methods
   - Manage Power Admin / user capabilities matrix (this list + 5.2)
-  - Manage users / roles (create, update, delete, assign ONE OR MORE roles
-    per user + set primary role — §2.7.1)
+  - Manage users / roles (create, update, delete, assign ONE OR MORE equal
+    roles per user — §2.7.1; no primary / secondary)
   - Manage hub backups (schedules, run/download/restore from Central)
   - Remotely control content hubs (hub switcher / acting hub)
 - Stored as platform settings on Central Hub (not per content hub).
@@ -2269,8 +2272,8 @@ Out of scope for v1 of this module
   white_label (private client hub).
 - Roles: power_admin, finproms_admin, client_admin, manager, approver,
   admin_staff, advisor, user. Each user may hold MULTIPLE roles; effective
-  capabilities = UNION of assigned roles (§2.7.1). Primary role is for
-  display / audit only.
+  capabilities = UNION of assigned roles (§2.7.1). All assigned roles are
+  equal (no primary / secondary).
 - Separate frontend shells: member catalog app (on Shared / White-label), and
   one universal Dashboard shell at /my-dashboard (tools from Capabilities +
   Power Admin pa_* checklist on Central Hub).
@@ -2442,14 +2445,15 @@ STEP 1 — Shared hub core (content hub)
 [x] Wire member nav/actions to member capability checklist
 [x] Roles documented: power_admin, finproms_admin, client_admin, manager,
     approver, advisor, user (admin_staff also in matrix / User model)
-[x] MULTI-ROLE USERS (§2.7 / §2.7.1) — backend: user_roles pivot; users.role =
-    primary; capability UNION in userCan; UserRolesService sync + activity logs
-    (user.role_assigned / user.role_removed / user.primary_role_changed);
-    Power Admin / WL user APIs accept roles[] + primary_role; Excel import
-    accepts delimited multi-role cells; Hub → Users / Manage roles counts;
-    approver-scoped queue uses isApproverScopedOnly. Frontend (hub-finproms-frontend):
-    Users & roles multi-select + primary role, Hub Users / Access Control multi-role
-    display, AuthContext hasRole / roleKeys — done.
+[x] MULTI-ROLE USERS (§2.7 / §2.7.1) — backend: user_roles pivot; all roles
+    equal (no primary/secondary); users.role = privilege-ordered legacy mirror
+    only; capability UNION in userCan; UserRolesService sync + activity logs
+    (user.role_assigned / user.role_removed); Power Admin / WL user APIs accept
+    roles[] (not primary_role); Excel import accepts delimited multi-role cells;
+    Hub → Users / Manage roles counts; approver-scoped queue uses
+    isApproverScopedOnly. Frontend (hub-finproms-frontend): Users & roles
+    multi-select (equal roles, no Primary control), Hub Users / Access Control
+    multi-role display, AuthContext hasRole / roleKeys — done.
 [x] SEPARATION OF DUTIES (§2.7.2) — ComplianceSeparationService blocks
     owner / on-behalf self-assign, self-review, and change-status on SMC / GC / WC;
     reviewer lists exclude conflicted ids (optional request_id) and include
@@ -2509,7 +2513,7 @@ STEP 1 — Shared hub core (content hub)
 [x] Optional compliance supporting files (SMC / GC / WC) on submit, review/approve-reject, and change-status — shown in version history with uploader role (advisor / approver / manager), not as a separate request-level box
 [x] Approver / manager dedicated front-end UIs (SMC & ops flows)
 [x] Power Admin user management UI (pa_manage_users_roles — create/update/delete/roles)
-    — extend for multi-role assign + primary when §2.7.1 is implemented
+    — multi-role assign (equal roles; no primary) per §2.7.1
 [x] Control white labelled hubs via dashboard hub switcher (dashboard_control_white_label_hubs)
 [x] Acting-hub content create/list on white-label DB (posts, types, categories, tags, bundles)
 [x] Central content library (manual create + Excel bulk, distribute live posts;

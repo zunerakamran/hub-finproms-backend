@@ -7,7 +7,8 @@ use Illuminate\Support\Facades\Schema;
 
 /**
  * Multi-role users (§2.7.1): pivot of all roles held by a user.
- * users.role remains the PRIMARY role (display / audit / backward compat).
+ * All assigned roles are equal. users.role is a legacy single-string mirror
+ * (privilege-ordered) for audit / backward-compat call sites only.
  */
 return new class extends Migration
 {

@@ -11,13 +11,16 @@ use Illuminate\Validation\ValidationException;
 
 /**
  * Assign / revoke multiple roles per user (§2.7.1).
- * users.role stays the primary role; user_roles holds the full set.
- * Logs user.role_assigned / user.role_removed (and primary changes).
+ * All assigned roles are equal — no primary / secondary.
+ * users.role is a legacy single-string mirror (privilege-ordered) for
+ * audit / old call sites; user_roles is the source of truth.
+ * Logs user.role_assigned / user.role_removed.
  */
 class UserRolesService
 {
     /**
-     * Highest privilege first — used when primary is omitted.
+     * Highest privilege first — used only to fill legacy users.role when
+     * a single string is required (activity logs, old APIs).
      *
      * @var list<string>
      */
@@ -51,24 +54,32 @@ class UserRolesService
     }
 
     /**
-     * Ensure the primary users.role row exists in the pivot (silent — no activity log).
+     * Ensure the legacy users.role row exists in the pivot (silent — no activity log).
      */
-    public function ensurePrimaryInPivot(User $user): void
+    public function ensureRoleInPivot(User $user): void
     {
         if (! $this->pivotReady($user)) {
             return;
         }
 
-        $primary = $this->normalizeRole((string) ($user->role ?? ''));
-        if ($primary === '') {
+        $role = $this->normalizeRole((string) ($user->role ?? ''));
+        if ($role === '') {
             return;
         }
 
         UserRole::on($user->getConnectionName())
             ->firstOrCreate(
-                ['user_id' => $user->id, 'role' => $primary],
+                ['user_id' => $user->id, 'role' => $role],
                 []
             );
+    }
+
+    /**
+     * @deprecated Use ensureRoleInPivot()
+     */
+    public function ensurePrimaryInPivot(User $user): void
+    {
+        $this->ensureRoleInPivot($user);
     }
 
     /**
@@ -115,9 +126,9 @@ class UserRolesService
         }
 
         if ($keys === []) {
-            $primary = $this->normalizeRole((string) ($user->role ?? ''));
+            $fallback = $this->normalizeRole((string) ($user->role ?? ''));
 
-            return $primary !== '' ? [$primary] : [User::ROLE_USER];
+            return $fallback !== '' ? [$fallback] : [User::ROLE_USER];
         }
 
         return $this->hubRoles->orderRoles($keys);
@@ -125,20 +136,20 @@ class UserRolesService
 
     /**
      * Replace the user's role set. At least one role required.
+     * All roles are equal; users.role is updated to a privilege-ordered
+     * legacy mirror for single-string call sites only.
      *
      * @param  list<string>  $roles
      * @return array{
      *   roles: list<string>,
-     *   primary: string,
      *   assigned: list<string>,
-     *   removed: list<string>,
-     *   primary_changed: bool
+     *   removed: list<string>
      * }
      */
     public function syncRoles(
         User $user,
         array $roles,
-        ?string $primary = null,
+        ?string $legacyRole = null,
         bool $log = true,
         ?User $actor = null,
         ?Request $request = null,
@@ -161,17 +172,16 @@ class UserRolesService
 
         $normalized = $this->hubRoles->orderRoles($normalized);
 
-        $primary = $this->normalizeRole((string) ($primary ?? ''));
-        if ($primary === '' || ! in_array($primary, $normalized, true)) {
-            $primary = $this->pickPrimary($normalized);
+        // Legacy column only — not a "primary" role the client can choose.
+        $legacy = $this->normalizeRole((string) ($legacyRole ?? ''));
+        if ($legacy === '' || ! in_array($legacy, $normalized, true)) {
+            $legacy = $this->canonicalLegacyRole($normalized);
         }
 
         $before = $this->roleKeys($user);
-        $beforePrimary = $this->normalizeRole((string) ($user->role ?? ''));
 
         $assigned = array_values(array_diff($normalized, $before));
         $removed = array_values(array_diff($before, $normalized));
-        $primaryChanged = $beforePrimary !== $primary;
 
         if ($this->pivotReady($user)) {
             $connection = $user->getConnectionName();
@@ -186,8 +196,8 @@ class UserRolesService
             }
         }
 
-        if ($user->role !== $primary) {
-            $user->forceFill(['role' => $primary])->save();
+        if ($user->role !== $legacy) {
+            $user->forceFill(['role' => $legacy])->save();
         } else {
             $user->refresh();
         }
@@ -201,14 +211,11 @@ class UserRolesService
             ]))
         );
 
-        if ($log && ($assigned !== [] || $removed !== [] || $primaryChanged)) {
+        if ($log && ($assigned !== [] || $removed !== [])) {
             $this->logRoleChanges(
                 $user,
                 $assigned,
                 $removed,
-                $primary,
-                $beforePrimary,
-                $primaryChanged,
                 $normalized,
                 $actor,
                 $request,
@@ -241,26 +248,24 @@ class UserRolesService
 
         return [
             'roles' => $normalized,
-            'primary' => $primary,
             'assigned' => $assigned,
             'removed' => $removed,
-            'primary_changed' => $primaryChanged,
         ];
     }
 
     /**
      * Parse API / import input: prefer roles[], else single role, else keep existing.
+     * Ignores primary_role if present (legacy clients).
      *
      * @param  array<string, mixed>  $payload
-     * @return array{roles: list<string>, primary: string}|null  null = do not change roles
+     * @return array{roles: list<string>}|null  null = do not change roles
      */
     public function rolesFromPayload(array $payload, ?User $existing = null): ?array
     {
         $hasRoles = array_key_exists('roles', $payload);
         $hasRole = array_key_exists('role', $payload);
-        $hasPrimary = array_key_exists('primary_role', $payload);
 
-        if (! $hasRoles && ! $hasRole && ! $hasPrimary) {
+        if (! $hasRoles && ! $hasRole) {
             return null;
         }
 
@@ -282,15 +287,6 @@ class UserRolesService
             $roles = $this->roleKeys($existing);
         }
 
-        $primary = $hasPrimary
-            ? (string) $payload['primary_role']
-            : ($hasRole && ! $hasRoles ? (string) $payload['role'] : null);
-
-        if ($primary !== null && str_contains($primary, '|')) {
-            $parts = $this->splitRoleString($primary);
-            $primary = $parts[0] ?? null;
-        }
-
         $normalized = [];
         foreach ($roles as $role) {
             $role = $this->normalizeRole($role);
@@ -309,21 +305,17 @@ class UserRolesService
             ]);
         }
 
-        $primaryNorm = $this->normalizeRole((string) ($primary ?? ''));
-        if ($primaryNorm === '' || ! in_array($primaryNorm, $normalized, true)) {
-            $primaryNorm = $this->pickPrimary($normalized);
-        }
-
         return [
             'roles' => $this->hubRoles->orderRoles($normalized),
-            'primary' => $primaryNorm,
         ];
     }
 
     /**
+     * Privilege-ordered role for legacy users.role / single-string contexts.
+     *
      * @param  list<string>  $roles
      */
-    public function pickPrimary(array $roles): string
+    public function canonicalLegacyRole(array $roles): string
     {
         foreach (self::PRIVILEGE_ORDER as $role) {
             if (in_array($role, $roles, true)) {
@@ -332,6 +324,16 @@ class UserRolesService
         }
 
         return $roles[0] ?? User::ROLE_USER;
+    }
+
+    /**
+     * @deprecated Use canonicalLegacyRole()
+     *
+     * @param  list<string>  $roles
+     */
+    public function pickPrimary(array $roles): string
+    {
+        return $this->canonicalLegacyRole($roles);
     }
 
     public function normalizeRole(string $role): string
@@ -368,9 +370,6 @@ class UserRolesService
         User $subject,
         array $assigned,
         array $removed,
-        string $primary,
-        string $beforePrimary,
-        bool $primaryChanged,
         array $rolesAfter,
         ?User $actor,
         ?Request $request,
@@ -392,7 +391,6 @@ class UserRolesService
                     'target_user_email' => $subject->email,
                     'role' => $role,
                     'roles_after' => $rolesAfter,
-                    'primary_role' => $primary,
                 ],
             ]);
         }
@@ -410,26 +408,6 @@ class UserRolesService
                     'target_user_id' => $subject->id,
                     'target_user_email' => $subject->email,
                     'role' => $role,
-                    'roles_after' => $rolesAfter,
-                    'primary_role' => $primary,
-                ],
-            ]);
-        }
-
-        if ($primaryChanged && $assigned === [] && $removed === []) {
-            $this->activityLogs->log([
-                'action' => 'user.primary_role_changed',
-                'description' => 'Primary role for '.$subject->email.' changed from "'.$beforePrimary.'" to "'.$primary.'"',
-                'user' => $actor,
-                'hub' => $hub,
-                'request' => $request,
-                'subject' => $subject,
-                'status_code' => 200,
-                'properties' => [
-                    'target_user_id' => $subject->id,
-                    'target_user_email' => $subject->email,
-                    'primary_role_before' => $beforePrimary,
-                    'primary_role' => $primary,
                     'roles_after' => $rolesAfter,
                 ],
             ]);

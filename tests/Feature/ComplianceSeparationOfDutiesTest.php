@@ -236,7 +236,7 @@ class ComplianceSeparationOfDutiesTest extends TestCase
         $this->assertNotContains((int) $staff->id, $ids);
     }
 
-    public function test_multi_role_user_appears_in_reviewers_via_secondary_role(): void
+    public function test_multi_role_user_appears_in_reviewers_via_additional_role(): void
     {
         $hub = $this->createSharedHubWithSmc();
         $firm = Firm::query()->create([

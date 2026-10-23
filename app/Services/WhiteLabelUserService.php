@@ -83,13 +83,14 @@ class WhiteLabelUserService
             $this->assertEmailAvailable($connection, (string) $payload['email']);
 
             $roleSet = $this->userRoles->rolesFromPayload($payload)
-                ?? ['roles' => [(string) ($payload['role'] ?? User::ROLE_USER)], 'primary' => (string) ($payload['role'] ?? User::ROLE_USER)];
+                ?? ['roles' => [(string) ($payload['role'] ?? User::ROLE_USER)]];
+            $legacyRole = $this->userRoles->canonicalLegacyRole($roleSet['roles']);
 
             $user = User::on($connection)->create([
                 'name' => $payload['name'],
                 'email' => $payload['email'],
                 'password' => $payload['password'],
-                'role' => $roleSet['primary'],
+                'role' => $legacyRole,
                 'credits' => $payload['credits'] ?? 0,
                 'is_advisor' => $payload['is_advisor'] ?? in_array(User::ROLE_ADVISOR, $roleSet['roles'], true),
                 'allows_admin_staff_acting' => (bool) ($payload['allows_admin_staff_acting'] ?? false),
@@ -103,7 +104,6 @@ class WhiteLabelUserService
             $this->userRoles->syncRoles(
                 $user,
                 $roleSet['roles'],
-                $roleSet['primary'],
                 log: true,
                 actor: $actor,
                 request: $request,
@@ -159,7 +159,7 @@ class WhiteLabelUserService
             }
 
             if ($roleSet !== null) {
-                $fill['role'] = $roleSet['primary'];
+                $fill['role'] = $this->userRoles->canonicalLegacyRole($roleSet['roles']);
                 if (in_array(User::ROLE_ADVISOR, $roleSet['roles'], true) && ! array_key_exists('is_advisor', $fill)) {
                     $fill['is_advisor'] = true;
                 }
@@ -188,7 +188,6 @@ class WhiteLabelUserService
                 $this->userRoles->syncRoles(
                     $user,
                     $roleSet['roles'],
-                    $roleSet['primary'],
                     log: true,
                     actor: $actor,
                     request: $request,
@@ -252,10 +251,10 @@ class WhiteLabelUserService
         $hubAllowsUnlimited = $hub ? $hub->givesUnlimitedSubscriberCredits() : false;
         $unlimited = $user->hasUnlimitedCredits($hubAllowsUnlimited);
         $roles = $user->roleKeys();
-        $primary = (string) ($user->role ?: ($roles[0] ?? User::ROLE_USER));
+        $legacyRole = (string) ($user->role ?: ($roles[0] ?? User::ROLE_USER));
         $roleLabel = $hub
-            ? $hub->roleLabel($primary)
-            : (User::ROLE_LABELS[$primary] ?? $primary);
+            ? $hub->roleLabel($legacyRole)
+            : (User::ROLE_LABELS[$legacyRole] ?? $legacyRole);
         $roleLabels = array_map(
             fn (string $role) => $hub ? $hub->roleLabel($role) : (User::ROLE_LABELS[$role] ?? $role),
             $roles
@@ -265,11 +264,10 @@ class WhiteLabelUserService
             'id' => $user->id,
             'name' => $user->name,
             'email' => $user->email,
-            'role' => $primary,
+            'role' => $legacyRole,
             'role_label' => $roleLabel,
             'roles' => $roles,
             'role_labels' => $roleLabels,
-            'primary_role' => $primary,
             'credits' => $unlimited ? 0 : (int) $user->credits,
             'is_advisor' => (bool) $user->is_advisor,
             'allows_admin_staff_acting' => (bool) $user->allows_admin_staff_acting,

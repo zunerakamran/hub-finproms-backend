@@ -139,14 +139,14 @@ class PowerAdminUserController extends Controller
         $validated = $this->normalizeAdminStaffPermission($validated);
 
         $roleSet = $this->userRoles->rolesFromPayload($validated)
-            ?? ['roles' => [User::ROLE_USER], 'primary' => User::ROLE_USER];
+            ?? ['roles' => [User::ROLE_USER]];
+        $legacyRole = $this->userRoles->canonicalLegacyRole($roleSet['roles']);
 
         if ($hub = $this->actingWhiteLabelHub($request)) {
             $this->assertAssignableRoleSet($roleSet['roles'], $hub);
             $validated['roles'] = $roleSet['roles'];
-            $validated['primary_role'] = $roleSet['primary'];
-            $validated['role'] = $roleSet['primary'];
-            $validated = $this->normalizeFirmForRole($validated, $roleSet['primary']);
+            $validated['role'] = $legacyRole;
+            $validated = $this->normalizeFirmForRole($validated, $legacyRole);
             $validated = $this->normalizeAdminStaffPermission($validated, null, $roleSet['roles']);
 
             try {
@@ -178,15 +178,15 @@ class PowerAdminUserController extends Controller
 
         $this->assertAssignableRoleSet($roleSet['roles'], $this->labelHub());
         $validated['roles'] = $roleSet['roles'];
-        $validated['role'] = $roleSet['primary'];
-        $validated = $this->normalizeFirmForRole($validated, $roleSet['primary']);
+        $validated['role'] = $legacyRole;
+        $validated = $this->normalizeFirmForRole($validated, $legacyRole);
         $validated = $this->normalizeAdminStaffPermission($validated, null, $roleSet['roles']);
 
         $user = User::query()->create([
             'name' => $validated['name'],
             'email' => $validated['email'],
             'password' => $validated['password'],
-            'role' => $roleSet['primary'],
+            'role' => $legacyRole,
             'credits' => $validated['credits'] ?? 0,
             'is_advisor' => $validated['is_advisor'] ?? in_array(User::ROLE_ADVISOR, $roleSet['roles'], true),
             'allows_admin_staff_acting' => (bool) ($validated['allows_admin_staff_acting'] ?? false),
@@ -196,12 +196,11 @@ class PowerAdminUserController extends Controller
             'email_verified_at' => now(),
         ]);
 
-        // Boot may have inserted primary silently — reset so every role is logged as assigned.
+        // Boot may have inserted the legacy role silently — reset so every role is logged as assigned.
         $this->userRoles->resetPivotForLoggedSync($user);
         $this->userRoles->syncRoles(
             $user,
             $roleSet['roles'],
-            $roleSet['primary'],
             log: true,
             actor: $request->user(),
             request: $request,
@@ -274,16 +273,17 @@ class PowerAdminUserController extends Controller
 
             $validated = $this->validatedPayload($request, $current, skipUnique: true);
             $roleSet = $this->userRoles->rolesFromPayload($validated, $current);
-            $primaryForNormalize = $roleSet['primary'] ?? ($existing['role'] ?? null);
-            $validated = $this->normalizeFirmForRole($validated, $primaryForNormalize);
+            $legacyForNormalize = isset($roleSet['roles'])
+                ? $this->userRoles->canonicalLegacyRole($roleSet['roles'])
+                : ($existing['role'] ?? null);
+            $validated = $this->normalizeFirmForRole($validated, $legacyForNormalize);
             $validated = $this->normalizeAdminStaffPermission($validated, $current, $roleSet['roles'] ?? null);
 
             if ($roleSet !== null) {
                 $this->assertAssignableRoleSet($roleSet['roles'], $hub);
                 $this->assertCanChangeRoleOnHub($request, $hub, $existing, $roleSet['roles']);
                 $validated['roles'] = $roleSet['roles'];
-                $validated['primary_role'] = $roleSet['primary'];
-                $validated['role'] = $roleSet['primary'];
+                $validated['role'] = $this->userRoles->canonicalLegacyRole($roleSet['roles']);
             }
 
             try {
@@ -319,8 +319,10 @@ class PowerAdminUserController extends Controller
         $model = User::query()->with('roleAssignments')->findOrFail($user);
         $validated = $this->validatedPayload($request, $model);
         $roleSet = $this->userRoles->rolesFromPayload($validated, $model);
-        $primaryForNormalize = $roleSet['primary'] ?? $model->role;
-        $validated = $this->normalizeFirmForRole($validated, $primaryForNormalize);
+        $legacyForNormalize = isset($roleSet['roles'])
+            ? $this->userRoles->canonicalLegacyRole($roleSet['roles'])
+            : $model->role;
+        $validated = $this->normalizeFirmForRole($validated, $legacyForNormalize);
         $validated = $this->normalizeAdminStaffPermission($validated, $model, $roleSet['roles'] ?? null);
 
         if ($roleSet !== null) {
@@ -336,7 +338,7 @@ class PowerAdminUserController extends Controller
         }
 
         if ($roleSet !== null) {
-            $payload['role'] = $roleSet['primary'];
+            $payload['role'] = $this->userRoles->canonicalLegacyRole($roleSet['roles']);
             if (in_array(User::ROLE_ADVISOR, $roleSet['roles'], true) && ! array_key_exists('is_advisor', $payload)) {
                 $payload['is_advisor'] = true;
             }
@@ -352,7 +354,6 @@ class PowerAdminUserController extends Controller
             $this->userRoles->syncRoles(
                 $model,
                 $roleSet['roles'],
-                $roleSet['primary'],
                 log: true,
                 actor: $request->user(),
                 request: $request,
@@ -452,7 +453,7 @@ class PowerAdminUserController extends Controller
             'name' => [$user ? 'sometimes' : 'required', 'string', 'max:255'],
             'email' => $emailRules,
             'password' => $passwordRules,
-            // Legacy single role OR multi-role: roles[] (+ optional primary_role).
+            // Legacy single role OR multi-role: roles[] (all roles equal — no primary).
             'role' => [
                 $user ? 'sometimes' : 'required_without:roles',
                 'nullable',
@@ -471,7 +472,6 @@ class PowerAdminUserController extends Controller
             ],
             'roles' => [$user ? 'sometimes' : 'required_without:role', 'nullable', 'array', 'min:1'],
             'roles.*' => ['string', Rule::in($assignable)],
-            'primary_role' => ['sometimes', 'nullable', 'string', Rule::in($assignable)],
             'credits' => ['sometimes', 'integer', 'min:0'],
             'is_advisor' => ['sometimes', 'boolean'],
             'allows_admin_staff_acting' => ['sometimes', 'boolean'],

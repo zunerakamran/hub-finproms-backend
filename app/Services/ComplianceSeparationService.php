@@ -166,7 +166,7 @@ class ComplianceSeparationService
     }
 
     /**
-     * Users who hold any of the given roles (primary column or user_roles pivot).
+     * Users who hold any of the given roles (users.role or user_roles pivot).
      *
      * @param  list<string>  $roles
      * @param  list<string>  $columns

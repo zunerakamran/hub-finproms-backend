@@ -33,7 +33,7 @@ class ActingAdvisorService
     public function effectiveCapabilityRole(User $actor): string
     {
         if (! $this->canActOnBehalf($actor)) {
-            // Primary role for display / single-role call sites; capability
+            // Legacy users.role for single-role call sites; capability
             // checks use CapabilitiesMatrixService::userCan (UNION of roles).
             $role = (string) $actor->role;
             if ($role === 'admin') {
