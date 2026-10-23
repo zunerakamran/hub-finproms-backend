@@ -1416,9 +1416,11 @@ class CapabilitiesMatrixService
         }
 
         // Modules pricing caps are inactive while both charge functionalities are off.
+        // Exception: Central still manages the global module / package catalogue.
         if (Hub::isModulePricingCapability($flag)
             && ! $hub->can('charge_amount_per_module')
             && ! $hub->can('charge_recurring_per_module')
+            && ! $hub->isControlPlane()
         ) {
             return false;
         }

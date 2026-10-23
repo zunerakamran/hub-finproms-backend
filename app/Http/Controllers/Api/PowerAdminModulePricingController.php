@@ -13,7 +13,8 @@ class PowerAdminModulePricingController extends Controller
 {
     public function __construct(
         private readonly ModulePricingService $pricing,
-        private readonly ActingHubService $actingHubs
+        private readonly ActingHubService $actingHubs,
+        private readonly \App\Services\ModulePackageService $packages
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -22,8 +23,9 @@ class PowerAdminModulePricingController extends Controller
 
         return response()->json([
             'pricing' => $this->pricing->listPricing(),
+            'packages' => $this->packages->listPackages(activeOnly: false),
             'recurring_tiers' => $this->pricing->listRecurringTiers(),
-            'formula' => 'one_time on module enable; recurring Option B = rate(total active users with module) × batch',
+            'formula' => 'one_time on module/package enable; package price replaces individual enable invoices for covered modules; recurring Option B = rate(total active users with module) × batch',
             'target_hub' => [
                 'id' => $hub->id,
                 'name' => $hub->name,

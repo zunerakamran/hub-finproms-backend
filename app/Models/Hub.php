@@ -279,6 +279,50 @@ class Hub extends Model
     }
 
     /**
+     * Enabled catalogue module-package IDs for this hub.
+     *
+     * @return list<int>
+     */
+    public function enabledModulePackageIds(): array
+    {
+        $raw = $this->enabled_module_package_ids;
+        if (! is_array($raw)) {
+            return [];
+        }
+
+        $ids = [];
+        foreach ($raw as $id) {
+            $id = (int) $id;
+            if ($id > 0) {
+                $ids[$id] = true;
+            }
+        }
+
+        return array_map('intval', array_keys($ids));
+    }
+
+    /**
+     * Product module keys covered by currently enabled packages on this hub.
+     *
+     * @return list<string>
+     */
+    public function moduleKeysCoveredByEnabledPackages(): array
+    {
+        $packages = app(\App\Services\ModulePackageService::class);
+
+        return array_keys(
+            $packages->moduleKeysCoveredByPackages(
+                $packages->packagesByIds($this->enabledModulePackageIds())
+            )
+        );
+    }
+
+    public function moduleCoveredByEnabledPackage(string $moduleKey): bool
+    {
+        return in_array($moduleKey, $this->moduleKeysCoveredByEnabledPackages(), true);
+    }
+
+    /**
      * Display label for a module key.
      */
     public function moduleLabel(string $key): string
@@ -1359,7 +1403,7 @@ class Hub extends Model
         // --- Modules pricing (blurred while one-time AND recurring charge flags are off) ---
         'dashboard_manage_module_pricing' => [
             'label' => 'Set module prices (one-time + recurring)',
-            'description' => 'Configure one-time and recurring catalogue amounts / slot tables for each product module.',
+            'description' => 'Configure one-time and recurring catalogue amounts / slot tables for each product module, and create module packages (bundled modules with their own one-time package price).',
             'group' => self::GROUP_MODULE_PRICING,
             'default_shared' => false,
             'default_white_label' => true,
@@ -1764,6 +1808,7 @@ class Hub extends Model
         'db_ssl_mode',
         'db_ssl_ca',
         'checklist',
+        'enabled_module_package_ids',
         'role_capabilities',
         'role_display_names',
         'compliance_status_display_names',
@@ -1824,6 +1869,7 @@ class Hub extends Model
         return [
             'is_active' => 'boolean',
             'checklist' => 'array',
+            'enabled_module_package_ids' => 'array',
             'role_capabilities' => 'array',
             'role_display_names' => 'array',
             'compliance_status_display_names' => 'array',
@@ -2255,6 +2301,14 @@ class Hub extends Model
         }
 
         return $cache[$type] = $defaults;
+    }
+
+    public function setRawAttributes(array $attributes, $sync = false)
+    {
+        // refresh() copies DB rows via setRawAttributes (bypasses setAttribute).
+        $this->resolvedChecklistCache = null;
+
+        return parent::setRawAttributes($attributes, $sync);
     }
 
     public function setAttribute($key, $value)

@@ -6,6 +6,7 @@ use App\Models\Hub;
 use App\Models\HubModuleBilling;
 use App\Models\HubModuleRecurringBilling;
 use App\Models\Invoice;
+use App\Models\ModulePackage;
 use App\Models\User;
 use App\Models\WebsiteCompliance\Template;
 use App\Models\WebsiteCompliance\TemplateRequest;
@@ -143,6 +144,7 @@ class ModuleBillingService
     /**
      * Create one-time invoices for modules that newly became enabled
      * (unchecked → checked). Always creates a fresh invoice for that enable.
+     * Modules covered by an enabled package are skipped (package invoice covers them).
      *
      * @param  list<string>  $newlyEnabledKeys
      * @return list<Invoice>
@@ -153,14 +155,132 @@ class ModuleBillingService
             return [];
         }
 
+        $covered = array_fill_keys($hub->moduleKeysCoveredByEnabledPackages(), true);
         $created = [];
         foreach ($newlyEnabledKeys as $moduleKey) {
+            if (isset($covered[$moduleKey])) {
+                continue;
+            }
             foreach ($this->invoiceModuleEnablement($hub, $moduleKey, $actor, forceNew: true) as $invoice) {
                 $created[] = $invoice;
             }
         }
 
         return $created;
+    }
+
+    /**
+     * One-time invoices for newly enabled module packages.
+     *
+     * @param  list<int>  $newlyEnabledPackageIds
+     * @return list<Invoice>
+     */
+    public function invoiceNewlyEnabledPackages(Hub $hub, array $newlyEnabledPackageIds, User $actor): array
+    {
+        if (! $this->billingEnabled($hub) || $newlyEnabledPackageIds === []) {
+            return [];
+        }
+
+        $created = [];
+        foreach ($newlyEnabledPackageIds as $packageId) {
+            $invoice = $this->invoicePackageEnablement($hub, (int) $packageId, $actor, forceNew: true);
+            if ($invoice) {
+                $created[] = $invoice;
+            }
+        }
+
+        return $created;
+    }
+
+    public function invoicePackageEnablement(
+        Hub $hub,
+        int $packageId,
+        User $actor,
+        bool $forceNew = false
+    ): ?Invoice {
+        if (! $this->billingEnabled($hub) || $packageId <= 0) {
+            return null;
+        }
+
+        if (! in_array($packageId, $hub->enabledModulePackageIds(), true)) {
+            return null;
+        }
+
+        $package = ModulePackage::query()->with('items')->find($packageId);
+        if (! $package || ! $package->is_active) {
+            return null;
+        }
+
+        $billingKey = $package->billingModuleKey();
+
+        if (! $forceNew) {
+            $existing = HubModuleBilling::query()
+                ->where('hub_id', $hub->id)
+                ->where('module_key', $billingKey)
+                ->where('status', '!=', HubModuleBilling::STATUS_CANCELED)
+                ->get()
+                ->first(fn (HubModuleBilling $row) => ! empty($row->meta['module_package_enable_invoice']));
+
+            if ($existing) {
+                return $existing->invoice ?: $this->invoices->createForModuleBilling($existing);
+            }
+        }
+
+        $amount = (float) $package->amount;
+        $payer = $this->resolvePayer($actor);
+        $isComplimentary = $amount <= 0;
+        $status = $isComplimentary
+            ? HubModuleBilling::STATUS_PAID
+            : HubModuleBilling::STATUS_UNPAID;
+        $moduleKeys = $package->moduleKeys();
+
+        return DB::transaction(function () use (
+            $hub,
+            $package,
+            $billingKey,
+            $amount,
+            $payer,
+            $status,
+            $isComplimentary,
+            $actor,
+            $forceNew,
+            $moduleKeys
+        ) {
+            if ($forceNew) {
+                $this->removePreviousEnableInvoicesForModule($hub, $billingKey);
+                // Package price replaces individual enable invoices for covered modules.
+                foreach ($moduleKeys as $moduleKey) {
+                    $this->removePreviousEnableInvoicesForModule($hub, $moduleKey);
+                }
+            }
+
+            $billing = HubModuleBilling::query()->create([
+                'hub_id' => $hub->id,
+                'module_key' => $billingKey,
+                'billed_user_id' => $payer->id,
+                'amount' => $amount,
+                'currency' => $package->currency ?: 'gbp',
+                'status' => $status,
+                'payment_status' => $status,
+                'paid_at' => $isComplimentary ? now() : null,
+                'paid_by_user_id' => $isComplimentary ? $actor->id : null,
+                'payment_method' => $isComplimentary ? 'complimentary' : null,
+                'payment_notes' => $isComplimentary ? '£0 package price — included' : null,
+                'meta' => [
+                    'module_label' => $package->name,
+                    'module_package_id' => $package->id,
+                    'module_package_slug' => $package->slug,
+                    'module_package_module_keys' => $moduleKeys,
+                    'billing_cadence' => Invoice::TYPES_ONE_TIME,
+                    'billing_unit' => ModulePricingService::BILLING_UNIT_ONE_TIME,
+                    'module_enable_invoice' => true,
+                    'module_package_enable_invoice' => true,
+                    'auto_paid_on_hub_enable' => $isComplimentary,
+                ],
+            ]);
+
+            return $this->invoices->createForModuleBilling($billing);
+        });
     }
 
     /**
@@ -177,6 +297,12 @@ class ModuleBillingService
         }
 
         $created = [];
+        foreach ($hub->enabledModulePackageIds() as $packageId) {
+            $invoice = $this->invoicePackageEnablement($hub, (int) $packageId, $actor, forceNew: false);
+            if ($invoice) {
+                $created[] = $invoice;
+            }
+        }
         foreach ($hub->enabledModuleKeys() as $moduleKey) {
             foreach ($this->invoiceModuleEnablement($hub, $moduleKey, $actor, forceNew: false) as $invoice) {
                 $created[] = $invoice;
@@ -204,6 +330,11 @@ class ModuleBillingService
         }
 
         if (! $hub->moduleEffectivelyEnabled($moduleKey)) {
+            return [];
+        }
+
+        // Covered by an enabled package — charged via package invoice only.
+        if ($hub->moduleCoveredByEnabledPackage($moduleKey)) {
             return [];
         }
 
@@ -286,6 +417,10 @@ class ModuleBillingService
     public function invoiceExistingDeployedWebsites(Hub $hub, User $actor, bool $forceNew = false): array
     {
         if (! $this->billingEnabled($hub) || ! $hub->moduleEffectivelyEnabled(self::WEBSITE_MODULE_KEY)) {
+            return [];
+        }
+
+        if ($hub->moduleCoveredByEnabledPackage(self::WEBSITE_MODULE_KEY)) {
             return [];
         }
 

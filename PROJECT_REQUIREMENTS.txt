@@ -1493,6 +1493,9 @@ Either path designates the same Head; both MUST stay in sync:
     (capabilities blurred while this module is off)
   - Generic Content Pre Approval Workflow — activates GC capability section
     (capabilities blurred while this module is off)
+- Module packages (see 5.1C): optional bundles of the 5 product modules with a
+  single package price. Modules covered by an enabled package are locked on
+  this screen (`locked_reason=module_package`) and cannot be toggled separately.
 - Managed via `dashboard_manage_modules` / Modules API on Central Hub.
 - When `charge_amount_per_module` is ON, newly enabling a module (including
   uncheck → check again) creates a one-time invoice. Previous enable invoices
@@ -1523,14 +1526,46 @@ Either path designates the same Head; both MUST stay in sync:
 - Stored in `module_pricing` (+ recurring_* columns) and `module_recurring_tiers`.
 - Capabilities group “Modules pricing” (blurred while BOTH charge flags off):
   - `dashboard_manage_module_pricing` — Set one-time + recurring catalogue / slots
+    AND create/edit/delete module packages (bundled product modules with their
+    own one-time package price)
   - `dashboard_view_module_invoices` — Who can see module invoices
   - `dashboard_mark_module_invoices_paid` — Manually mark unpaid module invoices paid
-- APIs: GET/PUT module-pricing; PUT module-recurring-tiers/{id}; module-invoices…
+- APIs: GET/PUT module-pricing; PUT module-recurring-tiers/{id};
+  GET/POST/PUT/DELETE module-packages; module-invoices…
 - Invoice types: `module_billing` (one_time), `module_recurring` (recurring)
 - Scheduler: `billing:process-module-cycles` daily — anniversary invoices, renew-day
   card collection, grace penalties
-- Frontend: Module prices shows one-time + recurring + slots; advisor-pricing page
-  removed from nav (tiers retired); Billing renew + grace page under Advisors
+- Frontend: Module prices shows one-time + recurring + slots + packages;
+  advisor-pricing page removed from nav (tiers retired); Billing renew + grace
+  page under Advisors
+
+5.1C Module packages (bundled product modules)
+- Power Admin can create catalogue packages of the 5 optional product modules
+  (base Shared / White Label Hub is never packaged — it stays mandatory/locked).
+- Package rules:
+  - Must include ≥1 product module; dependency parents are auto-included
+    (e.g. selecting Social Media Pre Approval also includes Template Library).
+  - Package has its own one-time `amount` (may differ from the sum of
+    individual module catalogue prices).
+  - Packages that share any module cannot both be enabled on the same hub.
+- Hub Modules page (`GET/PUT /api/power-admin/modules`):
+  - Returns `packages` alongside `modules`.
+  - Enabling a package forces its modules ON and locks them
+    (`locked_reason=module_package`, `locked_by_package={id,name}`) so they
+    cannot be selected/deselected separately while the package is on.
+  - Disabling a package turns its modules OFF (unless another enabled package
+    still covers them); they can then be toggled individually again.
+  - Stored on hub as `enabled_module_package_ids` (JSON).
+- Billing (`charge_amount_per_module`):
+  - Newly enabling a package creates ONE package invoice
+    (`hub_module_billings.module_key = module_package:{id}`, meta
+    `module_package_enable_invoice`).
+  - Modules covered by an enabled package do NOT get individual one-time
+    enable invoices (including WTL per-template enable).
+  - Re-enabling a package supersedes prior package + covered-module enable
+    invoices (same pattern as individual module re-enable).
+  - Recurring charges still use per-module catalogue rates for modules that
+    are effectively on (package is a one-time packaging discount/bundle only).
 
 5.2 User capabilities matrix (REQUIRED — Power Admin → Capabilities)
 - Power Admin manages what users can do from their dashboards / member UI,

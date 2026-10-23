@@ -151,6 +151,20 @@ class HubModuleBilling extends Model
             $summary = $domain !== ''
                 ? sprintf('Website %s — £%s', $domain, number_format($amount, 2))
                 : sprintf('1 website — £%s', number_format($amount, 2));
+        } elseif (! empty($this->meta['module_package_enable_invoice'])) {
+            $packageName = (string) ($this->meta['module_label'] ?? 'Module package');
+            $covered = array_values(array_filter(array_map('strval', (array) ($this->meta['module_package_module_keys'] ?? []))));
+            $lines[] = 'One-time module package enablement charge.';
+            $lines[] = 'Package: '.$packageName;
+            if ($covered !== []) {
+                $labels = array_map(
+                    fn (string $key) => (string) (Hub::CHECKLIST_DEFINITIONS[$key]['label'] ?? $key),
+                    $covered
+                );
+                $lines[] = 'Includes: '.implode(', ', $labels);
+            }
+            $lines[] = sprintf('Amount: £%s', number_format($amount, 2));
+            $summary = sprintf('Package %s — £%s', $packageName, number_format($amount, 2));
         } else {
             $lines[] = 'One-time module enablement charge.';
             $lines[] = sprintf('Amount: £%s', number_format($amount, 2));

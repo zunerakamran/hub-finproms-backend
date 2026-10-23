@@ -54,6 +54,7 @@ use App\Http\Controllers\Api\InternalGcFileController;
 use App\Http\Controllers\Api\PowerAdminHubController;
 use App\Http\Controllers\Api\PowerAdminHubBackupController;
 use App\Http\Controllers\Api\PowerAdminHubReleaseController;
+use App\Http\Controllers\Api\PowerAdminModulePackageController;
 use App\Http\Controllers\Api\PowerAdminModulePricingController;
 use App\Http\Controllers\Api\PowerAdminPaymentMethodController;
 use App\Http\Controllers\Api\PowerAdminUserController;
@@ -636,6 +637,10 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/module-pricing', [PowerAdminModulePricingController::class, 'index']);
             Route::put('/module-pricing/{pricing}', [PowerAdminModulePricingController::class, 'update']);
             Route::put('/module-recurring-tiers/{tier}', [PowerAdminModulePricingController::class, 'updateTier']);
+            Route::get('/module-packages', [PowerAdminModulePackageController::class, 'index']);
+            Route::post('/module-packages', [PowerAdminModulePackageController::class, 'store']);
+            Route::put('/module-packages/{modulePackage}', [PowerAdminModulePackageController::class, 'update']);
+            Route::delete('/module-packages/{modulePackage}', [PowerAdminModulePackageController::class, 'destroy']);
         });
 
         Route::middleware('hub_can:dashboard_view_module_invoices')->group(function () {
@@ -1027,6 +1032,10 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/module-pricing', [PowerAdminModulePricingController::class, 'index']);
             Route::put('/module-pricing/{pricing}', [PowerAdminModulePricingController::class, 'update']);
             Route::put('/module-recurring-tiers/{tier}', [PowerAdminModulePricingController::class, 'updateTier']);
+            Route::get('/module-packages', [PowerAdminModulePackageController::class, 'index']);
+            Route::post('/module-packages', [PowerAdminModulePackageController::class, 'store']);
+            Route::put('/module-packages/{modulePackage}', [PowerAdminModulePackageController::class, 'update']);
+            Route::delete('/module-packages/{modulePackage}', [PowerAdminModulePackageController::class, 'destroy']);
         });
 
         Route::middleware('hub_can:dashboard_view_module_invoices')->group(function () {

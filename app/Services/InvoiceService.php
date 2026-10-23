@@ -111,6 +111,8 @@ class InvoiceService
         $amount = (float) $billing->amount;
         $hubName = $billing->hub?->name ?? 'Hub';
         $moduleKey = (string) $billing->module_key;
+        $isPackage = ! empty($billing->meta['module_package_enable_invoice'])
+            || \App\Models\ModulePackage::parseBillingPackageId($moduleKey) !== null;
         $moduleLabel = (string) (
             $billing->meta['module_label']
             ?? \App\Models\Hub::CHECKLIST_DEFINITIONS[$moduleKey]['label']
@@ -122,9 +124,13 @@ class InvoiceService
         $unitAmount = isset($billing->meta['unit_amount'])
             ? (float) $billing->meta['unit_amount']
             : $amount;
-        $description = $domain !== ''
-            ? "Module (one time) — {$moduleLabel} — {$domain} ({$hubName})"
-            : "Module (one time) — {$moduleLabel} ({$hubName})";
+        if ($isPackage) {
+            $description = "Module package (one time) — {$moduleLabel} ({$hubName})";
+        } else {
+            $description = $domain !== ''
+                ? "Module (one time) — {$moduleLabel} — {$domain} ({$hubName})"
+                : "Module (one time) — {$moduleLabel} ({$hubName})";
+        }
 
         $qty = ($websiteCount > 1 || ! empty($billing->meta['consolidated_websites']) || ! empty($billing->meta['template_count']))
             ? $websiteCount
@@ -154,9 +160,11 @@ class InvoiceService
                 ? $billing->hub->nextModuleInvoiceDueDate()->toDateString()
                 : now()->toDateString(),
             'line_items' => [[
-                'label' => $qty > 1
-                    ? "{$moduleLabel} — {$qty} {$unitLabel} × £".number_format($lineUnit, 2)
-                    : "{$moduleLabel} — one-time module charge",
+                'label' => $isPackage
+                    ? "{$moduleLabel} — one-time module package"
+                    : ($qty > 1
+                        ? "{$moduleLabel} — {$qty} {$unitLabel} × £".number_format($lineUnit, 2)
+                        : "{$moduleLabel} — one-time module charge"),
                 'quantity' => $qty,
                 'unit_amount' => $lineUnit,
                 'total' => $amount,

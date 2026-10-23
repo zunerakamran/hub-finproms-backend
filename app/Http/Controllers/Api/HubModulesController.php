@@ -9,6 +9,7 @@ use App\Services\ActivityLogService;
 use App\Services\CapabilitiesMatrixService;
 use App\Services\HubService;
 use App\Services\ModuleBillingService;
+use App\Services\ModulePackageService;
 use App\Services\WhiteLabelHubSyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -24,7 +25,8 @@ class HubModulesController extends Controller
         private readonly ActivityLogService $activityLogs,
         private readonly WhiteLabelHubSyncService $whiteLabelSync,
         private readonly ActingHubService $actingHubs,
-        private readonly ModuleBillingService $moduleBilling
+        private readonly ModuleBillingService $moduleBilling,
+        private readonly ModulePackageService $modulePackages
     ) {}
 
     public function show(Request $request): JsonResponse
@@ -40,6 +42,7 @@ class HubModulesController extends Controller
                 'type' => $hub->type,
             ],
             'modules' => $this->modulesPayload($hub),
+            'packages' => $this->modulePackages->packagesPayloadForHub($hub),
         ]);
     }
 
@@ -49,21 +52,47 @@ class HubModulesController extends Controller
         $this->assertCanManage($request, $hub);
 
         $validated = $request->validate([
-            'modules' => ['required', 'array'],
+            'modules' => ['sometimes', 'array'],
+            'packages' => ['sometimes', 'array'],
         ]);
 
-        $input = $this->normalizeModulesPayload($validated['modules']);
-        $allowedKeys = $hub->moduleKeysForPage();
-        $unknown = array_diff(array_keys($input), $allowedKeys);
-        if ($unknown !== []) {
+        if (! array_key_exists('modules', $validated) && ! array_key_exists('packages', $validated)) {
             return response()->json([
-                'message' => 'Unknown module keys: '.implode(', ', $unknown),
+                'message' => 'Provide modules and/or packages to update.',
             ], 422);
         }
 
-        $checklist = $hub->resolvedChecklist();
-        $beforeChecklist = $checklist;
-        foreach ($allowedKeys as $key) {
+        $beforeChecklist = $hub->resolvedChecklist();
+        $beforePackageIds = $hub->enabledModulePackageIds();
+
+        $afterPackageIds = $beforePackageIds;
+        if (array_key_exists('packages', $validated)) {
+            try {
+                $afterPackageIds = $this->modulePackages->resolveEnabledPackageIds(
+                    $validated['packages'],
+                    $beforePackageIds
+                );
+            } catch (InvalidArgumentException $e) {
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
+        }
+
+        $input = [];
+        if (array_key_exists('modules', $validated)) {
+            $input = $this->normalizeModulesPayload($validated['modules']);
+            $allowedKeys = $hub->moduleKeysForPage();
+            $unknown = array_diff(array_keys($input), $allowedKeys);
+            if ($unknown !== []) {
+                return response()->json([
+                    'message' => 'Unknown module keys: '.implode(', ', $unknown),
+                ], 422);
+            }
+            // Modules owned by an enabled package cannot be selected separately.
+            $input = $this->modulePackages->filterIndividualModuleToggles($input, $afterPackageIds);
+        }
+
+        $checklist = $beforeChecklist;
+        foreach ($hub->moduleKeysForPage() as $key) {
             if (Hub::isLockedModuleKey($key)) {
                 continue;
             }
@@ -72,9 +101,15 @@ class HubModulesController extends Controller
             }
         }
 
-        $checklist = $hub->applyModuleDependencies($checklist);
+        $checklist = $this->modulePackages->applyPackagesToChecklist(
+            $hub,
+            $checklist,
+            $beforePackageIds,
+            $afterPackageIds
+        );
 
         $hub->checklist = $checklist;
+        $hub->enabled_module_package_ids = $afterPackageIds;
         $hub->save();
         $this->hubs->forgetCurrentCache();
 
@@ -82,16 +117,28 @@ class HubModulesController extends Controller
         $moduleInvoiceWarning = null;
         $actor = $request->user();
         if ($actor) {
+            $newlyEnabledPackages = $this->modulePackages->newlyEnabledPackageIds(
+                $beforePackageIds,
+                $afterPackageIds
+            );
             $newlyEnabled = $this->moduleBilling->newlyEnabledModuleKeys(
                 $hub,
                 $beforeChecklist,
                 $checklist
             );
+
             try {
-                $moduleInvoices = $this->moduleBilling->invoiceNewlyEnabledModules(
-                    $hub->fresh(),
-                    $newlyEnabled,
-                    $actor
+                $moduleInvoices = array_merge(
+                    $this->moduleBilling->invoiceNewlyEnabledPackages(
+                        $hub->fresh(),
+                        $newlyEnabledPackages,
+                        $actor
+                    ),
+                    $this->moduleBilling->invoiceNewlyEnabledModules(
+                        $hub->fresh(),
+                        $newlyEnabled,
+                        $actor
+                    )
                 );
             } catch (InvalidArgumentException $e) {
                 $moduleInvoiceWarning = $e->getMessage();
@@ -104,6 +151,7 @@ class HubModulesController extends Controller
                 $moduleInvoiceWarning === null
                 && $moduleInvoices === []
                 && in_array('module_website_template_library', $newlyEnabled, true)
+                && ! $hub->fresh()->moduleCoveredByEnabledPackage('module_website_template_library')
             ) {
                 $fresh = $hub->fresh();
                 if (! $this->moduleBilling->billingEnabled($fresh)) {
@@ -143,6 +191,7 @@ class HubModulesController extends Controller
                 'modules' => collect($this->modulesPayload($hub))
                     ->mapWithKeys(fn ($row) => [$row['key'] => $row['enabled']])
                     ->all(),
+                'packages' => $hub->enabledModulePackageIds(),
                 'module_invoices_created' => collect($moduleInvoices)
                     ->map(fn ($invoice) => [
                         'id' => $invoice->id,
@@ -169,6 +218,7 @@ class HubModulesController extends Controller
                 'type' => $hub->type,
             ],
             'modules' => $this->modulesPayload($hub),
+            'packages' => $this->modulePackages->packagesPayloadForHub($hub),
             'module_invoices' => collect($moduleInvoices)->map(fn ($invoice) => [
                 'id' => $invoice->id,
                 'invoice_number' => $invoice->invoice_number,
@@ -220,6 +270,7 @@ class HubModulesController extends Controller
      *   available: bool,
      *   locked: bool,
      *   locked_reason: ?string,
+     *   locked_by_package: ?array{id: int, name: string},
      *   depends_on: list<string>,
      *   dependencies_met: bool
      * }>
@@ -227,6 +278,7 @@ class HubModulesController extends Controller
     private function modulesPayload(Hub $hub): array
     {
         $resolved = $hub->resolvedChecklist();
+        $ownership = $this->modulePackages->packageOwnershipMap($hub);
         $items = [];
 
         foreach ($hub->moduleKeysForPage() as $key) {
@@ -246,6 +298,7 @@ class HubModulesController extends Controller
 
             $locked = Hub::isLockedModuleKey($key);
             $lockedReason = null;
+            $lockedByPackage = null;
             if ($key === 'module_shared_hub') {
                 $locked = true;
                 $lockedReason = 'shared_hub';
@@ -255,6 +308,13 @@ class HubModulesController extends Controller
             } elseif ($key === 'module_central_hub') {
                 $locked = true;
                 $lockedReason = 'central_hub';
+            } elseif (isset($ownership[$key])) {
+                $locked = true;
+                $lockedReason = 'module_package';
+                $lockedByPackage = [
+                    'id' => (int) $ownership[$key]->id,
+                    'name' => (string) $ownership[$key]->name,
+                ];
             }
 
             $enabled = (bool) ($resolved[$key] ?? false);
@@ -271,6 +331,7 @@ class HubModulesController extends Controller
                 'available' => true,
                 'locked' => $locked,
                 'locked_reason' => $lockedReason,
+                'locked_by_package' => $lockedByPackage,
                 'depends_on' => $dependsOn,
                 'dependencies_met' => $dependenciesMet,
             ];

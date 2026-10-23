@@ -140,9 +140,12 @@ class ActingHubService
         // Public website chrome (member_view_site_pages) is also THIS deploy only —
         // never the acting Shared / White-label hub (Website button must not open
         // a remote frontend_url and then break after login).
+        // Module pricing / packages catalogue is platform-global (same tables for every
+        // hub) — gate it on Central even while the switcher is on a content hub.
         if ($capability === self::CAPABILITY
             || $capability === 'dashboard_central_content_library'
             || $capability === 'member_view_site_pages'
+            || Hub::isModulePricingCapability($capability)
         ) {
             return $current;
         }
