@@ -75,7 +75,7 @@ class CreditsReportService
                     'direction' => 'in',
                     'type' => 'subscription',
                     'type_label' => 'Plan credits',
-                    'description' => $planName.' · '.$subscription->credits_granted.' credits granted',
+                    'description' => $planName.' | '.$subscription->credits_granted.' credits granted',
                     'item_title' => $planName,
                     'credits' => (int) $subscription->credits_granted,
                     'occurred_at' => optional($at)?->toIso8601String(),

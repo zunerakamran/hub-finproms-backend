@@ -17,7 +17,7 @@ class PublishScheduledChangeRequests extends Command
 
         if ($result['published'] === 0 && $result['failed'] === 0) {
             $this->info('No scheduled change requests due for publication.');
-            $this->line('Scopes scanned: '.$result['hubs_scanned'].' · now '.$result['now']);
+            $this->line('Scopes scanned: '.$result['hubs_scanned'].' | now '.$result['now']);
 
             return self::SUCCESS;
         }

@@ -20,7 +20,7 @@ class PowerAdminModulePackageController extends Controller
         return response()->json([
             'packages' => $this->packages->listPackages(activeOnly: false),
             'available_module_keys' => \App\Models\Hub::PRODUCT_MODULE_KEYS,
-            'formula' => 'Package one-time price replaces individual module enable invoices for covered modules. Recurring charges still use per-module catalogue rates for enabled modules.',
+            'formula' => 'Package one-time + recurring replace individual module catalogue charges for covered modules while the package is enabled.',
         ]);
     }
 
@@ -31,6 +31,9 @@ class PowerAdminModulePackageController extends Controller
             'slug' => ['sometimes', 'nullable', 'string', 'max:255'],
             'description' => ['sometimes', 'nullable', 'string', 'max:2000'],
             'amount' => ['sometimes', 'numeric', 'min:0'],
+            'recurring_amount' => ['sometimes', 'numeric', 'min:0'],
+            'recurring_billing_unit' => ['sometimes', 'string', 'in:none,per_network,per_adviser,per_user,per_website,per_firm'],
+            'recurring_tier_slot' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:3'],
             'currency' => ['sometimes', 'string', 'size:3'],
             'is_active' => ['sometimes', 'boolean'],
             'sort_order' => ['sometimes', 'integer', 'min:0'],
@@ -57,6 +60,9 @@ class PowerAdminModulePackageController extends Controller
             'slug' => ['sometimes', 'nullable', 'string', 'max:255'],
             'description' => ['sometimes', 'nullable', 'string', 'max:2000'],
             'amount' => ['sometimes', 'numeric', 'min:0'],
+            'recurring_amount' => ['sometimes', 'numeric', 'min:0'],
+            'recurring_billing_unit' => ['sometimes', 'string', 'in:none,per_network,per_adviser,per_user,per_website,per_firm'],
+            'recurring_tier_slot' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:3'],
             'currency' => ['sometimes', 'string', 'size:3'],
             'is_active' => ['sometimes', 'boolean'],
             'sort_order' => ['sometimes', 'integer', 'min:0'],

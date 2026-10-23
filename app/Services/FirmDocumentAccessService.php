@@ -62,6 +62,17 @@ class FirmDocumentAccessService
 
     public function isHeadOfFirm(User $user, Firm $firm): bool
     {
+        // Multiple Network/Firm Admins allowed — role + firm membership is authoritative.
+        if ($user->firm_id && (int) $user->firm_id === (int) $firm->id) {
+            if ($firm->isCentral() && $user->hasRole(User::ROLE_NETWORK_ADMIN)) {
+                return true;
+            }
+            if (! $firm->isCentral() && $user->hasRole(User::ROLE_FIRM_ADMIN)) {
+                return true;
+            }
+        }
+
+        // Legacy: primary contact on firms.head_user_id (or same email across hubs).
         if ($firm->head_user_id !== null) {
             if ((int) $firm->head_user_id === (int) $user->id) {
                 return true;
@@ -73,16 +84,6 @@ class FirmDocumentAccessService
                     && strcasecmp((string) $head->email, (string) $user->email) === 0) {
                     return true;
                 }
-            }
-        }
-
-        // Role-based headship when head_user_id is missing or out of sync.
-        if ($user->firm_id && (int) $user->firm_id === (int) $firm->id) {
-            if ($firm->isCentral() && $user->hasRole(User::ROLE_NETWORK_ADMIN)) {
-                return true;
-            }
-            if (! $firm->isCentral() && $user->hasRole(User::ROLE_FIRM_ADMIN)) {
-                return true;
             }
         }
 

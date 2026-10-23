@@ -415,15 +415,15 @@ Firm Admin):
   4) NETWORK ADMIN (network_admin) — head of the Central / Network firm
      - NEW system role (multi-role compatible). Default display name
        “Network Admin” (renameable per hub).
-     - Means: this user is the Head of the hub’s single Central / Network firm
+     - Means: this user is a Head of the hub’s single Central / Network firm
        (`firms.is_central = true`, default name “Central / Network”).
      - User MUST be a member of that Central / Network firm (`users.firm_id`
        points at the central firm). Assigning `network_admin` to a user of a
        non-central firm is rejected.
-     - ONE Network Admin / Head of Central firm per hub (same one-head rule as
-       other firms). Assigning a new Network Admin replaces the previous head
-       (clears previous `firms.head_user_id` and revokes `network_admin` from
-       the previous holder when that was their head-designation path).
+     - MULTIPLE Network Admins allowed per hub (any number of central-firm
+       members may hold `network_admin`). Assigning another does NOT revoke
+       existing Network Admins. `firms.head_user_id` is an optional primary
+       contact only (not exclusive headship).
      - Unlocks Document Repository (Firm Documents) full rights for the
        Central / Network firm only — see §3.4.
      - Other screens still follow the §5.2 matrix UNION for this role column
@@ -434,13 +434,13 @@ Firm Admin):
   5) FIRM ADMIN (firm_admin) — head of a member firm
      - NEW system role (multi-role compatible). Default display name
        “Firm Admin” (renameable per hub).
-     - Means: this user is the Head of THEIR firm — the firm on
+     - Means: this user is a Head of THEIR firm — the firm on
        `users.firm_id`. Example: user belongs to Firm1 and is assigned
        `firm_admin` → they are Head of Firm1.
      - User MUST belong to a non-central firm. Do NOT assign `firm_admin` to
        Central / Network firm members — use `network_admin` instead.
-     - ONE Firm Admin / Head per firm. Assigning `firm_admin` to another
-       member of the same firm replaces the previous head for that firm.
+     - MULTIPLE Firm Admins allowed per member firm. Assigning `firm_admin`
+       to another member does NOT revoke existing Firm Admins for that firm.
      - Unlocks Document Repository (Firm Documents) full rights for THEIR
        firm only — see §3.4.
      - Other screens follow the §5.2 matrix column for `firm_admin`.
@@ -1001,12 +1001,12 @@ Two system roles designate firm heads (display names renameable per hub):
   A) NETWORK ADMIN (`network_admin`)
      - Head of the Central / Network firm only.
      - User MUST have `users.firm_id` = the hub’s central firm.
-     - ONE Network Admin per hub (one head for the central firm).
+     - MULTIPLE Network Admins allowed per hub.
 
   B) FIRM ADMIN (`firm_admin`)
      - Head of the user’s own member firm (`users.firm_id`).
      - Example: member of Firm1 + role `firm_admin` → Head of Firm1.
-     - ONE Firm Admin per member firm.
+     - MULTIPLE Firm Admins allowed per member firm.
      - Must NOT be used for the Central / Network firm (use `network_admin`).
 
 Rules:
@@ -1020,27 +1020,31 @@ Rules:
   firm change until the head role is revoked.
 
 3.4.1a Appointing / syncing Head (two equivalent paths)
-Either path designates the same Head; both MUST stay in sync:
+Either path designates Heads; both MUST stay in sync. Multiple admins OK:
 
-  Path 1 — Assign Head of Firm UI / API
-  - Capability: `dashboard_assign_firm_head` (“Assign Head of Firm”) —
+  Path 1 — Update admins of this firm UI / API
+  - Capability: `dashboard_assign_firm_head` (“Update admin of this firm”) —
     typically Power Admin / FinProms admin / Client admin as matrix allows.
-  - Sets `firms.head_user_id` (must already be a member of that firm).
-  - MUST also assign the matching role on that user:
-      central firm → add `network_admin` (and remove from previous head)
-      member firm  → add `firm_admin` (and remove from previous head)
-  - Clearing the head clears `head_user_id` AND revokes that head role from
-    the previous holder (does not remove their other roles).
+  - Accepts `head_user_ids` (array of firm members). Empty array clears all
+    admins for that firm.
+  - MUST sync the matching role on each selected user (add) and revoke it
+    from members no longer selected:
+      central firm → `network_admin`
+      member firm  → `firm_admin`
+  - `firms.head_user_id` = optional primary contact (first selected / retained
+    if still an admin). Not exclusive — Document rights use the role.
 
   Path 2 — Role assign (Hub → Users / multi-role UI / Excel when supported)
-  - Assigning `network_admin` or `firm_admin` MUST set that firm’s
-    `head_user_id` to the user (replacing any previous head) when firm
-    membership qualifies; otherwise reject the role assign.
-  - Revoking the last head role for that firm clears `head_user_id`.
+  - Assigning `network_admin` or `firm_admin` adds that user as an admin
+    WITHOUT revoking other admins. Sets `head_user_id` only when currently
+    empty (primary contact). Reject if firm membership does not qualify.
+  - Revoking a head role from one user does not affect other admins; if that
+    user was `head_user_id`, reassign primary to another remaining admin or
+    clear it.
 
-- `is_firm_head` / Document Repository unlock = user is `firms.head_user_id`
-  for their firm OR holds the matching head role with matching firm
-  membership (implementations should treat these as one state).
+- `is_firm_head` / Document Repository unlock = user holds the matching head
+  role with matching firm membership (preferred), OR is legacy
+  `firms.head_user_id` / same-email primary contact.
 - LEGACY: older “Head may be ANY role without network_admin/firm_admin” is
   superseded — new appointments always create/sync the head role. Existing
   heads without the role SHOULD be migrated (backfill `network_admin` /
@@ -1550,8 +1554,12 @@ Either path designates the same Head; both MUST stay in sync:
 - Package rules:
   - Must include ≥1 product module; dependency parents are auto-included
     (e.g. selecting Social Media Pre Approval also includes Template Library).
-  - Package has its own one-time `amount` (may differ from the sum of
-    individual module catalogue prices).
+  - Package has its own one-time `amount` and recurring fields
+    (`recurring_amount`, `recurring_billing_unit`, `recurring_tier_slot`) —
+    same units as single modules (none / per_network / per_adviser / per_user /
+    per_website / per_firm + slot 1–3).
+  - While a package is enabled, its one-time and recurring charges replace
+    individual catalogue charges for covered modules (no double billing).
   - Packages that share any module cannot both be enabled on the same hub.
 - Hub Modules page (`GET/PUT /api/power-admin/modules`):
   - Returns `packages` alongside `modules`.
@@ -1569,8 +1577,9 @@ Either path designates the same Head; both MUST stay in sync:
     enable invoices (including WTL per-template enable).
   - Re-enabling a package supersedes prior package + covered-module enable
     invoices (same pattern as individual module re-enable).
-  - Recurring charges still use per-module catalogue rates for modules that
-    are effectively on (package is a one-time packaging discount/bundle only).
+  - Recurring: flat package invoices on renew day; seat packages create import /
+    anniversary batches under `module_package:{id}` (users with access to any
+    module in the package). Covered modules skip their individual recurring.
 - Module prices page (`/my-dashboard/module-pricing`) lists catalogue rows for
   the **acting hub type only** (WL → White Label Hub + 5 products; Shared →
   Shared Hub + 5 products; Central → Central Hub Controller only).

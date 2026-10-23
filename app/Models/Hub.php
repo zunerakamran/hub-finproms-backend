@@ -1145,7 +1145,7 @@ class Hub extends Model
             'default_white_label' => true,
         ],
         'dashboard_assign_firm_head' => [
-            'label' => 'Update admin of this firm',
+            'label' => 'Update admins of this firm',
             'description' => 'Appoint, replace, or clear the admin for each firm (must be a member of that firm). The selected user receives Network Admin (Central / Network firm) or Firm Admin (member firms). Not tied to the Firm documents functionality. Typical for Power Admin / FinProms admin.',
             'group' => self::GROUP_DASHBOARD_FIRMS,
             'default_shared' => true,
@@ -2965,7 +2965,7 @@ class Hub extends Model
     }
 
     /**
-     * Public-site page copy (Home / Posts·Reels / post detail), defaults merged in.
+     * Public-site page copy (Home / Posts|Reels / post detail), defaults merged in.
      *
      * @return array{
      *   home: array<string, string>,

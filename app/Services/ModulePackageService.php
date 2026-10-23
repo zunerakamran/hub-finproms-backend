@@ -114,6 +114,9 @@ class ModulePackageService
                 'slug' => $slug,
                 'description' => isset($data['description']) ? (string) $data['description'] : null,
                 'amount' => round((float) ($data['amount'] ?? 0), 2),
+                'recurring_amount' => round((float) ($data['recurring_amount'] ?? 0), 2),
+                'recurring_billing_unit' => $this->normalizeRecurringUnit($data['recurring_billing_unit'] ?? null),
+                'recurring_tier_slot' => $this->normalizeRecurringSlot($data['recurring_tier_slot'] ?? null),
                 'billing_unit' => ModulePricingService::BILLING_UNIT_ONE_TIME,
                 'currency' => strtolower((string) ($data['currency'] ?? 'gbp')),
                 'is_active' => array_key_exists('is_active', $data) ? (bool) $data['is_active'] : true,
@@ -156,6 +159,15 @@ class ModulePackageService
             }
             if (array_key_exists('amount', $data)) {
                 $package->amount = round((float) $data['amount'], 2);
+            }
+            if (array_key_exists('recurring_amount', $data)) {
+                $package->recurring_amount = round((float) $data['recurring_amount'], 2);
+            }
+            if (array_key_exists('recurring_billing_unit', $data)) {
+                $package->recurring_billing_unit = $this->normalizeRecurringUnit($data['recurring_billing_unit']);
+            }
+            if (array_key_exists('recurring_tier_slot', $data)) {
+                $package->recurring_tier_slot = $this->normalizeRecurringSlot($data['recurring_tier_slot']);
             }
             if (array_key_exists('currency', $data)) {
                 $package->currency = strtolower((string) $data['currency']);
@@ -520,6 +532,11 @@ class ModulePackageService
             'description' => $package->description,
             'amount' => (float) $package->amount,
             'billing_unit' => (string) ($package->billing_unit ?: ModulePricingService::BILLING_UNIT_ONE_TIME),
+            'recurring_amount' => (float) ($package->recurring_amount ?? 0),
+            'recurring_billing_unit' => (string) ($package->recurring_billing_unit ?: ModuleRecurringBillingService::UNIT_NONE),
+            'recurring_tier_slot' => $package->recurring_tier_slot !== null
+                ? (int) $package->recurring_tier_slot
+                : null,
             'currency' => $package->currency,
             'is_active' => (bool) $package->is_active,
             'sort_order' => (int) $package->sort_order,
@@ -530,6 +547,25 @@ class ModulePackageService
             ], $keys),
             'individual_module_amount_sum' => $this->sumIndividualCatalogueAmounts($keys),
         ];
+    }
+
+    private function normalizeRecurringUnit(mixed $unit): string
+    {
+        $unit = (string) ($unit ?: ModuleRecurringBillingService::UNIT_NONE);
+        if (! in_array($unit, ModulePricingService::RECURRING_UNITS, true)) {
+            throw new InvalidArgumentException('Invalid recurring_billing_unit.');
+        }
+
+        return $unit;
+    }
+
+    private function normalizeRecurringSlot(mixed $slot): ?int
+    {
+        if ($slot === null || $slot === '') {
+            return null;
+        }
+
+        return max(1, min(3, (int) $slot));
     }
 
     /**

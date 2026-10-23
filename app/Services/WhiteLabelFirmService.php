@@ -302,62 +302,79 @@ class WhiteLabelFirmService
     }
 
     /**
-     * Eligible Head of Firm candidates (active members of the firm on the remote hub).
+     * Eligible firm-admin candidates (active members on the remote hub).
      *
-     * @return array{firm: array<string, mixed>, members: list<array{id: int, name: string, email: string}>}
+     * @return array{
+     *   firm: array<string, mixed>,
+     *   members: list<array{id: int, name: string, email: string, is_admin: bool}>,
+     *   admin_user_ids: list<int>
+     * }
      */
     public function members(Hub $hub, int $firmId): array
     {
         $this->assertTarget($hub);
 
         return $this->remoteDb->run($hub, function (string $connection) use ($firmId) {
-            $row = DB::connection($connection)->table('firms')->where('id', $firmId)->first();
-            if (! $row) {
+            $firm = Firm::on($connection)->find($firmId);
+            if (! $firm) {
                 throw new InvalidArgumentException('Firm not found on this hub.');
             }
 
-            $query = DB::connection($connection)->table('users')
+            $role = $this->headRoles->headRoleForFirm($firm);
+            $roles = app(UserRolesService::class);
+
+            $query = User::on($connection)
                 ->where('firm_id', $firmId)
                 ->orderBy('name');
 
-            if (DB::connection($connection)->getSchemaBuilder()->hasColumn('users', 'is_discontinued')) {
+            if (Schema::connection($connection)->hasColumn('users', 'is_discontinued')) {
                 $query->where(function ($q) {
                     $q->where('is_discontinued', false)->orWhereNull('is_discontinued');
                 });
             }
 
+            $adminIds = [];
             $members = $query->get(['id', 'name', 'email'])
-                ->map(fn ($u) => [
-                    'id' => (int) $u->id,
-                    'name' => (string) $u->name,
-                    'email' => (string) $u->email,
-                ])
+                ->map(function (User $u) use ($roles, $role, &$adminIds) {
+                    $isAdmin = in_array($role, $roles->roleKeys($u), true);
+                    if ($isAdmin) {
+                        $adminIds[] = (int) $u->id;
+                    }
+
+                    return [
+                        'id' => (int) $u->id,
+                        'name' => (string) $u->name,
+                        'email' => (string) $u->email,
+                        'is_admin' => $isAdmin,
+                    ];
+                })
                 ->values()
                 ->all();
 
             return [
                 'firm' => $this->serializeRow($connection, $firmId),
                 'members' => $members,
+                'admin_user_ids' => $adminIds,
             ];
         });
     }
 
     /**
-     * Appoint / replace / clear firm admin (Head of Firm) on the remote hub DB.
-     * Syncs network_admin (Central / Network) or firm_admin (member firm) on that DB.
+     * Sync the set of firm admins on the remote hub DB (multiple allowed).
      *
+     * @param  list<int>  $headUserIds
      * @return array<string, mixed>
      */
-    public function assignHead(
+    public function syncAdmins(
         Hub $hub,
         int $firmId,
-        ?int $headUserId,
+        array $headUserIds,
         ?User $actor = null,
         ?Request $request = null,
     ): array {
         $this->assertTarget($hub);
 
-        return $this->remoteDb->run($hub, function (string $connection) use ($firmId, $headUserId, $hub, $actor, $request) {
+        return $this->remoteDb->run($hub, function (string $connection) use ($firmId, $headUserIds, $hub, $actor, $request) {
             if (! Schema::connection($connection)->hasColumn('firms', 'head_user_id')) {
                 throw new InvalidArgumentException(
                     'This hub has not been migrated for Head of Firm yet. Run migrations on that hub’s database.'
@@ -369,55 +386,93 @@ class WhiteLabelFirmService
                 throw new InvalidArgumentException('Firm not found on this hub.');
             }
 
-            $previousHeadId = $firm->head_user_id ? (int) $firm->head_user_id : null;
-
-            if ($headUserId === null) {
-                if ($previousHeadId === null) {
-                    return $this->serializeRow($connection, $firmId);
+            $ids = [];
+            foreach ($headUserIds as $id) {
+                $id = (int) $id;
+                if ($id > 0 && ! in_array($id, $ids, true)) {
+                    $ids[] = $id;
                 }
+            }
 
-                $firm->head_user_id = null;
-                $firm->save();
+            $role = $this->headRoles->headRoleForFirm($firm);
+            $roles = app(UserRolesService::class);
 
-                $this->headRoles->afterHeadAssigned(
+            $currentAdmins = User::on($connection)
+                ->where('firm_id', $firmId)
+                ->get()
+                ->filter(fn (User $u) => in_array($role, $roles->roleKeys($u), true))
+                ->map(fn (User $u) => (int) $u->id)
+                ->values()
+                ->all();
+
+            $toAdd = array_values(array_diff($ids, $currentAdmins));
+            $toRemove = array_values(array_diff($currentAdmins, $ids));
+
+            foreach ($ids as $id) {
+                $head = User::on($connection)->find($id);
+                if (! $head) {
+                    throw new InvalidArgumentException('The selected user was not found on this hub.');
+                }
+                if ($head->firm_id === null || (int) $head->firm_id !== (int) $firmId) {
+                    throw new InvalidArgumentException('Each firm admin must be a member of this firm.');
+                }
+                if ($head->isDiscontinued()) {
+                    throw new InvalidArgumentException('A discontinued user cannot be Head of Firm.');
+                }
+            }
+
+            foreach ($toAdd as $id) {
+                $this->headRoles->grantHeadRole(
+                    User::on($connection)->find($id),
                     $firm,
-                    $previousHeadId,
-                    null,
                     $actor,
                     $request,
                     $hub,
                 );
-
-                return $this->serializeRow($connection, $firmId);
             }
 
-            $head = User::on($connection)->find($headUserId);
-            if (! $head) {
-                throw new InvalidArgumentException('The selected user was not found on this hub.');
+            foreach ($toRemove as $id) {
+                $user = User::on($connection)->find($id);
+                if ($user) {
+                    $this->headRoles->revokeHeadRole($user, $firm, $actor, $request, $hub);
+                }
             }
 
-            if ($head->firm_id === null || (int) $head->firm_id !== (int) $firmId) {
-                throw new InvalidArgumentException('The Head of Firm must be a member of this firm.');
+            if ($ids === []) {
+                $firm->head_user_id = null;
+            } elseif ($firm->head_user_id === null
+                || ! in_array((int) $firm->head_user_id, $ids, true)
+            ) {
+                $firm->head_user_id = $ids[0];
             }
-
-            if ($head->isDiscontinued()) {
-                throw new InvalidArgumentException('A discontinued user cannot be Head of Firm.');
-            }
-
-            $firm->head_user_id = $head->id;
             $firm->save();
 
-            $this->headRoles->afterHeadAssigned(
-                $firm,
-                $previousHeadId,
-                $head,
-                $actor,
-                $request,
-                $hub,
-            );
+            $serialized = $this->serializeRow($connection, $firmId);
+            $serialized['admin_user_ids'] = $ids;
 
-            return $this->serializeRow($connection, $firmId);
+            return $serialized;
         });
+    }
+
+    /**
+     * @deprecated Prefer syncAdmins(). Maps single id / null onto a full sync.
+     *
+     * @return array<string, mixed>
+     */
+    public function assignHead(
+        Hub $hub,
+        int $firmId,
+        ?int $headUserId,
+        ?User $actor = null,
+        ?Request $request = null,
+    ): array {
+        return $this->syncAdmins(
+            $hub,
+            $firmId,
+            $headUserId !== null ? [$headUserId] : [],
+            $actor,
+            $request,
+        );
     }
 
     /**

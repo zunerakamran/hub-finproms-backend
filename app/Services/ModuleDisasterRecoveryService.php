@@ -602,10 +602,10 @@ class ModuleDisasterRecoveryService
         $label = $this->moduleLabel($moduleKey);
 
         return match ($trigger) {
-            ModuleDisasterSnapshot::TRIGGER_PRE_ROLLBACK => 'Pre-rollback · '.$label,
-            ModuleDisasterSnapshot::TRIGGER_AUTO_BASELINE => 'Auto baseline · '.$label,
-            ModuleDisasterSnapshot::TRIGGER_RECOGNIZE => 'At recognition · '.$label,
-            default => 'Manual · '.$label.' · '.now()->toDateTimeString(),
+            ModuleDisasterSnapshot::TRIGGER_PRE_ROLLBACK => 'Pre-rollback | '.$label,
+            ModuleDisasterSnapshot::TRIGGER_AUTO_BASELINE => 'Auto baseline | '.$label,
+            ModuleDisasterSnapshot::TRIGGER_RECOGNIZE => 'At recognition | '.$label,
+            default => 'Manual | '.$label.' | '.now()->toDateTimeString(),
         };
     }
 

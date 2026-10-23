@@ -7,6 +7,7 @@ use App\Models\HubModuleRecurringBilling;
 use App\Models\Invoice;
 use App\Models\ModuleBillingBatch;
 use App\Models\ModuleBillingBatchUser;
+use App\Models\ModulePackage;
 use App\Models\ModulePricing;
 use App\Models\ModuleRecurringTier;
 use App\Models\User;
@@ -112,6 +113,11 @@ class ModuleRecurringBillingService
      */
     public function quoteSeatBatch(Hub $hub, string $moduleKey, array $batchUsers, ?string $connection = null): ?array
     {
+        // Covered by an enabled package with its own recurring — skip individual seat charge.
+        if ($this->moduleCoveredByPackageRecurring($hub, $moduleKey)) {
+            return null;
+        }
+
         $this->pricing->seedDefaultsIfEmpty();
         $pricing = ModulePricing::query()->where('module_key', $moduleKey)->where('is_active', true)->first();
         if (! $pricing || ! in_array($pricing->recurring_billing_unit, [self::UNIT_PER_USER, self::UNIT_PER_ADVISER], true)) {
@@ -123,9 +129,73 @@ class ModuleRecurringBillingService
             return null;
         }
 
+        return $this->buildSeatQuote(
+            $hub,
+            $moduleKey,
+            $batchUsers,
+            (string) $pricing->recurring_billing_unit,
+            $slot,
+            (string) ($pricing->currency ?: 'gbp'),
+            [$moduleKey],
+            $connection
+        );
+    }
+
+    /**
+     * Seat quote for an enabled package (per_user / per_adviser + slot).
+     *
+     * @param  list<User>  $batchUsers
+     * @return array<string, mixed>|null
+     */
+    public function quoteSeatBatchForPackage(
+        Hub $hub,
+        ModulePackage $package,
+        array $batchUsers,
+        ?string $connection = null
+    ): ?array {
+        $unit = (string) ($package->recurring_billing_unit ?: self::UNIT_NONE);
+        if (! in_array($unit, [self::UNIT_PER_USER, self::UNIT_PER_ADVISER], true)) {
+            return null;
+        }
+        $slot = (int) ($package->recurring_tier_slot ?: 0);
+        if ($slot < 1) {
+            return null;
+        }
+
+        $keys = $package->moduleKeys();
+        if ($keys === []) {
+            return null;
+        }
+
+        return $this->buildSeatQuote(
+            $hub,
+            $package->billingModuleKey(),
+            $batchUsers,
+            $unit,
+            $slot,
+            (string) ($package->currency ?: 'gbp'),
+            $keys,
+            $connection
+        );
+    }
+
+    /**
+     * @param  list<User>  $batchUsers
+     * @param  list<string>  $accessModuleKeys  modules used to count active users
+     * @return array<string, mixed>|null
+     */
+    private function buildSeatQuote(
+        Hub $hub,
+        string $billingKey,
+        array $batchUsers,
+        string $billingUnit,
+        int $slot,
+        string $currency,
+        array $accessModuleKeys,
+        ?string $connection = null
+    ): ?array {
         $batchIds = collect($batchUsers)->pluck('id')->all();
-        $existing = $this->activeUsersWithModule($hub, $moduleKey, $connection);
-        // Total after batch: unique active users including this batch.
+        $existing = $this->activeUsersWithAnyModule($hub, $accessModuleKeys, $connection);
         $allIds = collect($existing)->pluck('id')->merge($batchIds)->unique()->values();
         $total = $allIds->count();
         $batchCount = count(array_unique($batchIds));
@@ -140,13 +210,13 @@ class ModuleRecurringBillingService
         $amount = round($rate * $batchCount, 2);
 
         return [
-            'module_key' => $moduleKey,
+            'module_key' => $billingKey,
             'batch_count' => $batchCount,
             'total_users' => $total,
             'rate_per_user' => $rate,
             'network_margin_per_user' => $margin,
             'amount' => $amount,
-            'currency' => $pricing->currency ?: 'gbp',
+            'currency' => $currency,
             'slot' => $slot,
             'tier' => $tier ? [
                 'id' => $tier->id,
@@ -155,8 +225,68 @@ class ModuleRecurringBillingService
                 'rate_per_user' => $rate,
                 'network_margin_per_user' => $margin,
             ] : null,
-            'billing_unit' => (string) $pricing->recurring_billing_unit,
+            'billing_unit' => $billingUnit,
         ];
+    }
+
+    /**
+     * @param  list<string>  $moduleKeys
+     * @return list<User>
+     */
+    public function activeUsersWithAnyModule(Hub $hub, array $moduleKeys, ?string $connection = null): array
+    {
+        if ($moduleKeys === []) {
+            return [];
+        }
+
+        $query = User::query()
+            ->when($connection, fn ($q) => $q->on($connection))
+            ->where('is_suspended', false)
+            ->where('is_discontinued', false)
+            ->orderBy('id');
+
+        return $query->get()->filter(function (User $user) use ($hub, $moduleKeys) {
+            if (ActingHubService::isControlPlaneRole((string) $user->role)) {
+                return false;
+            }
+            foreach ($moduleKeys as $moduleKey) {
+                if ($user->hasModuleAccess($hub, $moduleKey)) {
+                    return true;
+                }
+            }
+
+            return false;
+        })->values()->all();
+    }
+
+    public function moduleCoveredByPackageRecurring(Hub $hub, string $moduleKey): bool
+    {
+        foreach ($this->enabledPackagesWithRecurring($hub) as $package) {
+            if (in_array($moduleKey, $package->moduleKeys(), true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @return list<ModulePackage>
+     */
+    public function enabledPackagesWithRecurring(Hub $hub): array
+    {
+        $ids = $hub->enabledModulePackageIds();
+        if ($ids === []) {
+            return [];
+        }
+
+        return ModulePackage::query()
+            ->with('items')
+            ->whereIn('id', $ids)
+            ->where('is_active', true)
+            ->where('recurring_billing_unit', '!=', self::UNIT_NONE)
+            ->get()
+            ->all();
     }
 
     /**
@@ -178,6 +308,9 @@ class ModuleRecurringBillingService
 
         foreach (self::SEAT_MODULE_KEYS as $moduleKey) {
             if (! $hub->moduleEffectivelyEnabled($moduleKey)) {
+                continue;
+            }
+            if ($this->moduleCoveredByPackageRecurring($hub, $moduleKey)) {
                 continue;
             }
 
@@ -250,6 +383,104 @@ class ModuleRecurringBillingService
             }
         }
 
+        // Seat packages: one batch per enabled package with per_user / per_adviser.
+        foreach ($this->enabledPackagesWithRecurring($hub) as $package) {
+            $unit = (string) ($package->recurring_billing_unit ?: self::UNIT_NONE);
+            if (! in_array($unit, [self::UNIT_PER_USER, self::UNIT_PER_ADVISER], true)) {
+                continue;
+            }
+            $packageKeys = $package->moduleKeys();
+            $batchUsers = array_values(array_filter(
+                $importedUsers,
+                function (User $u) use ($hub, $packageKeys) {
+                    if ($u->isSuspended() || $u->isDiscontinued()) {
+                        return false;
+                    }
+                    foreach ($packageKeys as $key) {
+                        if ($u->hasModuleAccess($hub, $key)) {
+                            return true;
+                        }
+                    }
+
+                    return false;
+                }
+            ));
+            if ($batchUsers === []) {
+                continue;
+            }
+
+            $quote = $this->quoteSeatBatchForPackage($hub, $package, $batchUsers, $connection);
+            if (! $quote || $quote['amount'] <= 0) {
+                continue;
+            }
+
+            $billingKey = $package->billingModuleKey();
+            $invoice = DB::transaction(function () use (
+                $hub,
+                $package,
+                $billingKey,
+                $batchUsers,
+                $quote,
+                $payer,
+                $today,
+                $anniversaryDay
+            ) {
+                $batch = ModuleBillingBatch::query()->create([
+                    'hub_id' => $hub->id,
+                    'module_key' => $billingKey,
+                    'anniversary_day' => $anniversaryDay,
+                    'started_on' => $today->toDateString(),
+                    'next_invoice_on' => $this->nextAnniversaryDate($today, $anniversaryDay)->toDateString(),
+                    'status' => ModuleBillingBatch::STATUS_ACTIVE,
+                    'initial_user_count' => $quote['batch_count'],
+                    'meta' => [
+                        'quote' => $quote,
+                        'module_package_id' => $package->id,
+                        'module_package_module_keys' => $package->moduleKeys(),
+                    ],
+                ]);
+
+                foreach ($batchUsers as $user) {
+                    ModuleBillingBatchUser::query()->create([
+                        'module_billing_batch_id' => $batch->id,
+                        'user_id' => $user->id,
+                        'email' => $user->email,
+                    ]);
+                }
+
+                $billing = HubModuleRecurringBilling::query()->create([
+                    'hub_id' => $hub->id,
+                    'module_billing_batch_id' => $batch->id,
+                    'module_key' => $billingKey,
+                    'billed_user_id' => $payer->id,
+                    'user_count' => $quote['batch_count'],
+                    'total_users_for_tier' => $quote['total_users'],
+                    'rate_per_user' => $quote['rate_per_user'],
+                    'amount' => $quote['amount'],
+                    'currency' => $quote['currency'],
+                    'status' => HubModuleRecurringBilling::STATUS_UNPAID,
+                    'payment_status' => HubModuleRecurringBilling::STATUS_UNPAID,
+                    'due_on' => $today->toDateString(),
+                    'period_starts_on' => $today->toDateString(),
+                    'period_ends_on' => $batch->next_invoice_on?->toDateString(),
+                    'billing_kind' => HubModuleRecurringBilling::KIND_BATCH,
+                    'meta' => [
+                        'quote' => $quote,
+                        'module_label' => $package->name,
+                        'module_package_id' => $package->id,
+                        'module_package_enable_invoice' => false,
+                        'recurring_billing_unit' => $quote['billing_unit'] ?? null,
+                    ],
+                ]);
+
+                return $this->invoices->createForModuleRecurringBilling($billing);
+            });
+
+            if ($invoice) {
+                $created[] = $invoice;
+            }
+        }
+
         return $created;
     }
 
@@ -293,7 +524,20 @@ class ModuleRecurringBillingService
         }
 
         $moduleKey = $batch->module_key;
-        if (! $hub->moduleEffectivelyEnabled($moduleKey)) {
+        $packageId = ModulePackage::parseBillingPackageId((string) $moduleKey);
+        $package = null;
+        $accessKeys = [$moduleKey];
+
+        if ($packageId) {
+            if (! in_array($packageId, $hub->enabledModulePackageIds(), true)) {
+                return null;
+            }
+            $package = ModulePackage::query()->with('items')->find($packageId);
+            if (! $package || ! $package->is_active) {
+                return null;
+            }
+            $accessKeys = $package->moduleKeys();
+        } elseif (! $hub->moduleEffectivelyEnabled($moduleKey)) {
             return null;
         }
 
@@ -304,13 +548,21 @@ class ModuleRecurringBillingService
         }
 
         // Active cohort + tier total must be read from the hub DB (remote for WL).
-        $activeInBatch = $this->oneTimeBilling->onHubDatabase($hub, function () use ($userIds, $hub, $moduleKey) {
+        $activeInBatch = $this->oneTimeBilling->onHubDatabase($hub, function () use ($userIds, $hub, $accessKeys) {
             return User::query()
                 ->whereIn('id', $userIds)
                 ->where('is_suspended', false)
                 ->where('is_discontinued', false)
                 ->get()
-                ->filter(fn (User $u) => $u->hasModuleAccess($hub, $moduleKey))
+                ->filter(function (User $u) use ($hub, $accessKeys) {
+                    foreach ($accessKeys as $key) {
+                        if ($u->hasModuleAccess($hub, $key)) {
+                            return true;
+                        }
+                    }
+
+                    return false;
+                })
                 ->values()
                 ->all();
         });
@@ -321,7 +573,11 @@ class ModuleRecurringBillingService
             return null;
         }
 
-        $quote = $this->oneTimeBilling->onHubDatabase($hub, function (?string $connection) use ($hub, $moduleKey, $activeInBatch) {
+        $quote = $this->oneTimeBilling->onHubDatabase($hub, function (?string $connection) use ($hub, $moduleKey, $package, $activeInBatch) {
+            if ($package) {
+                return $this->quoteSeatBatchForPackage($hub, $package, $activeInBatch, $connection);
+            }
+
             return $this->quoteSeatBatch($hub, $moduleKey, $activeInBatch, $connection);
         });
         if (! $quote || $quote['amount'] <= 0) {
@@ -340,7 +596,22 @@ class ModuleRecurringBillingService
             return null;
         }
 
-        return DB::transaction(function () use ($hub, $batch, $moduleKey, $quote, $batchCount, $amount, $payer, $on) {
+        $moduleLabel = $package
+            ? $package->name
+            : (Hub::CHECKLIST_DEFINITIONS[$moduleKey]['label'] ?? $moduleKey);
+
+        return DB::transaction(function () use (
+            $hub,
+            $batch,
+            $moduleKey,
+            $quote,
+            $batchCount,
+            $amount,
+            $payer,
+            $on,
+            $moduleLabel,
+            $package
+        ) {
             $nextOn = $this->nextAnniversaryDate($on, (int) $batch->anniversary_day);
 
             $billing = HubModuleRecurringBilling::query()->create([
@@ -361,7 +632,8 @@ class ModuleRecurringBillingService
                 'billing_kind' => HubModuleRecurringBilling::KIND_ANNIVERSARY,
                 'meta' => [
                     'quote' => $quote,
-                    'module_label' => Hub::CHECKLIST_DEFINITIONS[$moduleKey]['label'] ?? $moduleKey,
+                    'module_label' => $moduleLabel,
+                    'module_package_id' => $package?->id,
                     'recurring_billing_unit' => $quote['billing_unit'] ?? null,
                 ],
             ]);
@@ -407,77 +679,132 @@ class ModuleRecurringBillingService
             if (! $hub->moduleEffectivelyEnabled($moduleKey)) {
                 continue;
             }
-
-            $exists = HubModuleRecurringBilling::query()
-                ->where('hub_id', $hub->id)
-                ->where('module_key', $moduleKey)
-                ->where('billing_kind', HubModuleRecurringBilling::KIND_FLAT)
-                ->whereDate('period_starts_on', $periodStart)
-                ->where('status', '!=', HubModuleRecurringBilling::STATUS_CANCELED)
-                ->exists();
-            if ($exists) {
+            if ($this->moduleCoveredByPackageRecurring($hub, $moduleKey)) {
                 continue;
             }
 
-            $qty = 1;
-            $unit = (string) $pricing->recurring_billing_unit;
-            if ($unit === self::UNIT_PER_FIRM) {
-                $qty = max(0, $this->oneTimeBilling->countFirms($hub));
-            } elseif ($unit === self::UNIT_PER_WEBSITE) {
-                // Count deployed WC template requests (showcase / advisor websites).
-                $qty = max(0, $this->oneTimeBilling->countDeployedWebsites($hub));
-            }
-
-            $rate = (float) ($pricing->recurring_amount ?? 0);
-            $amount = round($rate * $qty, 2);
-            if ($qty < 1 || $amount <= 0) {
-                continue;
-            }
-
-            $invoice = DB::transaction(function () use (
+            $invoice = $this->createFlatRecurringInvoice(
                 $hub,
-                $moduleKey,
                 $payer,
-                $qty,
-                $rate,
-                $amount,
-                $pricing,
-                $unit,
+                $moduleKey,
+                (string) $pricing->recurring_billing_unit,
+                (float) ($pricing->recurring_amount ?? 0),
+                (string) ($pricing->currency ?: 'gbp'),
+                Hub::CHECKLIST_DEFINITIONS[$moduleKey]['label'] ?? $moduleKey,
                 $on,
                 $periodStart,
                 $periodEnd
-            ) {
-                $billing = HubModuleRecurringBilling::query()->create([
-                    'hub_id' => $hub->id,
-                    'module_billing_batch_id' => null,
-                    'module_key' => $moduleKey,
-                    'billed_user_id' => $payer->id,
-                    'user_count' => $qty,
-                    'total_users_for_tier' => $qty,
-                    'rate_per_user' => $rate,
-                    'amount' => $amount,
-                    'currency' => $pricing->currency ?: 'gbp',
-                    'status' => HubModuleRecurringBilling::STATUS_UNPAID,
-                    'payment_status' => HubModuleRecurringBilling::STATUS_UNPAID,
-                    'due_on' => $on->toDateString(),
-                    'period_starts_on' => $periodStart,
-                    'period_ends_on' => $periodEnd,
-                    'billing_kind' => HubModuleRecurringBilling::KIND_FLAT,
-                    'meta' => [
-                        'recurring_billing_unit' => $unit,
-                        'module_label' => Hub::CHECKLIST_DEFINITIONS[$moduleKey]['label'] ?? $moduleKey,
-                    ],
-                ]);
+            );
+            if ($invoice) {
+                $created[] = $invoice;
+            }
+        }
 
-                return $this->invoices->createForModuleRecurringBilling($billing);
-            });
+        foreach ($this->enabledPackagesWithRecurring($hub) as $package) {
+            $unit = (string) ($package->recurring_billing_unit ?: self::UNIT_NONE);
+            if (! in_array($unit, $flatUnits, true)) {
+                continue;
+            }
 
+            $invoice = $this->createFlatRecurringInvoice(
+                $hub,
+                $payer,
+                $package->billingModuleKey(),
+                $unit,
+                (float) ($package->recurring_amount ?? 0),
+                (string) ($package->currency ?: 'gbp'),
+                $package->name,
+                $on,
+                $periodStart,
+                $periodEnd,
+                ['module_package_id' => $package->id]
+            );
             if ($invoice) {
                 $created[] = $invoice;
             }
         }
 
         return $created;
+    }
+
+    /**
+     * @param  array<string, mixed>  $extraMeta
+     */
+    private function createFlatRecurringInvoice(
+        Hub $hub,
+        User $payer,
+        string $moduleKey,
+        string $unit,
+        float $rate,
+        string $currency,
+        string $label,
+        Carbon $on,
+        string $periodStart,
+        string $periodEnd,
+        array $extraMeta = []
+    ): ?Invoice {
+        $exists = HubModuleRecurringBilling::query()
+            ->where('hub_id', $hub->id)
+            ->where('module_key', $moduleKey)
+            ->where('billing_kind', HubModuleRecurringBilling::KIND_FLAT)
+            ->whereDate('period_starts_on', $periodStart)
+            ->where('status', '!=', HubModuleRecurringBilling::STATUS_CANCELED)
+            ->exists();
+        if ($exists) {
+            return null;
+        }
+
+        $qty = 1;
+        if ($unit === self::UNIT_PER_FIRM) {
+            $qty = max(0, $this->oneTimeBilling->countFirms($hub));
+        } elseif ($unit === self::UNIT_PER_WEBSITE) {
+            $qty = max(0, $this->oneTimeBilling->countDeployedWebsites($hub));
+        }
+
+        $amount = round($rate * $qty, 2);
+        if ($qty < 1 || $amount <= 0) {
+            return null;
+        }
+
+        return DB::transaction(function () use (
+            $hub,
+            $moduleKey,
+            $payer,
+            $qty,
+            $rate,
+            $amount,
+            $currency,
+            $unit,
+            $label,
+            $on,
+            $periodStart,
+            $periodEnd,
+            $extraMeta
+        ) {
+            $billing = HubModuleRecurringBilling::query()->create([
+                'hub_id' => $hub->id,
+                'module_billing_batch_id' => null,
+                'module_key' => $moduleKey,
+                'billed_user_id' => $payer->id,
+                'user_count' => $qty,
+                'total_users_for_tier' => $qty,
+                'rate_per_user' => $rate,
+                'amount' => $amount,
+                'currency' => $currency,
+                'status' => HubModuleRecurringBilling::STATUS_UNPAID,
+                'payment_status' => HubModuleRecurringBilling::STATUS_UNPAID,
+                'due_on' => $on->toDateString(),
+                'period_starts_on' => $periodStart,
+                'period_ends_on' => $periodEnd,
+                'billing_kind' => HubModuleRecurringBilling::KIND_FLAT,
+                'meta' => array_merge([
+                    'recurring_billing_unit' => $unit,
+                    'module_label' => $label,
+                ], $extraMeta),
+            ]);
+
+            return $this->invoices->createForModuleRecurringBilling($billing);
+        });
     }
 
     /**

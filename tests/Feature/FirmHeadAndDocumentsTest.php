@@ -67,7 +67,7 @@ class FirmHeadAndDocumentsTest extends TestCase
         app(HubService::class)->forgetCurrentCache();
     }
 
-    public function test_assign_replace_and_clear_firm_head_with_activity_logs(): void
+    public function test_assign_multiple_admins_and_clear_with_activity_logs(): void
     {
         $hub = $this->createSharedHub();
         $this->enableCaps($hub, User::ROLE_POWER_ADMIN, [
@@ -84,29 +84,28 @@ class FirmHeadAndDocumentsTest extends TestCase
         User::factory()->create(['role' => User::ROLE_USER]); // outside firm
 
         $this->putJson('/api/client-admin/firms/'.$firm->id.'/head', [
-            'head_user_id' => $memberA->id,
+            'head_user_ids' => [$memberA->id],
         ])->assertOk()
             ->assertJsonPath('firm.head_user_id', $memberA->id)
-            ->assertJsonPath('assigned_role', 'firm_admin');
+            ->assertJsonPath('assigned_role', 'firm_admin')
+            ->assertJsonPath('admin_user_ids.0', $memberA->id);
 
-        $this->assertDatabaseHas('activity_logs', ['action' => 'firm.head.assign']);
+        $this->assertDatabaseHas('activity_logs', ['action' => 'firm.head.sync']);
         $memberA->refresh();
         $this->assertTrue($memberA->hasRole(User::ROLE_FIRM_ADMIN));
 
         $this->putJson('/api/client-admin/firms/'.$firm->id.'/head', [
-            'head_user_id' => $memberB->id,
+            'head_user_ids' => [$memberA->id, $memberB->id],
         ])->assertOk()
-            ->assertJsonPath('firm.head_user_id', $memberB->id)
             ->assertJsonPath('assigned_role', 'firm_admin');
 
-        $this->assertDatabaseHas('activity_logs', ['action' => 'firm.head.replace']);
         $memberA->refresh();
         $memberB->refresh();
-        $this->assertFalse($memberA->hasRole(User::ROLE_FIRM_ADMIN));
+        $this->assertTrue($memberA->hasRole(User::ROLE_FIRM_ADMIN));
         $this->assertTrue($memberB->hasRole(User::ROLE_FIRM_ADMIN));
 
         $this->putJson('/api/client-admin/firms/'.$firm->id.'/head', [
-            'head_user_id' => null,
+            'head_user_ids' => [],
         ])->assertOk()
             ->assertJsonPath('firm.head_user_id', null);
 
@@ -116,6 +115,25 @@ class FirmHeadAndDocumentsTest extends TestCase
         $memberB->refresh();
         $this->assertFalse($memberA->hasRole(User::ROLE_FIRM_ADMIN));
         $this->assertFalse($memberB->hasRole(User::ROLE_FIRM_ADMIN));
+    }
+
+    public function test_role_assign_adds_firm_admin_without_removing_existing(): void
+    {
+        $hub = $this->createSharedHub();
+        $firm = Firm::query()->create(['name' => 'Multi Admin Co']);
+        $memberA = User::factory()->create(['firm_id' => $firm->id, 'role' => User::ROLE_USER]);
+        $memberB = User::factory()->create(['firm_id' => $firm->id, 'role' => User::ROLE_USER]);
+        $actor = User::factory()->powerAdmin()->create();
+
+        $roles = app(\App\Services\UserRolesService::class);
+        $roles->syncRoles($memberA, [User::ROLE_USER, User::ROLE_FIRM_ADMIN], log: false, actor: $actor, hub: $hub);
+        $roles->syncRoles($memberB, [User::ROLE_USER, User::ROLE_FIRM_ADMIN], log: false, actor: $actor, hub: $hub);
+
+        $memberA->refresh();
+        $memberB->refresh();
+        $this->assertTrue($memberA->hasRole(User::ROLE_FIRM_ADMIN));
+        $this->assertTrue($memberB->hasRole(User::ROLE_FIRM_ADMIN));
+        $this->assertSame((int) $memberA->id, (int) $firm->fresh()->head_user_id);
     }
 
     public function test_assign_head_syncs_firm_admin_role(): void
@@ -570,7 +588,7 @@ class FirmHeadAndDocumentsTest extends TestCase
 
         $service = app(WhiteLabelFirmService::class);
 
-        $service->assignHead($hub, $firmId, $userA);
+        $service->syncAdmins($hub, $firmId, [$userA]);
         $connection = $remote->connect($hub);
         try {
             $this->assertSame($userA, (int) DB::connection($connection)->table('firms')->where('id', $firmId)->value('head_user_id'));
@@ -578,16 +596,14 @@ class FirmHeadAndDocumentsTest extends TestCase
                 DB::connection($connection)->table('user_roles')
                     ->where('user_id', $userA)->where('role', User::ROLE_FIRM_ADMIN)->exists()
             );
-            $this->assertSame(User::ROLE_FIRM_ADMIN, DB::connection($connection)->table('users')->where('id', $userA)->value('role'));
         } finally {
             $remote->disconnect($hub);
         }
 
-        $service->assignHead($hub, $firmId, $userB);
+        $service->syncAdmins($hub, $firmId, [$userA, $userB]);
         $connection = $remote->connect($hub);
         try {
-            $this->assertSame($userB, (int) DB::connection($connection)->table('firms')->where('id', $firmId)->value('head_user_id'));
-            $this->assertFalse(
+            $this->assertTrue(
                 DB::connection($connection)->table('user_roles')
                     ->where('user_id', $userA)->where('role', User::ROLE_FIRM_ADMIN)->exists()
             );
@@ -595,8 +611,6 @@ class FirmHeadAndDocumentsTest extends TestCase
                 DB::connection($connection)->table('user_roles')
                     ->where('user_id', $userB)->where('role', User::ROLE_FIRM_ADMIN)->exists()
             );
-            $this->assertSame(User::ROLE_USER, DB::connection($connection)->table('users')->where('id', $userA)->value('role'));
-            $this->assertSame(User::ROLE_FIRM_ADMIN, DB::connection($connection)->table('users')->where('id', $userB)->value('role'));
         } finally {
             $remote->disconnect($hub);
         }

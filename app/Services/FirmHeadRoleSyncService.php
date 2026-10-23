@@ -11,6 +11,7 @@ use Illuminate\Validation\ValidationException;
 
 /**
  * Keeps Document Repository headship in sync with network_admin / firm_admin (§3.4).
+ * Multiple Network Admins / Firm Admins are allowed per firm.
  * Assign Head UI and multi-role assign are equivalent paths.
  */
 class FirmHeadRoleSyncService
@@ -86,7 +87,8 @@ class FirmHeadRoleSyncService
     }
 
     /**
-     * After roles are written: mirror head_user_id (and strip the head role from a previous holder).
+     * After roles are written: keep head_user_id as a primary contact only
+     * (does not revoke other admins — multiple Network/Firm Admins are allowed).
      *
      * @param  list<string>  $before
      * @param  list<string>  $after
@@ -120,7 +122,8 @@ class FirmHeadRoleSyncService
                 return;
             }
 
-            $this->setFirmHead($firm, $user, $actor, $request, $hub, clearPreviousRole: true);
+            // Do not revoke other admins — only set primary contact when empty.
+            $this->ensurePrimaryContact($firm, $user);
 
             return;
         }
@@ -134,16 +137,99 @@ class FirmHeadRoleSyncService
                 if (! $lostExpected) {
                     continue;
                 }
-                if ((int) $firm->head_user_id === (int) $user->id) {
-                    $firm->head_user_id = null;
-                    $firm->save();
-                }
+                $this->reassignPrimaryContact($firm, excludeUserId: (int) $user->id);
             }
         }
     }
 
     /**
-     * After Assign Head UI sets/clears head_user_id: mirror network_admin / firm_admin.
+     * Grant the firm’s head role to a user without removing other admins.
+     */
+    public function grantHeadRole(
+        User $user,
+        Firm $firm,
+        ?User $actor = null,
+        ?Request $request = null,
+        ?Hub $hub = null,
+    ): void {
+        $connection = $firm->getConnectionName();
+        if ($user->getConnectionName() !== $connection) {
+            $user = User::on($connection)->find($user->id) ?? $user;
+        }
+
+        $role = $this->headRoleForFirm($firm);
+        $roles = app(UserRolesService::class);
+        $keys = $roles->roleKeys($user);
+        $otherHead = $role === User::ROLE_NETWORK_ADMIN
+            ? User::ROLE_FIRM_ADMIN
+            : User::ROLE_NETWORK_ADMIN;
+        $keys = array_values(array_filter($keys, fn (string $key) => $key !== $otherHead));
+        if (! in_array($role, $keys, true)) {
+            $keys[] = $role;
+        }
+
+        $wasSyncing = $this->syncing;
+        $this->syncing = true;
+        try {
+            $roles->syncRoles(
+                $user,
+                $keys,
+                log: true,
+                actor: $actor,
+                request: $request,
+                hub: $hub,
+                syncFirmHead: false,
+            );
+        } finally {
+            $this->syncing = $wasSyncing;
+        }
+    }
+
+    /**
+     * Revoke the firm’s head role from a user without affecting other admins.
+     */
+    public function revokeHeadRole(
+        User $user,
+        Firm $firm,
+        ?User $actor = null,
+        ?Request $request = null,
+        ?Hub $hub = null,
+    ): void {
+        $connection = $firm->getConnectionName();
+        if ($user->getConnectionName() !== $connection) {
+            $user = User::on($connection)->find($user->id) ?? $user;
+        }
+
+        $role = $this->headRoleForFirm($firm);
+        $roles = app(UserRolesService::class);
+        $next = array_values(array_filter(
+            $roles->roleKeys($user),
+            fn (string $key) => $key !== $role
+        ));
+        if ($next === []) {
+            $next = [User::ROLE_USER];
+        }
+
+        $wasSyncing = $this->syncing;
+        $this->syncing = true;
+        try {
+            $roles->syncRoles(
+                $user,
+                $next,
+                log: true,
+                actor: $actor,
+                request: $request,
+                hub: $hub,
+                syncFirmHead: false,
+            );
+        } finally {
+            $this->syncing = $wasSyncing;
+        }
+    }
+
+    /**
+     * @deprecated Use grantHeadRole / revokeHeadRole / FirmHeadService::syncAdmins.
+     * Legacy single-head path: assigning a new head no longer strips other admins.
      */
     public function afterHeadAssigned(
         Firm $firm,
@@ -158,60 +244,20 @@ class FirmHeadRoleSyncService
             return;
         }
 
-        $this->syncing = true;
+        if ($newHead) {
+            $this->grantHeadRole($newHead, $firm, $actor, $request, $hub);
+            $this->ensurePrimaryContact($firm, $newHead);
 
-        try {
-            $role = $this->headRoleForFirm($firm);
-            $roles = app(UserRolesService::class);
+            return;
+        }
 
-            if ($previousHeadId && (! $newHead || (int) $previousHeadId !== (int) $newHead->id)) {
-                $previous = User::on($connection)->find($previousHeadId);
-                if ($previous) {
-                    $next = array_values(array_filter(
-                        $roles->roleKeys($previous),
-                        fn (string $key) => $key !== $role
-                    ));
-                    if ($next === []) {
-                        $next = [User::ROLE_USER];
-                    }
-                    $roles->syncRoles(
-                        $previous,
-                        $next,
-                        log: true,
-                        actor: $actor,
-                        request: $request,
-                        hub: $hub,
-                        syncFirmHead: false,
-                    );
-                }
+        // Clear primary only — revoke role from previous primary if they still hold it.
+        // Full “clear all admins” is handled by FirmHeadService::syncAdmins([]).
+        if ($previousHeadId) {
+            $previous = User::on($connection)->find($previousHeadId);
+            if ($previous) {
+                $this->revokeHeadRole($previous, $firm, $actor, $request, $hub);
             }
-
-            if ($newHead) {
-                // Ensure the new head is loaded on the same connection as the firm.
-                if ($newHead->getConnectionName() !== $connection) {
-                    $newHead = User::on($connection)->find($newHead->id) ?? $newHead;
-                }
-
-                $keys = $roles->roleKeys($newHead);
-                $otherHead = $role === User::ROLE_NETWORK_ADMIN
-                    ? User::ROLE_FIRM_ADMIN
-                    : User::ROLE_NETWORK_ADMIN;
-                $keys = array_values(array_filter($keys, fn (string $key) => $key !== $otherHead));
-                if (! in_array($role, $keys, true)) {
-                    $keys[] = $role;
-                }
-                $roles->syncRoles(
-                    $newHead,
-                    $keys,
-                    log: true,
-                    actor: $actor,
-                    request: $request,
-                    hub: $hub,
-                    syncFirmHead: false,
-                );
-            }
-        } finally {
-            $this->syncing = false;
         }
     }
 
@@ -253,56 +299,50 @@ class FirmHeadRoleSyncService
 
         if ($hasFirm && (int) $user->firm_id !== (int) $newFirmId) {
             throw ValidationException::withMessages([
-                'firm_id' => 'Firm Admin is tied to the user’s current firm. Revoke Firm Admin (or clear Head of Firm) before moving firms.',
+                'firm_id' => 'Firm Admin is tied to the user’s current firm. Revoke Firm Admin before moving firms.',
             ]);
         }
     }
 
-    private function setFirmHead(
-        Firm $firm,
-        User $head,
-        ?User $actor,
-        ?Request $request,
-        ?Hub $hub,
-        bool $clearPreviousRole,
-    ): void {
-        $previousHeadId = $firm->head_user_id ? (int) $firm->head_user_id : null;
-        if ($previousHeadId === (int) $head->id) {
+    private function ensurePrimaryContact(Firm $firm, User $user): void
+    {
+        if ($firm->head_user_id !== null) {
             return;
         }
 
+        $wasSyncing = $this->syncing;
         $this->syncing = true;
-
         try {
-            $firm->head_user_id = $head->id;
+            $firm->head_user_id = $user->id;
             $firm->save();
-
-            if ($clearPreviousRole && $previousHeadId) {
-                $connection = $firm->getConnectionName();
-                $previous = User::on($connection)->find($previousHeadId);
-                $role = $this->headRoleForFirm($firm);
-                if ($previous) {
-                    $roles = app(UserRolesService::class);
-                    $next = array_values(array_filter(
-                        $roles->roleKeys($previous),
-                        fn (string $key) => $key !== $role
-                    ));
-                    if ($next === []) {
-                        $next = [User::ROLE_USER];
-                    }
-                    $roles->syncRoles(
-                        $previous,
-                        $next,
-                        log: true,
-                        actor: $actor,
-                        request: $request,
-                        hub: $hub,
-                        syncFirmHead: false,
-                    );
-                }
-            }
         } finally {
-            $this->syncing = false;
+            $this->syncing = $wasSyncing;
+        }
+    }
+
+    private function reassignPrimaryContact(Firm $firm, int $excludeUserId): void
+    {
+        $connection = $firm->getConnectionName();
+        $role = $this->headRoleForFirm($firm);
+        $roles = app(UserRolesService::class);
+
+        $replacement = User::on($connection)
+            ->where('firm_id', $firm->id)
+            ->where('id', '!=', $excludeUserId)
+            ->where(function ($q) {
+                $q->where('is_discontinued', false)->orWhereNull('is_discontinued');
+            })
+            ->orderBy('id')
+            ->get()
+            ->first(fn (User $u) => in_array($role, $roles->roleKeys($u), true));
+
+        $wasSyncing = $this->syncing;
+        $this->syncing = true;
+        try {
+            $firm->head_user_id = $replacement?->id;
+            $firm->save();
+        } finally {
+            $this->syncing = $wasSyncing;
         }
     }
 

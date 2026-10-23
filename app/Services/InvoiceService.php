@@ -168,7 +168,7 @@ class InvoiceService
                 'quantity' => $qty,
                 'unit_amount' => $lineUnit,
                 'total' => $amount,
-                'note' => implode(' · ', $breakdown['lines']),
+                'note' => implode(' | ', $breakdown['lines']),
                 'breakdown' => $breakdown,
             ]],
         ]);
@@ -222,7 +222,7 @@ class InvoiceService
                 'quantity' => $qty,
                 'unit_amount' => $rate,
                 'total' => $amount,
-                'note' => implode(' · ', $breakdown['lines']),
+                'note' => implode(' | ', $breakdown['lines']),
                 'breakdown' => $breakdown,
             ]],
         ]);

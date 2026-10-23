@@ -36,19 +36,30 @@ class FirmHeadController extends Controller
                 return response()->json(['message' => $e->getMessage()], $notFound ? 404 : 422);
             }
 
+            $isCentral = ! empty($payload['firm']['is_central']);
+
             return response()->json(array_merge($payload, [
+                'admin_user_ids' => $payload['admin_user_ids'] ?? [],
+                'admin_role' => $isCentral ? 'network_admin' : 'firm_admin',
+                'admin_role_label' => $isCentral ? 'Network Admin' : 'Firm Admin',
                 'target_hub' => $this->targetHubPayload($hub),
                 'acting_on_white_label' => true,
             ]));
         }
 
         $model = Firm::query()->findOrFail($firm);
+        $members = $this->heads->eligibleMembers($model);
+        $adminUserIds = array_values(array_map(
+            fn (array $m) => $m['id'],
+            array_filter($members, fn (array $m) => ! empty($m['is_admin']))
+        ));
 
         $payload = $model->load('headUser:id,name,email')->toApiArray();
 
         return response()->json([
             'firm' => $payload,
-            'members' => $this->heads->eligibleMembers($model),
+            'members' => $members,
+            'admin_user_ids' => $adminUserIds,
             'admin_role' => $model->isCentral() ? 'network_admin' : 'firm_admin',
             'admin_role_label' => $model->isCentral() ? 'Network Admin' : 'Firm Admin',
             'acting_on_white_label' => false,
@@ -57,31 +68,19 @@ class FirmHeadController extends Controller
 
     public function assign(Request $request, int $firm): JsonResponse
     {
-        if (! $request->exists('head_user_id')) {
+        $ids = $this->resolveAdminIds($request);
+        if ($ids === null) {
             return response()->json([
-                'message' => 'head_user_id is required (send null to clear).',
+                'message' => 'head_user_ids (array) or head_user_id is required (send [] / null to clear all admins).',
             ], 422);
         }
 
-        $headUserId = $request->input('head_user_id');
-        $headUserId = $headUserId !== null && $headUserId !== ''
-            ? (int) $headUserId
-            : null;
-
         if ($hub = $this->actingWhiteLabelHub($request)) {
             try {
-                $previous = null;
-                try {
-                    $before = $this->whiteLabelFirms->members($hub, $firm);
-                    $previous = $before['firm']['head_user_id'] ?? null;
-                } catch (InvalidArgumentException) {
-                    $previous = null;
-                }
-
-                $updated = $this->whiteLabelFirms->assignHead(
+                $updated = $this->whiteLabelFirms->syncAdmins(
                     $hub,
                     $firm,
-                    $headUserId,
+                    $ids,
                     $request->user(),
                     $request,
                 );
@@ -91,17 +90,21 @@ class FirmHeadController extends Controller
                 return response()->json(['message' => $e->getMessage()], $notFound ? 404 : 422);
             }
 
-            $this->logRemoteHeadChange($request, $updated, $previous);
+            $this->logRemoteHeadSync($request, $updated, $ids);
 
             $roleLabel = ! empty($updated['is_central']) ? 'Network Admin' : 'Firm Admin';
-            $message = ($updated['head_user_id'] ?? null)
-                ? 'Firm admin updated successfully. Selected user now has the '.$roleLabel.' role.'
-                : 'Firm admin cleared successfully. The '.$roleLabel.' role was removed from the previous admin.';
+            $count = count($updated['admin_user_ids'] ?? $ids);
+            $message = $count === 0
+                ? 'All '.$roleLabel.' roles cleared for this firm.'
+                : ($count === 1
+                    ? 'Firm admin updated. 1 user now has the '.$roleLabel.' role.'
+                    : 'Firm admins updated. '.$count.' users now have the '.$roleLabel.' role.');
 
             return response()->json([
                 'message' => $message,
                 'firm' => $updated,
-                'assigned_role' => ($updated['head_user_id'] ?? null)
+                'admin_user_ids' => $updated['admin_user_ids'] ?? $ids,
+                'assigned_role' => $count > 0
                     ? (! empty($updated['is_central']) ? 'network_admin' : 'firm_admin')
                     : null,
                 'target_hub' => $this->targetHubPayload($hub),
@@ -111,66 +114,91 @@ class FirmHeadController extends Controller
 
         $model = Firm::query()->findOrFail($firm);
 
-        if ($headUserId !== null) {
-            $request->validate([
-                'head_user_id' => ['integer', 'exists:users,id'],
-            ]);
-        }
+        $request->validate([
+            'head_user_ids' => ['sometimes', 'array'],
+            'head_user_ids.*' => ['integer', 'exists:users,id'],
+            'head_user_id' => ['sometimes', 'nullable', 'integer', 'exists:users,id'],
+        ]);
 
-        $updated = $this->heads->assign(
+        $updated = $this->heads->syncAdmins(
             $model,
-            $headUserId,
+            $ids,
             $request->user(),
             $request,
         );
 
+        $adminIds = $this->heads->adminUserIds($updated);
         $roleKey = $updated->isCentral() ? 'network_admin' : 'firm_admin';
         $roleLabel = $updated->isCentral() ? 'Network Admin' : 'Firm Admin';
-        $message = $updated->head_user_id
-            ? 'Firm admin updated successfully. Selected user now has the '.$roleLabel.' role.'
-            : 'Firm admin cleared successfully. The '.$roleLabel.' role was removed from the previous admin.';
+        $count = count($adminIds);
+        $message = $count === 0
+            ? 'All '.$roleLabel.' roles cleared for this firm.'
+            : ($count === 1
+                ? 'Firm admin updated. 1 user now has the '.$roleLabel.' role.'
+                : 'Firm admins updated. '.$count.' users now have the '.$roleLabel.' role.');
 
         return response()->json([
             'message' => $message,
             'firm' => $updated->toApiArray(),
-            'assigned_role' => $updated->head_user_id ? $roleKey : null,
+            'admin_user_ids' => $adminIds,
+            'assigned_role' => $count > 0 ? $roleKey : null,
             'acting_on_white_label' => false,
         ]);
     }
 
     /**
-     * @param  array<string, mixed>  $firm
+     * @return list<int>|null  null when neither field was provided
      */
-    private function logRemoteHeadChange(Request $request, array $firm, mixed $previousHeadId): void
+    private function resolveAdminIds(Request $request): ?array
     {
-        $newHeadId = $firm['head_user_id'] ?? null;
-        $prev = $previousHeadId ? (int) $previousHeadId : null;
-        $next = $newHeadId ? (int) $newHeadId : null;
+        if ($request->exists('head_user_ids')) {
+            $raw = $request->input('head_user_ids');
+            if (! is_array($raw)) {
+                return null;
+            }
 
-        if ($prev === $next) {
-            return;
+            $ids = [];
+            foreach ($raw as $id) {
+                if ($id === null || $id === '') {
+                    continue;
+                }
+                $id = (int) $id;
+                if ($id > 0 && ! in_array($id, $ids, true)) {
+                    $ids[] = $id;
+                }
+            }
+
+            return $ids;
         }
 
+        if ($request->exists('head_user_id')) {
+            $headUserId = $request->input('head_user_id');
+
+            return ($headUserId !== null && $headUserId !== '')
+                ? [(int) $headUserId]
+                : [];
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $firm
+     * @param  list<int>  $ids
+     */
+    private function logRemoteHeadSync(Request $request, array $firm, array $ids): void
+    {
         $roleLabel = ! empty($firm['is_central']) ? 'Network Admin' : 'Firm Admin';
-
-        if ($next === null) {
-            $action = 'firm.head.clear';
-            $description = 'Cleared firm admin ('.$roleLabel.') for “'.($firm['name'] ?? '').'” (remote hub)';
-        } elseif ($prev === null) {
-            $action = 'firm.head.assign';
-            $description = 'Set '.($firm['head_user']['name'] ?? 'user')
-                .' as firm admin ('.$roleLabel.') for “'.($firm['name'] ?? '').'” (remote hub)';
-        } else {
-            $action = 'firm.head.replace';
-            $description = 'Replaced firm admin ('.$roleLabel.') for “'.($firm['name'] ?? '').'” (remote hub)';
-        }
+        $count = count($ids);
 
         /** @var User|null $actor */
         $actor = $request->user();
 
         $this->activityLogs->log([
-            'action' => $action,
-            'description' => $description,
+            'action' => $count === 0 ? 'firm.head.clear' : 'firm.head.sync',
+            'description' => $count === 0
+                ? 'Cleared all '.$roleLabel.' admins for “'.($firm['name'] ?? '').'” (remote hub)'
+                : 'Updated '.$roleLabel.' admins for “'.($firm['name'] ?? '').'” ('.$count.', remote hub)',
             'user' => $actor,
             'hub' => $this->hubs->current(),
             'request' => $request,
@@ -178,9 +206,8 @@ class FirmHeadController extends Controller
             'properties' => [
                 'firm_id' => $firm['id'] ?? null,
                 'firm_name' => $firm['name'] ?? null,
-                'previous_head_user_id' => $prev,
-                'head_user_id' => $next,
-                'head_user_name' => $firm['head_user']['name'] ?? null,
+                'head_user_ids' => $ids,
+                'head_user_id' => $firm['head_user_id'] ?? null,
                 'acting_remotely' => true,
             ],
         ]);
