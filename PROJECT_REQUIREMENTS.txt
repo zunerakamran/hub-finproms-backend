@@ -233,7 +233,7 @@ Packaging tips:
   after a successful password check on every sign-in.
 - Enabling / disabling 2FA (and changing email) requires `current_password`.
 - Login returns `otp_required` + `otp_challenge` (no Sanctum token yet)
-  only when that user has 2FA enabled.
+  only when that user has 2FA enabled (and MFA is not enabled).
   A 6-digit code is emailed (hub From address / MAIL_FROM fallback).
   Code expires in 10 minutes; max 5 failed attempts; resend throttled 60s.
 - APIs: POST /api/auth/verify-login-otp, POST /api/auth/resend-login-otp.
@@ -241,11 +241,33 @@ Packaging tips:
   `auth.login_otp_required` (always false; legacy clients).
 - Email template catalog event: `login_otp` (always available to edit).
 - Frontend Login shows a second step when the login response has otp_required.
+- Activity logs: `auth.two_factor_otp_chosen` / `auth.two_factor_otp_disabled`
+  when the user toggles email OTP on Update profile (`properties.method` = otp).
 - Profile page (all authenticated users): Update profile — name, email,
-  avatar (profile picture), and two-factor toggle.
+  avatar (profile picture), email OTP toggle, and MFA toggle (see 2.2b2).
   API: PUT/PATCH/POST /api/auth/profile (POST for multipart avatar).
   Changing email clears verification and sends a new verification link.
   Avatar stored on public disk (`avatars/{user_id}/…`); URL via /api/media/.
+
+2.2b2 Authenticator MFA (Microsoft Authenticator / TOTP) — per user
+- Second checkbox on Update profile (`users.mfa_enabled`, default OFF).
+  Compatible with Microsoft Authenticator and any RFC 6238 TOTP app.
+- Mutually exclusive with email OTP: enabling one clears the other.
+- Enabling MFA is two-step: (1) profile `mfa_enabled=true` + `current_password`
+  stores an encrypted secret and returns `mfa_setup` { secret, otpauth_uri,
+  issuer, account } with `mfa_confirmation_required`; user is `mfa_pending`
+  until confirmed. (2) POST /api/auth/mfa/confirm with app code + password
+  sets `mfa_enabled` + `mfa_confirmed_at`.
+- Optional: POST /api/auth/mfa/setup to resume/regenerate pending setup.
+- Disabling MFA (profile `mfa_enabled=false` + password) clears secret.
+- Login: when MFA is enrolled, returns `mfa_required` + `mfa_challenge`
+  (no token yet). POST /api/auth/verify-login-mfa with email, challenge, code.
+  MFA takes precedence over email OTP if both were somehow set.
+- Public GET /hub: `auth.login_mfa_per_user` = true.
+- Activity logs (choice tracking):
+  `auth.mfa_setup_started`, `auth.mfa_chosen`, `auth.mfa_disabled`,
+  plus login `auth.login_mfa_required` / `auth.login_mfa_verified`
+  (`properties.method` = mfa).
 
 2.2c Terms & Conditions (all hub types)
 - Capability matrix key: `dashboard_manage_terms` (“Manage terms & conditions”)
@@ -2782,7 +2804,10 @@ STEP 1 — Shared hub core (content hub)
     (verify-email + resend; welcome mail after verify; admin/import users auto-verified)
 [x] Per-user two-factor (login OTP) via Update profile — not hub Functionalities
     (users.two_factor_enabled; verify-login-otp + resend-login-otp; Login UI second step)
-[x] Update profile (all users): name, email, avatar, two-factor toggle
+[x] Per-user authenticator MFA (Microsoft Authenticator / TOTP) via Update profile
+    (users.mfa_*; mfa/setup + mfa/confirm; verify-login-mfa; mutual exclusive vs OTP;
+    activity logs auth.mfa_chosen / auth.two_factor_otp_chosen)
+[x] Update profile (all users): name, email, avatar, OTP toggle, MFA toggle
     (POST/PUT /api/auth/profile; frontend /my-dashboard/profile)
 [x] Capability: dashboard_manage_terms — who can edit Terms & Conditions (all hubs)
 [x] Terms & Conditions rich content + first-login accept gate (saved on user;
@@ -3076,7 +3101,8 @@ SECURITY HARDENING (phase 2 — 2026-10-04)
     recognizes disaster for an affected product module; module snapshots;
     roll back that module only (secmon_manage_disaster_recovery); UI on
     Incidents; distinct from §6B whole-hub restore
-[ ] Future: TOTP authenticator 2FA for Power Admin (in addition to email OTP)
+[x] TOTP authenticator MFA (Microsoft Authenticator) for all users via Update profile
+    (section 2.2b2; mutually exclusive with email OTP; choice logged in activity_logs)
 [x] NFR-SEC-FW (section 9.5): application-layer IP deny + dangerous upload
     rejection (incl. SVG block) + optional ClamAV; see §8 NFR-SEC-FW + §9.5
     (per-endpoint mime allowlists already exist on major upload routes)

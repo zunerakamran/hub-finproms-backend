@@ -83,6 +83,8 @@ class GdprDataExportService
             'privacy_accepted_at' => $user->privacy_accepted_at?->toIso8601String(),
             'privacy_accepted_version' => $user->privacy_accepted_version,
             'two_factor_enabled' => (bool) $user->two_factor_enabled,
+            'mfa_enabled' => (bool) $user->mfa_enabled,
+            'mfa_confirmed_at' => $user->mfa_confirmed_at?->toIso8601String(),
             'avatar_url' => $user->avatar_url,
             'is_advisor' => (bool) $user->is_advisor,
             'is_suspended' => (bool) $user->is_suspended,

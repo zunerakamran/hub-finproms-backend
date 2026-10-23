@@ -23,6 +23,8 @@ class ActivityLogService
         'current_password',
         'token',
         'secret',
+        'mfa_secret',
+        'otpauth_uri',
         'stripe_secret',
         'stripe_webhook_secret',
         'hub_stripe_secret',

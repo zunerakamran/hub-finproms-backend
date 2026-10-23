@@ -151,7 +151,7 @@ class LoginOtpTest extends TestCase
     {
         $this->getJson('/api/hub')
             ->assertOk()
-            ->assertJsonPath('auth.login_otp_required', false)
-            ->assertJsonPath('auth.login_otp_per_user', true);
+            ->assertJsonPath('hub.auth.login_otp_required', false)
+            ->assertJsonPath('hub.auth.login_otp_per_user', true);
     }
 }

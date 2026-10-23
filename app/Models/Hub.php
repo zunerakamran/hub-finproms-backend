@@ -2953,6 +2953,8 @@ class Hub extends Model
                 // Kept as false for older frontends; OTP is per-user via profile.
                 'login_otp_required' => false,
                 'login_otp_per_user' => true,
+                // TOTP / Microsoft Authenticator MFA is also per-user via Update profile.
+                'login_mfa_per_user' => true,
                 'terms' => $this->termsPublicPayload(),
                 'privacy' => $this->privacyPublicPayload(),
                 'cookies' => $this->cookiesPublicPayload(),

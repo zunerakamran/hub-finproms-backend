@@ -89,6 +89,7 @@ Route::prefix('auth')->group(function () {
         Route::post('/resend-verification', [AuthController::class, 'resendVerification']);
         Route::post('/verify-login-otp', [AuthController::class, 'verifyLoginOtp']);
         Route::post('/resend-login-otp', [AuthController::class, 'resendLoginOtp']);
+        Route::post('/verify-login-mfa', [AuthController::class, 'verifyLoginMfa']);
     });
 
     Route::middleware('auth:sanctum')->group(function () {
@@ -98,6 +99,8 @@ Route::prefix('auth')->group(function () {
         Route::post('/accept-privacy', [AuthController::class, 'acceptPrivacy']);
         // POST accepts multipart avatar; PUT/PATCH for JSON-only updates.
         Route::match(['put', 'patch', 'post'], '/profile', [AuthController::class, 'updateProfile']);
+        Route::post('/mfa/setup', [AuthController::class, 'mfaSetup']);
+        Route::post('/mfa/confirm', [AuthController::class, 'confirmMfa']);
     });
 });
 

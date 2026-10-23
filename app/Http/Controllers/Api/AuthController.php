@@ -9,9 +9,11 @@ use App\Services\AdminNewUserRegistrationMailService;
 use App\Services\EmailVerificationService;
 use App\Services\FunctionalMailService;
 use App\Services\HubService;
+use App\Services\LoginMfaChallengeService;
 use App\Services\LoginOtpService;
 use App\Services\PowerAdminCapabilitiesService;
 use App\Services\SecurityMonitoringService;
+use App\Services\TotpService;
 use App\Services\WelcomeMailService;
 use App\Support\InputSanitizer;
 use Illuminate\Http\JsonResponse;
@@ -37,7 +39,9 @@ class AuthController extends Controller
         private readonly AdminNewUserRegistrationMailService $adminNewUserMail,
         private readonly FunctionalMailService $functionalMail,
         private readonly EmailVerificationService $emailVerification,
-        private readonly LoginOtpService $loginOtp
+        private readonly LoginOtpService $loginOtp,
+        private readonly LoginMfaChallengeService $loginMfa,
+        private readonly TotpService $totp,
     ) {}
 
     public function register(Request $request): JsonResponse
@@ -342,6 +346,32 @@ class AuthController extends Controller
             ], 403);
         }
 
+        // MFA (Microsoft Authenticator / TOTP) takes precedence over email OTP.
+        if ($user->hasMfaEnabled()) {
+            $challenge = $this->loginMfa->create($user);
+
+            try {
+                $this->activityLogs->log([
+                    'action' => 'auth.login_mfa_required',
+                    'description' => 'Login MFA challenge issued: '.$user->email,
+                    'user' => $user,
+                    'request' => $request,
+                    'subject' => $user,
+                    'status_code' => 200,
+                    'properties' => ['method' => 'mfa'],
+                ]);
+            } catch (\Throwable) {
+                //
+            }
+
+            return response()->json([
+                'message' => 'Enter the code from your authenticator app to finish signing in.',
+                'mfa_required' => true,
+                'mfa_challenge' => $challenge['challenge'],
+                'email' => $user->email,
+            ]);
+        }
+
         if ($user->hasTwoFactorEnabled()) {
             $otp = $this->loginOtp->create($user);
             try {
@@ -358,6 +388,7 @@ class AuthController extends Controller
                     'request' => $request,
                     'subject' => $user,
                     'status_code' => 200,
+                    'properties' => ['method' => 'otp'],
                 ]);
             } catch (\Throwable) {
                 //
@@ -369,6 +400,58 @@ class AuthController extends Controller
                 'otp_challenge' => $otp['challenge'],
                 'email' => $user->email,
             ]);
+        }
+
+        return $this->issueLoginToken($user, $request);
+    }
+
+    public function verifyLoginMfa(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'email' => ['required', 'email'],
+            'challenge' => ['required', 'string'],
+            'code' => ['required', 'string', 'size:6'],
+        ]);
+
+        $user = $this->loginMfa->consume(
+            $validated['email'],
+            $validated['challenge'],
+            $validated['code'],
+            $this->totp
+        );
+
+        if (! $user) {
+            throw ValidationException::withMessages([
+                'code' => ['Invalid or expired authenticator code. Try again.'],
+            ]);
+        }
+
+        if ($user->isSuspended() || $user->isDiscontinued() || ! $user->hasVerifiedEmail()) {
+            return response()->json([
+                'message' => 'This account cannot sign in right now. Contact your hub administrator.',
+            ], 403);
+        }
+
+        if ($this->hubs->can('private_invite_only') && ! $user->mayLoginOnInviteOnlyHub()) {
+            return response()->json([
+                'message' => 'This hub is invite-only. Only users imported from the invite list can sign in.',
+                'registration_enabled' => false,
+                'invite_only' => true,
+            ], 403);
+        }
+
+        try {
+            $this->activityLogs->log([
+                'action' => 'auth.login_mfa_verified',
+                'description' => 'Login MFA verified: '.$user->email,
+                'user' => $user,
+                'request' => $request,
+                'subject' => $user,
+                'status_code' => 200,
+                'properties' => ['method' => 'mfa'],
+            ]);
+        } catch (\Throwable) {
+            //
         }
 
         return $this->issueLoginToken($user, $request);
@@ -416,6 +499,7 @@ class AuthController extends Controller
                 'request' => $request,
                 'subject' => $user,
                 'status_code' => 200,
+                'properties' => ['method' => 'otp'],
             ]);
         } catch (\Throwable) {
             //
@@ -526,6 +610,7 @@ class AuthController extends Controller
         $user->setAttribute('terms_required_version', $hub->termsVersion());
         $user->setAttribute('privacy_accepted', $user->hasAcceptedPrivacy($hub));
         $user->setAttribute('privacy_required_version', $hub->privacyVersion());
+        $user->setAttribute('mfa_pending', $user->hasMfaPending());
 
         $user->loadMissing([
             'firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
@@ -708,7 +793,7 @@ class AuthController extends Controller
     }
 
     /**
-     * Self-serve profile update: name, email, avatar, and per-user 2FA toggle.
+     * Self-serve profile update: name, email, avatar, email OTP 2FA, and MFA (MS Authenticator).
      */
     public function updateProfile(Request $request): JsonResponse
     {
@@ -725,6 +810,7 @@ class AuthController extends Controller
                 Rule::unique('users', 'email')->ignore($user->id),
             ],
             'two_factor_enabled' => ['sometimes', 'boolean'],
+            'mfa_enabled' => ['sometimes', 'boolean'],
             'avatar' => ['sometimes', 'nullable', 'image', 'mimes:jpeg,jpg,png,webp,gif', 'max:2048'],
             'remove_avatar' => ['sometimes', 'boolean'],
             'current_password' => ['nullable', 'string'],
@@ -738,16 +824,33 @@ class AuthController extends Controller
         $twoFactorChanging = $twoFactorProvided
             && $twoFactorEnabled !== (bool) $user->two_factor_enabled;
 
-        if ($emailChanging || $twoFactorChanging) {
+        $mfaProvided = array_key_exists('mfa_enabled', $validated);
+        $mfaWanted = $mfaProvided ? $request->boolean('mfa_enabled') : $user->hasMfaEnabled();
+        $mfaCurrentlyOn = $user->hasMfaEnabled();
+        $mfaCurrentlyPending = $user->hasMfaPending();
+        // Turning MFA "on" while already enrolled is a no-op; turning on while off/pending starts/resumes setup.
+        // Turning MFA "off" clears enrollment or abandons pending setup.
+        $mfaTurningOn = $mfaProvided && $mfaWanted && ! $mfaCurrentlyOn;
+        $mfaTurningOff = $mfaProvided && ! $mfaWanted && ($mfaCurrentlyOn || $mfaCurrentlyPending);
+
+        if ($emailChanging || $twoFactorChanging || $mfaTurningOn || $mfaTurningOff) {
             $currentPassword = (string) ($validated['current_password'] ?? '');
             if ($currentPassword === '' || ! Hash::check($currentPassword, $user->password)) {
                 throw ValidationException::withMessages([
-                    'current_password' => ['Your current password is required to change email or two-factor authentication.'],
+                    'current_password' => ['Your current password is required to change email, OTP, or MFA settings.'],
                 ]);
             }
         }
 
+        if ($twoFactorProvided && $mfaProvided && $twoFactorEnabled && $mfaWanted) {
+            throw ValidationException::withMessages([
+                'mfa_enabled' => ['Choose either email OTP or authenticator MFA, not both.'],
+            ]);
+        }
+
         $changes = [];
+        $mfaSetup = null;
+        $authMethodLogs = [];
 
         if (array_key_exists('name', $validated)) {
             $validated['name'] = InputSanitizer::plain($validated['name']);
@@ -765,7 +868,92 @@ class AuthController extends Controller
 
         if ($twoFactorChanging) {
             $user->two_factor_enabled = $twoFactorEnabled;
-            $changes[] = $user->two_factor_enabled ? 'two_factor_enabled' : 'two_factor_disabled';
+            $changes[] = $user->two_factor_enabled ? 'two_factor_otp_enabled' : 'two_factor_otp_disabled';
+            $authMethodLogs[] = [
+                'action' => $user->two_factor_enabled ? 'auth.two_factor_otp_chosen' : 'auth.two_factor_otp_disabled',
+                'description' => ($user->two_factor_enabled
+                    ? 'User chose email OTP two-factor authentication: '
+                    : 'User disabled email OTP two-factor authentication: ').$user->email,
+                'properties' => [
+                    'method' => 'otp',
+                    'enabled' => (bool) $user->two_factor_enabled,
+                ],
+            ];
+
+            // Email OTP and authenticator MFA are mutually exclusive.
+            if ($user->two_factor_enabled && ($user->hasMfaEnabled() || $user->hasMfaPending())) {
+                $user->mfa_enabled = false;
+                $user->mfa_secret = null;
+                $user->mfa_confirmed_at = null;
+                $changes[] = 'mfa_cleared_for_otp';
+                $authMethodLogs[] = [
+                    'action' => 'auth.mfa_disabled',
+                    'description' => 'Authenticator MFA cleared because email OTP was chosen: '.$user->email,
+                    'properties' => [
+                        'method' => 'mfa',
+                        'enabled' => false,
+                        'reason' => 'switched_to_otp',
+                    ],
+                ];
+            }
+        }
+
+        if ($mfaTurningOff) {
+            $user->mfa_enabled = false;
+            $user->mfa_secret = null;
+            $user->mfa_confirmed_at = null;
+            $changes[] = 'mfa_disabled';
+            $authMethodLogs[] = [
+                'action' => 'auth.mfa_disabled',
+                'description' => 'User disabled authenticator MFA: '.$user->email,
+                'properties' => [
+                    'method' => 'mfa',
+                    'enabled' => false,
+                ],
+            ];
+        }
+
+        if ($mfaTurningOn) {
+            $resumingPending = $user->hasMfaPending();
+            if (! $resumingPending) {
+                $user->mfa_secret = $this->totp->generateSecret();
+                $user->mfa_enabled = false;
+                $user->mfa_confirmed_at = null;
+                $changes[] = 'mfa_setup_started';
+
+                if ($user->two_factor_enabled) {
+                    $user->two_factor_enabled = false;
+                    $changes[] = 'two_factor_otp_cleared_for_mfa';
+                    $authMethodLogs[] = [
+                        'action' => 'auth.two_factor_otp_disabled',
+                        'description' => 'Email OTP cleared because authenticator MFA setup started: '.$user->email,
+                        'properties' => [
+                            'method' => 'otp',
+                            'enabled' => false,
+                            'reason' => 'switched_to_mfa',
+                        ],
+                    ];
+                }
+
+                $authMethodLogs[] = [
+                    'action' => 'auth.mfa_setup_started',
+                    'description' => 'User started authenticator MFA setup (Microsoft Authenticator / TOTP): '.$user->email,
+                    'properties' => [
+                        'method' => 'mfa',
+                        'enabled' => false,
+                        'pending' => true,
+                    ],
+                ];
+            }
+
+            $secret = (string) $user->mfa_secret;
+            $issuer = $this->mfaIssuerName();
+            $mfaSetup = [
+                'secret' => $secret,
+                'otpauth_uri' => $this->totp->otpauthUri($secret, (string) $user->email, $issuer),
+                'issuer' => $issuer,
+                'account' => (string) $user->email,
+            ];
         }
 
         $removeAvatar = $request->boolean('remove_avatar');
@@ -814,18 +1002,190 @@ class AuthController extends Controller
             //
         }
 
+        foreach ($authMethodLogs as $methodLog) {
+            try {
+                $this->activityLogs->log([
+                    'action' => $methodLog['action'],
+                    'description' => $methodLog['description'],
+                    'user' => $user,
+                    'request' => $request,
+                    'subject' => $user,
+                    'status_code' => 200,
+                    'properties' => $methodLog['properties'],
+                ]);
+            } catch (\Throwable) {
+                //
+            }
+        }
+
         $user = $user->fresh();
 
         $message = 'Profile updated successfully.';
         if ($emailChanging) {
             $message = 'Profile updated. Please verify your new email address — a confirmation link has been sent.';
+        } elseif ($mfaTurningOn) {
+            $message = 'Scan the QR code (or enter the secret) in Microsoft Authenticator, then confirm with a code.';
+        } elseif ($mfaTurningOff) {
+            $message = 'Authenticator MFA has been disabled.';
         }
 
-        return response()->json([
+        $payload = [
             'message' => $message,
             'user' => $this->decorateUserForAuthResponse($user),
             'email_verification_required' => $emailChanging,
+        ];
+
+        if ($mfaSetup !== null) {
+            $payload['mfa_setup'] = $mfaSetup;
+            $payload['mfa_confirmation_required'] = true;
+        }
+
+        return response()->json($payload);
+    }
+
+    /**
+     * Confirm pending MFA enrollment with a code from Microsoft Authenticator (or any TOTP app).
+     */
+    public function confirmMfa(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'code' => ['required', 'string', 'size:6'],
+            'current_password' => ['required', 'string'],
         ]);
+
+        if (! Hash::check($validated['current_password'], $user->password)) {
+            throw ValidationException::withMessages([
+                'current_password' => ['Your current password is required to enable MFA.'],
+            ]);
+        }
+
+        if (! $user->hasMfaPending()) {
+            throw ValidationException::withMessages([
+                'code' => ['No MFA setup is in progress. Enable MFA from Update profile first.'],
+            ]);
+        }
+
+        if (! $this->totp->verify((string) $user->mfa_secret, $validated['code'])) {
+            throw ValidationException::withMessages([
+                'code' => ['Invalid authenticator code. Check the app and try again.'],
+            ]);
+        }
+
+        $user->mfa_enabled = true;
+        $user->mfa_confirmed_at = now();
+        $user->two_factor_enabled = false;
+        $user->save();
+
+        try {
+            $this->activityLogs->log([
+                'action' => 'auth.mfa_chosen',
+                'description' => 'User chose authenticator MFA (Microsoft Authenticator / TOTP): '.$user->email,
+                'user' => $user,
+                'request' => $request,
+                'subject' => $user,
+                'status_code' => 200,
+                'properties' => [
+                    'method' => 'mfa',
+                    'enabled' => true,
+                ],
+            ]);
+        } catch (\Throwable) {
+            //
+        }
+
+        return response()->json([
+            'message' => 'Authenticator MFA is now enabled. You will be asked for an app code at sign-in.',
+            'user' => $this->decorateUserForAuthResponse($user->fresh()),
+        ]);
+    }
+
+    /**
+     * Re-issue MFA setup payload when enrollment is still pending (e.g. user closed the QR dialog).
+     */
+    public function mfaSetup(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'current_password' => ['required', 'string'],
+            'regenerate' => ['sometimes', 'boolean'],
+        ]);
+
+        if (! Hash::check($validated['current_password'], $user->password)) {
+            throw ValidationException::withMessages([
+                'current_password' => ['Your current password is required to view MFA setup.'],
+            ]);
+        }
+
+        if ($user->hasMfaEnabled()) {
+            return response()->json([
+                'message' => 'Authenticator MFA is already enabled.',
+                'user' => $this->decorateUserForAuthResponse($user),
+            ], 422);
+        }
+
+        $regenerate = $request->boolean('regenerate') || ! $user->hasMfaPending();
+        if ($regenerate) {
+            $user->mfa_secret = $this->totp->generateSecret();
+            $user->mfa_enabled = false;
+            $user->mfa_confirmed_at = null;
+            if ($user->two_factor_enabled) {
+                $user->two_factor_enabled = false;
+            }
+            $user->save();
+
+            try {
+                $this->activityLogs->log([
+                    'action' => 'auth.mfa_setup_started',
+                    'description' => 'User started/regenerated authenticator MFA setup: '.$user->email,
+                    'user' => $user,
+                    'request' => $request,
+                    'subject' => $user,
+                    'status_code' => 200,
+                    'properties' => [
+                        'method' => 'mfa',
+                        'enabled' => false,
+                        'pending' => true,
+                        'regenerated' => true,
+                    ],
+                ]);
+            } catch (\Throwable) {
+                //
+            }
+        }
+
+        $secret = (string) $user->mfa_secret;
+        $issuer = $this->mfaIssuerName();
+
+        return response()->json([
+            'message' => 'Scan the QR code (or enter the secret) in Microsoft Authenticator, then confirm with a code.',
+            'mfa_confirmation_required' => true,
+            'mfa_setup' => [
+                'secret' => $secret,
+                'otpauth_uri' => $this->totp->otpauthUri($secret, (string) $user->email, $issuer),
+                'issuer' => $issuer,
+                'account' => (string) $user->email,
+            ],
+            'user' => $this->decorateUserForAuthResponse($user->fresh()),
+        ]);
+    }
+
+    private function mfaIssuerName(): string
+    {
+        try {
+            $name = trim((string) $this->hubs->current()->name);
+            if ($name !== '') {
+                return $name;
+            }
+        } catch (\Throwable) {
+            //
+        }
+
+        return (string) config('app.name', 'Hub');
     }
 
     private function deleteAvatarFile(?string $path): void

@@ -149,6 +149,9 @@ class User extends Authenticatable
         'privacy_accepted_version',
         'gdpr_erased_at',
         'two_factor_enabled',
+        'mfa_enabled',
+        'mfa_secret',
+        'mfa_confirmed_at',
         'avatar_path',
     ];
 
@@ -157,6 +160,7 @@ class User extends Authenticatable
         'remember_token',
         'stripe_payment_method_id',
         'avatar_path',
+        'mfa_secret',
     ];
 
     protected $appends = [
@@ -186,6 +190,9 @@ class User extends Authenticatable
             'modules' => 'array',
             'capability_overrides' => 'array',
             'two_factor_enabled' => 'boolean',
+            'mfa_enabled' => 'boolean',
+            'mfa_secret' => 'encrypted',
+            'mfa_confirmed_at' => 'datetime',
         ];
     }
 
@@ -312,6 +319,27 @@ class User extends Authenticatable
     public function hasTwoFactorEnabled(): bool
     {
         return (bool) $this->two_factor_enabled;
+    }
+
+    /**
+     * Microsoft Authenticator (TOTP) MFA is fully enrolled and required at login.
+     */
+    public function hasMfaEnabled(): bool
+    {
+        return (bool) $this->mfa_enabled
+            && $this->mfa_confirmed_at !== null
+            && is_string($this->mfa_secret)
+            && $this->mfa_secret !== '';
+    }
+
+    /**
+     * Setup started (secret stored) but not yet confirmed with an authenticator code.
+     */
+    public function hasMfaPending(): bool
+    {
+        return ! $this->hasMfaEnabled()
+            && is_string($this->mfa_secret)
+            && $this->mfa_secret !== '';
     }
 
     /**

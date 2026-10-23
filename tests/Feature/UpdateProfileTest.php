@@ -74,6 +74,11 @@ class UpdateProfileTest extends TestCase
             ->assertJsonPath('user.two_factor_enabled', true);
 
         $this->assertTrue((bool) $user->fresh()->two_factor_enabled);
+
+        $this->assertDatabaseHas('activity_logs', [
+            'action' => 'auth.two_factor_otp_chosen',
+            'user_id' => $user->id,
+        ]);
     }
 
     public function test_email_change_requires_password_and_resets_verification(): void
