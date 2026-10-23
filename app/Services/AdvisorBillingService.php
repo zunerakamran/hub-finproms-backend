@@ -475,6 +475,7 @@ class AdvisorBillingService
         // Payer of record is always the client admin; power/finproms may complete
         // checkout on their behalf after Excel import.
         $canStaffPay = $user->isWhiteLabelClientAdmin()
+            || $user->isAccountsAdmin()
             || $user->isPowerAdmin()
             || $user->isFinpromsAdmin();
 

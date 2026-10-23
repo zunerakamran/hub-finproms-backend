@@ -38,6 +38,24 @@ class User extends Authenticatable
      */
     public const ROLE_FIRM_ADMIN = 'firm_admin';
 
+    /**
+     * Oversight role — all report types (SMC / GC / WC). Firm-scoped unless the
+     * user belongs to the Central / Network firm (then hub-wide).
+     */
+    public const ROLE_TOP_MANAGEMENT = 'top_management';
+
+    /**
+     * Billing / invoices role — hub invoices, bank transfers, payment card (WL).
+     * Firm-scoped data where applicable; Central / Network members see hub-wide.
+     */
+    public const ROLE_ACCOUNTS_ADMIN = 'accounts_admin';
+
+    /**
+     * Audit role — activity logs and compliance audit trails.
+     * Firm-scoped where trails are firm-filtered; Central / Network = hub-wide.
+     */
+    public const ROLE_AUDITOR = 'auditor';
+
     /** Mid-level hub staff. */
     public const ROLE_MANAGER = 'manager';
 
@@ -82,6 +100,9 @@ class User extends Authenticatable
         self::ROLE_CLIENT_ADMIN => 'Client Admin',
         self::ROLE_NETWORK_ADMIN => 'Network Admin',
         self::ROLE_FIRM_ADMIN => 'Firm Admin',
+        self::ROLE_TOP_MANAGEMENT => 'Top Management',
+        self::ROLE_ACCOUNTS_ADMIN => 'Accounts Admin',
+        self::ROLE_AUDITOR => 'Auditor',
         self::ROLE_MANAGER => 'Manager',
         self::ROLE_APPROVER => 'Approver',
         self::ROLE_ADVISOR => 'Advisor',
@@ -265,6 +286,11 @@ class User extends Authenticatable
             self::ROLE_POWER_ADMIN,
             self::ROLE_FINPROMS_ADMIN,
             self::ROLE_CLIENT_ADMIN,
+            self::ROLE_NETWORK_ADMIN,
+            self::ROLE_FIRM_ADMIN,
+            self::ROLE_TOP_MANAGEMENT,
+            self::ROLE_ACCOUNTS_ADMIN,
+            self::ROLE_AUDITOR,
             self::ROLE_MANAGER,
             self::ROLE_ADMIN_STAFF,
             'admin',
@@ -411,6 +437,21 @@ class User extends Authenticatable
         return $this->hasRole(self::ROLE_FIRM_ADMIN);
     }
 
+    public function isTopManagement(): bool
+    {
+        return $this->hasRole(self::ROLE_TOP_MANAGEMENT);
+    }
+
+    public function isAccountsAdmin(): bool
+    {
+        return $this->hasRole(self::ROLE_ACCOUNTS_ADMIN);
+    }
+
+    public function isAuditor(): bool
+    {
+        return $this->hasRole(self::ROLE_AUDITOR);
+    }
+
     public function isManager(): bool
     {
         return $this->hasRole(self::ROLE_MANAGER);
@@ -514,6 +555,9 @@ class User extends Authenticatable
             self::ROLE_CLIENT_ADMIN,
             self::ROLE_NETWORK_ADMIN,
             self::ROLE_FIRM_ADMIN,
+            self::ROLE_TOP_MANAGEMENT,
+            self::ROLE_ACCOUNTS_ADMIN,
+            self::ROLE_AUDITOR,
             self::ROLE_MANAGER,
             self::ROLE_APPROVER,
             self::ROLE_ADVISOR,

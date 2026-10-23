@@ -10,12 +10,15 @@ use Illuminate\Database\Eloquent\Builder;
  * Resolves which firms may see / review / report on compliance requests
  * submitted by users of a given firm, based on that firm's visibility settings.
  *
- * Who is firm-scoped:
- * - client_admin, manager, approver, advisor, admin_staff, user (and any other non-control-plane role)
- *   when they have a firm_id — including when they have "view all" capabilities.
+ * Who is firm-scoped (own firm only, plus firm visibility settings):
+ * - Member-firm users (Firm Admin, Top Management, Auditor, Accounts Admin,
+ *   manager, approver, advisor, admin_staff, user, …) with a non-central firm_id
+ *   — including when they have "view all" capabilities.
  *
  * Who bypasses firm scope (sees everything their capabilities allow):
  * - power_admin, finproms_admin
+ * - Central / Network firm members who hold network_admin, top_management,
+ *   auditor, or accounts_admin (network can manage the network and all firms)
  *
  * Public self-registered users (no firm) are outside the firm model: their
  * requests are not part of firm queues, and staff without a firm only see
@@ -29,11 +32,36 @@ use Illuminate\Database\Eloquent\Builder;
 class FirmComplianceVisibilityService
 {
     /**
-     * Platform control-plane roles are not part of the firm model.
+     * Roles that, when held by a Central / Network firm member, see hub-wide
+     * (all firms) for compliance queues / reports within their capabilities.
+     *
+     * @var list<string>
+     */
+    public const NETWORK_HUB_WIDE_ROLES = [
+        User::ROLE_NETWORK_ADMIN,
+        User::ROLE_TOP_MANAGEMENT,
+        User::ROLE_AUDITOR,
+        User::ROLE_ACCOUNTS_ADMIN,
+    ];
+
+    /**
+     * Platform control-plane roles and Central / Network oversight roles.
      */
     public function actorBypassesFirmScope(User $actor): bool
     {
-        return $actor->isPowerAdmin() || $actor->isFinpromsAdmin();
+        if ($actor->isPowerAdmin() || $actor->isFinpromsAdmin()) {
+            return true;
+        }
+
+        if (! $actor->firm_id || ! $actor->hasAnyRole(self::NETWORK_HUB_WIDE_ROLES)) {
+            return false;
+        }
+
+        $firm = $actor->relationLoaded('firm')
+            ? $actor->firm
+            : Firm::query()->find((int) $actor->firm_id);
+
+        return $firm !== null && $firm->isCentral();
     }
 
     /**

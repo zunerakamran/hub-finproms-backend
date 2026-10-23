@@ -74,11 +74,11 @@ class AdvisorPaymentCardController extends Controller
 
     private function assertClientAdminPayer(?\App\Models\User $user): void
     {
-        // Payment card is the white-labelled client-admin payer entrance only.
+        // Payment card: white-labelled client admin or Accounts Admin.
         // Do not use isClientAdmin() — that includes finproms_admin / manager.
-        if (! $user || ! $user->isWhiteLabelClientAdmin()) {
+        if (! $user || (! $user->isWhiteLabelClientAdmin() && ! $user->isAccountsAdmin())) {
             abort(response()->json([
-                'message' => 'Only the client admin can manage the payment card for this hub.',
+                'message' => 'Only the client admin or Accounts Admin can manage the payment card for this hub.',
             ], 403));
         }
 

@@ -1,8 +1,8 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-23 (Network Admin + Firm Admin roles §2.7 / §3.4 Document
-  Repository + §5.2 capability matrix; multi-role §2.7.1 already done)
+Last updated: 2026-10-23 (Top Management / Auditor / Accounts Admin §2.7 +
+  firm vs network scope; Network/Firm Admin + Document Repository already done)
 
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
@@ -447,23 +447,44 @@ Firm Admin):
      - May be combined with other roles (e.g. advisor + firm_admin,
        manager + firm_admin).
 
-  6) MANAGER (manager) — hub staff (Shared or White-label)
+  6) TOP MANAGEMENT (top_management) — reports oversight
+     - Default display name “Top Management” (renameable).
+     - Default matrix ON: `smc_view_reports`, `gc_view_reports`,
+       `wc_view_platform_report` (all report types).
+     - SCOPE: member-firm users see reports for their firm only (firm
+       visibility rules). Central / Network firm users with this role see
+       hub-wide / all firms (see §2.7.0 Firm vs Network scope).
+
+  7) ACCOUNTS ADMIN (accounts_admin) — billing / invoices
+     - Default display name “Accounts Admin” (renameable).
+     - Default matrix ON: one-time / module / advisor invoices, mark module
+       invoices paid, confirm bank transfers, billing renew+grace,
+       general_show_invoices. May manage WL Payment card (with client_admin).
+     - SCOPE: same firm vs network rule as Top Management (§2.7.0).
+
+  8) AUDITOR (auditor) — activity logs & audit trails
+     - Default display name “Auditor” (renameable).
+     - Default matrix ON: `dashboard_view_activity_logs`,
+       `dashboard_view_compliance_audit_trail`, `wc_view_activity_logs`.
+     - SCOPE: same firm vs network rule as Top Management (§2.7.0).
+
+  9) MANAGER (manager) — hub staff (Shared or White-label)
      - Mid-level operational role (e.g. content/ops management without full
        client_admin rights). Exact screens TBD; gated by hub dashboard checklist
        and/or future manager-specific flags.
 
-  7) APPROVER (approver) — compliance / review
+  10) APPROVER (approver) — compliance / review
      - Reviews/approves content (ties to compliance check flow, section 3.3).
      - Not a full hub admin by default; approval UI to be built later.
 
-  8) ADVISOR (advisor) — reserved role label in the capabilities matrix
+  11) ADVISOR (advisor) — reserved role label in the capabilities matrix
      - Not assigned automatically on plan subscribe or Excel import.
      - White-label invited advisors keep role=user (may add other roles later);
        Excel import sets is_advisor and has_unlimited_credits when hub
        behaviour allows.
      - Uses member UI (same as user) unless other assigned roles unlock more.
 
-  9) USER (user) — general user / subscriber
+  12) USER (user) — general user / subscriber
      - Browse / subscribe / buy / download as user capability checklist allows.
      - After a paid public-hub plan subscription, the user role remains
        (credits only); other roles already assigned are NOT removed.
@@ -471,9 +492,31 @@ Firm Admin):
        them) unless staff explicitly assign additional roles.
      - Label in the Capabilities matrix is "User" (not "Member").
 
-  10) ADMIN-STAFF (admin_staff) — firm-scoped staff (see User model / matrix)
+  13) ADMIN-STAFF (admin_staff) — firm-scoped staff (see User model / matrix)
      - Submit compliance and related work on behalf of advisors when allowed.
      - Display name overridable via hub role_display_names.
+
+2.7.0 Firm vs Network scope (REQUIRED)
+--------------------------------------------------------------------
+Applies to compliance queues, reports, and other firm-filtered tools:
+
+  A) MEMBER FIRM USER (users.firm_id → non-central firm)
+     - Manages / sees ONLY their own firm (plus that firm’s compliance
+       visibility allowlist: own / central / named firm).
+     - Includes Firm Admin, Top Management, Auditor, Accounts Admin,
+       manager, approver, etc. when they belong to a member firm.
+
+  B) NETWORK / CENTRAL FIRM USER (users.firm_id → firms.is_central)
+     - Manages the Central / Network firm.
+     - When they also hold `network_admin`, `top_management`, `auditor`, or
+       `accounts_admin`, they MAY manage / see ALL firms on the hub
+       (bypass firm scope for capability-gated tools) — “network can manage
+       the network or all firms”.
+     - Other roles on the central firm still follow visible_to_central /
+       visibility settings only (no automatic hub-wide bypass).
+
+  C) Control-plane bypass (unchanged): power_admin, finproms_admin always
+     bypass firm scope when their capabilities allow.
 
 Notes:
 - Former "admin" → client_admin. Shared hub operator should use finproms_admin
@@ -537,7 +580,8 @@ EQUAL ROLES (no primary / secondary):
   audit actor role, uploaded_by_role, Excel single-cell fallback), derive
   a privilege-ordered legacy mirror automatically:
   power_admin > finproms_admin > client_admin > network_admin >
-  firm_admin > manager > approver > admin_staff > advisor > user.
+  firm_admin > top_management > accounts_admin > auditor > manager >
+  approver > admin_staff > advisor > user.
 - That mirror does NOT limit capabilities and is NOT editable as “primary”.
 - Capabilities always use the UNION of ALL assigned roles (below).
 - UI badges / Hub → Users / Access Control show all role labels equally
@@ -1501,7 +1545,8 @@ Either path designates the same Head; both MUST stay in sync:
   not one per user.
 - System role keys in the matrix catalog (left → right order for defaults):
   power_admin, finproms_admin, client_admin, network_admin, firm_admin,
-  manager, approver, advisor, admin_staff, user — plus any custom roles.
+  top_management, accounts_admin, auditor, manager, approver, advisor,
+  admin_staff, user — plus any custom roles.
 - Matrix COLUMNS = roles currently present on that hub (users who HOLD that
   role exist on the hub’s user store / remote DB — a multi-role user counts
   toward every role they hold) UNION roles Power Admin has explicitly added
@@ -1633,6 +1678,13 @@ Either path designates the same Head; both MUST stay in sync:
     invoices / purchases as for user column unless Power Admin changes);
     hub-admin dashboard tools OFF by default; compliance / support caps OFF
     until enabled — Power Admin may broaden these columns per hub
+  - Top Management defaults ON: `smc_view_reports`, `gc_view_reports`,
+    `wc_view_platform_report` (other tools OFF). Firm vs network scope §2.7.0
+  - Auditor defaults ON: `dashboard_view_activity_logs`,
+    `dashboard_view_compliance_audit_trail`, `wc_view_activity_logs`
+  - Accounts Admin defaults ON: one-time / module / advisor invoices, mark
+    module invoices paid, bank transfers, billing renew+grace,
+    `general_show_invoices`; WL Payment card allowed in code for this role
   - AI content generation / control hubs remotely — same roles
     (typically Power Admin on Central Hub; Shared-only where appropriate)
   - Any other admin dashboard screens/actions
@@ -2418,10 +2470,13 @@ Out of scope for v1 of this module
 - Three instance roles: central (control plane), shared (public/content hub),
   white_label (private client hub).
 - Roles: power_admin, finproms_admin, client_admin, network_admin, firm_admin,
-  manager, approver, admin_staff, advisor, user. Each user may hold MULTIPLE
-  roles; effective capabilities = UNION of assigned roles (§2.7.1). All
-  assigned roles are equal (no primary / secondary). Network Admin / Firm
-  Admin designate Document Repository firm heads (§3.4).
+  top_management, accounts_admin, auditor, manager, approver, admin_staff,
+  advisor, user. Each user may hold MULTIPLE roles; effective capabilities =
+  UNION of assigned roles (§2.7.1). All assigned roles are equal (no primary /
+  secondary). Network Admin / Firm Admin designate Document Repository firm
+  heads (§3.4). Member-firm users are firm-scoped; Central / Network firm
+  users with network_admin / top_management / auditor / accounts_admin may
+  manage hub-wide (§2.7.0).
 - Separate frontend shells: member catalog app (on Shared / White-label), and
   one universal Dashboard shell at /my-dashboard (tools from Capabilities +
   Power Admin pa_* checklist on Central Hub).
@@ -2597,6 +2652,8 @@ STEP 1 — Shared hub core (content hub)
 [x] Roles documented + wired: network_admin (Network Admin), firm_admin
     (Firm Admin) — Document Repository heads; matrix columns; renameable
     display names (§2.7 / §3.4 / §5.2)
+[x] Roles documented + wired: top_management, accounts_admin, auditor —
+    report / invoice / audit defaults; firm vs network scope (§2.7 / §2.7.0)
 [x] MULTI-ROLE USERS (§2.7 / §2.7.1) — backend: user_roles pivot; all roles
     equal (no primary/secondary); users.role = privilege-ordered legacy mirror
     only; capability UNION in userCan; UserRolesService sync + activity logs

@@ -22,6 +22,9 @@ class CapabilitiesMatrixService
         User::ROLE_CLIENT_ADMIN,
         User::ROLE_NETWORK_ADMIN,
         User::ROLE_FIRM_ADMIN,
+        User::ROLE_TOP_MANAGEMENT,
+        User::ROLE_ACCOUNTS_ADMIN,
+        User::ROLE_AUDITOR,
         User::ROLE_MANAGER,
         User::ROLE_APPROVER,
         User::ROLE_ADVISOR,
@@ -998,13 +1001,16 @@ class CapabilitiesMatrixService
                 $hubType === Hub::TYPE_WHITE_LABEL;
         }
 
-        // Remaining roles (network/firm admin, approver / advisor / admin-staff / user):
-        // dashboard & admin-email tools off by default. Own-firm Document Repository
-        // head rights come from the role itself (§3.4), not hub-wide firm_documents_* ticks.
-        // Power Admin enables matrix cells per hub. Security Monitoring defaults OFF here.
+        // Remaining roles (network/firm admin, top management / accounts / auditor,
+        // approver / advisor / admin-staff / user): dashboard & admin-email tools
+        // off by default, then specialty defaults below. Own-firm Document Repository
+        // head rights come from network_admin / firm_admin (§3.4), not hub-wide ticks.
         foreach ([
             User::ROLE_NETWORK_ADMIN,
             User::ROLE_FIRM_ADMIN,
+            User::ROLE_TOP_MANAGEMENT,
+            User::ROLE_ACCOUNTS_ADMIN,
+            User::ROLE_AUDITOR,
             User::ROLE_APPROVER,
             User::ROLE_ADVISOR,
             User::ROLE_ADMIN_STAFF,
@@ -1059,6 +1065,45 @@ class CapabilitiesMatrixService
                 if (isset($matrix[$role])) {
                     $matrix[$role][$key] = false;
                 }
+            }
+        }
+
+        // Top Management — all report types ON by default (firm-scoped unless
+        // Central / Network firm membership → hub-wide via visibility service).
+        if (isset($matrix[User::ROLE_TOP_MANAGEMENT])) {
+            foreach ([
+                'smc_view_reports',
+                'gc_view_reports',
+                'wc_view_platform_report',
+            ] as $key) {
+                $matrix[User::ROLE_TOP_MANAGEMENT][$key] = true;
+            }
+        }
+
+        // Auditor — activity logs + compliance audit trail ON by default.
+        if (isset($matrix[User::ROLE_AUDITOR])) {
+            foreach ([
+                'dashboard_view_activity_logs',
+                'dashboard_view_compliance_audit_trail',
+                'wc_view_activity_logs',
+            ] as $key) {
+                $matrix[User::ROLE_AUDITOR][$key] = true;
+            }
+        }
+
+        // Accounts Admin — invoices, bank transfers, billing renew ON by default.
+        // Payment card (WL) is also allowed for this role in code (not a matrix key).
+        if (isset($matrix[User::ROLE_ACCOUNTS_ADMIN])) {
+            foreach ([
+                'dashboard_view_one_time_invoices',
+                'dashboard_view_module_invoices',
+                'dashboard_mark_module_invoices_paid',
+                'dashboard_view_advisor_invoices',
+                'dashboard_bank_transfers',
+                'dashboard_manage_advisor_renewal',
+                'general_show_invoices',
+            ] as $key) {
+                $matrix[User::ROLE_ACCOUNTS_ADMIN][$key] = true;
             }
         }
 
