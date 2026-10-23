@@ -11,7 +11,8 @@ use Illuminate\Support\Collection;
 class ComplianceAuditTrailService
 {
     public function __construct(
-        private readonly HubService $hubs
+        private readonly HubService $hubs,
+        private readonly FirmComplianceVisibilityService $firmVisibility,
     ) {}
 
     /**
@@ -130,14 +131,23 @@ class ComplianceAuditTrailService
      * them via acting-hub). Do not require hub_id === Central registry id —
      * local hubs.id on the content DB often differs from the registry row.
      *
+     * When $subjectIds is non-empty, only those subjects are returned (used by
+     * firm-scoped report rows). When $actor is set and subjectIds empty,
+     * firm / delegated-access filtering is applied.
+     *
      * @param  list<int>  $subjectIds
      * @return list<array<string, mixed>>
      */
-    public function forHub(string $module, Hub $hub, array $subjectIds = []): array
+    public function forHub(string $module, Hub $hub, array $subjectIds = [], ?User $actor = null): array
     {
         $ids = array_values(array_unique(array_map('intval', $subjectIds)));
 
         $query = $this->hubQuery($module, $hub, $ids)->orderBy('id');
+
+        // Firm-scope only when not already limited to visible subject ids.
+        if ($actor && $ids === []) {
+            $this->firmVisibility->scopeAuditEventsForActor($query, $actor, $module);
+        }
 
         return $query
             ->get()
@@ -151,12 +161,16 @@ class ComplianceAuditTrailService
      * @param  array{page?: int, per_page?: int, q?: string|null, event_type?: string|null, from?: string|null, to?: string|null}  $filters
      * @return array{events: list<array<string, mixed>>, meta: array{current_page: int, last_page: int, per_page: int, total: int}}
      */
-    public function paginateForHub(string $module, Hub $hub, array $filters = []): array
+    public function paginateForHub(string $module, Hub $hub, array $filters = [], ?User $actor = null): array
     {
         $perPage = max(1, min(200, (int) ($filters['per_page'] ?? 50)));
         $page = max(1, (int) ($filters['page'] ?? 1));
 
         $query = $this->hubQuery($module, $hub)->orderByDesc('id');
+
+        if ($actor) {
+            $this->firmVisibility->scopeAuditEventsForActor($query, $actor, $module);
+        }
 
         if (! empty($filters['event_type'])) {
             $query->where('event_type', (string) $filters['event_type']);
@@ -210,9 +224,14 @@ class ComplianceAuditTrailService
 
         $query = ComplianceAuditEvent::query()->where('module', $module);
 
-        // Content hub (local deploy or remounted from Central): all module events
-        // on this connection belong to the acting content hub.
+        // Content hub (local deploy or remounted from Central): events on this
+        // connection belong to the acting content hub. Still honour subjectIds
+        // when the caller firm-scoped the visible request set.
         if ($hub->isContentHub()) {
+            if ($ids !== []) {
+                $query->whereIn('subject_id', $ids);
+            }
+
             return $query;
         }
 

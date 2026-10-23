@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\ComplianceAuditEvent;
+use App\Models\User;
 use App\Services\ComplianceAuditTrailService;
 use App\Services\HubService;
 use Illuminate\Http\JsonResponse;
@@ -39,6 +40,8 @@ class ComplianceAuditEventController extends Controller
 
         $hub = $this->hubs->current();
         $module = (string) $validated['module'];
+        /** @var User $actor */
+        $actor = $request->user();
 
         $listed = $this->auditTrail->paginateForHub($module, $hub, [
             'q' => $validated['q'] ?? null,
@@ -47,7 +50,7 @@ class ComplianceAuditEventController extends Controller
             'to' => $validated['to'] ?? null,
             'per_page' => $validated['per_page'] ?? 100,
             'page' => $validated['page'] ?? 1,
-        ]);
+        ], $actor);
 
         return response()->json([
             'module' => $module,

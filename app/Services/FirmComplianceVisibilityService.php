@@ -2,9 +2,11 @@
 
 namespace App\Services;
 
+use App\Models\ComplianceAuditEvent;
 use App\Models\Firm;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -321,6 +323,131 @@ class FirmComplianceVisibilityService
         return $candidates
             ->filter(fn (User $user) => $this->userIsEligibleAssignee($user, $submitterFirm))
             ->values();
+    }
+
+    /**
+     * Firm IDs whose compliance / activity data the actor may see for oversight tools
+     * (reports, audit trail, activity logs).
+     *
+     * null  = hub-wide (bypass)
+     * []    = nothing
+     * list  = own firm + firms that delegated access TO the actor's firm
+     *
+     * @return list<int>|null
+     */
+    public function visibleFirmIdsForActor(User $actor): ?array
+    {
+        if ($this->actorBypassesFirmScope($actor)) {
+            return null;
+        }
+
+        if (! $actor->firm_id) {
+            return [];
+        }
+
+        $viewerFirmId = (int) $actor->firm_id;
+        $ids = [$viewerFirmId];
+
+        if (Schema::hasTable('firm_compliance_authorities')) {
+            $delegated = DB::table('firm_compliance_authorities')
+                ->where('authority_firm_id', $viewerFirmId)
+                ->pluck('subject_firm_id')
+                ->map(static fn ($id) => (int) $id)
+                ->all();
+            $ids = array_merge($ids, $delegated);
+        } else {
+            // Legacy: other firms that named this firm, or central flag.
+            $viewerFirm = $actor->relationLoaded('firm')
+                ? $actor->firm
+                : Firm::query()->find($viewerFirmId);
+            $viewerIsCentral = (bool) ($viewerFirm?->is_central);
+
+            $legacy = Firm::query()
+                ->where(function (Builder $q) use ($viewerFirmId, $viewerIsCentral) {
+                    $q->where('compliance_visible_to_firm_id', $viewerFirmId);
+                    if ($viewerIsCentral) {
+                        $q->orWhere('compliance_visible_to_central', true);
+                    }
+                })
+                ->pluck('id')
+                ->map(static fn ($id) => (int) $id)
+                ->all();
+            $ids = array_merge($ids, $legacy);
+        }
+
+        return array_values(array_unique(array_filter($ids)));
+    }
+
+    /**
+     * Restrict activity_logs to users belonging to firms the actor may see.
+     * Guest / system rows (null user_id) are hidden for firm-scoped viewers.
+     *
+     * @param  Builder<\Illuminate\Database\Eloquent\Model>  $query
+     */
+    public function scopeActivityLogsForActor(Builder $query, User $actor): void
+    {
+        $firmIds = $this->visibleFirmIdsForActor($actor);
+        if ($firmIds === null) {
+            return;
+        }
+
+        if ($firmIds === []) {
+            $query->whereRaw('0 = 1');
+
+            return;
+        }
+
+        $query->whereNotNull('user_id')
+            ->whereIn('user_id', function ($sub) use ($firmIds) {
+                $sub->select('id')
+                    ->from('users')
+                    ->whereIn('firm_id', $firmIds);
+            });
+    }
+
+    /**
+     * Restrict compliance_audit_events to subjects whose submitter/editor firm
+     * the actor may see.
+     *
+     * @param  Builder<\Illuminate\Database\Eloquent\Model>  $query
+     */
+    public function scopeAuditEventsForActor(Builder $query, User $actor, string $module): void
+    {
+        $firmIds = $this->visibleFirmIdsForActor($actor);
+        if ($firmIds === null) {
+            return;
+        }
+
+        if ($firmIds === []) {
+            $query->whereRaw('0 = 1');
+
+            return;
+        }
+
+        $userIdsSub = function ($sub) use ($firmIds) {
+            $sub->select('id')
+                ->from('users')
+                ->whereIn('firm_id', $firmIds);
+        };
+
+        match ($module) {
+            ComplianceAuditEvent::MODULE_SMC => $query->whereIn('subject_id', function ($sub) use ($userIdsSub) {
+                $sub->select('id')
+                    ->from('social_media_compliance_requests')
+                    ->whereIn('user_id', $userIdsSub);
+            }),
+            ComplianceAuditEvent::MODULE_GC => $query->whereIn('subject_id', function ($sub) use ($userIdsSub) {
+                $sub->select('id')
+                    ->from('general_compliance_requests')
+                    ->whereIn('user_id', $userIdsSub);
+            }),
+            ComplianceAuditEvent::MODULE_WC => $query->whereIn('subject_id', function ($sub) use ($userIdsSub) {
+                $sub->select('id')
+                    ->from('wc_change_requests')
+                    ->whereIn('editor_id', $userIdsSub);
+            }),
+            default => $query->whereRaw('0 = 1'),
+        };
     }
 
     private function qualifySubmitterKey(string $userRelation): string

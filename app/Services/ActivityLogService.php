@@ -38,7 +38,8 @@ class ActivityLogService
     ];
 
     public function __construct(
-        private readonly HubService $hubs
+        private readonly HubService $hubs,
+        private readonly FirmComplianceVisibilityService $firmVisibility,
     ) {}
 
     /**
@@ -173,9 +174,9 @@ class ActivityLogService
      *   per_page?: int|null
      * }  $filters
      */
-    public function list(Hub $hub, array $filters = []): LengthAwarePaginator
+    public function list(Hub $hub, array $filters = [], ?User $actor = null): LengthAwarePaginator
     {
-        $query = $this->filteredQuery($hub, $filters)->orderByDesc('id');
+        $query = $this->filteredQuery($hub, $filters, $actor)->orderByDesc('id');
 
         $perPage = max(1, min(100, (int) ($filters['per_page'] ?? 25)));
 
@@ -200,9 +201,9 @@ class ActivityLogService
      *   filters: array<string, mixed>
      * }
      */
-    public function report(Hub $hub, array $filters = []): array
+    public function report(Hub $hub, array $filters = [], ?User $actor = null): array
     {
-        $base = $this->filteredQuery($hub, $filters);
+        $base = $this->filteredQuery($hub, $filters, $actor);
 
         $total = (clone $base)->count();
         $uniqueUsers = (clone $base)->whereNotNull('user_id')->distinct('user_id')->count('user_id');
@@ -269,9 +270,13 @@ class ActivityLogService
     /**
      * @param  array<string, mixed>  $filters
      */
-    private function filteredQuery(Hub $hub, array $filters): Builder
+    private function filteredQuery(Hub $hub, array $filters, ?User $actor = null): Builder
     {
         $query = ActivityLog::query()->where('hub_id', $hub->id);
+
+        if ($actor) {
+            $this->firmVisibility->scopeActivityLogsForActor($query, $actor);
+        }
 
         if (array_key_exists('user_id', $filters) && $filters['user_id'] !== null && $filters['user_id'] !== '') {
             // 0 = guest / anonymous activity (user_id IS NULL).

@@ -988,12 +988,12 @@ class SocialMediaComplianceService
                 'approved_multiple_attempts' => $approvedMultiple,
             ],
             'rows' => $export,
-            // Hub-scoped trail so Audit tab works even when firm-visibility hides some rows
-            // (e.g. Power Admin on Central viewing / acting on a content hub).
+            // Firm-scoped to the same visible request set (hub-wide for bypass actors).
             'audit_events' => $this->auditTrail->forHub(
                 ComplianceAuditEvent::MODULE_SMC,
                 $hub,
-                $requestIds
+                $requestIds,
+                $actor
             ),
             'hub' => [
                 'id' => $hub->id,
@@ -1006,7 +1006,7 @@ class SocialMediaComplianceService
     /**
      * @return array{labels: list<string>, datasets: list<array{label: string, data: list<int>}>}
      */
-    public function approverWorkload(Hub $hub, ?string $from = null, ?string $to = null): array
+    public function approverWorkload(Hub $hub, ?string $from = null, ?string $to = null, ?User $actor = null): array
     {
         $this->assertModuleEnabled($hub);
 
@@ -1014,6 +1014,10 @@ class SocialMediaComplianceService
             ->selectRaw('assigned_to, COUNT(*) as total')
             ->whereNotNull('assigned_to')
             ->groupBy('assigned_to');
+
+        if ($actor) {
+            $this->firmVisibility->scopeQueryForActor($query, $actor, 'user', 'assigned_to');
+        }
 
         if ($from) {
             $query->whereDate('submission_date', '>=', $from);
@@ -1043,7 +1047,7 @@ class SocialMediaComplianceService
     /**
      * @return array{labels: list<string>, datasets: list<array{label: string, data: list<int>}>}
      */
-    public function advisorComparison(Hub $hub, ?string $from = null, ?string $to = null, ?string $status = null): array
+    public function advisorComparison(Hub $hub, ?string $from = null, ?string $to = null, ?string $status = null, ?User $actor = null): array
     {
         $this->assertModuleEnabled($hub);
 
@@ -1055,6 +1059,20 @@ class SocialMediaComplianceService
             })
             ->selectRaw('r.user_id, COUNT(*) as total')
             ->groupBy('r.user_id');
+
+        if ($actor) {
+            // Alias-aware firm scope: filter by submitter firm visibility.
+            $firmIds = $this->firmVisibility->visibleFirmIdsForActor($actor);
+            if ($firmIds !== null) {
+                if ($firmIds === []) {
+                    $query->whereRaw('0 = 1');
+                } else {
+                    $query->whereIn('r.user_id', function ($sub) use ($firmIds) {
+                        $sub->select('id')->from('users')->whereIn('firm_id', $firmIds);
+                    });
+                }
+            }
+        }
 
         if ($from) {
             $query->whereDate('r.submission_date', '>=', $from);

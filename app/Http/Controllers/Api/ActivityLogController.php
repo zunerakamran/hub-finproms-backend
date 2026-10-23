@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\User;
 use App\Services\ActivityLogService;
 use App\Services\HubService;
 use Illuminate\Http\JsonResponse;
@@ -22,7 +23,9 @@ class ActivityLogController extends Controller
     {
         $filters = $this->filters($request);
         $hub = $this->hubs->current();
-        $paginator = $this->activityLogs->list($hub, $filters);
+        /** @var User $actor */
+        $actor = $request->user();
+        $paginator = $this->activityLogs->list($hub, $filters, $actor);
 
         $this->activityLogs->log([
             'action' => 'activity_logs.view',
@@ -53,7 +56,9 @@ class ActivityLogController extends Controller
         unset($filters['per_page']);
 
         $hub = $this->hubs->current();
-        $report = $this->activityLogs->report($hub, $filters);
+        /** @var User $actor */
+        $actor = $request->user();
+        $report = $this->activityLogs->report($hub, $filters, $actor);
 
         $this->activityLogs->log([
             'action' => 'activity_logs.report',

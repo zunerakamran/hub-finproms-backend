@@ -2851,6 +2851,10 @@ STEP 1 — Shared hub core (content hub)
     one-way review/assign/reports/audit; FirmComplianceVisibilityService
     (+ Central Approver in NETWORK_HUB_WIDE_ROLES); frontend AdminFirms
     multi-checkbox + firmAssigneeFilter. Backend + frontend.
+[x] Firm-scope oversight tools (§2.7.0 / §2.7.0a) — Activity logs, Audit
+    trail page, SMC/GC report audit_events + charts, WC platform CR report
+    / live CR stats use visibleFirmIdsForActor (own + delegated; Central
+    oversight hub-wide).
 [x] MULTI-ROLE USERS (§2.7 / §2.7.1) — backend: user_roles pivot; all roles
     equal (no primary/secondary); users.role = privilege-ordered legacy mirror
     only; capability UNION in userCan; UserRolesService sync + activity logs

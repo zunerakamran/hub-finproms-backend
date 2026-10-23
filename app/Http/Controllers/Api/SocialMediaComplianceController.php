@@ -451,7 +451,8 @@ class SocialMediaComplianceController extends Controller
         $chart = $this->compliance->approverWorkload(
             $hub,
             $validated['from'] ?? null,
-            $validated['to'] ?? null
+            $validated['to'] ?? null,
+            $user
         );
 
         $this->activityLogs->log([
@@ -485,7 +486,8 @@ class SocialMediaComplianceController extends Controller
             $hub,
             $validated['from'] ?? null,
             $validated['to'] ?? null,
-            $validated['status'] ?? null
+            $validated['status'] ?? null,
+            $user
         );
 
         $this->activityLogs->log([

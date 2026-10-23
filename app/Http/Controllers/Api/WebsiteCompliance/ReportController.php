@@ -12,6 +12,7 @@ use App\Models\WebsiteCompliance\TemplateRequest;
 use App\Support\WebsiteCompliance\WcDatabaseContext;
 use App\Services\ActivityLogService;
 use App\Services\ComplianceAuditTrailService;
+use App\Services\FirmComplianceVisibilityService;
 use App\Services\WebsiteCompliance\WebsiteComplianceGate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -24,7 +25,8 @@ class ReportController extends Controller
     public function __construct(
         private readonly WebsiteComplianceGate $gate,
         private readonly ActivityLogService $activityLogs,
-        private readonly ComplianceAuditTrailService $auditTrail
+        private readonly ComplianceAuditTrailService $auditTrail,
+        private readonly FirmComplianceVisibilityService $firmVisibility,
     ) {}
 
     public function summary(Request $request): JsonResponse
@@ -101,7 +103,7 @@ class ReportController extends Controller
 
         $limit = max(1, min(500, (int) $request->integer('limit', 500)));
 
-        $rows = ChangeRequest::query()
+        $query = ChangeRequest::query()
             ->with([
                 'editor:id,name,email,role,firm_id',
                 'editor.firm:id,name',
@@ -110,9 +112,11 @@ class ReportController extends Controller
                 'currentVersionRow',
                 'section:id,name,display_name',
             ])
-            ->orderByDesc('id')
-            ->limit($limit)
-            ->get();
+            ->orderByDesc('id');
+
+        $this->firmVisibility->scopeQueryForActor($query, $user, 'editor', 'approver_id');
+
+        $rows = $query->limit($limit)->get();
 
         $auditByRequest = $this->auditTrail->forSubjects(
             ComplianceAuditEvent::MODULE_WC,
@@ -178,7 +182,8 @@ class ReportController extends Controller
                 'audit_events' => $this->auditTrail->forHub(
                     ComplianceAuditEvent::MODULE_WC,
                     $hub,
-                    $requestIds
+                    $requestIds,
+                    $user
                 ),
                 'hub' => [
                     'id' => $hub->id,
@@ -197,7 +202,7 @@ class ReportController extends Controller
      */
     protected function liveSummaryPayload(User $viewer, ?PlatformReport $latestSnapshot = null): array
     {
-        $stats = $this->collectLiveWcStats();
+        $stats = $this->collectLiveWcStats($viewer);
         $payload = $this->formatSummaryFromStats($stats);
 
         $payload['id'] = $latestSnapshot?->id;
@@ -243,7 +248,7 @@ class ReportController extends Controller
      *   resubmitted: int
      * }
      */
-    protected function collectLiveWcStats(): array
+    protected function collectLiveWcStats(?User $actor = null): array
     {
         $templatesTotal = Template::count();
         $templatesActive = Template::where('is_active', true)->count();
@@ -274,7 +279,12 @@ class ReportController extends Controller
             ->values()
             ->all();
 
-        $changeRequestsByStatus = ChangeRequest::query()
+        $crBase = ChangeRequest::query();
+        if ($actor) {
+            $this->firmVisibility->scopeQueryForActor($crBase, $actor, 'editor', 'approver_id');
+        }
+
+        $changeRequestsByStatus = (clone $crBase)
             ->select('status', DB::raw('count(*) as total'))
             ->groupBy('status')
             ->pluck('total', 'status')
@@ -287,12 +297,12 @@ class ReportController extends Controller
             ->whereNull('assigned_advisor_id')
             ->count();
 
-        $awaitingApprover = ChangeRequest::query()
+        $awaitingApprover = (clone $crBase)
             ->where('status', ChangeRequest::STATUS_PENDING)
             ->whereNull('approver_id')
             ->count();
 
-        [$avgVersion, $resubmitted] = $this->changeRequestVersionStats();
+        [$avgVersion, $resubmitted] = $this->changeRequestVersionStats($actor);
 
         return [
             'templates_total' => $templatesTotal,
@@ -301,7 +311,7 @@ class ReportController extends Controller
             'template_requests_by_status' => $templateRequestsByStatus,
             'template_requests_by_type' => $templateRequestsByType,
             'template_requests_by_template' => $templateRequestsByTemplate,
-            'change_requests_total' => ChangeRequest::count(),
+            'change_requests_total' => (clone $crBase)->count(),
             'change_requests_by_status' => $changeRequestsByStatus,
             'awaiting_advisor' => $awaitingAdvisor,
             'awaiting_approver' => $awaitingApprover,
@@ -382,7 +392,7 @@ class ReportController extends Controller
     /**
      * @return array{0: float, 1: int}
      */
-    protected function changeRequestVersionStats(): array
+    protected function changeRequestVersionStats(?User $actor = null): array
     {
         $connection = WcDatabaseContext::connection()
             ?: (new ChangeRequest)->getConnectionName()
@@ -393,8 +403,13 @@ class ReportController extends Controller
             return [1.0, 0];
         }
 
-        $avgVersion = (float) (ChangeRequest::query()->avg(DB::raw('COALESCE(current_version, 1)')) ?: 1);
-        $resubmitted = (int) ChangeRequest::query()->where('current_version', '>', 1)->count();
+        $base = ChangeRequest::query();
+        if ($actor) {
+            $this->firmVisibility->scopeQueryForActor($base, $actor, 'editor', 'approver_id');
+        }
+
+        $avgVersion = (float) ((clone $base)->avg(DB::raw('COALESCE(current_version, 1)')) ?: 1);
+        $resubmitted = (int) (clone $base)->where('current_version', '>', 1)->count();
 
         return [$avgVersion, $resubmitted];
     }
@@ -426,7 +441,7 @@ class ReportController extends Controller
 
     protected function captureSnapshot(User $user): PlatformReport
     {
-        $stats = $this->collectLiveWcStats();
+        $stats = $this->collectLiveWcStats($user);
         $trStatus = $stats['template_requests_by_status'];
         $trType = $stats['template_requests_by_type'];
         $crStatus = $stats['change_requests_by_status'];
