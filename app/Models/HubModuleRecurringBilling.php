@@ -25,6 +25,8 @@ class HubModuleRecurringBilling extends Model
         'module_billing_batch_id',
         'module_key',
         'billed_user_id',
+        'payer_scope',
+        'firm_id',
         'user_count',
         'total_users_for_tier',
         'rate_per_user',

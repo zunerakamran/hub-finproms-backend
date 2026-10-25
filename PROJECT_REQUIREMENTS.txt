@@ -1781,6 +1781,28 @@ Either path designates Heads; both MUST stay in sync. Multiple admins OK:
   ongoing; show slot picker when unit is per_user_slots; advisor-pricing page
   removed from nav (tiers retired); Billing renew + grace page under Advisors
 
+5.1B2 Module invoice / payment settings (who pays)
+- Page `/my-dashboard/module-invoice-settings` gated by capability
+  `dashboard_manage_module_invoice_settings` (Modules pricing group).
+- Per-hub settings (`hub_module_invoice_settings`):
+  1) `network_pays_all` — Network pays ALL module invoices (every pricing unit,
+     one-time + ongoing). Checking this clears firm + user options.
+     Network Admin adds card details; network Accounts Admin can see invoices.
+  2) `firms_pay_own` — Each firm pays its own invoice when the unit is
+     `per_firm` (one invoice created per firm, billed to Firm Admin / firm
+     Accounts Admin). Other units remain paid by the network.
+  3) `users_pay_own` — Each user pays their own invoice when the unit is
+     `per_user` (fixed) or `per_user_slots` (slot rate). One invoice per user.
+     Other units remain paid by the network.
+  4) `network_resells` — Network pays the platform for all invoices, then may
+     re-charge users with its own pricing. Checking this clears `users_pay_own`.
+     Requires reseller logo + invoice text (+ format: standard / compact /
+     detailed) stamped onto invoice meta for branded display.
+- APIs: GET/POST/PUT module-invoice-settings (multipart for logo).
+- Billing rows store `payer_scope` (network|firm|user) + optional `firm_id`.
+- Module invoices list is filtered by viewer role (firm Accounts Admin sees
+  their firm’s invoices; network managers see all; users see own user-scope).
+
 5.1C Module packages (bundled product modules)
 - Separate page `/my-dashboard/module-packages` gated by capability
   `dashboard_manage_module_packages` (Modules pricing group).

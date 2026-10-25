@@ -728,6 +728,7 @@ class Hub extends Model
     public const MODULE_PRICING_CAPABILITY_KEYS = [
         'dashboard_manage_module_pricing',
         'dashboard_manage_module_packages',
+        'dashboard_manage_module_invoice_settings',
         'dashboard_view_module_invoices',
         'dashboard_mark_module_invoices_paid',
     ];
@@ -1413,6 +1414,13 @@ class Hub extends Model
         'dashboard_manage_module_packages' => [
             'label' => 'Manage module packages',
             'description' => 'Create, edit, and delete catalogue packages that bundle product modules at a single one-time package price. Packages are enabled per hub on the Modules page.',
+            'group' => self::GROUP_MODULE_PRICING,
+            'default_shared' => false,
+            'default_white_label' => true,
+        ],
+        'dashboard_manage_module_invoice_settings' => [
+            'label' => 'Module invoice / payment settings',
+            'description' => 'Choose who pays module invoices (network / firms / users), and optional network reseller branding (logo + text) when the network pays the platform then re-charges users.',
             'group' => self::GROUP_MODULE_PRICING,
             'default_shared' => false,
             'default_white_label' => true,

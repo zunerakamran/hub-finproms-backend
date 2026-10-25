@@ -24,7 +24,8 @@ class ModuleBillingService
     public function __construct(
         private readonly ModulePricingService $pricing,
         private readonly InvoiceService $invoices,
-        private readonly WhiteLabelDatabaseService $remoteDb
+        private readonly WhiteLabelDatabaseService $remoteDb,
+        private readonly ModuleInvoiceSettingsService $invoiceSettings
     ) {}
 
     public function billingEnabled(Hub $hub): bool
@@ -136,13 +137,123 @@ class ModuleBillingService
      */
     public function countFirms(Hub $hub): int
     {
-        return (int) $this->onHubDatabase($hub, function (?string $connection) {
+        return $this->listFirms($hub)->count();
+    }
+
+    /**
+     * @return \Illuminate\Support\Collection<int, \App\Models\Firm>
+     */
+    public function listFirms(Hub $hub)
+    {
+        return $this->onHubDatabase($hub, function (?string $connection) {
             if ($connection) {
-                return (int) DB::connection($connection)->table('firms')->count();
+                $rows = DB::connection($connection)->table('firms')->orderBy('id')->get();
+
+                return $rows->map(function ($row) {
+                    $firm = new \App\Models\Firm;
+                    $firm->forceFill((array) $row);
+                    $firm->id = (int) $row->id;
+                    $firm->exists = true;
+
+                    return $firm;
+                });
             }
 
-            return (int) \App\Models\Firm::query()->count();
+            return \App\Models\Firm::query()->orderBy('id')->get();
         });
+    }
+
+    /**
+     * Expand a catalogue quote into one or more invoice targets based on
+     * hub module invoice settings (network / firm / user pays).
+     *
+     * @param  list<string>|null  $accessModuleKeys
+     * @return list<array{payer: User, amount: float, payer_scope: string, firm_id: ?int, meta: array<string, mixed>}>
+     */
+    public function expandBillingTargets(
+        Hub $hub,
+        string $billingUnit,
+        float $unitAmount,
+        float $consolidatedAmount,
+        User $actor,
+        ?string $moduleKey = null,
+        ?array $accessModuleKeys = null,
+        ?int $tierSlot = null
+    ): array {
+        $settings = $this->invoiceSettings->forHub($hub);
+        $scope = $this->invoiceSettings->payerScopeForUnit($settings, $billingUnit);
+        $branding = $this->invoiceSettings->resellerBrandingMeta($settings);
+        $normalized = ModulePricingService::normalizeUnit($billingUnit);
+
+        if ($scope === ModuleInvoiceSettingsService::PAYER_FIRM) {
+            $firms = $this->listFirms($hub);
+            $nonCentralCount = $firms->filter(fn ($f) => ! $f->isCentral())->count();
+            $targets = [];
+            foreach ($firms as $firm) {
+                $firmId = (int) $firm->id;
+                if ($firmId <= 0) {
+                    continue;
+                }
+                // Skip central/network firm when member firms exist.
+                if ($firm->isCentral() && $nonCentralCount > 0) {
+                    continue;
+                }
+                $targets[] = [
+                    'payer' => $this->invoiceSettings->resolveFirmPayer($hub, $firmId, $actor),
+                    'amount' => round($unitAmount, 2),
+                    'payer_scope' => ModuleInvoiceSettingsService::PAYER_FIRM,
+                    'firm_id' => $firmId,
+                    'meta' => array_merge($branding, [
+                        'firm_id' => $firmId,
+                        'firm_name' => (string) ($firm->name ?? ''),
+                        'payer_scope' => ModuleInvoiceSettingsService::PAYER_FIRM,
+                    ]),
+                ];
+            }
+
+            return $targets;
+        }
+
+        if ($scope === ModuleInvoiceSettingsService::PAYER_USER) {
+            $keys = $accessModuleKeys ?? ($moduleKey ? [$moduleKey] : []);
+            $recurring = app(ModuleRecurringBillingService::class);
+            $users = $recurring->activeUsersWithAnyModule($hub, $keys);
+            $rate = $unitAmount;
+            if ($normalized === ModulePricingService::UNIT_PER_USER_SLOTS) {
+                $slot = $tierSlot !== null && $tierSlot >= 1 ? $tierSlot : 0;
+                if ($slot >= 1) {
+                    $tier = $recurring->resolveTier($slot, count($users));
+                    $rate = $tier ? (float) $tier->rate_per_user : 0.0;
+                }
+            }
+            $targets = [];
+            foreach ($users as $user) {
+                $targets[] = [
+                    'payer' => $user,
+                    'amount' => round($rate, 2),
+                    'payer_scope' => ModuleInvoiceSettingsService::PAYER_USER,
+                    'firm_id' => $user->firm_id ? (int) $user->firm_id : null,
+                    'meta' => array_merge($branding, [
+                        'payer_scope' => ModuleInvoiceSettingsService::PAYER_USER,
+                        'billed_user_email' => $user->email,
+                    ]),
+                ];
+            }
+
+            return $targets;
+        }
+
+        $payer = $this->invoiceSettings->resolveNetworkPayer($hub, $actor);
+
+        return [[
+            'payer' => $payer,
+            'amount' => round($consolidatedAmount, 2),
+            'payer_scope' => ModuleInvoiceSettingsService::PAYER_NETWORK,
+            'firm_id' => null,
+            'meta' => array_merge($branding, [
+                'payer_scope' => ModuleInvoiceSettingsService::PAYER_NETWORK,
+            ]),
+        ]];
     }
 
     /**
@@ -254,16 +365,20 @@ class ModuleBillingService
     }
 
     /**
-     * Prefer the actor when they are client admin; otherwise first client admin, else actor.
+     * Network payer of record for module invoices (respects invoice settings).
      */
-    public function resolvePayer(User $actor): User
+    public function resolvePayer(User $actor, ?Hub $hub = null): User
     {
-        if (in_array($actor->role, [User::ROLE_CLIENT_ADMIN, 'admin'], true)) {
+        if ($hub) {
+            return $this->invoiceSettings->resolveNetworkPayer($hub, $actor);
+        }
+
+        if (in_array($actor->role, [User::ROLE_CLIENT_ADMIN, 'admin', User::ROLE_NETWORK_ADMIN], true)) {
             return $actor;
         }
 
         $clientAdmin = User::query()
-            ->whereIn('role', [User::ROLE_CLIENT_ADMIN, 'admin'])
+            ->whereIn('role', [User::ROLE_CLIENT_ADMIN, 'admin', User::ROLE_NETWORK_ADMIN])
             ->orderBy('id')
             ->first();
 
@@ -328,8 +443,7 @@ class ModuleBillingService
 
         $created = [];
         foreach ($newlyEnabledPackageIds as $packageId) {
-            $invoice = $this->invoicePackageEnablement($hub, (int) $packageId, $actor, forceNew: true);
-            if ($invoice) {
+            foreach ($this->invoicePackageEnablement($hub, (int) $packageId, $actor, forceNew: true) as $invoice) {
                 $created[] = $invoice;
             }
         }
@@ -337,23 +451,26 @@ class ModuleBillingService
         return $created;
     }
 
+    /**
+     * @return list<Invoice>
+     */
     public function invoicePackageEnablement(
         Hub $hub,
         int $packageId,
         User $actor,
         bool $forceNew = false
-    ): ?Invoice {
+    ): array {
         if (! $this->billingEnabled($hub) || $packageId <= 0) {
-            return null;
+            return [];
         }
 
         if (! in_array($packageId, $hub->enabledModulePackageIds(), true)) {
-            return null;
+            return [];
         }
 
         $package = ModulePackage::query()->with('items')->find($packageId);
         if (! $package || ! $package->is_active) {
-            return null;
+            return [];
         }
 
         $billingKey = $package->billingModuleKey();
@@ -367,7 +484,11 @@ class ModuleBillingService
                 ->first(fn (HubModuleBilling $row) => ! empty($row->meta['module_package_enable_invoice']));
 
             if ($existing) {
-                return $existing->invoice ?: $this->invoices->createForModuleBilling($existing);
+                if ($existing->invoice) {
+                    return [];
+                }
+
+                return [$this->invoices->createForModuleBilling($existing)];
             }
         }
 
@@ -382,12 +503,19 @@ class ModuleBillingService
             $moduleKeys,
             $tierSlot
         );
-        $amount = $priced['amount'];
-        $payer = $this->resolvePayer($actor);
-        $isComplimentary = $amount <= 0;
-        $status = $isComplimentary
-            ? HubModuleBilling::STATUS_PAID
-            : HubModuleBilling::STATUS_UNPAID;
+        $targets = $this->expandBillingTargets(
+            $hub,
+            $billingUnit,
+            (float) $priced['unit_amount'],
+            (float) $priced['amount'],
+            $actor,
+            null,
+            $moduleKeys,
+            $tierSlot
+        );
+        if ($targets === []) {
+            return [];
+        }
 
         return DB::transaction(function () use (
             $hub,
@@ -395,48 +523,59 @@ class ModuleBillingService
             $billingKey,
             $billingUnit,
             $priced,
-            $amount,
-            $payer,
-            $status,
-            $isComplimentary,
+            $targets,
             $actor,
             $forceNew,
             $moduleKeys
         ) {
             if ($forceNew) {
                 $this->removePreviousEnableInvoicesForModule($hub, $billingKey);
-                // Package price replaces individual enable invoices for covered modules.
                 foreach ($moduleKeys as $moduleKey) {
                     $this->removePreviousEnableInvoicesForModule($hub, $moduleKey);
                 }
             }
 
-            $billing = HubModuleBilling::query()->create([
-                'hub_id' => $hub->id,
-                'module_key' => $billingKey,
-                'billed_user_id' => $payer->id,
-                'amount' => $amount,
-                'currency' => $package->currency ?: 'gbp',
-                'status' => $status,
-                'payment_status' => $status,
-                'paid_at' => $isComplimentary ? now() : null,
-                'paid_by_user_id' => $isComplimentary ? $actor->id : null,
-                'payment_method' => $isComplimentary ? 'complimentary' : null,
-                'payment_notes' => $isComplimentary ? '£0 package price — included' : null,
-                'meta' => array_merge([
-                    'module_label' => $package->name,
-                    'module_package_id' => $package->id,
-                    'module_package_slug' => $package->slug,
-                    'module_package_module_keys' => $moduleKeys,
-                    'billing_cadence' => Invoice::TYPES_ONE_TIME,
-                    'billing_unit' => $billingUnit,
-                    'module_enable_invoice' => true,
-                    'module_package_enable_invoice' => true,
-                    'auto_paid_on_hub_enable' => $isComplimentary,
-                ], $priced['meta']),
-            ]);
+            $created = [];
+            foreach ($targets as $target) {
+                $amount = (float) $target['amount'];
+                $isComplimentary = $amount <= 0;
+                $status = $isComplimentary
+                    ? HubModuleBilling::STATUS_PAID
+                    : HubModuleBilling::STATUS_UNPAID;
+                /** @var User $payer */
+                $payer = $target['payer'];
 
-            return $this->invoices->createForModuleBilling($billing);
+                $billing = HubModuleBilling::query()->create([
+                    'hub_id' => $hub->id,
+                    'module_key' => $billingKey,
+                    'billed_user_id' => $payer->id,
+                    'payer_scope' => $target['payer_scope'],
+                    'firm_id' => $target['firm_id'],
+                    'amount' => $amount,
+                    'currency' => $package->currency ?: 'gbp',
+                    'status' => $status,
+                    'payment_status' => $status,
+                    'paid_at' => $isComplimentary ? now() : null,
+                    'paid_by_user_id' => $isComplimentary ? $actor->id : null,
+                    'payment_method' => $isComplimentary ? 'complimentary' : null,
+                    'payment_notes' => $isComplimentary ? '£0 package price — included' : null,
+                    'meta' => array_merge([
+                        'module_label' => $package->name,
+                        'module_package_id' => $package->id,
+                        'module_package_slug' => $package->slug,
+                        'module_package_module_keys' => $moduleKeys,
+                        'billing_cadence' => Invoice::TYPES_ONE_TIME,
+                        'billing_unit' => $billingUnit,
+                        'module_enable_invoice' => true,
+                        'module_package_enable_invoice' => true,
+                        'auto_paid_on_hub_enable' => $isComplimentary,
+                    ], $priced['meta'], $target['meta']),
+                ]);
+
+                $created[] = $this->invoices->createForModuleBilling($billing);
+            }
+
+            return $created;
         });
     }
 
@@ -455,8 +594,7 @@ class ModuleBillingService
 
         $created = [];
         foreach ($hub->enabledModulePackageIds() as $packageId) {
-            $invoice = $this->invoicePackageEnablement($hub, (int) $packageId, $actor, forceNew: false);
-            if ($invoice) {
+            foreach ($this->invoicePackageEnablement($hub, (int) $packageId, $actor, forceNew: false) as $invoice) {
                 $created[] = $invoice;
             }
         }
@@ -537,23 +675,28 @@ class ModuleBillingService
             $tierSlot
         );
 
-        // Flat / quantity one-time — including £0 catalogue prices (still create the invoice).
-        // On re-enable (forceNew), supersede previous unpaid enable rows first.
-        $payer = $this->resolvePayer($actor);
-        $isComplimentary = (float) $priced['amount'] <= 0;
-        $status = $isComplimentary
-            ? HubModuleBilling::STATUS_PAID
-            : HubModuleBilling::STATUS_UNPAID;
+        $targets = $this->expandBillingTargets(
+            $hub,
+            $billingUnit,
+            (float) $priced['unit_amount'],
+            (float) $priced['amount'],
+            $actor,
+            $moduleKey,
+            [$moduleKey],
+            $tierSlot
+        );
 
-        $invoice = DB::transaction(function () use (
+        if ($targets === []) {
+            return [];
+        }
+
+        return DB::transaction(function () use (
             $hub,
             $moduleKey,
             $quote,
             $priced,
             $billingUnit,
-            $payer,
-            $status,
-            $isComplimentary,
+            $targets,
             $actor,
             $forceNew
         ) {
@@ -561,31 +704,44 @@ class ModuleBillingService
                 $this->removePreviousEnableInvoicesForModule($hub, $moduleKey);
             }
 
-            $billing = HubModuleBilling::query()->create([
-                'hub_id' => $hub->id,
-                'module_key' => $moduleKey,
-                'billed_user_id' => $payer->id,
-                'amount' => $priced['amount'],
-                'currency' => $quote['currency'],
-                'status' => $status,
-                'payment_status' => $status,
-                'paid_at' => $isComplimentary ? now() : null,
-                'paid_by_user_id' => $isComplimentary ? $actor->id : null,
-                'payment_method' => $isComplimentary ? 'complimentary' : null,
-                'payment_notes' => $isComplimentary ? '£0 catalogue price — included' : null,
-                'meta' => array_merge([
-                    'module_label' => Hub::CHECKLIST_DEFINITIONS[$moduleKey]['label'] ?? $moduleKey,
-                    'billing_cadence' => Invoice::TYPES_ONE_TIME,
-                    'billing_unit' => $billingUnit,
-                    'module_enable_invoice' => true,
-                    'auto_paid_on_hub_enable' => $isComplimentary,
-                ], $priced['meta']),
-            ]);
+            $created = [];
+            foreach ($targets as $target) {
+                $amount = (float) $target['amount'];
+                $isComplimentary = $amount <= 0;
+                $status = $isComplimentary
+                    ? HubModuleBilling::STATUS_PAID
+                    : HubModuleBilling::STATUS_UNPAID;
+                /** @var User $payer */
+                $payer = $target['payer'];
 
-            return $this->invoices->createForModuleBilling($billing);
+                $billing = HubModuleBilling::query()->create([
+                    'hub_id' => $hub->id,
+                    'module_key' => $moduleKey,
+                    'billed_user_id' => $payer->id,
+                    'payer_scope' => $target['payer_scope'],
+                    'firm_id' => $target['firm_id'],
+                    'amount' => $amount,
+                    'currency' => $quote['currency'],
+                    'status' => $status,
+                    'payment_status' => $status,
+                    'paid_at' => $isComplimentary ? now() : null,
+                    'paid_by_user_id' => $isComplimentary ? $actor->id : null,
+                    'payment_method' => $isComplimentary ? 'complimentary' : null,
+                    'payment_notes' => $isComplimentary ? '£0 catalogue price — included' : null,
+                    'meta' => array_merge([
+                        'module_label' => Hub::CHECKLIST_DEFINITIONS[$moduleKey]['label'] ?? $moduleKey,
+                        'billing_cadence' => Invoice::TYPES_ONE_TIME,
+                        'billing_unit' => $billingUnit,
+                        'module_enable_invoice' => true,
+                        'auto_paid_on_hub_enable' => $isComplimentary,
+                    ], $priced['meta'], $target['meta']),
+                ]);
+
+                $created[] = $this->invoices->createForModuleBilling($billing);
+            }
+
+            return $created;
         });
-
-        return [$invoice];
     }
 
     /**

@@ -19,6 +19,8 @@ class HubModuleBilling extends Model
         'hub_id',
         'module_key',
         'billed_user_id',
+        'payer_scope',
+        'firm_id',
         'amount',
         'currency',
         'status',

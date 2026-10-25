@@ -54,6 +54,7 @@ use App\Http\Controllers\Api\InternalGcFileController;
 use App\Http\Controllers\Api\PowerAdminHubController;
 use App\Http\Controllers\Api\PowerAdminHubBackupController;
 use App\Http\Controllers\Api\PowerAdminHubReleaseController;
+use App\Http\Controllers\Api\PowerAdminModuleInvoiceSettingsController;
 use App\Http\Controllers\Api\PowerAdminModulePackageController;
 use App\Http\Controllers\Api\PowerAdminModulePricingController;
 use App\Http\Controllers\Api\PowerAdminPaymentMethodController;
@@ -647,6 +648,12 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::delete('/module-recurring-tiers/{tier}', [PowerAdminModulePricingController::class, 'destroyTier']);
         });
 
+        Route::middleware('hub_can:dashboard_manage_module_invoice_settings')->group(function () {
+            Route::get('/module-invoice-settings', [PowerAdminModuleInvoiceSettingsController::class, 'show']);
+            Route::post('/module-invoice-settings', [PowerAdminModuleInvoiceSettingsController::class, 'update']);
+            Route::put('/module-invoice-settings', [PowerAdminModuleInvoiceSettingsController::class, 'update']);
+        });
+
         Route::middleware('hub_can:dashboard_manage_module_packages')->group(function () {
             Route::get('/module-packages', [PowerAdminModulePackageController::class, 'index']);
             Route::post('/module-packages', [PowerAdminModulePackageController::class, 'store']);
@@ -1046,6 +1053,12 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/module-recurring-tiers', [PowerAdminModulePricingController::class, 'storeTier']);
             Route::put('/module-recurring-tiers/{tier}', [PowerAdminModulePricingController::class, 'updateTier']);
             Route::delete('/module-recurring-tiers/{tier}', [PowerAdminModulePricingController::class, 'destroyTier']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_module_invoice_settings')->group(function () {
+            Route::get('/module-invoice-settings', [PowerAdminModuleInvoiceSettingsController::class, 'show']);
+            Route::post('/module-invoice-settings', [PowerAdminModuleInvoiceSettingsController::class, 'update']);
+            Route::put('/module-invoice-settings', [PowerAdminModuleInvoiceSettingsController::class, 'update']);
         });
 
         Route::middleware('hub_can:dashboard_manage_module_packages')->group(function () {

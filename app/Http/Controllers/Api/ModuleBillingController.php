@@ -22,7 +22,8 @@ class ModuleBillingController extends Controller
     public function __construct(
         private readonly ActingHubService $actingHubs,
         private readonly CapabilitiesMatrixService $matrix,
-        private readonly ModuleBillingService $moduleBilling
+        private readonly ModuleBillingService $moduleBilling,
+        private readonly \App\Services\ModuleInvoiceSettingsService $invoiceSettings
     ) {}
 
     public function invoices(Request $request): JsonResponse
@@ -51,24 +52,75 @@ class ModuleBillingController extends Controller
                 'user:id,name,email',
             ])
             ->latest('issued_at')
-            ->paginate((int) $request->integer('per_page', 20));
+            ->get()
+            ->filter(function (Invoice $invoice) use ($actor, $hub) {
+                if (! $actor) {
+                    return false;
+                }
+                if ($invoice->type === Invoice::TYPE_MODULE_RECURRING && $invoice->moduleRecurringBilling) {
+                    $b = $invoice->moduleRecurringBilling;
+
+                    return $this->invoiceSettings->viewerCanSeeBilling(
+                        $actor,
+                        $hub,
+                        (string) ($b->payer_scope ?: 'network'),
+                        $b->firm_id !== null ? (int) $b->firm_id : null,
+                        $b->billed_user_id !== null ? (int) $b->billed_user_id : null
+                    );
+                }
+                if ($invoice->moduleBilling) {
+                    $b = $invoice->moduleBilling;
+
+                    return $this->invoiceSettings->viewerCanSeeBilling(
+                        $actor,
+                        $hub,
+                        (string) ($b->payer_scope ?: 'network'),
+                        $b->firm_id !== null ? (int) $b->firm_id : null,
+                        $b->billed_user_id !== null ? (int) $b->billed_user_id : null
+                    );
+                }
+
+                return false;
+            })
+            ->values();
+
+        $perPage = max(1, (int) $request->integer('per_page', 20));
+        $page = max(1, (int) $request->integer('page', 1));
+        $total = $invoices->count();
+        $slice = $invoices->forPage($page, $perPage)->values();
 
         $canMarkPaid = $actor
             ? $this->matrix->roleCan($hub, (string) $actor->role, self::MARK_PAID_CAPABILITY)
             : false;
 
-        $payload = $invoices->toArray();
-        $payload['data'] = collect($invoices->items())->map(function (Invoice $invoice) {
-            $row = $invoice->toArray();
-            $row['payment'] = $invoice->type === Invoice::TYPE_MODULE_RECURRING
-                ? $invoice->moduleRecurringBilling?->paymentDetailsForApi()
-                : $invoice->moduleBilling?->paymentDetailsForApi();
-            $row['billing_breakdown'] = $invoice->type === Invoice::TYPE_MODULE_RECURRING
-                ? $invoice->moduleRecurringBilling?->billingBreakdownForApi()
-                : $invoice->moduleBilling?->billingBreakdownForApi();
+        $payload = [
+            'data' => $slice->map(function (Invoice $invoice) {
+                $row = $invoice->toArray();
+                $row['payment'] = $invoice->type === Invoice::TYPE_MODULE_RECURRING
+                    ? $invoice->moduleRecurringBilling?->paymentDetailsForApi()
+                    : $invoice->moduleBilling?->paymentDetailsForApi();
+                $row['billing_breakdown'] = $invoice->type === Invoice::TYPE_MODULE_RECURRING
+                    ? $invoice->moduleRecurringBilling?->billingBreakdownForApi()
+                    : $invoice->moduleBilling?->billingBreakdownForApi();
+                $billing = $invoice->type === Invoice::TYPE_MODULE_RECURRING
+                    ? $invoice->moduleRecurringBilling
+                    : $invoice->moduleBilling;
+                $row['payer_scope'] = $billing?->payer_scope ?? ($billing?->meta['payer_scope'] ?? 'network');
+                $row['firm_id'] = $billing?->firm_id;
+                $row['reseller_branding'] = [
+                    'network_resells' => (bool) ($billing?->meta['network_resells'] ?? false),
+                    'reseller_invoice_format' => $billing?->meta['reseller_invoice_format'] ?? null,
+                    'reseller_invoice_text' => $billing?->meta['reseller_invoice_text'] ?? null,
+                    'reseller_logo_url' => $billing?->meta['reseller_logo_url'] ?? null,
+                ];
 
-            return $row;
-        })->all();
+                return $row;
+            })->all(),
+            'current_page' => $page,
+            'per_page' => $perPage,
+            'total' => $total,
+            'last_page' => (int) max(1, ceil($total / $perPage)),
+        ];
 
         return response()->json([
             ...$payload,
@@ -104,6 +156,23 @@ class ModuleBillingController extends Controller
         ]);
 
         $actor = $request->user();
+        $billing = $invoice->type === Invoice::TYPE_MODULE_RECURRING
+            ? $invoice->moduleRecurringBilling
+            : $invoice->moduleBilling;
+        if (
+            $actor
+            && $billing
+            && ! $this->invoiceSettings->viewerCanSeeBilling(
+                $actor,
+                $hub,
+                (string) ($billing->payer_scope ?: 'network'),
+                $billing->firm_id !== null ? (int) $billing->firm_id : null,
+                $billing->billed_user_id !== null ? (int) $billing->billed_user_id : null
+            )
+        ) {
+            abort(response()->json(['message' => 'You do not have access to this invoice.'], 403));
+        }
+
         $canMarkPaid = $actor
             ? $this->matrix->roleCan($hub, (string) $actor->role, self::MARK_PAID_CAPABILITY)
             : false;
@@ -121,6 +190,14 @@ class ModuleBillingController extends Controller
             'payment' => $payment,
             'billing_breakdown' => $billingBreakdown,
             'can_mark_paid' => $canMarkPaid && $invoice->status !== 'paid',
+            'payer_scope' => $billing?->payer_scope ?? 'network',
+            'firm_id' => $billing?->firm_id,
+            'reseller_branding' => [
+                'network_resells' => (bool) ($billing?->meta['network_resells'] ?? false),
+                'reseller_invoice_format' => $billing?->meta['reseller_invoice_format'] ?? null,
+                'reseller_invoice_text' => $billing?->meta['reseller_invoice_text'] ?? null,
+                'reseller_logo_url' => $billing?->meta['reseller_logo_url'] ?? null,
+            ],
             'target_hub' => [
                 'id' => $hub->id,
                 'name' => $hub->name,
