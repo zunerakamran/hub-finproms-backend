@@ -1661,7 +1661,7 @@ class Hub extends Model
         ],
         'wc_assign_website_templates' => [
             'label' => 'Assign website templates',
-            'description' => 'Request a template deployment on behalf of an advisor and assign them as the site editor.',
+            'description' => 'Request a template deployment for a network/firm and assign one or more Website Admins as site editors (firm Delegated compliance access filters the picker).',
             'group' => self::GROUP_WEBSITE_TEMPLATE_LIBRARY,
             'default_shared' => false,
             'default_white_label' => false,

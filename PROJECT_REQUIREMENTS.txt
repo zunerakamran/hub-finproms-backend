@@ -1,8 +1,9 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-23 (Delegated compliance access implemented — multi-firm
-  pivot + UI rename; firm/network role scope; Network/Firm Admin done)
+Last updated: 2026-10-25 (Website Admin role + Network/Firm Admin multi-assign
+  Website Admins on Website Template Library requests; Delegated compliance
+  access picker filter)
 
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
@@ -452,6 +453,9 @@ Firm Admin):
        (hub-wide firm_documents_* caps remain separate from own-firm head rights).
      - May be combined with other non–control-plane roles (e.g. manager,
        approver, user).
+     - Website Template Library: with `wc_request_deployments` +
+       `wc_assign_website_templates` (default ON), Network Admin requests a
+       site for the network and assigns one or more Website Admins (§3.3d).
 
   5) FIRM ADMIN (firm_admin) — head of a member firm
      - NEW system role (multi-role compatible). Default display name
@@ -468,35 +472,55 @@ Firm Admin):
      - Other screens follow the §5.2 matrix column for `firm_admin`.
      - May be combined with other roles (e.g. advisor + firm_admin,
        manager + firm_admin).
+     - Website Template Library: with `wc_request_deployments` +
+       `wc_assign_website_templates` (default ON), Firm Admin requests a site
+       for THEIR firm and assigns one or more Website Admins (§3.3d).
 
-  6) TOP MANAGEMENT (top_management) — reports oversight
+  6) WEBSITE ADMIN (website_admin) — firm/network website editor
+     - NEW system role (multi-role compatible). Default display name
+       “Website Admin” (renameable per hub).
+     - Firm- or network-scoped editor for Website Template Library
+       deployments / Website Content Pre Approval editing.
+     - MULTIPLE Website Admins allowed per firm or network. A user must
+       belong to a firm (`users.firm_id`); the role may be held alongside
+       other non–control-plane roles (e.g. advisor + website_admin).
+     - Default matrix ON: `wc_edit_sections`, `wc_submit_change_requests`.
+     - Assigned to website deployments by Network Admin / Firm Admin (or
+       other roles with `wc_assign_website_templates`) via multi-select.
+       One website may have MANY Website Admins (`wc_template_request_website_admins`
+       pivot). `assigned_advisor_id` remains the primary content/cPanel owner
+       (first selected Website Admin) for section scoping.
+     - Picker eligibility uses Delegated compliance access (§2.7.0a) — same
+       firm visibility rules as firm create/update.
+
+  7) TOP MANAGEMENT (top_management) — reports oversight
      - Default matrix ON: `smc_view_reports`, `gc_view_reports`,
        `wc_view_platform_report` (all report types).
      - SCOPE: own firm + firms that delegated access TO this user’s firm
        (§2.7.0 / §2.7.0a). Central / Network Top Management also hub-wide
        for all firms (§2.7.0 B).
 
-  7) ACCOUNTS ADMIN (accounts_admin) — billing / invoices
+  8) ACCOUNTS ADMIN (accounts_admin) — billing / invoices
      - Default matrix ON: one-time / module / advisor invoices, mark module
        invoices paid, confirm bank transfers, billing renew+grace,
        general_show_invoices. May manage WL Payment card (with client_admin).
      - SCOPE: same firm vs network + delegated-access pattern as Top
        Management where invoices are firm-filtered (§2.7.0).
 
-  8) AUDITOR (auditor) — activity logs & audit trails
+  9) AUDITOR (auditor) — activity logs & audit trails
      - Default matrix ON: `dashboard_view_activity_logs`,
        `dashboard_view_compliance_audit_trail`, `wc_view_activity_logs`.
      - SCOPE: own firm + firms that delegated access TO this user’s firm
        (§2.7.0a). Central / Network Auditor also hub-wide (§2.7.0 B).
 
-  9) MANAGER (manager) — hub staff (Shared or White-label)
+  10) MANAGER (manager) — hub staff (Shared or White-label)
      - Mid-level operational role; gated by hub dashboard checklist.
      - SCOPE: own firm + delegated-access firms (§2.7.0a) for assign /
        change-status / view-all within caps. Central manager without a
        hub-wide oversight role (§2.7.0 B) uses the same allowlist (firms
        that checked Central / Network).
 
-  10) APPROVER (approver) — compliance / review
+  11) APPROVER (approver) — compliance / review
      - Reviews/approves content (§3.3). Not a full hub admin by default.
      - SCOPE (REQUIRED — §2.7.0 / §2.7.0a):
        • Member-firm Approver → own firm’s requests PLUS any other firm
@@ -506,14 +530,14 @@ Firm Admin):
      - Still subject to SoD (§2.7.2). Multi-role = UNION caps; data scope
        still from `users.firm_id` + delegated access.
 
-  11) ADVISOR (advisor) — reserved role label in the capabilities matrix
+  12) ADVISOR (advisor) — reserved role label in the capabilities matrix
      - Not assigned automatically on plan subscribe or Excel import.
      - White-label invited advisors keep role=user (may add other roles later);
        Excel import sets is_advisor and has_unlimited_credits when hub
        behaviour allows.
      - Uses member UI (same as user) unless other assigned roles unlock more.
 
-  12) USER (user) — general user / subscriber
+  13) USER (user) — general user / subscriber
      - Browse / subscribe / buy / download as user capability checklist allows.
      - After a paid public-hub plan subscription, the user role remains
        (credits only); other roles already assigned are NOT removed.
@@ -521,7 +545,7 @@ Firm Admin):
        them) unless staff explicitly assign additional roles.
      - Label in the Capabilities matrix is "User" (not "Member").
 
-  13) ADMIN-STAFF (admin_staff) — firm-scoped staff (see User model / matrix)
+  14) ADMIN-STAFF (admin_staff) — firm-scoped staff (see User model / matrix)
      - Submit compliance and related work on behalf of advisors when allowed.
      - Display name overridable via hub role_display_names.
 
@@ -731,7 +755,7 @@ EQUAL ROLES (no primary / secondary):
   a privilege-ordered legacy mirror automatically:
   power_admin > finproms_admin > client_admin > network_admin >
   firm_admin > top_management > accounts_admin > auditor > manager >
-  approver > admin_staff > advisor > user.
+  approver > admin_staff > website_admin > advisor > user.
 - That mirror does NOT limit capabilities and is NOT editable as “primary”.
 - Capabilities always use the UNION of ALL assigned roles (below).
 - UI badges / Hub → Users / Access Control show all role labels equally
@@ -1094,13 +1118,28 @@ IMPLEMENTATION: UserCapabilitiesService; wired in CapabilitiesMatrixService
          • `selected_pages` — slugs chosen from the template’s `available_pages`
          • `page_contents` — document attachment (`url` + `name`) keyed by selected page slug
            (typed textareas are not used; attach a file for each page/service/policy)
-     - Optional staff path: request on behalf of / assign to an advisor
-       (`wc_assign_website_templates`).
+     - Network Admin / Firm Admin request path (preferred):
+       • Network Admin requests a website for their network (Central / Network
+         firm); Firm Admin requests a website for their member firm.
+       • Default caps ON for both roles: `wc_request_deployments` +
+         `wc_assign_website_templates`.
+       • On create (and later re-assign), the form shows a multi-select of
+         Website Admins (`website_admin` role). Eligibility uses the same
+         Delegated compliance access rules as firm create/update (§2.7.0a) —
+         API: `GET /api/website-compliance/website-admins`; body field
+         `website_admin_ids: number[]` (legacy `assigned_advisor_id` still
+         accepted as a single id).
+       • MULTIPLE Website Admins may be assigned to ONE website
+         (`wc_template_request_website_admins` pivot). First selected id is
+         also stored on `assigned_advisor_id` as the primary content/cPanel
+         owner for section scoping.
+       • Website Admins edit content after deploy (`wc_edit_sections` /
+         `wc_submit_change_requests` default ON for that role).
      - Power Admin (if `wc_deploy_websites`) manually deploys the pending
        request onto the respective cPanel (credentials + domain on deploy).
        Deploy is never automatic from the request form.
      - Related caps: `wc_view_all_deployments` (list), `wc_deploy_websites`
-       (deploy / reject).
+       (deploy / reject), `wc_assign_website_templates` (assign Website Admins).
      - Capabilities in group “Website Template Library” are blurred while
        this module is off.
 
@@ -1752,8 +1791,8 @@ Either path designates Heads; both MUST stay in sync. Multiple admins OK:
   not one per user.
 - System role keys in the matrix catalog (left → right order for defaults):
   power_admin, finproms_admin, client_admin, network_admin, firm_admin,
-  top_management, accounts_admin, auditor, manager, approver, advisor,
-  admin_staff, user — plus any custom roles.
+  website_admin, top_management, accounts_admin, auditor, manager, approver,
+  advisor, admin_staff, user — plus any custom roles.
 - Matrix COLUMNS = roles currently present on that hub (users who HOLD that
   role exist on the hub’s user store / remote DB — a multi-role user counts
   toward every role they hold) UNION roles Power Admin has explicitly added
@@ -2681,15 +2720,16 @@ Out of scope for v1 of this module
 - Three instance roles: central (control plane), shared (public/content hub),
   white_label (private client hub).
 - Roles: power_admin, finproms_admin, client_admin, network_admin, firm_admin,
-  top_management, accounts_admin, auditor, manager, approver, admin_staff,
-  advisor, user. Each user may hold MULTIPLE roles; effective capabilities =
-  UNION of assigned roles (§2.7.1). All assigned roles are equal (no primary /
-  secondary). Network Admin / Firm Admin designate Document Repository firm
-  heads (§3.4). Member-firm users are firm-scoped plus one-way Delegated
-  compliance access (§2.7.0a). Central / Network users with network_admin /
-  top_management / auditor / accounts_admin / approver may manage / review
-  hub-wide (§2.7.0 B); peer / non-oversight Central staff use the multi-firm
-  allowlist.
+  website_admin, top_management, accounts_admin, auditor, manager, approver,
+  admin_staff, advisor, user. Each user may hold MULTIPLE roles; effective
+  capabilities = UNION of assigned roles (§2.7.1). All assigned roles are equal
+  (no primary / secondary). Network Admin / Firm Admin designate Document
+  Repository firm heads (§3.4) and request Website Template Library sites,
+  assigning Website Admins (§3.3d). Member-firm users are firm-scoped plus
+  one-way Delegated compliance access (§2.7.0a). Central / Network users with
+  network_admin / top_management / auditor / accounts_admin / approver may
+  manage / review hub-wide (§2.7.0 B); peer / non-oversight Central staff use
+  the multi-firm allowlist.
 - Separate frontend shells: member catalog app (on Shared / White-label), and
   one universal Dashboard shell at /my-dashboard (tools from Capabilities +
   Power Admin pa_* checklist on Central Hub).
@@ -2967,6 +3007,10 @@ STEP 1 — Shared hub core (content hub)
     separate supporting files); sensitive files + text encrypted at rest
     (NFR-GC-ENC)
 [x] Website Template Library module + APIs (templates, request form, manual cPanel deploy)
+[x] Website Admin (`website_admin`) system role + multi-assign on template
+    requests (`website_admin_ids` / `wc_template_request_website_admins`);
+    Network Admin / Firm Admin request for network/firm; picker filtered by
+    Delegated compliance access; frontend multi-select (§2.7 / §3.3d)
 [x] Website templates: Power Admin colour schemes on register/edit; request form
     scheme picker + optional custom colours (`wc_templates.color_schemes`)
 [x] Website templates: Power Admin available pages on register/edit

@@ -7,6 +7,7 @@ use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class TemplateRequest extends Model
 {
@@ -162,9 +163,59 @@ class TemplateRequest extends Model
         return $this->belongsTo(User::class, 'assigned_advisor_id');
     }
 
+    /**
+     * Website Admins assigned to edit this deployment (multi-assignee).
+     * Primary content/cPanel owner remains assigned_advisor_id (first selected).
+     */
+    public function websiteAdmins(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            User::class,
+            'wc_template_request_website_admins',
+            'template_request_id',
+            'user_id'
+        )->withTimestamps();
+    }
+
     public function goLiveRequestedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'go_live_requested_by_id');
+    }
+
+    public function isAssignedWebsiteAdmin(int $userId): bool
+    {
+        if ($userId <= 0) {
+            return false;
+        }
+
+        if ((int) ($this->assigned_advisor_id ?? 0) === $userId
+            || (int) ($this->advisor_id ?? 0) === $userId) {
+            return true;
+        }
+
+        if ($this->relationLoaded('websiteAdmins')) {
+            return $this->websiteAdmins->contains(fn (User $u) => (int) $u->id === $userId);
+        }
+
+        return $this->websiteAdmins()->where('users.id', $userId)->exists();
+    }
+
+    /**
+     * Sync Website Admin assignees and keep assigned_advisor_id as primary owner.
+     *
+     * @param  list<int>  $userIds
+     */
+    public function syncWebsiteAdmins(array $userIds): void
+    {
+        $ids = array_values(array_unique(array_filter(
+            array_map(static fn ($id) => (int) $id, $userIds),
+            static fn (int $id) => $id > 0
+        )));
+
+        $this->websiteAdmins()->sync($ids);
+        $this->forceFill([
+            'assigned_advisor_id' => $ids[0] ?? null,
+        ])->save();
     }
 
     public function isOnSite(): bool

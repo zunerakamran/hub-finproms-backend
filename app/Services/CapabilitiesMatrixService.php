@@ -22,6 +22,7 @@ class CapabilitiesMatrixService
         User::ROLE_CLIENT_ADMIN,
         User::ROLE_NETWORK_ADMIN,
         User::ROLE_FIRM_ADMIN,
+        User::ROLE_WEBSITE_ADMIN,
         User::ROLE_TOP_MANAGEMENT,
         User::ROLE_ACCOUNTS_ADMIN,
         User::ROLE_AUDITOR,
@@ -1002,13 +1003,15 @@ class CapabilitiesMatrixService
                 $hubType === Hub::TYPE_WHITE_LABEL;
         }
 
-        // Remaining roles (network/firm admin, top management / accounts / auditor,
-        // approver / advisor / admin-staff / user): dashboard & admin-email tools
-        // off by default, then specialty defaults below. Own-firm Document Repository
-        // head rights come from network_admin / firm_admin (§3.4), not hub-wide ticks.
+        // Remaining roles (network/firm/website admin, top management / accounts /
+        // auditor, approver / advisor / admin-staff / user): dashboard & admin-email
+        // tools off by default, then specialty defaults below. Own-firm Document
+        // Repository head rights come from network_admin / firm_admin (§3.4), not
+        // hub-wide ticks.
         foreach ([
             User::ROLE_NETWORK_ADMIN,
             User::ROLE_FIRM_ADMIN,
+            User::ROLE_WEBSITE_ADMIN,
             User::ROLE_TOP_MANAGEMENT,
             User::ROLE_ACCOUNTS_ADMIN,
             User::ROLE_AUDITOR,
@@ -1131,6 +1134,25 @@ class CapabilitiesMatrixService
         ] as $key) {
             if (isset($matrix[User::ROLE_MANAGER][$key])) {
                 $matrix[User::ROLE_MANAGER][$key] = true;
+            }
+        }
+
+        // Network / Firm Admin — request sites for their network/firm and assign
+        // Website Admins (firm Delegated compliance access filters the picker).
+        foreach ([User::ROLE_NETWORK_ADMIN, User::ROLE_FIRM_ADMIN] as $role) {
+            foreach (['wc_request_deployments', 'wc_assign_website_templates'] as $key) {
+                if (isset($matrix[$role][$key])) {
+                    $matrix[$role][$key] = true;
+                }
+            }
+        }
+
+        // Website Admin — edit deployed site content and submit change requests.
+        if (isset($matrix[User::ROLE_WEBSITE_ADMIN])) {
+            foreach (['wc_edit_sections', 'wc_submit_change_requests'] as $key) {
+                if (isset($matrix[User::ROLE_WEBSITE_ADMIN][$key])) {
+                    $matrix[User::ROLE_WEBSITE_ADMIN][$key] = true;
+                }
             }
         }
 

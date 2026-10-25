@@ -400,6 +400,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::middleware('hub_can:wc_request_deployments,wc_assign_website_templates,wc_view_all_deployments,wc_deploy_websites')->group(function () {
             Route::get('/advisors', [WebsiteComplianceAdvisorController::class, 'advisors']);
+            Route::get('/website-admins', [WebsiteComplianceAdvisorController::class, 'websiteAdmins']);
         });
         Route::middleware('hub_can:wc_assign_change_requests,wc_view_all_change_requests,wc_review_change_requests')->group(function () {
             Route::get('/reviewers', [WebsiteComplianceAdvisorController::class, 'reviewers']);
@@ -905,6 +906,7 @@ Route::middleware('auth:sanctum')->group(function () {
             });
             Route::middleware('hub_can:wc_request_deployments,wc_assign_website_templates,wc_view_all_deployments,wc_deploy_websites')->group(function () {
                 Route::get('/advisors', [WebsiteComplianceAdvisorController::class, 'advisors']);
+                Route::get('/website-admins', [WebsiteComplianceAdvisorController::class, 'websiteAdmins']);
             });
             Route::middleware('hub_can:wc_assign_change_requests,wc_view_all_change_requests,wc_review_change_requests')->group(function () {
                 Route::get('/reviewers', [WebsiteComplianceAdvisorController::class, 'reviewers']);
@@ -1409,6 +1411,7 @@ Route::middleware('auth:sanctum')->group(function () {
             });
             Route::middleware('hub_can:wc_request_deployments,wc_assign_website_templates,wc_view_all_deployments,wc_deploy_websites')->group(function () {
                 Route::get('/advisors', [WebsiteComplianceAdvisorController::class, 'advisors']);
+                Route::get('/website-admins', [WebsiteComplianceAdvisorController::class, 'websiteAdmins']);
             });
             Route::middleware('hub_can:wc_assign_change_requests,wc_view_all_change_requests,wc_review_change_requests')->group(function () {
                 Route::get('/reviewers', [WebsiteComplianceAdvisorController::class, 'reviewers']);

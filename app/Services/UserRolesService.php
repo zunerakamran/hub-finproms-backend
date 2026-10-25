@@ -36,6 +36,7 @@ class UserRolesService
         User::ROLE_MANAGER,
         User::ROLE_APPROVER,
         User::ROLE_ADMIN_STAFF,
+        User::ROLE_WEBSITE_ADMIN,
         User::ROLE_ADVISOR,
         User::ROLE_USER,
     ];

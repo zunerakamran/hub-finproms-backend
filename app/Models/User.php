@@ -39,6 +39,13 @@ class User extends Authenticatable
     public const ROLE_FIRM_ADMIN = 'firm_admin';
 
     /**
+     * Firm- or network-scoped editor for Website Template Library deployments.
+     * Network / Firm Admins assign one or more Website Admins when requesting a site.
+     * Display name overridable via hub role_display_names (default “Website Admin”).
+     */
+    public const ROLE_WEBSITE_ADMIN = 'website_admin';
+
+    /**
      * Oversight role — all report types (SMC / GC / WC). Firm-scoped unless the
      * user belongs to the Central / Network firm (then hub-wide).
      */
@@ -100,6 +107,7 @@ class User extends Authenticatable
         self::ROLE_CLIENT_ADMIN => 'Client Admin',
         self::ROLE_NETWORK_ADMIN => 'Network Admin',
         self::ROLE_FIRM_ADMIN => 'Firm Admin',
+        self::ROLE_WEBSITE_ADMIN => 'Website Admin',
         self::ROLE_TOP_MANAGEMENT => 'Top Management',
         self::ROLE_ACCOUNTS_ADMIN => 'Accounts Admin',
         self::ROLE_AUDITOR => 'Auditor',
@@ -463,6 +471,11 @@ class User extends Authenticatable
     public function isFirmAdmin(): bool
     {
         return $this->hasRole(self::ROLE_FIRM_ADMIN);
+    }
+
+    public function isWebsiteAdmin(): bool
+    {
+        return $this->hasRole(self::ROLE_WEBSITE_ADMIN);
     }
 
     public function isTopManagement(): bool

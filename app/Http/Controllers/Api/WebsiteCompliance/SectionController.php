@@ -96,9 +96,12 @@ class SectionController extends Controller
 
             $websiteAdvisorId = $user ? $this->actingAdvisors->websiteAdvisorId($user) : null;
             if ($websiteAdvisorId) {
-                $allowed = (int) ($tr->advisor_id ?? 0) === (int) $websiteAdvisorId
-                    || (int) ($tr->assigned_advisor_id ?? 0) === (int) $websiteAdvisorId;
+                $allowed = $tr->isAssignedWebsiteAdmin((int) $websiteAdvisorId);
                 if (! $allowed) {
+                    return false;
+                }
+            } elseif ($user && $user->isWebsiteAdmin()) {
+                if (! $tr->isAssignedWebsiteAdmin((int) $user->id)) {
                     return false;
                 }
             }

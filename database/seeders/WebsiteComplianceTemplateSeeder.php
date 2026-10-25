@@ -86,6 +86,18 @@ class WebsiteComplianceTemplateSeeder extends Seeder
                 'wc_view_activity_logs',
                 'wc_view_platform_report',
             ],
+            User::ROLE_NETWORK_ADMIN => [
+                'wc_request_deployments',
+                'wc_assign_website_templates',
+            ],
+            User::ROLE_FIRM_ADMIN => [
+                'wc_request_deployments',
+                'wc_assign_website_templates',
+            ],
+            User::ROLE_WEBSITE_ADMIN => [
+                'wc_edit_sections',
+                'wc_submit_change_requests',
+            ],
             User::ROLE_APPROVER => [
                 // Review only — history/queue stay scoped to requests this approver picked.
                 // Hub-wide visibility requires wc_view_all_change_requests (managers / admins).

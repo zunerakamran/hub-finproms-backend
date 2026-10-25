@@ -55,6 +55,8 @@ class TemplateRequestController extends Controller
             'advisor.firm',
             'assignedAdvisor',
             'assignedAdvisor.firm',
+            'websiteAdmins',
+            'websiteAdmins.firm',
             'requestedBy',
             'requestedBy.firm',
             'goLiveRequestedBy',
@@ -62,7 +64,82 @@ class TemplateRequestController extends Controller
     }
 
     /**
-     * Ensure assigned advisor is allowed for the submitter firm's visibility settings.
+     * Normalize website_admin_ids (preferred) or legacy assigned_advisor_id into a unique id list.
+     *
+     * @return list<int>
+     */
+    private function resolveWebsiteAdminIds(Request $request): array
+    {
+        $ids = [];
+        if ($request->filled('website_admin_ids') && is_array($request->input('website_admin_ids'))) {
+            foreach ($request->input('website_admin_ids') as $id) {
+                $ids[] = (int) $id;
+            }
+        } elseif ($request->filled('assigned_advisor_id')) {
+            $ids[] = (int) $request->input('assigned_advisor_id');
+        }
+
+        return array_values(array_unique(array_filter($ids, static fn (int $id) => $id > 0)));
+    }
+
+    /**
+     * Ensure each Website Admin exists, holds the role, and is allowed for the
+     * submitter firm's Delegated compliance access settings.
+     *
+     * @param  list<int>  $adminIds
+     *
+     * @throws ValidationException
+     */
+    private function assertAssignableWebsiteAdmins(User $actor, array $adminIds, ?User $submitter): void
+    {
+        if ($adminIds === []) {
+            return;
+        }
+
+        $submitter?->loadMissing([
+            'firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
+        ]);
+        $submitterFirm = $submitter?->firm;
+        $bypassNoFirm = $this->firmVisibility->actorBypassesFirmScope($actor) && ! $submitterFirm;
+
+        $users = User::query()
+            ->with('firm:id,name,is_central')
+            ->whereIn('id', $adminIds)
+            ->get()
+            ->keyBy('id');
+
+        foreach ($adminIds as $adminId) {
+            $admin = $users->get($adminId);
+            if (! $admin) {
+                throw ValidationException::withMessages([
+                    'website_admin_ids' => ['One or more selected Website Admins were not found.'],
+                ]);
+            }
+
+            if (! $admin->isWebsiteAdmin()) {
+                throw ValidationException::withMessages([
+                    'website_admin_ids' => [
+                        $admin->name.' does not have the Website Admin role.',
+                    ],
+                ]);
+            }
+
+            if ($bypassNoFirm) {
+                continue;
+            }
+
+            if (! $this->firmVisibility->userIsEligibleAssignee($admin, $submitterFirm)) {
+                throw ValidationException::withMessages([
+                    'website_admin_ids' => [
+                        'Selected Website Admin is not allowed for this firm’s visibility settings.',
+                    ],
+                ]);
+            }
+        }
+    }
+
+    /**
+     * @deprecated Prefer assertAssignableWebsiteAdmins — kept for internal single-id checks.
      *
      * @throws ValidationException
      */
@@ -72,28 +149,7 @@ class TemplateRequestController extends Controller
             return;
         }
 
-        $advisor = User::query()->with('firm:id,name,is_central')->find($advisorId);
-        if (! $advisor) {
-            return;
-        }
-
-        $submitter?->loadMissing([
-            'firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
-        ]);
-        $submitterFirm = $submitter?->firm;
-
-        if ($this->firmVisibility->userIsEligibleAssignee($advisor, $submitterFirm)) {
-            return;
-        }
-
-        // Power / FinProms admin creating without a firm may assign any advisor.
-        if ($this->firmVisibility->actorBypassesFirmScope($actor) && ! $submitterFirm) {
-            return;
-        }
-
-        throw ValidationException::withMessages([
-            'assigned_advisor_id' => ['Selected advisor is not allowed for this firm’s visibility settings.'],
-        ]);
+        $this->assertAssignableWebsiteAdmins($actor, [$advisorId], $submitter);
     }
 
     public function store(Request $request): JsonResponse
@@ -107,10 +163,10 @@ class TemplateRequestController extends Controller
             $this->gate->assertCan($user, 'wc_request_deployments');
         }
 
-        // Managers with "Assign website templates" must pick an advisor on create.
+        // Network / Firm Admin (and other assigners) must pick Website Admin(s) on create.
         // Admin-staff acting as an advisor behave like that advisor (no assign required).
         $operatingAsAdvisor = $this->actingAdvisors->isOperatingAsAdvisor($user);
-        $mustAssignAdvisor = ! $operatingAsAdvisor
+        $mustAssignWebsiteAdmins = ! $operatingAsAdvisor
             && $this->gate->can($user, 'wc_assign_website_templates');
 
         $request->validate([
@@ -143,8 +199,15 @@ class TemplateRequestController extends Controller
             'page_contents' => 'nullable|array',
             'page_contents.*.url' => 'nullable|string|max:1000',
             'page_contents.*.name' => 'nullable|string|max:255',
+            'website_admin_ids' => [
+                $mustAssignWebsiteAdmins ? 'required' : 'nullable',
+                'array',
+                $mustAssignWebsiteAdmins ? 'min:1' : 'nullable',
+            ],
+            'website_admin_ids.*' => ['integer', Rule::exists(User::class, 'id')],
+            // Legacy single-assignee field — still accepted and merged into website_admin_ids.
             'assigned_advisor_id' => [
-                $mustAssignAdvisor ? 'required' : 'nullable',
+                'nullable',
                 Rule::exists(User::class, 'id'),
             ],
         ]);
@@ -157,13 +220,17 @@ class TemplateRequestController extends Controller
             ], 422);
         }
 
-        $assignedAdvisorId = $mustAssignAdvisor || $request->filled('assigned_advisor_id')
-            ? ($request->assigned_advisor_id ? (int) $request->assigned_advisor_id : null)
-            : null;
+        $websiteAdminIds = $this->resolveWebsiteAdminIds($request);
+        if ($mustAssignWebsiteAdmins && $websiteAdminIds === []) {
+            throw ValidationException::withMessages([
+                'website_admin_ids' => ['Assign at least one Website Admin for content editing.'],
+            ]);
+        }
+
         $user->loadMissing([
             'firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
         ]);
-        $this->assertAssignableAdvisor($user, $assignedAdvisorId, $user);
+        $this->assertAssignableWebsiteAdmins($user, $websiteAdminIds, $user);
 
         $requestType = $request->request_type
             ?? ($this->gate->can($user, 'wc_deploy_websites') ? 'hub_main_website' : 'advisor_website');
@@ -175,13 +242,13 @@ class TemplateRequestController extends Controller
             : null;
 
         // Persist the pending request only. Hub sections are created on deploy
-        // (same path for advisor self-request and manager-assigned deployments).
+        // (same path for advisor self-request and admin-assigned deployments).
         $templateRequest = TemplateRequest::create([
             'advisor_id' => $operatingAsAdvisor ? ($websiteAdvisorId ?? $tenantUserId) : null,
             'requested_by_id' => $tenantUserId,
             'template_name' => $templateName,
             'request_type' => $requestType,
-            'assigned_advisor_id' => $assignedAdvisorId,
+            'assigned_advisor_id' => $websiteAdminIds[0] ?? null,
             'domain_name' => $request->domain_name,
             'logo_url' => CpanelSyncService::absoluteAssetUrl($request->logo_url),
             'white_logo_url' => CpanelSyncService::absoluteAssetUrl($request->white_logo_url),
@@ -197,16 +264,21 @@ class TemplateRequestController extends Controller
             'status' => 'pending',
         ]);
 
+        if ($websiteAdminIds !== []) {
+            $templateRequest->syncWebsiteAdmins($websiteAdminIds);
+        }
+
         $this->activityLogs->log([
             'action' => 'wc.template_request.submit',
             'description' => "Requested template ({$templateRequest->template_name}) deployment [{$requestType}] for domain: ".$request->domain_name
+                .($websiteAdminIds !== [] ? ' (Website Admins: '.implode(',', $websiteAdminIds).')' : '')
                 .($onBehalfById && $websiteAdvisorId ? ' on behalf of user #'.$websiteAdvisorId : ''),
             'user' => $user,
             'subject' => $templateRequest,
             'request' => $request,
         ]);
 
-        return response()->json($templateRequest->load($this->requestRelations()), 201);
+        return response()->json($templateRequest->fresh()->load($this->requestRelations()), 201);
     }
 
     public function index(Request $request): JsonResponse
@@ -226,23 +298,33 @@ class TemplateRequestController extends Controller
             || $this->gate->can($user, 'wc_assign_website_templates')
         ) {
             $scopeId = $this->actingAdvisors->websiteAdvisorId($user) ?? (int) $user->id;
+            $actorId = (int) $user->id;
             $query
-                ->where(function ($q) use ($user, $scopeId) {
+                ->where(function ($q) use ($actorId, $scopeId) {
                     $q->where('advisor_id', $scopeId)
                         ->orWhere('assigned_advisor_id', $scopeId)
-                        ->orWhere('requested_by_id', $user->id);
-                    if ($scopeId !== (int) $user->id) {
-                        $q->orWhere('advisor_id', $user->id)
-                            ->orWhere('assigned_advisor_id', $user->id);
+                        ->orWhere('requested_by_id', $actorId)
+                        ->orWhereHas('websiteAdmins', fn ($wa) => $wa->where('users.id', $actorId));
+                    if ($scopeId !== $actorId) {
+                        $q->orWhere('advisor_id', $actorId)
+                            ->orWhere('assigned_advisor_id', $actorId)
+                            ->orWhereHas('websiteAdmins', fn ($wa) => $wa->where('users.id', $scopeId));
                     }
                 })
                 ->latest();
         } else {
             $scopeId = $this->actingAdvisors->websiteAdvisorId($user) ?? (int) $user->id;
+            $actorId = (int) $user->id;
             $query
-                ->where(function ($q) use ($scopeId) {
+                ->where(function ($q) use ($scopeId, $actorId) {
                     $q->where('advisor_id', $scopeId)
-                        ->orWhere('assigned_advisor_id', $scopeId);
+                        ->orWhere('assigned_advisor_id', $scopeId)
+                        ->orWhereHas('websiteAdmins', function ($wa) use ($scopeId, $actorId) {
+                            $wa->where('users.id', $scopeId);
+                            if ($scopeId !== $actorId) {
+                                $wa->orWhere('users.id', $actorId);
+                            }
+                        });
                 })
                 ->latest();
         }
@@ -612,8 +694,18 @@ class TemplateRequestController extends Controller
         $this->gate->assertCan($user, 'wc_assign_website_templates');
 
         $request->validate([
-            'assigned_advisor_id' => ['required', Rule::exists(User::class, 'id')],
+            'website_admin_ids' => ['nullable', 'array', 'min:1'],
+            'website_admin_ids.*' => ['integer', Rule::exists(User::class, 'id')],
+            // Legacy single-assignee field.
+            'assigned_advisor_id' => ['nullable', Rule::exists(User::class, 'id')],
         ]);
+
+        $websiteAdminIds = $this->resolveWebsiteAdminIds($request);
+        if ($websiteAdminIds === []) {
+            throw ValidationException::withMessages([
+                'website_admin_ids' => ['Assign at least one Website Admin.'],
+            ]);
+        }
 
         $templateRequest = TemplateRequest::with($this->requestRelations())->findOrFail($id);
 
@@ -635,26 +727,21 @@ class TemplateRequestController extends Controller
             $templateRequest->assigned_advisor_id ? (int) $templateRequest->assigned_advisor_id : null
         );
 
-        $this->assertAssignableAdvisor(
-            $user,
-            (int) $request->assigned_advisor_id,
-            $requester
-        );
+        $this->assertAssignableWebsiteAdmins($user, $websiteAdminIds, $requester);
 
         // Only store the assignment. Sections are created when Power Admin deploys.
-        $templateRequest->update([
-            'assigned_advisor_id' => $request->assigned_advisor_id,
-        ]);
+        $templateRequest->syncWebsiteAdmins($websiteAdminIds);
 
         $this->activityLogs->log([
-            'action' => 'wc.template_request.assign_advisor',
-            'description' => 'Advisor ID '.$request->assigned_advisor_id.' assigned to deployment for domain: '.$templateRequest->domain_name,
+            'action' => 'wc.template_request.assign_website_admins',
+            'description' => 'Website Admin IDs '.implode(',', $websiteAdminIds)
+                .' assigned to deployment for domain: '.$templateRequest->domain_name,
             'user' => $user,
             'subject' => $templateRequest,
             'request' => $request,
         ]);
 
-        return response()->json($templateRequest->load($this->requestRelations()));
+        return response()->json($templateRequest->fresh()->load($this->requestRelations()));
     }
 
     public function reject(Request $request, int $id): JsonResponse
@@ -695,10 +782,8 @@ class TemplateRequestController extends Controller
         $isPowerAdminAccess = $this->gate->can($user, 'wc_manage_deployment_sections')
             || $this->gate->can($user, 'wc_publish_live_content');
         $websiteAdvisorId = $this->actingAdvisors->websiteAdvisorId($user);
-        $isOwnerAdvisor = $websiteAdvisorId && (
-            (int) ($templateRequest->advisor_id ?? 0) === (int) $websiteAdvisorId
-            || (int) ($templateRequest->assigned_advisor_id ?? 0) === (int) $websiteAdvisorId
-        );
+        $isOwnerAdvisor = ($websiteAdvisorId && $templateRequest->isAssignedWebsiteAdmin((int) $websiteAdvisorId))
+            || $templateRequest->isAssignedWebsiteAdmin((int) $user->id);
 
         if (! $isPowerAdminAccess && ! $isOwnerAdvisor) {
             // Staff who assign / view deployments may read section metadata (not edit).
