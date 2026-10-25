@@ -123,9 +123,9 @@ class HubModuleBilling extends Model
 
         if ($websiteCount > 1 || ! empty($this->meta['consolidated_websites']) || ! empty($this->meta['template_count'])) {
             $count = max(1, (int) ($this->meta['template_count'] ?? $websiteCount));
-            $billedByTemplates = ($this->meta['billed_by'] ?? '') === 'wc_templates'
+            $billedByShowcase = ($this->meta['billed_by'] ?? '') === 'wc_templates'
                 || ! empty($this->meta['wc_template_ids']);
-            $unitLabel = $billedByTemplates ? 'template' : 'website';
+            $unitLabel = $billedByShowcase ? 'showcase template' : 'website request';
             $lines[] = sprintf(
                 'One-time Website Template Library charge for %d %s%s.',
                 $count,
@@ -136,21 +136,21 @@ class HubModuleBilling extends Model
             $lines[] = sprintf('Total: £%s × %d = £%s', number_format($unitAmount, 2), $count, number_format($amount, 2));
             $names = array_values(array_filter(array_map('strval', (array) ($this->meta['template_names'] ?? $this->meta['domains'] ?? []))));
             if ($names !== []) {
-                $lines[] = ($billedByTemplates ? 'Templates: ' : 'Domains: ').implode(', ', $names);
+                $lines[] = ($billedByShowcase ? 'Showcase templates: ' : 'Domains: ').implode(', ', $names);
             }
             $summary = sprintf('%d %ss — £%s', $count, $unitLabel, number_format($amount, 2));
         } elseif ($requestId > 0 || $unit === 'per_website') {
-            $lines[] = 'One-time charge for a deployed website (Website Template Library).';
+            $lines[] = 'One-time charge for a website template request (Website Template Library) — not the showcase catalogue.';
             if ($domain !== '') {
                 $lines[] = 'Domain: '.$domain;
             }
             if ($requestId > 0) {
                 $lines[] = 'Template request #'.$requestId;
             }
-            $lines[] = sprintf('Amount: £%s per website', number_format($amount, 2));
+            $lines[] = sprintf('Amount: £%s per website request', number_format($amount, 2));
             $summary = $domain !== ''
                 ? sprintf('Website %s — £%s', $domain, number_format($amount, 2))
-                : sprintf('1 website — £%s', number_format($amount, 2));
+                : sprintf('1 website request — £%s', number_format($amount, 2));
         } elseif (! empty($this->meta['module_package_enable_invoice'])) {
             $packageName = (string) ($this->meta['module_label'] ?? 'Module package');
             $covered = array_values(array_filter(array_map('strval', (array) ($this->meta['module_package_module_keys'] ?? []))));

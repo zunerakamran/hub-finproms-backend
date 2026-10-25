@@ -8,17 +8,62 @@ use InvalidArgumentException;
 
 class ModulePricingService
 {
+    /** @deprecated Prefer UNIT_PER_NETWORK for flat one-time charges. Still accepted. */
     public const BILLING_UNIT_ONE_TIME = 'one_time';
 
     public const BILLING_UNIT_PER_WEBSITE = 'per_website';
 
+    public const UNIT_PER_NETWORK = 'per_network';
+
+    public const UNIT_PER_FIRM = 'per_firm';
+
+    public const UNIT_PER_USER = 'per_user';
+
+    public const UNIT_PER_USER_SLOTS = 'per_user_slots';
+
+    public const UNIT_PER_WEBSITE = 'per_website';
+
+    /**
+     * Canonical units for both one-time (`billing_unit`) and ongoing
+     * (`recurring_billing_unit`) dropdowns. Recurring also allows `none`.
+     *
+     * @var list<string>
+     */
+    public const PRICE_UNITS = [
+        self::UNIT_PER_NETWORK,
+        self::UNIT_PER_FIRM,
+        self::UNIT_PER_USER,
+        self::UNIT_PER_USER_SLOTS,
+        self::UNIT_PER_WEBSITE,
+    ];
+
+    /**
+     * Units accepted when saving one-time billing_unit (canonical + legacy).
+     *
+     * @var list<string>
+     */
+    public const ONE_TIME_UNITS = [
+        self::UNIT_PER_NETWORK,
+        self::UNIT_PER_FIRM,
+        self::UNIT_PER_USER,
+        self::UNIT_PER_USER_SLOTS,
+        self::UNIT_PER_WEBSITE,
+        self::BILLING_UNIT_ONE_TIME, // legacy flat
+    ];
+
+    /**
+     * Units accepted when saving recurring_billing_unit (canonical + none + legacy).
+     *
+     * @var list<string>
+     */
     public const RECURRING_UNITS = [
         ModuleRecurringBillingService::UNIT_NONE,
-        ModuleRecurringBillingService::UNIT_PER_NETWORK,
-        ModuleRecurringBillingService::UNIT_PER_ADVISER,
-        ModuleRecurringBillingService::UNIT_PER_USER,
-        ModuleRecurringBillingService::UNIT_PER_WEBSITE,
-        ModuleRecurringBillingService::UNIT_PER_FIRM,
+        self::UNIT_PER_NETWORK,
+        self::UNIT_PER_FIRM,
+        self::UNIT_PER_USER,
+        self::UNIT_PER_USER_SLOTS,
+        self::UNIT_PER_WEBSITE,
+        ModuleRecurringBillingService::UNIT_PER_ADVISER, // legacy → slots
     ];
 
     /**
@@ -29,51 +74,51 @@ class ModulePricingService
     public const DEFAULT_CATALOGUE = [
         'module_shared_hub' => [
             'amount' => 14500.00,
-            'billing_unit' => self::BILLING_UNIT_ONE_TIME,
+            'billing_unit' => self::UNIT_PER_NETWORK,
             'recurring_amount' => 4500.00,
-            'recurring_billing_unit' => ModuleRecurringBillingService::UNIT_PER_NETWORK,
+            'recurring_billing_unit' => self::UNIT_PER_NETWORK,
             'recurring_tier_slot' => null,
         ],
         'module_white_label_hub' => [
             'amount' => 14500.00,
-            'billing_unit' => self::BILLING_UNIT_ONE_TIME,
+            'billing_unit' => self::UNIT_PER_NETWORK,
             'recurring_amount' => 4500.00,
-            'recurring_billing_unit' => ModuleRecurringBillingService::UNIT_PER_NETWORK,
+            'recurring_billing_unit' => self::UNIT_PER_NETWORK,
             'recurring_tier_slot' => null,
         ],
         'module_social_media_template_library' => [
             'amount' => 0.00,
-            'billing_unit' => self::BILLING_UNIT_ONE_TIME,
+            'billing_unit' => self::UNIT_PER_NETWORK,
             'recurring_amount' => 0.00,
-            'recurring_billing_unit' => ModuleRecurringBillingService::UNIT_PER_ADVISER,
+            'recurring_billing_unit' => self::UNIT_PER_USER_SLOTS,
             'recurring_tier_slot' => 1,
         ],
         'module_social_media_compliance' => [
             'amount' => 5000.00,
-            'billing_unit' => self::BILLING_UNIT_ONE_TIME,
+            'billing_unit' => self::UNIT_PER_NETWORK,
             'recurring_amount' => 0.00,
-            'recurring_billing_unit' => ModuleRecurringBillingService::UNIT_PER_USER,
+            'recurring_billing_unit' => self::UNIT_PER_USER_SLOTS,
             'recurring_tier_slot' => 2,
         ],
         'module_website_template_library' => [
             'amount' => 300.00,
-            'billing_unit' => self::BILLING_UNIT_PER_WEBSITE,
+            'billing_unit' => self::UNIT_PER_WEBSITE,
             'recurring_amount' => 125.00,
-            'recurring_billing_unit' => ModuleRecurringBillingService::UNIT_PER_WEBSITE,
+            'recurring_billing_unit' => self::UNIT_PER_WEBSITE,
             'recurring_tier_slot' => null,
         ],
         'module_website_compliance' => [
             'amount' => 10000.00,
-            'billing_unit' => self::BILLING_UNIT_ONE_TIME,
+            'billing_unit' => self::UNIT_PER_NETWORK,
             'recurring_amount' => 1500.00,
-            'recurring_billing_unit' => ModuleRecurringBillingService::UNIT_PER_FIRM,
+            'recurring_billing_unit' => self::UNIT_PER_FIRM,
             'recurring_tier_slot' => null,
         ],
         'module_general_compliance' => [
             'amount' => 3500.00,
-            'billing_unit' => self::BILLING_UNIT_ONE_TIME,
+            'billing_unit' => self::UNIT_PER_NETWORK,
             'recurring_amount' => 0.00,
-            'recurring_billing_unit' => ModuleRecurringBillingService::UNIT_PER_USER,
+            'recurring_billing_unit' => self::UNIT_PER_USER_SLOTS,
             'recurring_tier_slot' => 3,
         ],
     ];
@@ -89,6 +134,114 @@ class ModulePricingService
         'module_general_compliance' => 3500.00,
     ];
 
+    /**
+     * Dropdown options for one-time and ongoing price units (same list).
+     *
+     * @return list<array{value: string, label: string, description: string, requires_tier_slot: bool}>
+     */
+    public static function priceUnitOptions(): array
+    {
+        return [
+            [
+                'value' => self::UNIT_PER_NETWORK,
+                'label' => 'Per network',
+                'description' => 'Invoice per the network / central firm (usually there is only one). Flat charge × 1.',
+                'requires_tier_slot' => false,
+            ],
+            [
+                'value' => self::UNIT_PER_FIRM,
+                'label' => 'Per firm',
+                'description' => 'Invoice generated per firm on the hub (amount × firm count).',
+                'requires_tier_slot' => false,
+            ],
+            [
+                'value' => self::UNIT_PER_USER,
+                'label' => 'Per user',
+                'description' => 'Invoice generated per user at a fixed catalogue rate (amount × active users with the module / package).',
+                'requires_tier_slot' => false,
+            ],
+            [
+                'value' => self::UNIT_PER_USER_SLOTS,
+                'label' => 'Per user (slots)',
+                'description' => 'User-count slots (1–3) define the rate from the recurring tier table; invoice uses that slot rate × billed users.',
+                'requires_tier_slot' => true,
+            ],
+            [
+                'value' => self::UNIT_PER_WEBSITE,
+                'label' => 'Per website',
+                'description' => 'Per website template request (deployed wc_template_requests) — not the template showcase catalogue.',
+                'requires_tier_slot' => false,
+            ],
+        ];
+    }
+
+    /**
+     * Recurring dropdown = same price units + “none” (disable ongoing charge).
+     *
+     * @return list<array{value: string, label: string, description: string, requires_tier_slot: bool}>
+     */
+    public static function recurringUnitOptions(): array
+    {
+        return array_merge([
+            [
+                'value' => ModuleRecurringBillingService::UNIT_NONE,
+                'label' => 'None',
+                'description' => 'No ongoing / recurring charge for this module or package.',
+                'requires_tier_slot' => false,
+            ],
+        ], self::priceUnitOptions());
+    }
+
+    public static function billingUnitLabel(string $unit): string
+    {
+        $normalized = self::normalizeUnit($unit);
+
+        return match ($normalized) {
+            self::UNIT_PER_NETWORK => 'Per network',
+            self::UNIT_PER_FIRM => 'Per firm',
+            self::UNIT_PER_USER => 'Per user',
+            self::UNIT_PER_USER_SLOTS => 'Per user (slots)',
+            self::UNIT_PER_WEBSITE => 'Per website',
+            ModuleRecurringBillingService::UNIT_NONE => 'None',
+            self::BILLING_UNIT_ONE_TIME => 'Per network',
+            default => 'Per network',
+        };
+    }
+
+    /**
+     * Normalize legacy unit codes to canonical values used for billing math.
+     */
+    public static function normalizeUnit(string $unit): string
+    {
+        return match ($unit) {
+            self::BILLING_UNIT_ONE_TIME => self::UNIT_PER_NETWORK,
+            ModuleRecurringBillingService::UNIT_PER_ADVISER => self::UNIT_PER_USER_SLOTS,
+            ModuleRecurringBillingService::UNIT_PER_USER => self::UNIT_PER_USER,
+            default => $unit,
+        };
+    }
+
+    public static function isSeatUnit(string $unit): bool
+    {
+        $normalized = self::normalizeUnit($unit);
+
+        return $normalized === self::UNIT_PER_USER_SLOTS
+            || $unit === ModuleRecurringBillingService::UNIT_PER_ADVISER
+            || $unit === self::UNIT_PER_USER_SLOTS;
+    }
+
+    public static function isFlatQuantityUnit(string $unit): bool
+    {
+        $normalized = self::normalizeUnit($unit);
+
+        return in_array($normalized, [
+            self::UNIT_PER_NETWORK,
+            self::UNIT_PER_FIRM,
+            self::UNIT_PER_USER,
+            self::UNIT_PER_WEBSITE,
+        ], true);
+    }
+
     public function seedDefaultsIfEmpty(): void
     {
         if (ModulePricing::query()->exists()) {
@@ -101,7 +254,7 @@ class ModulePricingService
         foreach (Hub::MODULE_KEYS as $key) {
             $meta = self::DEFAULT_CATALOGUE[$key] ?? [
                 'amount' => 0.0,
-                'billing_unit' => self::BILLING_UNIT_ONE_TIME,
+                'billing_unit' => self::UNIT_PER_NETWORK,
             ];
             ModulePricing::query()->create([
                 'module_key' => $key,
@@ -128,7 +281,7 @@ class ModulePricingService
             }
             $meta = self::DEFAULT_CATALOGUE[$key] ?? [
                 'amount' => 0.0,
-                'billing_unit' => self::BILLING_UNIT_ONE_TIME,
+                'billing_unit' => self::UNIT_PER_NETWORK,
                 'recurring_amount' => 0.0,
                 'recurring_billing_unit' => ModuleRecurringBillingService::UNIT_NONE,
                 'recurring_tier_slot' => null,
@@ -145,14 +298,6 @@ class ModulePricingService
                 'sort_order' => ++$sort,
             ]);
         }
-    }
-
-    public static function billingUnitLabel(string $unit): string
-    {
-        return match ($unit) {
-            self::BILLING_UNIT_PER_WEBSITE => 'Per website',
-            default => 'One time',
-        };
     }
 
     /**
@@ -227,7 +372,7 @@ class ModulePricingService
         return [
             'module_key' => $moduleKey,
             'amount' => $pricing ? (float) $pricing->amount : 0.0,
-            'billing_unit' => $pricing?->billing_unit ?? self::BILLING_UNIT_ONE_TIME,
+            'billing_unit' => $pricing?->billing_unit ?? self::UNIT_PER_NETWORK,
             'currency' => $pricing?->currency ?? 'gbp',
             'pricing' => $pricing,
         ];
@@ -251,10 +396,15 @@ class ModulePricingService
         }
         if (array_key_exists('billing_unit', $data)) {
             $unit = (string) $data['billing_unit'];
-            if (! in_array($unit, [self::BILLING_UNIT_ONE_TIME, self::BILLING_UNIT_PER_WEBSITE], true)) {
-                throw new InvalidArgumentException('billing_unit must be one_time or per_website.');
+            if (! in_array($unit, self::ONE_TIME_UNITS, true)) {
+                throw new InvalidArgumentException(
+                    'billing_unit must be one of: '.implode(', ', self::PRICE_UNITS).'.'
+                );
             }
-            $pricing->billing_unit = $unit;
+            // Persist canonical value (map legacy one_time → per_network).
+            $pricing->billing_unit = $unit === self::BILLING_UNIT_ONE_TIME
+                ? self::UNIT_PER_NETWORK
+                : $unit;
         }
         if (array_key_exists('recurring_amount', $data)) {
             $pricing->recurring_amount = round((float) $data['recurring_amount'], 2);
@@ -264,7 +414,10 @@ class ModulePricingService
             if (! in_array($unit, self::RECURRING_UNITS, true)) {
                 throw new InvalidArgumentException('Invalid recurring_billing_unit.');
             }
-            $pricing->recurring_billing_unit = $unit;
+            // Persist canonical seat unit.
+            $pricing->recurring_billing_unit = $unit === ModuleRecurringBillingService::UNIT_PER_ADVISER
+                ? self::UNIT_PER_USER_SLOTS
+                : $unit;
         }
         if (array_key_exists('recurring_tier_slot', $data)) {
             $slot = $data['recurring_tier_slot'];
@@ -340,6 +493,7 @@ class ModulePricingService
      *   billing_unit_label: string,
      *   recurring_amount: float,
      *   recurring_billing_unit: string,
+     *   recurring_billing_unit_label: string,
      *   recurring_tier_slot: ?int,
      *   currency: string,
      *   is_active: bool,
@@ -348,7 +502,8 @@ class ModulePricingService
      */
     public function serialize(ModulePricing $row): array
     {
-        $unit = (string) ($row->billing_unit ?: self::BILLING_UNIT_ONE_TIME);
+        $unit = (string) ($row->billing_unit ?: self::UNIT_PER_NETWORK);
+        $recurringUnit = (string) ($row->recurring_billing_unit ?: ModuleRecurringBillingService::UNIT_NONE);
 
         return [
             'id' => $row->id,
@@ -358,7 +513,8 @@ class ModulePricingService
             'billing_unit' => $unit,
             'billing_unit_label' => self::billingUnitLabel($unit),
             'recurring_amount' => (float) ($row->recurring_amount ?? 0),
-            'recurring_billing_unit' => (string) ($row->recurring_billing_unit ?: ModuleRecurringBillingService::UNIT_NONE),
+            'recurring_billing_unit' => $recurringUnit,
+            'recurring_billing_unit_label' => self::billingUnitLabel($recurringUnit),
             'recurring_tier_slot' => $row->recurring_tier_slot !== null ? (int) $row->recurring_tier_slot : null,
             'currency' => $row->currency,
             'is_active' => (bool) $row->is_active,

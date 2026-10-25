@@ -33,8 +33,8 @@ class ModuleBillingService
     }
 
     /**
-     * Deployed showcase / advisor websites on this hub (wc_template_requests).
-     * Used for recurring per-website charges.
+     * Deployed website template requests on this hub (wc_template_requests).
+     * Used for one-time and recurring per_website charges — not the showcase catalogue.
      */
     public function countDeployedWebsites(Hub $hub): int
     {
@@ -44,8 +44,8 @@ class ModuleBillingService
     }
 
     /**
-     * Catalogue website templates on this hub (wc_templates) — used for WTL
-     * one-time enable invoices (not template requests / deployments).
+     * Catalogue website templates on this hub (wc_templates) — showcase only.
+     * Not used for per_website billing (see countDeployedWebsites).
      */
     public function countLibraryTemplates(Hub $hub): int
     {
@@ -62,6 +62,73 @@ class ModuleBillingService
         return $this->onHubDatabase($hub, function () {
             return Template::query()->orderBy('id')->get();
         });
+    }
+
+    /**
+     * Resolve one-time quantity + total for a catalogue unit rate.
+     *
+     * @param  list<string>|null  $accessModuleKeys  for per_user / slots (package: any of these)
+     * @return array{unit: string, qty: int, unit_amount: float, amount: float, meta: array<string, mixed>}
+     */
+    public function quoteOneTimeQuantity(
+        Hub $hub,
+        string $billingUnit,
+        float $unitAmount,
+        ?string $moduleKey = null,
+        ?array $accessModuleKeys = null,
+        ?int $tierSlot = null
+    ): array {
+        $unit = ModulePricingService::normalizeUnit($billingUnit);
+        $meta = ['billing_unit' => $billingUnit, 'normalized_billing_unit' => $unit];
+        $qty = 1;
+        $rate = $unitAmount;
+
+        if ($unit === ModulePricingService::UNIT_PER_FIRM) {
+            $qty = max(0, $this->countFirms($hub));
+        } elseif ($unit === ModulePricingService::UNIT_PER_WEBSITE) {
+            $qty = max(0, $this->countDeployedWebsites($hub));
+            $requests = $this->deployedWebsiteRequests($hub);
+            $meta['billed_by'] = 'wc_template_requests';
+            $meta['website_count'] = $qty;
+            $meta['wc_template_request_ids'] = $requests->map(fn (TemplateRequest $r) => (int) $r->id)->all();
+            $meta['template_names'] = $requests->map(
+                fn (TemplateRequest $r) => (string) ($r->domain_name ?: $r->template_name ?: 'request #'.$r->id)
+            )->all();
+            $meta['domain_name'] = $qty === 1
+                ? (string) ($meta['template_names'][0] ?? '')
+                : sprintf('%d websites', $qty);
+            $meta['consolidated_websites'] = true;
+        } elseif ($unit === ModulePricingService::UNIT_PER_USER) {
+            $keys = $accessModuleKeys ?? ($moduleKey ? [$moduleKey] : []);
+            $recurring = app(ModuleRecurringBillingService::class);
+            $qty = max(0, count($recurring->activeUsersWithAnyModule($hub, $keys)));
+        } elseif ($unit === ModulePricingService::UNIT_PER_USER_SLOTS) {
+            $keys = $accessModuleKeys ?? ($moduleKey ? [$moduleKey] : []);
+            $recurring = app(ModuleRecurringBillingService::class);
+            $qty = max(0, count($recurring->activeUsersWithAnyModule($hub, $keys)));
+            $slot = $tierSlot !== null && $tierSlot >= 1 ? $tierSlot : 0;
+            $meta['recurring_tier_slot'] = $slot > 0 ? $slot : null;
+            if ($slot >= 1) {
+                $tier = $recurring->resolveTier($slot, $qty);
+                $rate = $tier ? (float) $tier->rate_per_user : 0.0;
+                $meta['tier_id'] = $tier?->id;
+                $meta['rate_from_slot'] = true;
+            }
+        }
+        // per_network (and legacy one_time): qty stays 1
+
+        $amount = round($rate * max(0, $qty), 2);
+
+        return [
+            'unit' => $unit,
+            'qty' => $qty,
+            'unit_amount' => $rate,
+            'amount' => $amount,
+            'meta' => array_merge($meta, [
+                'unit_amount' => $rate,
+                'quantity' => $qty,
+            ]),
+        ];
     }
 
     /**
@@ -100,12 +167,90 @@ class ModuleBillingService
     }
 
     /**
-     * Deploy-time one-time invoicing is disabled — WTL one-time charges are
-     * based on catalogue wc_templates at module enable, not template requests.
+     * One-time per_website charge when a template request is deployed.
+     * Idempotent per request; skipped when WTL is covered by an enabled package
+     * or catalogue billing_unit is not per_website.
      */
     public function invoiceWebsiteDeploy(Hub $hub, TemplateRequest $templateRequest, User $actor): ?Invoice
     {
-        return null;
+        if (! $this->billingEnabled($hub) || ! $hub->moduleEffectivelyEnabled(self::WEBSITE_MODULE_KEY)) {
+            return null;
+        }
+        if ($hub->moduleCoveredByEnabledPackage(self::WEBSITE_MODULE_KEY)) {
+            return null;
+        }
+
+        $quote = $this->pricing->quote(self::WEBSITE_MODULE_KEY);
+        $unit = ModulePricingService::normalizeUnit(
+            (string) ($quote['billing_unit'] ?? ModulePricingService::UNIT_PER_NETWORK)
+        );
+        if ($unit !== ModulePricingService::UNIT_PER_WEBSITE) {
+            return null;
+        }
+
+        $requestId = (int) $templateRequest->id;
+        if ($requestId > 0 && $this->billingCoveringWebsiteRequest($hub, $requestId)) {
+            return null;
+        }
+
+        $unitAmount = (float) $quote['amount'];
+        $payer = $this->resolvePayer($actor);
+        $isComplimentary = $unitAmount <= 0;
+        $status = $isComplimentary
+            ? HubModuleBilling::STATUS_PAID
+            : HubModuleBilling::STATUS_UNPAID;
+        $domain = (string) ($templateRequest->domain_name ?: $templateRequest->cpanel_domain ?: '');
+
+        return DB::transaction(function () use (
+            $hub,
+            $quote,
+            $payer,
+            $unitAmount,
+            $status,
+            $isComplimentary,
+            $actor,
+            $templateRequest,
+            $requestId,
+            $domain
+        ) {
+            $billing = HubModuleBilling::query()->create([
+                'hub_id' => $hub->id,
+                'module_key' => self::WEBSITE_MODULE_KEY,
+                'billed_user_id' => $payer->id,
+                'amount' => $unitAmount,
+                'currency' => $quote['currency'],
+                'status' => $status,
+                'payment_status' => $status,
+                'paid_at' => $isComplimentary ? now() : null,
+                'paid_by_user_id' => $isComplimentary ? $actor->id : null,
+                'payment_method' => $isComplimentary ? 'complimentary' : null,
+                'payment_notes' => $isComplimentary ? '£0 catalogue price — included' : null,
+                'meta' => [
+                    'module_label' => Hub::CHECKLIST_DEFINITIONS[self::WEBSITE_MODULE_KEY]['label'] ?? self::WEBSITE_MODULE_KEY,
+                    'billing_cadence' => Invoice::TYPES_ONE_TIME,
+                    'billing_unit' => ModulePricingService::UNIT_PER_WEBSITE,
+                    'billed_by' => 'wc_template_requests',
+                    'wc_template_request_id' => $requestId,
+                    'website_count' => 1,
+                    'unit_amount' => $unitAmount,
+                    'domain_name' => $domain,
+                    'auto_paid_on_hub_enable' => $isComplimentary,
+                ],
+            ]);
+
+            $invoice = $this->invoices->createForModuleBilling($billing);
+            $invoice->forceFill([
+                'description' => sprintf(
+                    'Module (one time) — Website Template Library — website request #%d%s (%s)',
+                    $requestId,
+                    $domain !== '' ? ' ('.$domain.')' : '',
+                    $hub->name
+                ),
+                'due_on' => $hub->nextModuleInvoiceDueDate()->toDateString(),
+            ])->save();
+
+            return $invoice->fresh();
+        });
     }
 
     /**
@@ -226,18 +371,30 @@ class ModuleBillingService
             }
         }
 
-        $amount = (float) $package->amount;
+        $moduleKeys = $package->moduleKeys();
+        $billingUnit = (string) ($package->billing_unit ?: ModulePricingService::UNIT_PER_NETWORK);
+        $tierSlot = $package->recurring_tier_slot !== null ? (int) $package->recurring_tier_slot : null;
+        $priced = $this->quoteOneTimeQuantity(
+            $hub,
+            $billingUnit,
+            (float) $package->amount,
+            null,
+            $moduleKeys,
+            $tierSlot
+        );
+        $amount = $priced['amount'];
         $payer = $this->resolvePayer($actor);
         $isComplimentary = $amount <= 0;
         $status = $isComplimentary
             ? HubModuleBilling::STATUS_PAID
             : HubModuleBilling::STATUS_UNPAID;
-        $moduleKeys = $package->moduleKeys();
 
         return DB::transaction(function () use (
             $hub,
             $package,
             $billingKey,
+            $billingUnit,
+            $priced,
             $amount,
             $payer,
             $status,
@@ -266,17 +423,17 @@ class ModuleBillingService
                 'paid_by_user_id' => $isComplimentary ? $actor->id : null,
                 'payment_method' => $isComplimentary ? 'complimentary' : null,
                 'payment_notes' => $isComplimentary ? '£0 package price — included' : null,
-                'meta' => [
+                'meta' => array_merge([
                     'module_label' => $package->name,
                     'module_package_id' => $package->id,
                     'module_package_slug' => $package->slug,
                     'module_package_module_keys' => $moduleKeys,
                     'billing_cadence' => Invoice::TYPES_ONE_TIME,
-                    'billing_unit' => ModulePricingService::BILLING_UNIT_ONE_TIME,
+                    'billing_unit' => $billingUnit,
                     'module_enable_invoice' => true,
                     'module_package_enable_invoice' => true,
                     'auto_paid_on_hub_enable' => $isComplimentary,
-                ],
+                ], $priced['meta']),
             ]);
 
             return $this->invoices->createForModuleBilling($billing);
@@ -339,11 +496,11 @@ class ModuleBillingService
         }
 
         $quote = $this->pricing->quote($moduleKey);
+        $billingUnit = (string) ($quote['billing_unit'] ?? ModulePricingService::UNIT_PER_NETWORK);
+        $normalized = ModulePricingService::normalizeUnit($billingUnit);
 
-        // Per-website modules: one consolidated invoice for currently deployed sites.
-        if (($quote['billing_unit'] ?? ModulePricingService::BILLING_UNIT_ONE_TIME)
-            === ModulePricingService::BILLING_UNIT_PER_WEBSITE
-        ) {
+        // Per-website: consolidated invoice for currently deployed template requests.
+        if ($normalized === ModulePricingService::UNIT_PER_WEBSITE) {
             return $this->invoiceExistingDeployedWebsites($hub, $actor, $forceNew);
         }
 
@@ -368,15 +525,38 @@ class ModuleBillingService
             }
         }
 
-        // Flat one-time — including £0 catalogue prices (still create the invoice).
+        $tierSlot = $quote['pricing']?->recurring_tier_slot !== null
+            ? (int) $quote['pricing']->recurring_tier_slot
+            : null;
+        $priced = $this->quoteOneTimeQuantity(
+            $hub,
+            $billingUnit,
+            (float) $quote['amount'],
+            $moduleKey,
+            [$moduleKey],
+            $tierSlot
+        );
+
+        // Flat / quantity one-time — including £0 catalogue prices (still create the invoice).
         // On re-enable (forceNew), supersede previous unpaid enable rows first.
         $payer = $this->resolvePayer($actor);
-        $isComplimentary = (float) $quote['amount'] <= 0;
+        $isComplimentary = (float) $priced['amount'] <= 0;
         $status = $isComplimentary
             ? HubModuleBilling::STATUS_PAID
             : HubModuleBilling::STATUS_UNPAID;
 
-        $invoice = DB::transaction(function () use ($hub, $moduleKey, $quote, $payer, $status, $isComplimentary, $actor, $forceNew) {
+        $invoice = DB::transaction(function () use (
+            $hub,
+            $moduleKey,
+            $quote,
+            $priced,
+            $billingUnit,
+            $payer,
+            $status,
+            $isComplimentary,
+            $actor,
+            $forceNew
+        ) {
             if ($forceNew) {
                 $this->removePreviousEnableInvoicesForModule($hub, $moduleKey);
             }
@@ -385,7 +565,7 @@ class ModuleBillingService
                 'hub_id' => $hub->id,
                 'module_key' => $moduleKey,
                 'billed_user_id' => $payer->id,
-                'amount' => $quote['amount'],
+                'amount' => $priced['amount'],
                 'currency' => $quote['currency'],
                 'status' => $status,
                 'payment_status' => $status,
@@ -393,13 +573,13 @@ class ModuleBillingService
                 'paid_by_user_id' => $isComplimentary ? $actor->id : null,
                 'payment_method' => $isComplimentary ? 'complimentary' : null,
                 'payment_notes' => $isComplimentary ? '£0 catalogue price — included' : null,
-                'meta' => [
+                'meta' => array_merge([
                     'module_label' => Hub::CHECKLIST_DEFINITIONS[$moduleKey]['label'] ?? $moduleKey,
                     'billing_cadence' => Invoice::TYPES_ONE_TIME,
-                    'billing_unit' => $quote['billing_unit'] ?? ModulePricingService::BILLING_UNIT_ONE_TIME,
+                    'billing_unit' => $billingUnit,
                     'module_enable_invoice' => true,
                     'auto_paid_on_hub_enable' => $isComplimentary,
-                ],
+                ], $priced['meta']),
             ]);
 
             return $this->invoices->createForModuleBilling($billing);
@@ -409,8 +589,9 @@ class ModuleBillingService
     }
 
     /**
-     * Create one WTL enable invoice (unit rate × catalogue wc_templates count).
+     * Create one WTL enable invoice (unit rate × deployed template request count).
      * Uncheck → check (forceNew) removes previous enable invoices and creates a new one.
+     * Quantity is website template requests — not the showcase catalogue (wc_templates).
      *
      * @return list<Invoice>
      */
@@ -428,17 +609,21 @@ class ModuleBillingService
             return [];
         }
 
-        $templates = $this->libraryTemplates($hub);
-        if ($templates->isEmpty()) {
+        $quote = $this->pricing->quote(self::WEBSITE_MODULE_KEY);
+        $priced = $this->quoteOneTimeQuantity(
+            $hub,
+            ModulePricingService::UNIT_PER_WEBSITE,
+            (float) $quote['amount'],
+            self::WEBSITE_MODULE_KEY
+        );
+
+        if ($priced['qty'] < 1) {
             return [];
         }
 
-        $quote = $this->pricing->quote(self::WEBSITE_MODULE_KEY);
-        $unitAmount = (float) $quote['amount'];
-        $count = $templates->count();
-        $amount = round($unitAmount * $count, 2);
-        $templateIds = $templates->map(fn (Template $t) => (int) $t->id)->all();
-        $templateNames = $templates->map(fn (Template $t) => (string) ($t->name ?: $t->slug ?: 'template #'.$t->id))->all();
+        $unitAmount = $priced['unit_amount'];
+        $count = $priced['qty'];
+        $amount = $priced['amount'];
 
         $payer = $this->resolvePayer($actor);
         $isComplimentary = $amount <= 0;
@@ -453,8 +638,7 @@ class ModuleBillingService
             $amount,
             $unitAmount,
             $count,
-            $templateIds,
-            $templateNames,
+            $priced,
             $status,
             $isComplimentary,
             $actor,
@@ -479,30 +663,20 @@ class ModuleBillingService
                 'paid_by_user_id' => $isComplimentary ? $actor->id : null,
                 'payment_method' => $isComplimentary ? 'complimentary' : null,
                 'payment_notes' => $isComplimentary ? '£0 catalogue price — included' : null,
-                'meta' => [
+                'meta' => array_merge([
                     'module_label' => Hub::CHECKLIST_DEFINITIONS[self::WEBSITE_MODULE_KEY]['label'] ?? self::WEBSITE_MODULE_KEY,
                     'billing_cadence' => Invoice::TYPES_ONE_TIME,
-                    'billing_unit' => ModulePricingService::BILLING_UNIT_PER_WEBSITE,
-                    'consolidated_websites' => true,
+                    'billing_unit' => ModulePricingService::UNIT_PER_WEBSITE,
                     'wtl_enable_invoice' => true,
                     'module_enable_invoice' => true,
-                    'billed_by' => 'wc_templates',
-                    'website_count' => $count,
-                    'template_count' => $count,
-                    'unit_amount' => $unitAmount,
-                    'wc_template_ids' => $templateIds,
-                    'template_names' => $templateNames,
-                    'domain_name' => $count === 1
-                        ? ($templateNames[0] ?? '')
-                        : sprintf('%d templates', $count),
                     'auto_paid_on_hub_enable' => $isComplimentary,
-                ],
+                ], $priced['meta']),
             ]);
 
             $invoice = $this->invoices->createForModuleBilling($billing);
             $invoice->forceFill([
                 'description' => sprintf(
-                    'Module (one time) — Website Template Library — %d template%s × £%s (%s)',
+                    'Module (one time) — Website Template Library — %d website request%s × £%s (%s)',
                     $count,
                     $count === 1 ? '' : 's',
                     number_format($unitAmount, 2),

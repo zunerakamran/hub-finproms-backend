@@ -20,7 +20,9 @@ class PowerAdminModulePackageController extends Controller
         return response()->json([
             'packages' => $this->packages->listPackages(activeOnly: false),
             'available_module_keys' => \App\Models\Hub::PRODUCT_MODULE_KEYS,
-            'formula' => 'Package one-time + recurring replace individual module catalogue charges for covered modules while the package is enabled.',
+            'billing_units' => \App\Services\ModulePricingService::priceUnitOptions(),
+            'recurring_billing_units' => \App\Services\ModulePricingService::recurringUnitOptions(),
+            'formula' => 'Package one-time + recurring use the same units as modules (per_network / per_firm / per_user / per_user_slots / per_website) and replace individual catalogue charges for covered modules while enabled.',
         ]);
     }
 
@@ -31,8 +33,9 @@ class PowerAdminModulePackageController extends Controller
             'slug' => ['sometimes', 'nullable', 'string', 'max:255'],
             'description' => ['sometimes', 'nullable', 'string', 'max:2000'],
             'amount' => ['sometimes', 'numeric', 'min:0'],
+            'billing_unit' => ['sometimes', 'string', 'in:per_network,per_firm,per_user,per_user_slots,per_website,one_time'],
             'recurring_amount' => ['sometimes', 'numeric', 'min:0'],
-            'recurring_billing_unit' => ['sometimes', 'string', 'in:none,per_network,per_adviser,per_user,per_website,per_firm'],
+            'recurring_billing_unit' => ['sometimes', 'string', 'in:none,per_network,per_firm,per_user,per_user_slots,per_website,per_adviser'],
             'recurring_tier_slot' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:3'],
             'currency' => ['sometimes', 'string', 'size:3'],
             'is_active' => ['sometimes', 'boolean'],
@@ -60,8 +63,9 @@ class PowerAdminModulePackageController extends Controller
             'slug' => ['sometimes', 'nullable', 'string', 'max:255'],
             'description' => ['sometimes', 'nullable', 'string', 'max:2000'],
             'amount' => ['sometimes', 'numeric', 'min:0'],
+            'billing_unit' => ['sometimes', 'string', 'in:per_network,per_firm,per_user,per_user_slots,per_website,one_time'],
             'recurring_amount' => ['sometimes', 'numeric', 'min:0'],
-            'recurring_billing_unit' => ['sometimes', 'string', 'in:none,per_network,per_adviser,per_user,per_website,per_firm'],
+            'recurring_billing_unit' => ['sometimes', 'string', 'in:none,per_network,per_firm,per_user,per_user_slots,per_website,per_adviser'],
             'recurring_tier_slot' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:3'],
             'currency' => ['sometimes', 'string', 'size:3'],
             'is_active' => ['sometimes', 'boolean'],

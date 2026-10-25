@@ -325,6 +325,21 @@ class ModulePackageTest extends TestCase
         $this->assertNotContains('module_central_hub', $keys);
         $this->assertContains('module_social_media_template_library', $keys);
         $this->assertSame(Hub::TYPE_WHITE_LABEL, $response->json('target_hub.type'));
+
+        // Same unit dropdown for one-time + ongoing (recurring also has none).
+        $oneTimeUnits = collect($response->json('billing_units'))->pluck('value')->all();
+        $this->assertSame(
+            ['per_network', 'per_firm', 'per_user', 'per_user_slots', 'per_website'],
+            $oneTimeUnits
+        );
+        $recurringUnits = collect($response->json('recurring_billing_units'))->pluck('value')->all();
+        $this->assertSame(
+            ['none', 'per_network', 'per_firm', 'per_user', 'per_user_slots', 'per_website'],
+            $recurringUnits
+        );
+        $slots = collect($response->json('billing_units'))->firstWhere('value', 'per_user_slots');
+        $this->assertTrue($slots['requires_tier_slot']);
+        $this->assertStringContainsString('template request', strtolower($response->json('billing_units.4.description')));
     }
 
     private function grantPackageCapability(Hub $hub): void

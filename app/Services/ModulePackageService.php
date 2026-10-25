@@ -117,7 +117,7 @@ class ModulePackageService
                 'recurring_amount' => round((float) ($data['recurring_amount'] ?? 0), 2),
                 'recurring_billing_unit' => $this->normalizeRecurringUnit($data['recurring_billing_unit'] ?? null),
                 'recurring_tier_slot' => $this->normalizeRecurringSlot($data['recurring_tier_slot'] ?? null),
-                'billing_unit' => ModulePricingService::BILLING_UNIT_ONE_TIME,
+                'billing_unit' => $this->normalizeOneTimeUnit($data['billing_unit'] ?? null),
                 'currency' => strtolower((string) ($data['currency'] ?? 'gbp')),
                 'is_active' => array_key_exists('is_active', $data) ? (bool) $data['is_active'] : true,
                 'sort_order' => (int) ($data['sort_order'] ?? 0),
@@ -159,6 +159,9 @@ class ModulePackageService
             }
             if (array_key_exists('amount', $data)) {
                 $package->amount = round((float) $data['amount'], 2);
+            }
+            if (array_key_exists('billing_unit', $data)) {
+                $package->billing_unit = $this->normalizeOneTimeUnit($data['billing_unit']);
             }
             if (array_key_exists('recurring_amount', $data)) {
                 $package->recurring_amount = round((float) $data['recurring_amount'], 2);
@@ -531,9 +534,15 @@ class ModulePackageService
             'slug' => $package->slug,
             'description' => $package->description,
             'amount' => (float) $package->amount,
-            'billing_unit' => (string) ($package->billing_unit ?: ModulePricingService::BILLING_UNIT_ONE_TIME),
+            'billing_unit' => (string) ($package->billing_unit ?: ModulePricingService::UNIT_PER_NETWORK),
+            'billing_unit_label' => ModulePricingService::billingUnitLabel(
+                (string) ($package->billing_unit ?: ModulePricingService::UNIT_PER_NETWORK)
+            ),
             'recurring_amount' => (float) ($package->recurring_amount ?? 0),
             'recurring_billing_unit' => (string) ($package->recurring_billing_unit ?: ModuleRecurringBillingService::UNIT_NONE),
+            'recurring_billing_unit_label' => ModulePricingService::billingUnitLabel(
+                (string) ($package->recurring_billing_unit ?: ModuleRecurringBillingService::UNIT_NONE)
+            ),
             'recurring_tier_slot' => $package->recurring_tier_slot !== null
                 ? (int) $package->recurring_tier_slot
                 : null,
@@ -549,6 +558,20 @@ class ModulePackageService
         ];
     }
 
+    private function normalizeOneTimeUnit(mixed $unit): string
+    {
+        $unit = (string) ($unit ?: ModulePricingService::UNIT_PER_NETWORK);
+        if (! in_array($unit, ModulePricingService::ONE_TIME_UNITS, true)) {
+            throw new InvalidArgumentException(
+                'billing_unit must be one of: '.implode(', ', ModulePricingService::PRICE_UNITS).'.'
+            );
+        }
+
+        return $unit === ModulePricingService::BILLING_UNIT_ONE_TIME
+            ? ModulePricingService::UNIT_PER_NETWORK
+            : $unit;
+    }
+
     private function normalizeRecurringUnit(mixed $unit): string
     {
         $unit = (string) ($unit ?: ModuleRecurringBillingService::UNIT_NONE);
@@ -556,7 +579,9 @@ class ModulePackageService
             throw new InvalidArgumentException('Invalid recurring_billing_unit.');
         }
 
-        return $unit;
+        return $unit === ModuleRecurringBillingService::UNIT_PER_ADVISER
+            ? ModulePricingService::UNIT_PER_USER_SLOTS
+            : $unit;
     }
 
     private function normalizeRecurringSlot(mixed $slot): ?int

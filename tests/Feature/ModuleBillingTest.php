@@ -243,7 +243,7 @@ class ModuleBillingTest extends TestCase
         ]);
     }
 
-    public function test_website_template_library_invoices_catalogue_templates_on_enable(): void
+    public function test_website_template_library_invoices_template_requests_on_enable(): void
     {
         $hub = Hub::query()->create([
             'name' => 'WL Hub',
@@ -266,6 +266,7 @@ class ModuleBillingTest extends TestCase
         Sanctum::actingAs($admin);
         app(ModulePricingService::class)->seedDefaultsIfEmpty();
 
+        // Showcase catalogue must NOT affect the enable invoice count.
         \App\Models\WebsiteCompliance\Template::query()->create([
             'name' => 'Classic',
             'slug' => 'classic',
@@ -276,7 +277,7 @@ class ModuleBillingTest extends TestCase
             'slug' => 'modern',
             'is_active' => true,
         ]);
-        // Deployed template requests must NOT affect the enable invoice count.
+        // Deployed template requests DO drive per_website one-time enable qty.
         \App\Models\WebsiteCompliance\TemplateRequest::query()->create([
             'template_name' => 'classic',
             'request_type' => 'advisor_website',
@@ -309,8 +310,8 @@ class ModuleBillingTest extends TestCase
         $response->assertOk();
         $created = collect($response->json('module_invoices'));
         $this->assertCount(1, $created);
-        $this->assertSame(600.0, (float) $created->first()['amount']);
-        $this->assertStringContainsString('2 templates', $created->first()['description']);
+        $this->assertSame(900.0, (float) $created->first()['amount']);
+        $this->assertStringContainsString('3 website request', $created->first()['description']);
         $this->assertTrue($hub->fresh()->hasWebsiteTemplateLibraryModule());
         $this->assertSame(1, \App\Models\HubModuleBilling::query()
             ->where('hub_id', $hub->id)
@@ -349,7 +350,7 @@ class ModuleBillingTest extends TestCase
         $reenable->assertOk();
         $createdAgain = collect($reenable->json('module_invoices'));
         $this->assertCount(1, $createdAgain);
-        $this->assertSame(600.0, (float) $createdAgain->first()['amount']);
+        $this->assertSame(900.0, (float) $createdAgain->first()['amount']);
         $this->assertNotSame($firstInvoiceId, $createdAgain->first()['id']);
         $this->assertSame(1, \App\Models\HubModuleBilling::query()
             ->where('hub_id', $hub->id)
@@ -357,7 +358,7 @@ class ModuleBillingTest extends TestCase
             ->count());
         $this->assertDatabaseMissing('invoices', ['id' => $firstInvoiceId]);
 
-        // No catalogue templates → enabling creates no WTL invoices.
+        // No deployed template requests → enabling creates no WTL invoices.
         $hub2 = Hub::query()->create([
             'name' => 'WL Empty',
             'slug' => 'wl-wtl-empty',
@@ -698,12 +699,13 @@ class ModuleBillingTest extends TestCase
 
         $this->assertSame(2, $billing->countDeployedWebsites($hub));
 
-        // Deploy no longer creates one-time invoices (enable uses wc_templates instead).
+        // Deploy creates one-time invoices when billing_unit is per_website (template requests).
         $invoice1 = $billing->invoiceWebsiteDeploy($hub, $first, $admin);
         $invoice2 = $billing->invoiceWebsiteDeploy($hub, $second, $admin);
-        $this->assertNull($invoice1);
-        $this->assertNull($invoice2);
-        $this->assertSame(0, \App\Models\HubModuleBilling::query()
+        $this->assertNotNull($invoice1);
+        $this->assertNotNull($invoice2);
+        $this->assertSame(300.0, (float) $invoice1->amount);
+        $this->assertSame(2, \App\Models\HubModuleBilling::query()
             ->where('hub_id', $hub->id)
             ->where('module_key', 'module_website_template_library')
             ->count());

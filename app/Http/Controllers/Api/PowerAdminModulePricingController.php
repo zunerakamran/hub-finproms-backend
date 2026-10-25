@@ -23,7 +23,9 @@ class PowerAdminModulePricingController extends Controller
         return response()->json([
             'pricing' => $this->pricing->listPricingForHub($hub),
             'recurring_tiers' => $this->pricing->listRecurringTiers(),
-            'formula' => 'one_time on module enable; catalogue filtered to this hub type; recurring Option B = rate(total active users with module) × batch',
+            'billing_units' => ModulePricingService::priceUnitOptions(),
+            'recurring_billing_units' => ModulePricingService::recurringUnitOptions(),
+            'formula' => 'Same units for one-time and ongoing: per_network, per_firm, per_user (fixed), per_user_slots, per_website (template requests). Recurring also allows none. Seat units use tier slots 1–3.',
             'target_hub' => [
                 'id' => $hub->id,
                 'name' => $hub->name,
@@ -51,9 +53,9 @@ class PowerAdminModulePricingController extends Controller
 
         $validated = $request->validate([
             'amount' => ['sometimes', 'numeric', 'min:0'],
-            'billing_unit' => ['sometimes', 'string', 'in:one_time,per_website'],
+            'billing_unit' => ['sometimes', 'string', 'in:per_network,per_firm,per_user,per_user_slots,per_website,one_time'],
             'recurring_amount' => ['sometimes', 'numeric', 'min:0'],
-            'recurring_billing_unit' => ['sometimes', 'string', 'in:none,per_network,per_adviser,per_user,per_website,per_firm'],
+            'recurring_billing_unit' => ['sometimes', 'string', 'in:none,per_network,per_firm,per_user,per_user_slots,per_website,per_adviser'],
             'recurring_tier_slot' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:3'],
             'is_active' => ['sometimes', 'boolean'],
             'sort_order' => ['sometimes', 'integer', 'min:0'],

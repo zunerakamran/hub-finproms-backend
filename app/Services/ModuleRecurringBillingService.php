@@ -20,9 +20,14 @@ class ModuleRecurringBillingService
 
     public const UNIT_PER_NETWORK = 'per_network';
 
+    /** @deprecated Use ModulePricingService::UNIT_PER_USER_SLOTS */
     public const UNIT_PER_ADVISER = 'per_adviser';
 
+    /** Fixed rate × users (not tier slots). */
     public const UNIT_PER_USER = 'per_user';
+
+    /** Tier-slot seat billing (canonical). */
+    public const UNIT_PER_USER_SLOTS = 'per_user_slots';
 
     public const UNIT_PER_WEBSITE = 'per_website';
 
@@ -33,6 +38,16 @@ class ModuleRecurringBillingService
         'module_social_media_template_library',
         'module_social_media_compliance',
         'module_general_compliance',
+    ];
+
+    /**
+     * Units that use module_recurring_tiers via recurring_tier_slot.
+     *
+     * @var list<string>
+     */
+    public const SEAT_UNITS = [
+        self::UNIT_PER_USER_SLOTS,
+        self::UNIT_PER_ADVISER, // legacy
     ];
 
     public function __construct(
@@ -120,11 +135,12 @@ class ModuleRecurringBillingService
 
         $this->pricing->seedDefaultsIfEmpty();
         $pricing = ModulePricing::query()->where('module_key', $moduleKey)->where('is_active', true)->first();
-        if (! $pricing || ! in_array($pricing->recurring_billing_unit, [self::UNIT_PER_USER, self::UNIT_PER_ADVISER], true)) {
+        $slot = $pricing && $pricing->recurring_tier_slot !== null ? (int) $pricing->recurring_tier_slot : null;
+        if (! $pricing || ! $this->isSeatBillingUnit((string) $pricing->recurring_billing_unit, $slot)) {
             return null;
         }
 
-        $slot = (int) ($pricing->recurring_tier_slot ?: 0);
+        $slot = (int) ($slot ?: 0);
         if ($slot < 1) {
             return null;
         }
@@ -133,7 +149,7 @@ class ModuleRecurringBillingService
             $hub,
             $moduleKey,
             $batchUsers,
-            (string) $pricing->recurring_billing_unit,
+            ModulePricingService::UNIT_PER_USER_SLOTS,
             $slot,
             (string) ($pricing->currency ?: 'gbp'),
             [$moduleKey],
@@ -142,7 +158,7 @@ class ModuleRecurringBillingService
     }
 
     /**
-     * Seat quote for an enabled package (per_user / per_adviser + slot).
+     * Seat quote for an enabled package (per_user_slots / legacy per_adviser + slot).
      *
      * @param  list<User>  $batchUsers
      * @return array<string, mixed>|null
@@ -154,10 +170,11 @@ class ModuleRecurringBillingService
         ?string $connection = null
     ): ?array {
         $unit = (string) ($package->recurring_billing_unit ?: self::UNIT_NONE);
-        if (! in_array($unit, [self::UNIT_PER_USER, self::UNIT_PER_ADVISER], true)) {
+        $slotNullable = $package->recurring_tier_slot !== null ? (int) $package->recurring_tier_slot : null;
+        if (! $this->isSeatBillingUnit($unit, $slotNullable)) {
             return null;
         }
-        $slot = (int) ($package->recurring_tier_slot ?: 0);
+        $slot = (int) ($slotNullable ?: 0);
         if ($slot < 1) {
             return null;
         }
@@ -171,12 +188,26 @@ class ModuleRecurringBillingService
             $hub,
             $package->billingModuleKey(),
             $batchUsers,
-            $unit,
+            ModulePricingService::UNIT_PER_USER_SLOTS,
             $slot,
             (string) ($package->currency ?: 'gbp'),
             $keys,
             $connection
         );
+    }
+
+    /**
+     * @param  ?int  $tierSlot  When unit is legacy `per_user` with a slot, treat as seats
+     *                          until data is migrated to `per_user_slots`.
+     */
+    public function isSeatBillingUnit(string $unit, ?int $tierSlot = null): bool
+    {
+        if (in_array($unit, self::SEAT_UNITS, true) || ModulePricingService::isSeatUnit($unit)) {
+            return true;
+        }
+
+        // Pre-migration rows: per_user + slot meant tier seats (now per_user_slots).
+        return $unit === self::UNIT_PER_USER && $tierSlot !== null && $tierSlot >= 1;
     }
 
     /**
@@ -383,10 +414,11 @@ class ModuleRecurringBillingService
             }
         }
 
-        // Seat packages: one batch per enabled package with per_user / per_adviser.
+        // Seat packages: one batch per enabled package with per_user_slots (or legacy seat units).
         foreach ($this->enabledPackagesWithRecurring($hub) as $package) {
             $unit = (string) ($package->recurring_billing_unit ?: self::UNIT_NONE);
-            if (! in_array($unit, [self::UNIT_PER_USER, self::UNIT_PER_ADVISER], true)) {
+            $pkgSlot = $package->recurring_tier_slot !== null ? (int) $package->recurring_tier_slot : null;
+            if (! $this->isSeatBillingUnit($unit, $pkgSlot)) {
                 continue;
             }
             $packageKeys = $package->moduleKeys();
@@ -645,8 +677,9 @@ class ModuleRecurringBillingService
     }
 
     /**
-     * Flat recurring modules (per_network / per_website / per_firm) — one invoice
-     * per hub+module+calendar month on renew day (idempotent).
+     * Flat recurring modules (per_network / per_firm / per_user fixed / per_website)
+     * — one invoice per hub+module+calendar month on renew day (idempotent).
+     * Seat units (per_user_slots) use import / anniversary batches instead.
      *
      * @return list<Invoice>
      */
@@ -667,6 +700,7 @@ class ModuleRecurringBillingService
             self::UNIT_PER_NETWORK,
             self::UNIT_PER_WEBSITE,
             self::UNIT_PER_FIRM,
+            self::UNIT_PER_USER, // fixed rate × users (not slots)
         ];
 
         $rows = ModulePricing::query()
@@ -676,6 +710,12 @@ class ModuleRecurringBillingService
 
         foreach ($rows as $pricing) {
             $moduleKey = (string) $pricing->module_key;
+            $unit = (string) $pricing->recurring_billing_unit;
+            $slot = $pricing->recurring_tier_slot !== null ? (int) $pricing->recurring_tier_slot : null;
+            // Skip legacy per_user+slot rows — those still belong on the seat path.
+            if ($this->isSeatBillingUnit($unit, $slot)) {
+                continue;
+            }
             if (! $hub->moduleEffectivelyEnabled($moduleKey)) {
                 continue;
             }
@@ -687,7 +727,7 @@ class ModuleRecurringBillingService
                 $hub,
                 $payer,
                 $moduleKey,
-                (string) $pricing->recurring_billing_unit,
+                $unit,
                 (float) ($pricing->recurring_amount ?? 0),
                 (string) ($pricing->currency ?: 'gbp'),
                 Hub::CHECKLIST_DEFINITIONS[$moduleKey]['label'] ?? $moduleKey,
@@ -702,7 +742,8 @@ class ModuleRecurringBillingService
 
         foreach ($this->enabledPackagesWithRecurring($hub) as $package) {
             $unit = (string) ($package->recurring_billing_unit ?: self::UNIT_NONE);
-            if (! in_array($unit, $flatUnits, true)) {
+            $pkgSlot = $package->recurring_tier_slot !== null ? (int) $package->recurring_tier_slot : null;
+            if (! in_array($unit, $flatUnits, true) || $this->isSeatBillingUnit($unit, $pkgSlot)) {
                 continue;
             }
 
@@ -759,6 +800,16 @@ class ModuleRecurringBillingService
             $qty = max(0, $this->oneTimeBilling->countFirms($hub));
         } elseif ($unit === self::UNIT_PER_WEBSITE) {
             $qty = max(0, $this->oneTimeBilling->countDeployedWebsites($hub));
+        } elseif ($unit === self::UNIT_PER_USER) {
+            // Fixed per-user: count active users with access to this module / any package module.
+            $packageId = ModulePackage::parseBillingPackageId($moduleKey);
+            if ($packageId) {
+                $package = ModulePackage::query()->with('items')->find($packageId);
+                $keys = $package ? $package->moduleKeys() : [];
+                $qty = max(0, count($this->activeUsersWithAnyModule($hub, $keys)));
+            } else {
+                $qty = max(0, $this->activeUserCountWithModule($hub, $moduleKey));
+            }
         }
 
         $amount = round($rate * $qty, 2);

@@ -151,7 +151,10 @@ class HubModuleRecurringBilling extends Model
         $lines = [];
         $summary = '';
 
-        if (in_array($unit, ['per_user', 'per_adviser'], true) || in_array($kind, [self::KIND_BATCH, self::KIND_ANNIVERSARY], true)) {
+        $isSeatUnit = in_array($unit, ['per_user_slots', 'per_adviser'], true)
+            || in_array($kind, [self::KIND_BATCH, self::KIND_ANNIVERSARY], true);
+
+        if ($isSeatUnit) {
             $active ??= (int) ($quote['total_users'] ?? 0);
             $slot ??= isset($quote['slot']) ? (int) $quote['slot'] : null;
             $rate ??= isset($quote['rate_per_user']) ? (float) $quote['rate_per_user'] : null;
@@ -184,6 +187,13 @@ class HubModuleRecurringBilling extends Model
                 $qty,
                 number_format($rate ?? 0, 2)
             );
+        } elseif ($unit === 'per_user') {
+            $lines[] = sprintf('Active users counted (fixed per-user rate): %d', $qty);
+            if ($rate !== null) {
+                $lines[] = sprintf('Rate: £%s per user / month', number_format($rate, 2));
+                $lines[] = sprintf('%d × £%s = £%s', $qty, number_format($rate, 2), number_format($amount, 2));
+            }
+            $summary = sprintf('%d user(s) × £%s', $qty, number_format($rate ?? 0, 2));
         } elseif ($unit === 'per_website') {
             $lines[] = sprintf('Deployed websites counted (wc_template_requests status=deployed): %d', $qty);
             if ($rate !== null) {
