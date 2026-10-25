@@ -444,18 +444,52 @@ class ModulePricingService
             ->orderBy('sort_order')
             ->orderBy('min_users')
             ->get()
-            ->map(fn ($row) => [
-                'id' => $row->id,
-                'slot' => (int) $row->slot,
-                'min_users' => (int) $row->min_users,
-                'max_users' => $row->max_users !== null ? (int) $row->max_users : null,
-                'rate_per_user' => (float) $row->rate_per_user,
-                'network_margin_per_user' => (float) $row->network_margin_per_user,
-                'currency' => $row->currency,
-                'is_active' => (bool) $row->is_active,
-                'sort_order' => (int) $row->sort_order,
-            ])
+            ->map(fn ($row) => $this->serializeRecurringTier($row))
             ->all();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function serializeRecurringTier(\App\Models\ModuleRecurringTier $row): array
+    {
+        return [
+            'id' => $row->id,
+            'slot' => (int) $row->slot,
+            'min_users' => (int) $row->min_users,
+            'max_users' => $row->max_users !== null ? (int) $row->max_users : null,
+            'rate_per_user' => (float) $row->rate_per_user,
+            'network_margin_per_user' => (float) $row->network_margin_per_user,
+            'currency' => $row->currency ?: 'gbp',
+            'is_active' => (bool) $row->is_active,
+            'sort_order' => (int) $row->sort_order,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    public function createRecurringTier(array $data): \App\Models\ModuleRecurringTier
+    {
+        $slot = max(1, min(3, (int) ($data['slot'] ?? 1)));
+        $minUsers = max(0, (int) ($data['min_users'] ?? 0));
+        $maxUsers = array_key_exists('max_users', $data) && $data['max_users'] !== null && $data['max_users'] !== ''
+            ? (int) $data['max_users']
+            : null;
+        if ($maxUsers !== null && $maxUsers < $minUsers) {
+            throw new InvalidArgumentException('max_users must be greater than or equal to min_users.');
+        }
+
+        return \App\Models\ModuleRecurringTier::query()->create([
+            'slot' => $slot,
+            'min_users' => $minUsers,
+            'max_users' => $maxUsers,
+            'rate_per_user' => round((float) ($data['rate_per_user'] ?? 0), 2),
+            'network_margin_per_user' => round((float) ($data['network_margin_per_user'] ?? 0), 2),
+            'currency' => strtolower((string) ($data['currency'] ?? 'gbp')),
+            'is_active' => array_key_exists('is_active', $data) ? (bool) $data['is_active'] : true,
+            'sort_order' => (int) ($data['sort_order'] ?? 0),
+        ]);
     }
 
     /**
@@ -463,17 +497,26 @@ class ModulePricingService
      */
     public function updateRecurringTier(\App\Models\ModuleRecurringTier $tier, array $data): \App\Models\ModuleRecurringTier
     {
-        foreach (['min_users', 'max_users', 'sort_order', 'slot'] as $intKey) {
+        if (array_key_exists('slot', $data)) {
+            $tier->slot = max(1, min(3, (int) $data['slot']));
+        }
+        foreach (['min_users', 'max_users', 'sort_order'] as $intKey) {
             if (array_key_exists($intKey, $data)) {
                 $tier->{$intKey} = $data[$intKey] === null || $data[$intKey] === ''
                     ? null
                     : (int) $data[$intKey];
             }
         }
+        if ($tier->max_users !== null && $tier->min_users !== null && $tier->max_users < $tier->min_users) {
+            throw new InvalidArgumentException('max_users must be greater than or equal to min_users.');
+        }
         foreach (['rate_per_user', 'network_margin_per_user'] as $decKey) {
             if (array_key_exists($decKey, $data)) {
                 $tier->{$decKey} = round((float) $data[$decKey], 2);
             }
+        }
+        if (array_key_exists('currency', $data) && $data['currency'] !== null && $data['currency'] !== '') {
+            $tier->currency = strtolower((string) $data['currency']);
         }
         if (array_key_exists('is_active', $data)) {
             $tier->is_active = (bool) $data['is_active'];
@@ -481,6 +524,11 @@ class ModulePricingService
         $tier->save();
 
         return $tier->fresh();
+    }
+
+    public function deleteRecurringTier(\App\Models\ModuleRecurringTier $tier): void
+    {
+        $tier->delete();
     }
 
     /**

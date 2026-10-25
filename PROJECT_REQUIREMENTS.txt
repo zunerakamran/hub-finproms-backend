@@ -1768,7 +1768,8 @@ Either path designates Heads; both MUST stay in sync. Multiple admins OK:
   - `dashboard_mark_module_invoices_paid` — Manually mark unpaid module invoices paid
 - APIs: GET/PUT module-pricing (filtered by hub type; returns `billing_units` +
   `recurring_billing_units` option lists with labels/descriptions);
-  PUT module-recurring-tiers/{id};
+  POST/PUT/DELETE module-recurring-tiers (CRUD for slot bands: slot 1–3,
+  min/max users, rate, network margin);
   GET/POST/PUT/DELETE module-packages (same unit option lists; capability-gated);
   module-invoices…
 - Invoice types: `module_billing` (one_time), `module_recurring` (recurring)

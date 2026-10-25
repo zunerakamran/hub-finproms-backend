@@ -642,7 +642,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:dashboard_manage_module_pricing')->group(function () {
             Route::get('/module-pricing', [PowerAdminModulePricingController::class, 'index']);
             Route::put('/module-pricing/{pricing}', [PowerAdminModulePricingController::class, 'update']);
+            Route::post('/module-recurring-tiers', [PowerAdminModulePricingController::class, 'storeTier']);
             Route::put('/module-recurring-tiers/{tier}', [PowerAdminModulePricingController::class, 'updateTier']);
+            Route::delete('/module-recurring-tiers/{tier}', [PowerAdminModulePricingController::class, 'destroyTier']);
         });
 
         Route::middleware('hub_can:dashboard_manage_module_packages')->group(function () {
@@ -1041,7 +1043,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:dashboard_manage_module_pricing')->group(function () {
             Route::get('/module-pricing', [PowerAdminModulePricingController::class, 'index']);
             Route::put('/module-pricing/{pricing}', [PowerAdminModulePricingController::class, 'update']);
+            Route::post('/module-recurring-tiers', [PowerAdminModulePricingController::class, 'storeTier']);
             Route::put('/module-recurring-tiers/{tier}', [PowerAdminModulePricingController::class, 'updateTier']);
+            Route::delete('/module-recurring-tiers/{tier}', [PowerAdminModulePricingController::class, 'destroyTier']);
         });
 
         Route::middleware('hub_can:dashboard_manage_module_packages')->group(function () {

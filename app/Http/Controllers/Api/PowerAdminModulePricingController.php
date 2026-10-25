@@ -4,10 +4,12 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\ModulePricing;
+use App\Models\ModuleRecurringTier;
 use App\Services\ActingHubService;
 use App\Services\ModulePricingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use InvalidArgumentException;
 
 class PowerAdminModulePricingController extends Controller
 {
@@ -69,30 +71,62 @@ class PowerAdminModulePricingController extends Controller
         ]);
     }
 
-    public function updateTier(Request $request, \App\Models\ModuleRecurringTier $tier): JsonResponse
+    public function storeTier(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'min_users' => ['sometimes', 'integer', 'min:0'],
+            'slot' => ['required', 'integer', 'min:1', 'max:3'],
+            'min_users' => ['required', 'integer', 'min:0'],
             'max_users' => ['sometimes', 'nullable', 'integer', 'min:0'],
-            'rate_per_user' => ['sometimes', 'numeric', 'min:0'],
+            'rate_per_user' => ['required', 'numeric', 'min:0'],
             'network_margin_per_user' => ['sometimes', 'numeric', 'min:0'],
+            'currency' => ['sometimes', 'string', 'size:3'],
             'is_active' => ['sometimes', 'boolean'],
             'sort_order' => ['sometimes', 'integer', 'min:0'],
         ]);
 
-        $row = $this->pricing->updateRecurringTier($tier, $validated);
+        try {
+            $row = $this->pricing->createRecurringTier($validated);
+        } catch (InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'message' => 'Recurring tier created.',
+            'tier' => $this->pricing->serializeRecurringTier($row),
+        ], 201);
+    }
+
+    public function updateTier(Request $request, ModuleRecurringTier $tier): JsonResponse
+    {
+        $validated = $request->validate([
+            'slot' => ['sometimes', 'integer', 'min:1', 'max:3'],
+            'min_users' => ['sometimes', 'integer', 'min:0'],
+            'max_users' => ['sometimes', 'nullable', 'integer', 'min:0'],
+            'rate_per_user' => ['sometimes', 'numeric', 'min:0'],
+            'network_margin_per_user' => ['sometimes', 'numeric', 'min:0'],
+            'currency' => ['sometimes', 'string', 'size:3'],
+            'is_active' => ['sometimes', 'boolean'],
+            'sort_order' => ['sometimes', 'integer', 'min:0'],
+        ]);
+
+        try {
+            $row = $this->pricing->updateRecurringTier($tier, $validated);
+        } catch (InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
 
         return response()->json([
             'message' => 'Recurring tier updated.',
-            'tier' => [
-                'id' => $row->id,
-                'slot' => (int) $row->slot,
-                'min_users' => (int) $row->min_users,
-                'max_users' => $row->max_users !== null ? (int) $row->max_users : null,
-                'rate_per_user' => (float) $row->rate_per_user,
-                'network_margin_per_user' => (float) $row->network_margin_per_user,
-                'is_active' => (bool) $row->is_active,
-            ],
+            'tier' => $this->pricing->serializeRecurringTier($row),
+        ]);
+    }
+
+    public function destroyTier(ModuleRecurringTier $tier): JsonResponse
+    {
+        $this->pricing->deleteRecurringTier($tier);
+
+        return response()->json([
+            'message' => 'Recurring tier deleted.',
         ]);
     }
 }
