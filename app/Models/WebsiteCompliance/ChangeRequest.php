@@ -177,7 +177,9 @@ class ChangeRequest extends Model
             'editor.firm:id,name,is_central,compliance_visible_to_own,compliance_visible_to_central,compliance_visible_to_firm_id',
             'onBehalfBy:id,name,email,role',
             'approver:id,name,email,role',
-            'section:id,name,display_name,advisor_id',
+            'section:id,name,display_name,advisor_id,template_request_id',
+            'section.templateRequest:id,website_scope,requested_by_id,advisor_id,assigned_advisor_id',
+            'section.templateRequest.requestedBy:id,name,email,role',
         ]);
 
         if ($includeVersions) {
@@ -193,6 +195,24 @@ class ChangeRequest extends Model
         ], true);
 
         $attribution = ActingAdvisorService::attributionPayload($this->editor, $this->onBehalfBy);
+        $templateRequest = $this->section?->templateRequest;
+        if (! $templateRequest && is_array($decoded)) {
+            foreach ($decoded as $edit) {
+                $editTrId = (int) ($edit['template_request_id'] ?? 0);
+                if ($editTrId > 0) {
+                    $templateRequest = TemplateRequest::query()
+                        ->with('requestedBy:id,name,email,role')
+                        ->find($editTrId);
+                    break;
+                }
+            }
+        }
+        $websiteScope = $templateRequest
+            ? TemplateRequest::normalizeScope(
+                $templateRequest->website_scope
+                    ?: TemplateRequest::resolveScopeForRequester($templateRequest->requestedBy)
+            )
+            : TemplateRequest::SCOPE_INDEPENDENT;
 
         $payload = [
             'id' => $this->id,
@@ -200,6 +220,10 @@ class ChangeRequest extends Model
             'editor_id' => $this->editor_id,
             'on_behalf_by_user_id' => $this->on_behalf_by_user_id,
             'approver_id' => $this->approver_id,
+            'website_scope' => $websiteScope,
+            'template_request_id' => $templateRequest?->id ? (int) $templateRequest->id : (
+                $this->section?->template_request_id ? (int) $this->section->template_request_id : null
+            ),
             'status' => $this->status,
             'current_version' => (int) ($this->current_version ?: 1),
             'proposed_content' => $proposed,
@@ -246,6 +270,19 @@ class ChangeRequest extends Model
                 'name' => $this->section->name,
                 'display_name' => $this->section->display_name,
                 'advisor_id' => $this->section->advisor_id,
+                'template_request_id' => $this->section->template_request_id
+                    ? (int) $this->section->template_request_id
+                    : null,
+            ] : null,
+            'template_request' => $templateRequest ? [
+                'id' => (int) $templateRequest->id,
+                'website_scope' => TemplateRequest::normalizeScope($templateRequest->website_scope),
+                'requested_by' => $templateRequest->requestedBy ? [
+                    'id' => $templateRequest->requestedBy->id,
+                    'name' => $templateRequest->requestedBy->name,
+                    'email' => $templateRequest->requestedBy->email,
+                    'role' => $templateRequest->requestedBy->role,
+                ] : null,
             ] : null,
         ];
 

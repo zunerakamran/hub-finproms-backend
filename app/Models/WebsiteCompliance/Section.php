@@ -47,6 +47,11 @@ class Section extends Model
         return $this->belongsTo(User::class, 'advisor_id');
     }
 
+    public function templateRequest(): BelongsTo
+    {
+        return $this->belongsTo(TemplateRequest::class, 'template_request_id');
+    }
+
     public function lockedByUser(): BelongsTo
     {
         return $this->belongsTo(User::class, 'locked_by');

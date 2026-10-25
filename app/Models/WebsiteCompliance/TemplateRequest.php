@@ -233,6 +233,18 @@ class TemplateRequest extends Model
     }
 
     /**
+     * Normalize a stored/raw scope value to a known constant.
+     */
+    public static function normalizeScope(mixed $scope): string
+    {
+        $raw = strtolower(trim((string) $scope));
+
+        return in_array($raw, self::WEBSITE_SCOPES, true)
+            ? $raw
+            : self::SCOPE_INDEPENDENT;
+    }
+
+    /**
      * Resolve website scope from the requesting user's roles.
      * Network Admin → network; Firm Admin → firm; otherwise independent (advisor).
      */
