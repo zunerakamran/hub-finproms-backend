@@ -241,6 +241,9 @@ class TemplateRequestController extends Controller
             ? (int) $user->id
             : null;
 
+        // Scope is derived from the requester's roles — never taken from the client.
+        $websiteScope = TemplateRequest::resolveScopeForRequester($user);
+
         // Persist the pending request only. Hub sections are created on deploy
         // (same path for advisor self-request and admin-assigned deployments).
         $templateRequest = TemplateRequest::create([
@@ -248,6 +251,7 @@ class TemplateRequestController extends Controller
             'requested_by_id' => $tenantUserId,
             'template_name' => $templateName,
             'request_type' => $requestType,
+            'website_scope' => $websiteScope,
             'assigned_advisor_id' => $websiteAdminIds[0] ?? null,
             'domain_name' => $request->domain_name,
             'logo_url' => CpanelSyncService::absoluteAssetUrl($request->logo_url),
@@ -296,6 +300,7 @@ class TemplateRequestController extends Controller
         } elseif (
             $this->gate->can($user, 'wc_request_deployments')
             || $this->gate->can($user, 'wc_assign_website_templates')
+            || $this->gate->can($user, 'wc_request_go_live')
         ) {
             $scopeId = $this->actingAdvisors->websiteAdvisorId($user) ?? (int) $user->id;
             $actorId = (int) $user->id;
@@ -507,20 +512,14 @@ class TemplateRequestController extends Controller
     }
 
     /**
-     * Requester submits a go-live request for a staging site.
-     * Power Admin sees this as a new deployable request for the main/live URL.
+     * Original requester submits a go-live request for a staging site.
+     * Gated by wc_request_go_live; ownership still required (Network/Firm Admin /
+     * advisor who requested the template). Power Admin then deploys to live.
      */
     public function requestGoLive(Request $request, int $id): JsonResponse
     {
         $user = $request->user();
-        $this->gate->assertModuleEnabled($user);
-
-        if (
-            ! $this->gate->can($user, 'wc_request_deployments')
-            && ! $this->gate->can($user, 'wc_assign_website_templates')
-        ) {
-            $this->gate->assertCan($user, 'wc_request_deployments');
-        }
+        $this->gate->assertCan($user, 'wc_request_go_live');
 
         $request->validate([
             'domain_name' => 'nullable|string|max:255',

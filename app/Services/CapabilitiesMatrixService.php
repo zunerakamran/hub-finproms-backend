@@ -1140,10 +1140,22 @@ class CapabilitiesMatrixService
         // Network / Firm Admin — request sites for their network/firm and assign
         // Website Admins (firm Delegated compliance access filters the picker).
         foreach ([User::ROLE_NETWORK_ADMIN, User::ROLE_FIRM_ADMIN] as $role) {
-            foreach (['wc_request_deployments', 'wc_assign_website_templates'] as $key) {
+            foreach ([
+                'wc_request_deployments',
+                'wc_assign_website_templates',
+                'wc_request_go_live',
+            ] as $key) {
                 if (isset($matrix[$role][$key])) {
                     $matrix[$role][$key] = true;
                 }
+            }
+        }
+
+        // Advisors / managers who request sites can also request go-live for
+        // deployments they originally submitted (ownership still enforced in API).
+        foreach ([User::ROLE_ADVISOR, User::ROLE_MANAGER] as $role) {
+            if (isset($matrix[$role]['wc_request_go_live'])) {
+                $matrix[$role]['wc_request_go_live'] = true;
             }
         }
 

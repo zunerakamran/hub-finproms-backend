@@ -1,9 +1,8 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-25 (Website Admin role + Network/Firm Admin multi-assign
-  Website Admins on Website Template Library requests; Delegated compliance
-  access picker filter)
+Last updated: 2026-10-25 (wc_request_go_live capability; Website Admin role +
+  Network/Firm Admin multi-assign; Delegated compliance access picker filter)
 
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
@@ -454,8 +453,9 @@ Firm Admin):
      - May be combined with other non–control-plane roles (e.g. manager,
        approver, user).
      - Website Template Library: with `wc_request_deployments` +
-       `wc_assign_website_templates` (default ON), Network Admin requests a
-       site for the network and assigns one or more Website Admins (§3.3d).
+       `wc_assign_website_templates` + `wc_request_go_live` (default ON),
+       Network Admin requests a site for the network, assigns Website Admins,
+       and can request go-live for sites they requested (§3.3d).
 
   5) FIRM ADMIN (firm_admin) — head of a member firm
      - NEW system role (multi-role compatible). Default display name
@@ -473,8 +473,9 @@ Firm Admin):
      - May be combined with other roles (e.g. advisor + firm_admin,
        manager + firm_admin).
      - Website Template Library: with `wc_request_deployments` +
-       `wc_assign_website_templates` (default ON), Firm Admin requests a site
-       for THEIR firm and assigns one or more Website Admins (§3.3d).
+       `wc_assign_website_templates` + `wc_request_go_live` (default ON),
+       Firm Admin requests a site for THEIR firm, assigns Website Admins, and
+       can request go-live for sites they requested (§3.3d).
 
   6) WEBSITE ADMIN (website_admin) — firm/network website editor
      - NEW system role (multi-role compatible). Default display name
@@ -1122,7 +1123,7 @@ IMPLEMENTATION: UserCapabilitiesService; wired in CapabilitiesMatrixService
        • Network Admin requests a website for their network (Central / Network
          firm); Firm Admin requests a website for their member firm.
        • Default caps ON for both roles: `wc_request_deployments` +
-         `wc_assign_website_templates`.
+         `wc_assign_website_templates` + `wc_request_go_live`.
        • On create (and later re-assign), the form shows a multi-select of
          Website Admins (`website_admin` role). Eligibility uses the same
          Delegated compliance access rules as firm create/update (§2.7.0a) —
@@ -1135,11 +1136,29 @@ IMPLEMENTATION: UserCapabilitiesService; wired in CapabilitiesMatrixService
          owner for section scoping.
        • Website Admins edit content after deploy (`wc_edit_sections` /
          `wc_submit_change_requests` default ON for that role).
+     - Website scope (`wc_template_requests.website_scope`) — read-only in UI:
+       • `network` — requester is Network Admin (network website)
+       • `firm` — requester is Firm Admin (firm website)
+       • `independent` — requester is advisor / other self-serve (independent)
+       • Set automatically on create from requester roles (never client-editable).
+       • Shown as three disabled checkboxes (Network / Firm / Independent) on
+         request, assign, deploy, go-live, and request-detail surfaces.
+     - Request go-live (`wc_request_go_live`):
+       • When a site is on staging and content work is complete, the original
+         requester (Network Admin / Firm Admin / advisor who submitted the
+         template request — `requested_by_id`) can ask Power Admin to deploy
+         it to the main/live URL (`POST …/template-requests/{id}/request-go-live`).
+       • Capability-gated: user must have `wc_request_go_live` AND be the
+         original requester for that deployment. Defaults ON for
+         network_admin, firm_admin, advisor, and manager.
+       • Sets status → `ready_for_live`; Power Admin then promotes with
+         `wc_deploy_websites`.
      - Power Admin (if `wc_deploy_websites`) manually deploys the pending
        request onto the respective cPanel (credentials + domain on deploy).
        Deploy is never automatic from the request form.
      - Related caps: `wc_view_all_deployments` (list), `wc_deploy_websites`
-       (deploy / reject), `wc_assign_website_templates` (assign Website Admins).
+       (deploy / reject / promote go-live), `wc_assign_website_templates`
+       (assign Website Admins), `wc_request_go_live` (requester go-live ask).
      - Capabilities in group “Website Template Library” are blurred while
        this module is off.
 
@@ -3011,6 +3030,10 @@ STEP 1 — Shared hub core (content hub)
     requests (`website_admin_ids` / `wc_template_request_website_admins`);
     Network Admin / Firm Admin request for network/firm; picker filtered by
     Delegated compliance access; frontend multi-select (§2.7 / §3.3d)
+[x] `wc_request_go_live` capability — original requester (Network/Firm Admin /
+    advisor) asks Power Admin to promote staging → live; nav + API gated (§3.3d)
+[x] Website scope (`network` / `firm` / `independent`) on template requests —
+    auto from requester role; read-only checkboxes across WTL/WC UI (§3.3d)
 [x] Website templates: Power Admin colour schemes on register/edit; request form
     scheme picker + optional custom colours (`wc_templates.color_schemes`)
 [x] Website templates: Power Admin available pages on register/edit

@@ -697,6 +697,7 @@ class Hub extends Model
         'wc_manage_templates',
         'wc_request_deployments',
         'wc_assign_website_templates',
+        'wc_request_go_live',
         'wc_view_all_deployments',
         'wc_deploy_websites',
     ];
@@ -1662,6 +1663,13 @@ class Hub extends Model
         'wc_assign_website_templates' => [
             'label' => 'Assign website templates',
             'description' => 'Request a template deployment for a network/firm and assign one or more Website Admins as site editors (firm Delegated compliance access filters the picker).',
+            'group' => self::GROUP_WEBSITE_TEMPLATE_LIBRARY,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'wc_request_go_live' => [
+            'label' => 'Request website go-live',
+            'description' => 'When a staging site is complete, the original requester can ask Power Admin to deploy it to the main/live URL. Only applies to websites that user requested.',
             'group' => self::GROUP_WEBSITE_TEMPLATE_LIBRARY,
             'default_shared' => false,
             'default_white_label' => false,

@@ -372,6 +372,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/template-requests', [WcTemplateRequestController::class, 'index']);
         Route::middleware('hub_can:wc_request_deployments,wc_assign_website_templates')->group(function () {
             Route::post('/template-requests', [WcTemplateRequestController::class, 'store']);
+        });
+        Route::middleware('hub_can:wc_request_go_live')->group(function () {
             Route::post('/template-requests/{id}/request-go-live', [WcTemplateRequestController::class, 'requestGoLive'])->whereNumber('id');
         });
         Route::middleware('hub_can:wc_deploy_websites')->group(function () {
@@ -878,10 +880,10 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::middleware('hub_can:wc_assign_change_requests')->group(function () {
                 Route::post('/change-requests/{id}/assign-to-approver', [WcChangeRequestController::class, 'assignToApprover'])->whereNumber('id');
             });
-            Route::middleware('hub_can:wc_view_all_deployments,wc_request_deployments,wc_assign_website_templates,wc_deploy_websites')->group(function () {
+            Route::middleware('hub_can:wc_view_all_deployments,wc_request_deployments,wc_assign_website_templates,wc_request_go_live,wc_deploy_websites')->group(function () {
                 Route::get('/template-requests', [WcTemplateRequestController::class, 'index']);
             });
-            Route::middleware('hub_can:wc_request_deployments,wc_assign_website_templates')->group(function () {
+            Route::middleware('hub_can:wc_request_go_live')->group(function () {
                 Route::post('/template-requests/{id}/request-go-live', [WcTemplateRequestController::class, 'requestGoLive'])->whereNumber('id');
             });
             Route::middleware('hub_can:wc_deploy_websites')->group(function () {
@@ -1383,10 +1385,10 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::middleware('hub_can:wc_assign_change_requests')->group(function () {
                 Route::post('/change-requests/{id}/assign-to-approver', [WcChangeRequestController::class, 'assignToApprover'])->whereNumber('id');
             });
-            Route::middleware('hub_can:wc_view_all_deployments,wc_request_deployments,wc_assign_website_templates,wc_deploy_websites')->group(function () {
+            Route::middleware('hub_can:wc_view_all_deployments,wc_request_deployments,wc_assign_website_templates,wc_request_go_live,wc_deploy_websites')->group(function () {
                 Route::get('/template-requests', [WcTemplateRequestController::class, 'index']);
             });
-            Route::middleware('hub_can:wc_request_deployments,wc_assign_website_templates')->group(function () {
+            Route::middleware('hub_can:wc_request_go_live')->group(function () {
                 Route::post('/template-requests/{id}/request-go-live', [WcTemplateRequestController::class, 'requestGoLive'])->whereNumber('id');
             });
             Route::middleware('hub_can:wc_deploy_websites')->group(function () {

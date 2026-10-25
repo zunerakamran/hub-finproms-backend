@@ -146,6 +146,7 @@ class WebsiteAdminAssignmentTest extends TestCase
             'website_admin_ids' => [$adminA->id, $adminB->id],
         ])->assertCreated();
 
+        $this->assertSame('firm', $response->json('website_scope'));
         $this->assertEqualsCanonicalizing(
             [(int) $adminA->id, (int) $adminB->id],
             collect($response->json('website_admins') ?? $response->json('websiteAdmins') ?? [])

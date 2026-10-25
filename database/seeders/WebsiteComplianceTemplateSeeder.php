@@ -82,6 +82,7 @@ class WebsiteComplianceTemplateSeeder extends Seeder
                 'wc_review_change_requests',
                 'wc_change_request_status',
                 'wc_request_deployments',
+                'wc_request_go_live',
                 'wc_view_all_deployments',
                 'wc_view_activity_logs',
                 'wc_view_platform_report',
@@ -89,10 +90,12 @@ class WebsiteComplianceTemplateSeeder extends Seeder
             User::ROLE_NETWORK_ADMIN => [
                 'wc_request_deployments',
                 'wc_assign_website_templates',
+                'wc_request_go_live',
             ],
             User::ROLE_FIRM_ADMIN => [
                 'wc_request_deployments',
                 'wc_assign_website_templates',
+                'wc_request_go_live',
             ],
             User::ROLE_WEBSITE_ADMIN => [
                 'wc_edit_sections',
@@ -107,6 +110,7 @@ class WebsiteComplianceTemplateSeeder extends Seeder
                 'wc_edit_sections',
                 'wc_submit_change_requests',
                 'wc_request_deployments',
+                'wc_request_go_live',
             ],
             User::ROLE_USER => [],
         ];

@@ -38,6 +38,19 @@ class TemplateRequest extends Model
         self::STATUS_LIVE,
     ];
 
+    /** Website ownership scope — set from requester role; not editable in UI. */
+    public const SCOPE_NETWORK = 'network';
+
+    public const SCOPE_FIRM = 'firm';
+
+    public const SCOPE_INDEPENDENT = 'independent';
+
+    public const WEBSITE_SCOPES = [
+        self::SCOPE_NETWORK,
+        self::SCOPE_FIRM,
+        self::SCOPE_INDEPENDENT,
+    ];
+
     protected $table = 'wc_template_requests';
 
     protected $fillable = [
@@ -46,6 +59,7 @@ class TemplateRequest extends Model
         'assigned_advisor_id',
         'template_name',
         'request_type',
+        'website_scope',
         'domain_name',
         'staging_domain',
         'logo_url',
@@ -216,6 +230,42 @@ class TemplateRequest extends Model
         $this->forceFill([
             'assigned_advisor_id' => $ids[0] ?? null,
         ])->save();
+    }
+
+    /**
+     * Resolve website scope from the requesting user's roles.
+     * Network Admin → network; Firm Admin → firm; otherwise independent (advisor).
+     */
+    public static function resolveScopeForRequester(?User $requester): string
+    {
+        if (! $requester) {
+            return self::SCOPE_INDEPENDENT;
+        }
+
+        if ($requester->isNetworkAdmin()) {
+            return self::SCOPE_NETWORK;
+        }
+
+        if ($requester->isFirmAdmin()) {
+            return self::SCOPE_FIRM;
+        }
+
+        return self::SCOPE_INDEPENDENT;
+    }
+
+    public function isNetworkScope(): bool
+    {
+        return (string) $this->website_scope === self::SCOPE_NETWORK;
+    }
+
+    public function isFirmScope(): bool
+    {
+        return (string) $this->website_scope === self::SCOPE_FIRM;
+    }
+
+    public function isIndependentScope(): bool
+    {
+        return (string) ($this->website_scope ?: self::SCOPE_INDEPENDENT) === self::SCOPE_INDEPENDENT;
     }
 
     public function isOnSite(): bool
