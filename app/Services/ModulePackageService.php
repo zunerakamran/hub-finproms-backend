@@ -590,7 +590,7 @@ class ModulePackageService
             return null;
         }
 
-        return max(1, min(3, (int) $slot));
+        return max(1, min(255, (int) $slot));
     }
 
     /**

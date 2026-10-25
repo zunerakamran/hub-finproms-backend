@@ -163,7 +163,7 @@ class ModulePricingService
             [
                 'value' => self::UNIT_PER_USER_SLOTS,
                 'label' => 'Per user (slots)',
-                'description' => 'User-count slots (1–3) define the rate from the recurring tier table; invoice uses that slot rate × billed users.',
+                'description' => 'User-count slots define the rate from the recurring tier table (create any slot number, e.g. 1, 2, 3, 4…). Invoice uses that slot’s rate × billed users.',
                 'requires_tier_slot' => true,
             ],
             [
@@ -421,7 +421,7 @@ class ModulePricingService
         }
         if (array_key_exists('recurring_tier_slot', $data)) {
             $slot = $data['recurring_tier_slot'];
-            $pricing->recurring_tier_slot = $slot === null || $slot === '' ? null : max(1, min(3, (int) $slot));
+            $pricing->recurring_tier_slot = $slot === null || $slot === '' ? null : max(1, min(255, (int) $slot));
         }
         if (array_key_exists('is_active', $data)) {
             $pricing->is_active = (bool) $data['is_active'];
@@ -449,6 +449,30 @@ class ModulePricingService
     }
 
     /**
+     * Distinct slot numbers that already have at least one tier band.
+     *
+     * @return list<int>
+     */
+    public function listAvailableSlots(): array
+    {
+        return \App\Models\ModuleRecurringTier::query()
+            ->orderBy('slot')
+            ->distinct()
+            ->pluck('slot')
+            ->map(fn ($slot) => (int) $slot)
+            ->values()
+            ->all();
+    }
+
+    /** Suggested next free slot number when creating a brand-new slot. */
+    public function nextAvailableSlot(): int
+    {
+        $max = (int) \App\Models\ModuleRecurringTier::query()->max('slot');
+
+        return max(1, min(255, $max + 1));
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function serializeRecurringTier(\App\Models\ModuleRecurringTier $row): array
@@ -471,7 +495,7 @@ class ModulePricingService
      */
     public function createRecurringTier(array $data): \App\Models\ModuleRecurringTier
     {
-        $slot = max(1, min(3, (int) ($data['slot'] ?? 1)));
+        $slot = max(1, min(255, (int) ($data['slot'] ?? 1)));
         $minUsers = max(0, (int) ($data['min_users'] ?? 0));
         $maxUsers = array_key_exists('max_users', $data) && $data['max_users'] !== null && $data['max_users'] !== ''
             ? (int) $data['max_users']
@@ -498,7 +522,7 @@ class ModulePricingService
     public function updateRecurringTier(\App\Models\ModuleRecurringTier $tier, array $data): \App\Models\ModuleRecurringTier
     {
         if (array_key_exists('slot', $data)) {
-            $tier->slot = max(1, min(3, (int) $data['slot']));
+            $tier->slot = max(1, min(255, (int) $data['slot']));
         }
         foreach (['min_users', 'max_users', 'sort_order'] as $intKey) {
             if (array_key_exists($intKey, $data)) {

@@ -25,9 +25,11 @@ class PowerAdminModulePricingController extends Controller
         return response()->json([
             'pricing' => $this->pricing->listPricingForHub($hub),
             'recurring_tiers' => $this->pricing->listRecurringTiers(),
+            'available_slots' => $this->pricing->listAvailableSlots(),
+            'next_slot' => $this->pricing->nextAvailableSlot(),
             'billing_units' => ModulePricingService::priceUnitOptions(),
             'recurring_billing_units' => ModulePricingService::recurringUnitOptions(),
-            'formula' => 'Same units for one-time and ongoing: per_network, per_firm, per_user (fixed), per_user_slots, per_website (template requests). Recurring also allows none. Seat units use tier slots 1–3.',
+            'formula' => 'Same units for one-time and ongoing: per_network, per_firm, per_user (fixed), per_user_slots, per_website (template requests). Recurring also allows none. Seat units use any slot number (create new slots freely).',
             'target_hub' => [
                 'id' => $hub->id,
                 'name' => $hub->name,
@@ -58,7 +60,7 @@ class PowerAdminModulePricingController extends Controller
             'billing_unit' => ['sometimes', 'string', 'in:per_network,per_firm,per_user,per_user_slots,per_website,one_time'],
             'recurring_amount' => ['sometimes', 'numeric', 'min:0'],
             'recurring_billing_unit' => ['sometimes', 'string', 'in:none,per_network,per_firm,per_user,per_user_slots,per_website,per_adviser'],
-            'recurring_tier_slot' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:3'],
+            'recurring_tier_slot' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:255'],
             'is_active' => ['sometimes', 'boolean'],
             'sort_order' => ['sometimes', 'integer', 'min:0'],
         ]);
@@ -74,7 +76,7 @@ class PowerAdminModulePricingController extends Controller
     public function storeTier(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'slot' => ['required', 'integer', 'min:1', 'max:3'],
+            'slot' => ['required', 'integer', 'min:1', 'max:255'],
             'min_users' => ['required', 'integer', 'min:0'],
             'max_users' => ['sometimes', 'nullable', 'integer', 'min:0'],
             'rate_per_user' => ['required', 'numeric', 'min:0'],
@@ -93,13 +95,15 @@ class PowerAdminModulePricingController extends Controller
         return response()->json([
             'message' => 'Recurring tier created.',
             'tier' => $this->pricing->serializeRecurringTier($row),
+            'available_slots' => $this->pricing->listAvailableSlots(),
+            'next_slot' => $this->pricing->nextAvailableSlot(),
         ], 201);
     }
 
     public function updateTier(Request $request, ModuleRecurringTier $tier): JsonResponse
     {
         $validated = $request->validate([
-            'slot' => ['sometimes', 'integer', 'min:1', 'max:3'],
+            'slot' => ['sometimes', 'integer', 'min:1', 'max:255'],
             'min_users' => ['sometimes', 'integer', 'min:0'],
             'max_users' => ['sometimes', 'nullable', 'integer', 'min:0'],
             'rate_per_user' => ['sometimes', 'numeric', 'min:0'],
