@@ -76,12 +76,7 @@ class InvoiceController extends Controller
             || (int) $invoice->user_id === (int) $subject->id;
         $canGeneralInvoices = $matrix->roleCan($hub, $role, 'general_show_invoices');
         $canAdvisorInvoices = $matrix->roleCan($hub, $role, 'dashboard_view_advisor_invoices');
-        $canNetworkModule = $matrix->userCan($hub, $user, 'dashboard_view_network_module_invoices')
-            || $matrix->userCan($hub, $user, 'dashboard_view_module_invoices')
-            || $matrix->userCan($hub, $user, 'dashboard_view_all_module_invoices');
-        $canFirmModule = $matrix->userCan($hub, $user, 'dashboard_view_firm_module_invoices')
-            || $matrix->userCan($hub, $user, 'dashboard_view_module_invoices')
-            || $matrix->userCan($hub, $user, 'dashboard_view_all_module_invoices');
+        $invoiceSettings = app(\App\Services\ModuleInvoiceSettingsService::class);
         $canReseller = $matrix->userCan($hub, $user, 'dashboard_view_reseller_invoices');
 
         if ($invoice->type === Invoice::TYPE_ADVISOR_BILLING) {
@@ -101,12 +96,16 @@ class InvoiceController extends Controller
             if ($belongsToTargetHub) {
                 if ($isOwner && $payerScope === 'user' && $canGeneralInvoices) {
                     $allowed = true;
-                } elseif ($payerScope === 'network' && $canNetworkModule) {
-                    $allowed = true;
-                } elseif ($payerScope === 'firm' && $canFirmModule) {
-                    $allowed = true;
                 } elseif ($payerScope === 'user' && $canReseller) {
                     $allowed = true;
+                } elseif (in_array($payerScope, ['network', 'firm'], true)) {
+                    $allowed = $invoiceSettings->viewerCanSeeBilling(
+                        $user,
+                        $hub,
+                        $payerScope,
+                        $billing?->firm_id !== null ? (int) $billing->firm_id : null,
+                        $billing?->billed_user_id !== null ? (int) $billing->billed_user_id : null
+                    );
                 }
             }
         } elseif (in_array($invoice->type, Invoice::PERSONAL_TYPES, true)) {

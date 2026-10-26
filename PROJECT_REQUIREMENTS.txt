@@ -1710,9 +1710,11 @@ Either path designates Heads; both MUST stay in sync. Multiple admins OK:
     (capabilities blurred while this module is off)
   - Generic Content Pre Approval Workflow — activates GC capability section
     (capabilities blurred while this module is off)
-- Module packages (see 5.1C): optional bundles of the 5 product modules with a
-  single package price. Modules covered by an enabled package are locked on
-  this screen (`locked_reason=module_package`) and cannot be toggled separately.
+- Module packages (see 5.1C): optional bundles of Shared/White Label Hub and/or
+  the 5 product modules with a single package price. Product modules covered by
+  an enabled package are locked on this screen (`locked_reason=module_package`)
+  and cannot be toggled separately; hub base stays type-locked but is covered
+  for billing when included in the package.
 - Managed via `dashboard_manage_modules` / Modules API on Central Hub.
 - When `charge_amount_per_module` is ON, newly enabling a module (including
   uncheck → check again) creates a one-time invoice. Previous enable invoices
@@ -1763,8 +1765,8 @@ Either path designates Heads; both MUST stay in sync. Multiple admins OK:
     for modules that apply to the current hub type only (Shared base + products
     on Shared; White Label base + products on WL; Central base on Central)
   - `dashboard_manage_module_packages` — Create/edit/delete module packages
-    (bundled product modules with their own one-time + recurring package price);
-    separate page `/my-dashboard/module-packages`
+    (bundled Shared/WL Hub and/or product modules with their own one-time +
+    recurring package price); separate page `/my-dashboard/module-packages`
   - `dashboard_view_module_invoices` — Who can see module invoices
   - `dashboard_mark_module_invoices_paid` — Manually mark unpaid module invoices paid
 - APIs: GET/PUT module-pricing (filtered by hub type; returns `billing_units` +
@@ -1790,12 +1792,13 @@ Either path designates Heads; both MUST stay in sync. Multiple admins OK:
   - `dashboard_manage_firm_payment_card` — firm tab (needs firms_pay_own)
   - `dashboard_view_network_module_invoices` — Module invoices (network payer)
   - `dashboard_view_firm_module_invoices` — Module invoices (firm payer)
-  - `dashboard_view_reseller_invoices` — Reseller invoices page (network_resells)
+  - `dashboard_view_reseller_invoices` — Reseller invoices page (menu when granted;
+    list fills when network_resells is on)
   - `dashboard_mark_module_invoices_paid` — settle network/firm module invoices
-  - Personal card: NO capability — My payment method (users_pay_own only)
+  - Personal card: NO capability — My payment method (mandatory if users_pay_own OR network_resells)
 - Pages:
   - `/my-dashboard/payment-card` — network and/or firm cards (tabs)
-  - `/my-dashboard/my-payment-method` — personal card (shown only if users_pay_own)
+  - `/my-dashboard/my-payment-method` — personal card (shown if users_pay_own or network_resells)
   - `/my-dashboard/module-invoices` — network/firm one-time + recurring only
   - `/my-dashboard/my-invoices` — personal + user-billed module invoices
   - `/my-dashboard/reseller-invoices` — network→user charges (admins)
@@ -1803,39 +1806,50 @@ Either path designates Heads; both MUST stay in sync. Multiple admins OK:
   - `/my-dashboard/advisor-invoices` — label “Import users invoices”
 - Intelligent sync on save (enables only): network → network card + view;
   firms_pay_own → firm card + firm view; network_resells → reseller view.
-  users_pay_own does not grant caps (My payment method + My invoices).
+  users_pay_own / network_resells do not grant caps (My payment method + My invoices).
 - Per-hub settings (`hub_module_invoice_settings`):
   1) `network_pays_all` — Network pays ALL module invoices (every pricing unit,
      one-time + ongoing). Checking this clears firm + user options.
   2) `firms_pay_own` — Each firm pays its own invoice when the unit is
      `per_firm` (one invoice created per firm). Other units remain paid by
      the network.
-  3) `users_pay_own` — Each user pays their own invoice when the unit is
-     `per_user` (fixed) or `per_user_slots` (slot rate). One invoice per user.
-     Other units remain paid by the network.
+  3) `users_pay_own` — Each user pays their own invoice to the network/platform
+     when the unit is `per_user` / `per_user_slots`. Personal card mandatory
+     (My payment method). Other units remain paid by the network.
   4) `network_resells` — Network pays the platform for all invoices, then may
-     re-charge users with its own pricing. Checking this clears `users_pay_own`.
+     re-charge users with its own pricing (user pays the hub). Checking this
+     clears `users_pay_own`. Personal card still mandatory for each user.
      Requires reseller logo + invoice text (+ format: standard / compact /
      detailed) stamped onto invoice meta for branded display.
 - APIs: GET/POST/PUT module-invoice-settings (multipart for logo).
 - Billing rows store `payer_scope` (network|firm|user) + optional `firm_id`.
-- Module invoices list filtered by capability + firm membership (not hardcoded
-  role names). Payer of record prefers users with Manage payment card + card.
+- Module invoices list: network rows need See network module invoices; firm rows
+  need See firm module invoices and (for firm-scoped viewers) matching `firm_id`.
+  Legacy `dashboard_view_module_invoices` alone ≈ network view — not for Firm Admin.
+  Payer of record prefers users with Manage payment card + card.
 
-5.1C Module packages (bundled product modules)
+5.1C Module packages (bundled product modules + optional hub base)
 - Separate page `/my-dashboard/module-packages` gated by capability
   `dashboard_manage_module_packages` (Modules pricing group).
-- Capable roles can create catalogue packages of the 5 optional product modules
-  (base Shared / White Label Hub is never packaged — it stays mandatory/locked).
+- Capable roles can create catalogue packages of Shared Hub / White Label Hub
+  and/or the 5 optional product modules. Hub base remains mandatory/type-locked
+  on the Modules page (cannot be toggled off); including it in a package means
+  the package price covers the hub fee (no separate base invoice while enabled).
+  Selecting either Shared Hub or White Label Hub expands to both keys so the
+  same package covers the hub fee on Shared and WL hubs. Central Hub Controller
+  is never packageable.
 - Package rules:
-  - Must include ≥1 product module; dependency parents are auto-included
-    (e.g. selecting Social Media Pre Approval also includes Template Library).
+  - Must include ≥1 packageable module (hub base and/or product); product
+    dependency parents are auto-included (e.g. selecting Social Media Pre
+    Approval also includes Template Library). Hub base is NOT auto-added —
+    it is only included when explicitly selected.
   - Package has its own one-time `amount` + `billing_unit` and recurring fields
     (`recurring_amount`, `recurring_billing_unit`, `recurring_tier_slot`) —
     same units as single modules (see 5.1B unit list; recurring also allows none;
     any slot number when unit is per_user_slots).
   - While a package is enabled, its one-time and recurring charges replace
-    individual catalogue charges for covered modules (no double billing).
+    individual catalogue charges for covered modules including hub base when
+    packaged (no double billing).
   - Packages that share any module cannot both be enabled on the same hub.
 - Hub Modules page (`GET/PUT /api/power-admin/modules`):
   - Returns `packages` alongside `modules`.

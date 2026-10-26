@@ -12,8 +12,10 @@ use InvalidArgumentException;
 class ModulePackageService
 {
     /**
-     * Expand selected product modules so every dependency (except the hub base)
-     * is included. Rejects locked / base / unknown keys.
+     * Expand selected packageable modules so every product dependency is included.
+     * Content-hub bases (Shared / White Label) are allowed; selecting either base
+     * expands to both so the package covers the hub fee on Shared and WL hubs.
+     * Central Hub Controller is never packageable.
      *
      * @param  list<string>  $moduleKeys
      * @return list<string>
@@ -27,16 +29,30 @@ class ModulePackageService
             if ($key === '' || isset($requested[$key])) {
                 continue;
             }
-            if (! in_array($key, Hub::PRODUCT_MODULE_KEYS, true)) {
+            if (! in_array($key, Hub::PACKAGEABLE_MODULE_KEYS, true)) {
                 throw new InvalidArgumentException(
-                    "Module packages may only include product modules. Invalid key: {$key}"
+                    "Module packages may only include Shared/White Label Hub or product modules. Invalid key: {$key}"
                 );
             }
             $requested[$key] = true;
         }
 
         if ($requested === []) {
-            throw new InvalidArgumentException('A module package must include at least one product module.');
+            throw new InvalidArgumentException('A module package must include at least one module.');
+        }
+
+        // Shared Hub and White Label Hub are the same packaging slot across hub types.
+        $includesContentBase = false;
+        foreach (Hub::CONTENT_HUB_BASE_MODULE_KEYS as $baseKey) {
+            if (isset($requested[$baseKey])) {
+                $includesContentBase = true;
+                break;
+            }
+        }
+        if ($includesContentBase) {
+            foreach (Hub::CONTENT_HUB_BASE_MODULE_KEYS as $baseKey) {
+                $requested[$baseKey] = true;
+            }
         }
 
         $resolved = $requested;
@@ -45,9 +61,13 @@ class ModulePackageService
             : 'module_shared_hub';
 
         foreach (array_keys($requested) as $key) {
+            if (in_array($key, Hub::CONTENT_HUB_BASE_MODULE_KEYS, true)) {
+                continue;
+            }
             $deps = Hub::MODULE_DEPENDENCIES[$key] ?? [];
             foreach ($deps as $dep) {
                 $resolvedDep = $dep === '__base__' ? $base : $dep;
+                // Product deps only — hub base is included only when explicitly selected.
                 if ($resolvedDep === $base || Hub::isLockedModuleKey($resolvedDep)) {
                     continue;
                 }
@@ -59,7 +79,7 @@ class ModulePackageService
         }
 
         $ordered = [];
-        foreach (Hub::PRODUCT_MODULE_KEYS as $key) {
+        foreach (Hub::PACKAGEABLE_MODULE_KEYS as $key) {
             if (isset($resolved[$key])) {
                 $ordered[] = $key;
             }
@@ -373,17 +393,22 @@ class ModulePackageService
         $coveredAfter = $this->moduleKeysCoveredByPackages($afterPackages);
 
         // Modules that leave because their package was disabled.
+        // Locked hub bases stay on (state is derived from hub type).
         if ($removedIds !== []) {
             $removedPackages = $this->packagesByIds($removedIds);
             foreach (array_keys($this->moduleKeysCoveredByPackages($removedPackages)) as $key) {
-                if (! isset($coveredAfter[$key])) {
-                    $checklist[$key] = false;
+                if (isset($coveredAfter[$key]) || Hub::isLockedModuleKey($key)) {
+                    continue;
                 }
+                $checklist[$key] = false;
             }
         }
 
-        // Force every module covered by an enabled package ON.
+        // Force every module covered by an enabled package ON (bases re-normalised below).
         foreach (array_keys($coveredAfter) as $key) {
+            if (Hub::isLockedModuleKey($key)) {
+                continue;
+            }
             $checklist[$key] = true;
         }
 
@@ -596,6 +621,7 @@ class ModulePackageService
     /**
      * Sum of individual one-time catalogue amounts (for UI comparison).
      * WTL uses unit amount only (not × template count).
+     * Shared Hub + White Label Hub count once (same packaging slot / price).
      *
      * @param  list<string>  $moduleKeys
      */
@@ -603,7 +629,14 @@ class ModulePackageService
     {
         $pricing = app(ModulePricingService::class);
         $sum = 0.0;
+        $countedContentBase = false;
         foreach ($moduleKeys as $key) {
+            if (in_array($key, Hub::CONTENT_HUB_BASE_MODULE_KEYS, true)) {
+                if ($countedContentBase) {
+                    continue;
+                }
+                $countedContentBase = true;
+            }
             try {
                 $quote = $pricing->quote($key);
                 $sum += (float) $quote['amount'];

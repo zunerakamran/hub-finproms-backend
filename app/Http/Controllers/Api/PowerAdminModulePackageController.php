@@ -19,10 +19,10 @@ class PowerAdminModulePackageController extends Controller
     {
         return response()->json([
             'packages' => $this->packages->listPackages(activeOnly: false),
-            'available_module_keys' => \App\Models\Hub::PRODUCT_MODULE_KEYS,
+            'available_module_keys' => \App\Models\Hub::PACKAGEABLE_MODULE_KEYS,
             'billing_units' => \App\Services\ModulePricingService::priceUnitOptions(),
             'recurring_billing_units' => \App\Services\ModulePricingService::recurringUnitOptions(),
-            'formula' => 'Package one-time + recurring use the same units as modules (per_network / per_firm / per_user / per_user_slots / per_website) and replace individual catalogue charges for covered modules while enabled.',
+            'formula' => 'Package one-time + recurring use the same units as modules (per_network / per_firm / per_user / per_user_slots / per_website) and replace individual catalogue charges for covered modules (including Shared/White Label Hub when packaged) while enabled.',
         ]);
     }
 

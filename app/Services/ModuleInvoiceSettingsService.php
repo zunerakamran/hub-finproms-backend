@@ -90,8 +90,8 @@ class ModuleInvoiceSettingsService
             'explanations' => [
                 'network_pays_all' => 'Network pays all module invoices (every pricing unit, one-time and ongoing). Saving this turns on Manage payment card + View / View all module invoices for Network / Client Admin (and Accounts Admin for card + view). Power Admin can still grant any role.',
                 'firms_pay_own' => 'Each firm pays its own invoice when the unit is per firm (one invoice per firm). Other units stay with the network. Saving this turns on Manage payment card + View module invoices for Firm Admin and Accounts Admin so they can add the firm card and see firm invoices.',
-                'users_pay_own' => 'Each user pays their own invoice when the unit is per user / per user (slots). Other units stay with the network. Saving this turns on View module invoices (+ Manage payment card) for User / Advisor / Admin-staff so they can see and pay their own invoices.',
-                'network_resells' => 'Network pays the platform for all invoices, then may re-charge users with its own pricing. Disables “users pay own”. Requires logo + invoice text for branded invoices. Also enables network card + hub-wide invoice view caps like “Network pays all”.',
+                'users_pay_own' => 'Each user pays their own invoice to the network/platform when the unit is per user / per user (slots). Personal card under My payment method is mandatory. Other units stay with the network.',
+                'network_resells' => 'Network pays the platform for all invoices, then may re-charge users (user pays the hub). Disables “users pay own”, but each user still must add a personal card under My payment method. Requires logo + invoice text for branded invoices. Also enables network card + hub-wide invoice view caps like “Network pays all”.',
             ],
             'capability_sync' => [
                 'network' => [
@@ -113,7 +113,7 @@ class ModuleInvoiceSettingsService
                     'roles' => ['network_admin', 'client_admin', 'accounts_admin'],
                 ],
                 'user' => [
-                    'note' => 'Personal card lives under Profile (no capability). Own module invoices appear under My invoices.',
+                    'note' => 'Personal card is mandatory under My payment method when Users pay own or Network resells (no capability). Own invoices appear under My invoices.',
                 ],
             ],
         ];
@@ -282,7 +282,7 @@ class ModuleInvoiceSettingsService
             );
         }
 
-        // users_pay_own → personal Profile card (no capability) + My invoices.
+        // users_pay_own / network_resells → personal My payment method (no capability) + My invoices.
 
         $newlyEnabled = $this->matrix->enableCapabilityGrants($hub, $planned);
         if ($newlyEnabled === []) {
@@ -461,7 +461,13 @@ class ModuleInvoiceSettingsService
 
     /**
      * Module invoices page: network and/or firm scopes only (by capability).
+     * - Network invoices → See network module invoices (hub-wide)
+     * - Firm invoices → See firm module invoices, limited to the viewer’s firm
+     *   unless they are network-level (no firm / central firm) or have “view all”
      * User-scoped invoices belong on My invoices (and reseller page for admins).
+     *
+     * Legacy dashboard_view_module_invoices alone maps to network visibility.
+     * It must NOT widen Firm Admin (who also has the firm cap from older grants).
      */
     public function viewerCanSeeBilling(
         User $viewer,
@@ -470,35 +476,67 @@ class ModuleInvoiceSettingsService
         ?int $firmId,
         ?int $billedUserId
     ): bool {
+        [$canNetwork, $canFirm, $canAll] = $this->viewerModuleInvoiceFlags($hub, $viewer);
+
         if ($payerScope === self::PAYER_NETWORK) {
-            return $this->matrix->userCan($hub, $viewer, self::VIEW_NETWORK_CAPABILITY)
-                || $this->matrix->userCan($hub, $viewer, 'dashboard_view_module_invoices')
-                || $this->matrix->userCan($hub, $viewer, 'dashboard_view_all_module_invoices');
+            return $canNetwork;
         }
 
         if ($payerScope === self::PAYER_FIRM) {
             if (! $this->forHub($hub)->firms_pay_own) {
                 return false;
             }
-            if (! (
-                $this->matrix->userCan($hub, $viewer, self::VIEW_FIRM_CAPABILITY)
-                || $this->matrix->userCan($hub, $viewer, 'dashboard_view_module_invoices')
-                || $this->matrix->userCan($hub, $viewer, 'dashboard_view_all_module_invoices')
-            )) {
+            if (! $canFirm) {
                 return false;
             }
-            $viewerFirmId = $viewer->firm_id ? (int) $viewer->firm_id : null;
-            $viewerFirm = $viewerFirmId ? Firm::query()->find($viewerFirmId) : null;
-            $isNetworkLevel = ! $viewerFirmId || ($viewerFirm && $viewerFirm->isCentral());
-            if ($isNetworkLevel || $this->matrix->userCan($hub, $viewer, 'dashboard_view_all_module_invoices')) {
+            if ($canAll || $this->viewerIsNetworkLevelForFirmInvoices($viewer)) {
                 return true;
             }
+
+            $viewerFirmId = $viewer->firm_id ? (int) $viewer->firm_id : null;
 
             return $firmId && $viewerFirmId && (int) $firmId === $viewerFirmId;
         }
 
         // User-scoped: not listed on Module invoices page.
         return false;
+    }
+
+    /**
+     * @return array{0: bool, 1: bool, 2: bool} [canNetwork, canFirm, canAll]
+     */
+    public function viewerModuleInvoiceFlags(Hub $hub, User $viewer): array
+    {
+        $canAll = $this->matrix->userCan($hub, $viewer, 'dashboard_view_all_module_invoices');
+        $hasNetwork = $this->matrix->userCan($hub, $viewer, self::VIEW_NETWORK_CAPABILITY);
+        $hasFirm = $this->matrix->userCan($hub, $viewer, self::VIEW_FIRM_CAPABILITY);
+        $legacy = $this->matrix->userCan($hub, $viewer, 'dashboard_view_module_invoices');
+
+        // Pure legacy grant (pre-split) ≈ network view for hub admins / Power Admin.
+        // Never promote Firm Admin via the old blanket grant (migration 165500).
+        $effectiveRole = $this->matrix->effectiveRoleFor($viewer);
+        if (
+            $legacy
+            && ! $hasNetwork
+            && ! $hasFirm
+            && ! $canAll
+            && $effectiveRole !== User::ROLE_FIRM_ADMIN
+        ) {
+            $hasNetwork = true;
+        }
+
+        return [$hasNetwork || $canAll, $hasFirm || $canAll, $canAll];
+    }
+
+    public function viewerIsNetworkLevelForFirmInvoices(User $viewer): bool
+    {
+        $viewerFirmId = $viewer->firm_id ? (int) $viewer->firm_id : null;
+        if (! $viewerFirmId) {
+            return true;
+        }
+        $viewerFirm = Firm::query()->find($viewerFirmId);
+
+        return $viewerFirm && $viewerFirm->isCentral();
     }
 
     /**

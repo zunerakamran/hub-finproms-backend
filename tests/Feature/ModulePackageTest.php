@@ -64,7 +64,30 @@ class ModulePackageTest extends TestCase
         $this->assertSame(5000.0, (float) $response->json('package.individual_module_amount_sum'));
     }
 
-    public function test_package_rejects_base_hub_module(): void
+    public function test_package_accepts_shared_or_wl_hub_and_expands_both_bases(): void
+    {
+        $admin = User::factory()->powerAdmin()->create();
+        Sanctum::actingAs($admin);
+        $this->grantPackageCapability($this->central);
+        app(ModulePricingService::class)->seedDefaultsIfEmpty();
+
+        $response = $this->postJson('/api/power-admin/module-packages', [
+            'name' => 'Starter with Hub',
+            'amount' => 18000,
+            'module_keys' => ['module_white_label_hub', 'module_general_compliance'],
+        ]);
+
+        $response->assertCreated();
+        $keys = $response->json('package.module_keys');
+        $this->assertSame(
+            ['module_shared_hub', 'module_white_label_hub', 'module_general_compliance'],
+            $keys
+        );
+        // Shared + WL bases count once in the individual-sum comparison.
+        $this->assertSame(18000.0, (float) $response->json('package.individual_module_amount_sum'));
+    }
+
+    public function test_package_rejects_central_hub_module(): void
     {
         $admin = User::factory()->powerAdmin()->create();
         Sanctum::actingAs($admin);
@@ -73,8 +96,70 @@ class ModulePackageTest extends TestCase
         $this->postJson('/api/power-admin/module-packages', [
             'name' => 'Bad',
             'amount' => 1,
-            'module_keys' => ['module_shared_hub'],
+            'module_keys' => ['module_central_hub'],
         ])->assertStatus(422);
+    }
+
+    public function test_enabling_package_with_hub_base_skips_individual_base_invoice(): void
+    {
+        $hub = $this->createWhiteLabelHub([
+            'checklist' => array_merge(Hub::defaultChecklist(Hub::TYPE_WHITE_LABEL), [
+                'charge_amount_per_module' => true,
+                'module_general_compliance' => false,
+            ]),
+        ]);
+
+        $admin = User::factory()->powerAdmin()->create(['acting_hub_id' => $hub->id]);
+        Sanctum::actingAs($admin);
+        app(ModulePricingService::class)->seedDefaultsIfEmpty();
+
+        $package = app(ModulePackageService::class)->create([
+            'name' => 'WL Starter',
+            'amount' => 16000,
+            'module_keys' => [
+                'module_white_label_hub',
+                'module_general_compliance',
+            ],
+        ]);
+
+        $response = $this->putJson('/api/power-admin/modules?hub_id='.$hub->id, [
+            'hub_id' => $hub->id,
+            'packages' => [
+                ['id' => $package->id, 'enabled' => true],
+            ],
+        ]);
+
+        $response->assertOk();
+        $invoices = collect($response->json('module_invoices'));
+        $this->assertCount(1, $invoices);
+        $this->assertSame(16000.0, (float) $invoices->first()['amount']);
+        $this->assertStringContainsString('WL Starter', $invoices->first()['description']);
+
+        $modules = collect($response->json('modules'));
+        $base = $modules->firstWhere('key', 'module_white_label_hub');
+        $gc = $modules->firstWhere('key', 'module_general_compliance');
+        $this->assertTrue($base['enabled']);
+        $this->assertTrue($base['locked']);
+        $this->assertSame('white_label_hub', $base['locked_reason']);
+        $this->assertSame($package->id, $base['locked_by_package']['id']);
+        $this->assertTrue($gc['enabled']);
+        $this->assertTrue($gc['locked']);
+        $this->assertSame('module_package', $gc['locked_reason']);
+
+        $hub->refresh();
+        $this->assertTrue($hub->moduleCoveredByEnabledPackage('module_white_label_hub'));
+        $this->assertTrue($hub->hasGeneralComplianceModule());
+
+        // Disabling the package turns product modules off but hub base stays on.
+        $this->putJson('/api/power-admin/modules?hub_id='.$hub->id, [
+            'hub_id' => $hub->id,
+            'packages' => [['id' => $package->id, 'enabled' => false]],
+        ])->assertOk();
+
+        $hub->refresh();
+        $this->assertTrue($hub->hasWhiteLabelHubModule());
+        $this->assertFalse($hub->hasGeneralComplianceModule());
+        $this->assertSame([], $hub->enabledModulePackageIds());
     }
 
     public function test_enabling_package_locks_modules_and_invoices_package_price_only(): void

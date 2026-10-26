@@ -316,6 +316,13 @@ class HubModulesController extends Controller
                     'name' => (string) $ownership[$key]->name,
                 ];
             }
+            // Hub base stays type-locked, but still show package ownership when covered.
+            if ($lockedByPackage === null && isset($ownership[$key])) {
+                $lockedByPackage = [
+                    'id' => (int) $ownership[$key]->id,
+                    'name' => (string) $ownership[$key]->name,
+                ];
+            }
 
             $enabled = (bool) ($resolved[$key] ?? false);
             // Dependents cannot stay on when parents are off.

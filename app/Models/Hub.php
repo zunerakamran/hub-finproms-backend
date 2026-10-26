@@ -206,6 +206,32 @@ class Hub extends Model
     ];
 
     /**
+     * Locked base packaging modules for content hubs (Shared + White Label).
+     * Central Hub Controller base is never packageable.
+     *
+     * @var list<string>
+     */
+    public const CONTENT_HUB_BASE_MODULE_KEYS = [
+        'module_shared_hub',
+        'module_white_label_hub',
+    ];
+
+    /**
+     * Modules that may appear in catalogue module packages (content-hub bases + products).
+     *
+     * @var list<string>
+     */
+    public const PACKAGEABLE_MODULE_KEYS = [
+        'module_shared_hub',
+        'module_white_label_hub',
+        'module_social_media_template_library',
+        'module_social_media_compliance',
+        'module_website_template_library',
+        'module_website_compliance',
+        'module_general_compliance',
+    ];
+
+    /**
      * Modules that cannot be toggled — state is derived from hub type.
      *
      * @var list<string>
@@ -1463,7 +1489,7 @@ class Hub extends Model
         ],
         'dashboard_view_reseller_invoices' => [
             'label' => 'See network→user reseller invoices',
-            'description' => 'When the network resells / re-charges users, see all those user-facing invoices on Reseller invoices. End users still see their own under My invoices. Active only while Network resells is on.',
+            'description' => 'Opens Modules → Reseller invoices for network→user charges. Turn on Network resells under Module invoice settings to generate those invoices; end users still see their own under My invoices.',
             'group' => self::GROUP_MODULE_PRICING,
             'default_shared' => false,
             'default_white_label' => true,
@@ -3043,18 +3069,28 @@ class Hub extends Model
     }
 
     /**
-     * @return array{users_pay_own: bool, firms_pay_own: bool, network_pays_all: bool, network_resells: bool}
+     * @return array{
+     *   users_pay_own: bool,
+     *   firms_pay_own: bool,
+     *   network_pays_all: bool,
+     *   network_resells: bool,
+     *   personal_card_required: bool
+     * }
      */
     public function moduleInvoiceSettingsPublicSummary(): array
     {
         try {
             $row = app(\App\Services\ModuleInvoiceSettingsService::class)->forHub($this);
+            $usersPayOwn = (bool) $row->users_pay_own;
+            $networkResells = (bool) $row->network_resells;
 
             return [
-                'users_pay_own' => (bool) $row->users_pay_own,
+                'users_pay_own' => $usersPayOwn,
                 'firms_pay_own' => (bool) $row->firms_pay_own,
                 'network_pays_all' => (bool) $row->network_pays_all,
-                'network_resells' => (bool) $row->network_resells,
+                'network_resells' => $networkResells,
+                // Users pay FinProms directly, or pay the hub under network_resells.
+                'personal_card_required' => $usersPayOwn || $networkResells,
             ];
         } catch (\Throwable) {
             return [
@@ -3062,6 +3098,7 @@ class Hub extends Model
                 'firms_pay_own' => false,
                 'network_pays_all' => true,
                 'network_resells' => false,
+                'personal_card_required' => false,
             ];
         }
     }

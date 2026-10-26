@@ -1670,9 +1670,8 @@ class CapabilitiesMatrixService
             return true;
         }
 
-        if ($key === 'dashboard_view_reseller_invoices' && ! $settings->network_resells) {
-            return true;
-        }
+        // Reseller invoices page follows the capability alone (menu always visible
+        // when granted). The API returns an empty list until Network resells is on.
 
         return false;
     }

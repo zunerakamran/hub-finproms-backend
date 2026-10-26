@@ -15,7 +15,8 @@ use Stripe\Customer;
 use Stripe\PaymentMethod;
 
 /**
- * Network / firm hub cards (capability-gated) and personal cards (My payment method, users_pay_own).
+ * Network / firm hub cards (capability-gated) and personal cards (My payment method:
+ * required when users_pay_own or network_resells).
  */
 class PaymentCardService
 {
@@ -47,9 +48,9 @@ class PaymentCardService
     {
         if ($scope === self::SCOPE_PERSONAL) {
             $settings = $this->invoiceSettings->forHub($hub);
-            if (! $settings->users_pay_own) {
+            if (! $settings->users_pay_own && ! $settings->network_resells) {
                 throw new InvalidArgumentException(
-                    'Personal payment methods are available only while Module invoice settings → Users pay own is on.'
+                    'Personal payment methods are required only while Module invoice settings → Users pay own, or Network resells (users pay the hub), is on.'
                 );
             }
 
