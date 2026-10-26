@@ -50,14 +50,13 @@ class OversightRolesAndFirmScopeTest extends TestCase
 
         $this->assertTrue($defaults[User::ROLE_ACCOUNTS_ADMIN]['dashboard_view_one_time_invoices'] ?? false);
         $this->assertTrue($defaults[User::ROLE_ACCOUNTS_ADMIN]['dashboard_bank_transfers'] ?? false);
-        $this->assertTrue($defaults[User::ROLE_ACCOUNTS_ADMIN]['dashboard_view_module_invoices'] ?? false);
-        $this->assertTrue($defaults[User::ROLE_ACCOUNTS_ADMIN]['dashboard_manage_payment_card'] ?? false);
+        $this->assertTrue($defaults[User::ROLE_ACCOUNTS_ADMIN]['dashboard_view_network_module_invoices'] ?? false);
+        $this->assertTrue($defaults[User::ROLE_ACCOUNTS_ADMIN]['dashboard_manage_network_payment_card'] ?? false);
 
-        $this->assertTrue($defaults[User::ROLE_NETWORK_ADMIN]['dashboard_manage_payment_card'] ?? false);
-        $this->assertTrue($defaults[User::ROLE_NETWORK_ADMIN]['dashboard_view_all_module_invoices'] ?? false);
-        $this->assertTrue($defaults[User::ROLE_FIRM_ADMIN]['dashboard_manage_payment_card'] ?? false);
-        $this->assertTrue($defaults[User::ROLE_FIRM_ADMIN]['dashboard_view_module_invoices'] ?? false);
-        $this->assertFalse($defaults[User::ROLE_FIRM_ADMIN]['dashboard_view_all_module_invoices'] ?? true);
+        $this->assertTrue($defaults[User::ROLE_NETWORK_ADMIN]['dashboard_manage_network_payment_card'] ?? false);
+        $this->assertTrue($defaults[User::ROLE_NETWORK_ADMIN]['dashboard_view_network_module_invoices'] ?? false);
+        $this->assertTrue($defaults[User::ROLE_FIRM_ADMIN]['dashboard_manage_firm_payment_card'] ?? false);
+        $this->assertTrue($defaults[User::ROLE_FIRM_ADMIN]['dashboard_view_firm_module_invoices'] ?? false);
     }
 
     public function test_member_firm_top_management_stays_firm_scoped(): void

@@ -294,6 +294,10 @@ class CapabilitiesMatrixService
                     || ($requiresFirmDocuments && ! $firmDocumentsOn);
             }
 
+            if ($this->moduleInvoiceSettingGatesInactive($hub, $key)) {
+                $inactive = true;
+            }
+
             // Create/edit posts & taxonomy live on Central only (library + Central taxonomy).
             if ((! $isCentralHub && in_array($key, Hub::CONTENT_HUB_DISABLED_MANAGE_CAPABILITIES, true))
                 || ($isCentralHub && $key === 'dashboard_manage_posts')
@@ -1007,8 +1011,10 @@ class CapabilitiesMatrixService
             'dashboard_manage_module_pricing',
             'dashboard_manage_module_packages',
             'dashboard_manage_module_invoice_settings',
-            'dashboard_view_module_invoices',
-            'dashboard_view_all_module_invoices',
+            'dashboard_manage_network_payment_card',
+            'dashboard_view_network_module_invoices',
+            'dashboard_view_firm_module_invoices',
+            'dashboard_view_reseller_invoices',
             'dashboard_mark_module_invoices_paid',
             ActingHubService::CAPABILITY,
         ] as $key) {
@@ -1064,8 +1070,9 @@ class CapabilitiesMatrixService
                 $hubType === Hub::TYPE_WHITE_LABEL;
             foreach ([
                 'dashboard_manage_module_invoice_settings',
-                'dashboard_view_module_invoices',
-                'dashboard_view_all_module_invoices',
+                'dashboard_view_network_module_invoices',
+                'dashboard_view_firm_module_invoices',
+                'dashboard_view_reseller_invoices',
                 'dashboard_mark_module_invoices_paid',
             ] as $key) {
                 if (isset($matrix[User::ROLE_FINPROMS_ADMIN][$key])) {
@@ -1166,30 +1173,30 @@ class CapabilitiesMatrixService
             }
         }
 
-        // Accounts Admin — invoices, bank transfers, billing renew, payment card ON by default.
-        // These are defaults only; Power Admin may grant the same caps to any other role.
+        // Accounts Admin — invoices, bank transfers, billing renew, network+firm cards ON by default.
         if (isset($matrix[User::ROLE_ACCOUNTS_ADMIN])) {
             foreach ([
                 'dashboard_view_one_time_invoices',
-                'dashboard_view_module_invoices',
+                'dashboard_view_network_module_invoices',
+                'dashboard_view_firm_module_invoices',
+                'dashboard_view_reseller_invoices',
                 'dashboard_mark_module_invoices_paid',
                 'dashboard_view_advisor_invoices',
                 'dashboard_bank_transfers',
                 'dashboard_manage_advisor_renewal',
-                'dashboard_manage_payment_card',
+                'dashboard_manage_network_payment_card',
+                'dashboard_manage_firm_payment_card',
                 'general_show_invoices',
             ] as $key) {
                 $matrix[User::ROLE_ACCOUNTS_ADMIN][$key] = true;
             }
         }
 
-        // Network Admin — payment card + hub-wide module invoice visibility ON by default
-        // (example “network pays” path). Not a hard role lock-in.
         if (isset($matrix[User::ROLE_NETWORK_ADMIN])) {
             foreach ([
-                'dashboard_manage_payment_card',
-                'dashboard_view_module_invoices',
-                'dashboard_view_all_module_invoices',
+                'dashboard_manage_network_payment_card',
+                'dashboard_view_network_module_invoices',
+                'dashboard_view_reseller_invoices',
                 'dashboard_manage_module_invoice_settings',
             ] as $key) {
                 if (isset($matrix[User::ROLE_NETWORK_ADMIN][$key])) {
@@ -1198,14 +1205,13 @@ class CapabilitiesMatrixService
             }
         }
 
-        // Client Admin — hub-wide module invoice view + payment card (WL default already
-        // seeds payment_card true; ensure view_all for module invoice oversight).
         if (isset($matrix[User::ROLE_CLIENT_ADMIN])) {
             foreach ([
-                'dashboard_view_module_invoices',
-                'dashboard_view_all_module_invoices',
+                'dashboard_view_network_module_invoices',
+                'dashboard_view_firm_module_invoices',
+                'dashboard_view_reseller_invoices',
                 'dashboard_manage_module_invoice_settings',
-                'dashboard_manage_payment_card',
+                'dashboard_manage_network_payment_card',
             ] as $key) {
                 if (isset($matrix[User::ROLE_CLIENT_ADMIN][$key])) {
                     $matrix[User::ROLE_CLIENT_ADMIN][$key] = true;
@@ -1213,11 +1219,10 @@ class CapabilitiesMatrixService
             }
         }
 
-        // Firm Admin — firm payment card + firm-scoped module invoices (no view_all).
         if (isset($matrix[User::ROLE_FIRM_ADMIN])) {
             foreach ([
-                'dashboard_manage_payment_card',
-                'dashboard_view_module_invoices',
+                'dashboard_manage_firm_payment_card',
+                'dashboard_view_firm_module_invoices',
             ] as $key) {
                 if (isset($matrix[User::ROLE_FIRM_ADMIN][$key])) {
                     $matrix[User::ROLE_FIRM_ADMIN][$key] = true;
@@ -1578,6 +1583,10 @@ class CapabilitiesMatrixService
             return false;
         }
 
+        if ($this->moduleInvoiceSettingGatesInactive($hub, $flag)) {
+            return false;
+        }
+
         // Firm document caps are inactive while Functionalities → Firm documents is off.
         if (Hub::isFirmDocumentsCapability($flag) && ! $hub->hasFirmDocumentsFunctionality()) {
             return false;
@@ -1630,9 +1639,41 @@ class CapabilitiesMatrixService
     {
         return in_array($key, [
             'dashboard_manage_module_invoice_settings',
+            'dashboard_manage_network_payment_card',
+            'dashboard_manage_firm_payment_card',
+            'dashboard_view_network_module_invoices',
+            'dashboard_view_firm_module_invoices',
+            'dashboard_view_reseller_invoices',
+            'dashboard_mark_module_invoices_paid',
+            // legacy
             'dashboard_view_module_invoices',
             'dashboard_view_all_module_invoices',
-            'dashboard_mark_module_invoices_paid',
+            'dashboard_manage_payment_card',
         ], true);
+    }
+
+    /**
+     * Firm / reseller caps stay inactive while the matching invoice setting is off.
+     */
+    public function moduleInvoiceSettingGatesInactive(Hub $hub, string $key): bool
+    {
+        try {
+            $settings = app(ModuleInvoiceSettingsService::class)->forHub($hub);
+        } catch (\Throwable) {
+            return false;
+        }
+
+        if (in_array($key, [
+            'dashboard_manage_firm_payment_card',
+            'dashboard_view_firm_module_invoices',
+        ], true) && ! $settings->firms_pay_own) {
+            return true;
+        }
+
+        if ($key === 'dashboard_view_reseller_invoices' && ! $settings->network_resells) {
+            return true;
+        }
+
+        return false;
     }
 }

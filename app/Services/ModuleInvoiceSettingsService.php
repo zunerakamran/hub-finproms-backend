@@ -18,9 +18,21 @@ class ModuleInvoiceSettingsService
 
     public const PAYER_USER = 'user';
 
+    public const VIEW_NETWORK_CAPABILITY = 'dashboard_view_network_module_invoices';
+
+    public const VIEW_FIRM_CAPABILITY = 'dashboard_view_firm_module_invoices';
+
+    public const VIEW_RESELLER_CAPABILITY = 'dashboard_view_reseller_invoices';
+
+    public const NETWORK_CARD_CAPABILITY = 'dashboard_manage_network_payment_card';
+
+    public const FIRM_CARD_CAPABILITY = 'dashboard_manage_firm_payment_card';
+
+    /** @deprecated */
     public const VIEW_ALL_CAPABILITY = 'dashboard_view_all_module_invoices';
 
-    public const PAYMENT_CARD_CAPABILITY = 'dashboard_manage_payment_card';
+    /** @deprecated */
+    public const PAYMENT_CARD_CAPABILITY = 'dashboard_manage_network_payment_card';
 
     /** @var list<array{role: string, capability: string, reason: string}> */
     private array $lastCapabilitiesSynced = [];
@@ -84,25 +96,24 @@ class ModuleInvoiceSettingsService
             'capability_sync' => [
                 'network' => [
                     'capabilities' => [
-                        'dashboard_manage_payment_card',
-                        'dashboard_view_module_invoices',
-                        'dashboard_view_all_module_invoices',
+                        self::NETWORK_CARD_CAPABILITY,
+                        self::VIEW_NETWORK_CAPABILITY,
                     ],
                     'roles' => ['network_admin', 'client_admin', 'accounts_admin'],
                 ],
                 'firm' => [
                     'capabilities' => [
-                        'dashboard_manage_payment_card',
-                        'dashboard_view_module_invoices',
+                        self::FIRM_CARD_CAPABILITY,
+                        self::VIEW_FIRM_CAPABILITY,
                     ],
                     'roles' => ['firm_admin', 'accounts_admin'],
                 ],
+                'reseller' => [
+                    'capabilities' => [self::VIEW_RESELLER_CAPABILITY],
+                    'roles' => ['network_admin', 'client_admin', 'accounts_admin'],
+                ],
                 'user' => [
-                    'capabilities' => [
-                        'dashboard_manage_payment_card',
-                        'dashboard_view_module_invoices',
-                    ],
-                    'roles' => ['user', 'advisor', 'admin_staff'],
+                    'note' => 'Personal card lives under Profile (no capability). Own module invoices appear under My invoices.',
                 ],
             ],
         ];
@@ -246,34 +257,32 @@ class ModuleInvoiceSettingsService
             $reason = 'network_payer';
             $plan(
                 [User::ROLE_NETWORK_ADMIN, User::ROLE_CLIENT_ADMIN, User::ROLE_ACCOUNTS_ADMIN],
-                self::PAYMENT_CARD_CAPABILITY,
+                self::NETWORK_CARD_CAPABILITY,
                 $reason
             );
             $plan(
-                [User::ROLE_NETWORK_ADMIN, User::ROLE_CLIENT_ADMIN, User::ROLE_ACCOUNTS_ADMIN],
-                'dashboard_view_module_invoices',
-                $reason
-            );
-            $plan(
-                [User::ROLE_NETWORK_ADMIN, User::ROLE_CLIENT_ADMIN, User::ROLE_POWER_ADMIN, User::ROLE_FINPROMS_ADMIN],
-                self::VIEW_ALL_CAPABILITY,
+                [User::ROLE_NETWORK_ADMIN, User::ROLE_CLIENT_ADMIN, User::ROLE_ACCOUNTS_ADMIN, User::ROLE_POWER_ADMIN, User::ROLE_FINPROMS_ADMIN],
+                self::VIEW_NETWORK_CAPABILITY,
                 $reason
             );
         }
 
         if ($settings->firms_pay_own) {
             $reason = 'firms_pay_own';
-            foreach ([self::PAYMENT_CARD_CAPABILITY, 'dashboard_view_module_invoices'] as $cap) {
+            foreach ([self::FIRM_CARD_CAPABILITY, self::VIEW_FIRM_CAPABILITY] as $cap) {
                 $plan([User::ROLE_FIRM_ADMIN, User::ROLE_ACCOUNTS_ADMIN], $cap, $reason);
             }
         }
 
-        if ($settings->users_pay_own) {
-            $reason = 'users_pay_own';
-            foreach ([self::PAYMENT_CARD_CAPABILITY, 'dashboard_view_module_invoices'] as $cap) {
-                $plan([User::ROLE_USER, User::ROLE_ADVISOR, User::ROLE_ADMIN_STAFF], $cap, $reason);
-            }
+        if ($settings->network_resells) {
+            $plan(
+                [User::ROLE_NETWORK_ADMIN, User::ROLE_CLIENT_ADMIN, User::ROLE_ACCOUNTS_ADMIN, User::ROLE_POWER_ADMIN, User::ROLE_FINPROMS_ADMIN],
+                self::VIEW_RESELLER_CAPABILITY,
+                'network_resells'
+            );
         }
+
+        // users_pay_own → personal Profile card (no capability) + My invoices.
 
         $newlyEnabled = $this->matrix->enableCapabilityGrants($hub, $planned);
         if ($newlyEnabled === []) {
@@ -347,15 +356,23 @@ class ModuleInvoiceSettingsService
             ->where('is_discontinued', false)
             ->orderBy('id')
             ->get()
-            ->filter(fn (User $u) => $this->matrix->userCan($hub, $u, self::PAYMENT_CARD_CAPABILITY))
+            ->filter(fn (User $u) => $this->matrix->userCan($hub, $u, self::NETWORK_CARD_CAPABILITY))
             ->values();
+
+        $networkProfile = app(PaymentCardService::class)->networkProfile($hub);
+        if ($networkProfile?->managed_by_user_id) {
+            $manager = User::query()->find($networkProfile->managed_by_user_id);
+            if ($manager) {
+                return $manager;
+            }
+        }
 
         $withCard = $candidates->first(fn (User $u) => filled($u->stripe_payment_method_id));
         if ($withCard) {
             return $withCard;
         }
 
-        if ($actor && $this->matrix->userCan($hub, $actor, self::PAYMENT_CARD_CAPABILITY)) {
+        if ($actor && $this->matrix->userCan($hub, $actor, self::NETWORK_CARD_CAPABILITY)) {
             return $actor;
         }
 
@@ -390,8 +407,17 @@ class ModuleInvoiceSettingsService
             ->get();
 
         $capable = $users
-            ->filter(fn (User $u) => $this->matrix->userCan($hub, $u, self::PAYMENT_CARD_CAPABILITY))
+            ->filter(fn (User $u) => $this->matrix->userCan($hub, $u, self::FIRM_CARD_CAPABILITY))
             ->values();
+
+        $firmProfile = app(PaymentCardService::class)->firmProfile($hub, $firmId);
+        if ($firmProfile?->managed_by_user_id) {
+            $manager = $users->first(fn (User $u) => (int) $u->id === (int) $firmProfile->managed_by_user_id)
+                ?: User::query()->find($firmProfile->managed_by_user_id);
+            if ($manager) {
+                return $manager;
+            }
+        }
 
         $withCard = $capable->first(fn (User $u) => filled($u->stripe_payment_method_id));
         if ($withCard) {
@@ -434,8 +460,8 @@ class ModuleInvoiceSettingsService
     }
 
     /**
-     * Whether a viewer with “View module invoices” may see this billing row.
-     * Scope is capability + firm membership — not hard-coded role names.
+     * Module invoices page: network and/or firm scopes only (by capability).
+     * User-scoped invoices belong on My invoices (and reseller page for admins).
      */
     public function viewerCanSeeBilling(
         User $viewer,
@@ -444,31 +470,54 @@ class ModuleInvoiceSettingsService
         ?int $firmId,
         ?int $billedUserId
     ): bool {
-        if ($this->matrix->userCan($hub, $viewer, self::VIEW_ALL_CAPABILITY)) {
-            return true;
+        if ($payerScope === self::PAYER_NETWORK) {
+            return $this->matrix->userCan($hub, $viewer, self::VIEW_NETWORK_CAPABILITY)
+                || $this->matrix->userCan($hub, $viewer, 'dashboard_view_module_invoices')
+                || $this->matrix->userCan($hub, $viewer, 'dashboard_view_all_module_invoices');
         }
 
-        // Always allow the billed user to see their own user-scoped invoice.
-        if (
-            $payerScope === self::PAYER_USER
-            && $billedUserId
-            && (int) $billedUserId === (int) $viewer->id
-        ) {
-            return true;
+        if ($payerScope === self::PAYER_FIRM) {
+            if (! $this->forHub($hub)->firms_pay_own) {
+                return false;
+            }
+            if (! (
+                $this->matrix->userCan($hub, $viewer, self::VIEW_FIRM_CAPABILITY)
+                || $this->matrix->userCan($hub, $viewer, 'dashboard_view_module_invoices')
+                || $this->matrix->userCan($hub, $viewer, 'dashboard_view_all_module_invoices')
+            )) {
+                return false;
+            }
+            $viewerFirmId = $viewer->firm_id ? (int) $viewer->firm_id : null;
+            $viewerFirm = $viewerFirmId ? Firm::query()->find($viewerFirmId) : null;
+            $isNetworkLevel = ! $viewerFirmId || ($viewerFirm && $viewerFirm->isCentral());
+            if ($isNetworkLevel || $this->matrix->userCan($hub, $viewer, 'dashboard_view_all_module_invoices')) {
+                return true;
+            }
+
+            return $firmId && $viewerFirmId && (int) $firmId === $viewerFirmId;
         }
 
-        $viewerFirmId = $viewer->firm_id ? (int) $viewer->firm_id : null;
-        $viewerFirm = $viewerFirmId ? Firm::query()->find($viewerFirmId) : null;
-        $isNetworkLevel = ! $viewerFirmId || ($viewerFirm && $viewerFirm->isCentral());
+        // User-scoped: not listed on Module invoices page.
+        return false;
+    }
 
-        if ($isNetworkLevel) {
-            // Network-level members oversee network invoices (+ user invoices).
-            return $payerScope === self::PAYER_NETWORK || $payerScope === self::PAYER_USER;
+    /**
+     * Reseller invoices page — network→user charges when network_resells is on.
+     */
+    public function viewerCanSeeResellerBilling(
+        User $viewer,
+        Hub $hub,
+        string $payerScope,
+        ?int $billedUserId,
+        array $meta = []
+    ): bool {
+        if (! $this->forHub($hub)->network_resells && empty($meta['network_resells'])) {
+            return false;
+        }
+        if (! $this->matrix->userCan($hub, $viewer, self::VIEW_RESELLER_CAPABILITY)) {
+            return false;
         }
 
-        // Firm members see that firm’s firm-scoped invoices.
-        return $payerScope === self::PAYER_FIRM
-            && $firmId
-            && (int) $firmId === $viewerFirmId;
+        return $payerScope === self::PAYER_USER || ! empty($meta['network_resells']);
     }
 }

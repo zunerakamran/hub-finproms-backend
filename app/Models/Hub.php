@@ -729,9 +729,16 @@ class Hub extends Model
         'dashboard_manage_module_pricing',
         'dashboard_manage_module_packages',
         'dashboard_manage_module_invoice_settings',
+        'dashboard_manage_network_payment_card',
+        'dashboard_manage_firm_payment_card',
+        'dashboard_view_network_module_invoices',
+        'dashboard_view_firm_module_invoices',
+        'dashboard_view_reseller_invoices',
+        'dashboard_mark_module_invoices_paid',
+        // Legacy aliases (migrated → network/firm splits).
         'dashboard_view_module_invoices',
         'dashboard_view_all_module_invoices',
-        'dashboard_mark_module_invoices_paid',
+        'dashboard_manage_payment_card',
     ];
 
     /**
@@ -1234,8 +1241,8 @@ class Hub extends Model
             'default_white_label' => true,
         ],
         'dashboard_view_advisor_invoices' => [
-            'label' => 'View advisor billing invoices',
-            'description' => 'See invoices for white-labelled hub billing (legacy advisor billing and module recurring invoices).',
+            'label' => 'View import users invoices',
+            'description' => 'See invoices created when users are imported (Import Users billing). Sidebar label: Import users invoices.',
             'group' => self::GROUP_DASHBOARD_ADVISORS,
             'default_shared' => false,
             'default_white_label' => true,
@@ -1250,13 +1257,6 @@ class Hub extends Model
         'dashboard_manage_advisor_renewal' => [
             'label' => 'Set billing renew + grace dates',
             'description' => 'Choose the monthly renew day (charge card for all due unpaid invoices) and grace day (after which unpaid recurring seats suspend users and unpaid one-time invoices disable modules).',
-            'group' => self::GROUP_DASHBOARD_ADVISORS,
-            'default_shared' => false,
-            'default_white_label' => true,
-        ],
-        'dashboard_manage_payment_card' => [
-            'label' => 'Manage payment card',
-            'description' => 'Add or update the card on file used for advisor billing and for module invoices when the network / firm pays. Any role with this capability may manage the card — not limited to Network Admin or Accounts Admin.',
             'group' => self::GROUP_DASHBOARD_ADVISORS,
             'default_shared' => false,
             'default_white_label' => true,
@@ -1383,8 +1383,8 @@ class Hub extends Model
             'default_white_label' => true,
         ],
         'dashboard_view_one_time_invoices' => [
-            'label' => 'View one-time invoices',
-            'description' => 'List all one-time invoices for this hub (content purchases and one-time module charges).',
+            'label' => 'View all one-time invoices',
+            'description' => 'List every one-time invoice on this hub (content purchases, one-time module charges, etc.) regardless of who pays. Separate from network/firm Module invoices and My invoices.',
             'group' => self::GROUP_DASHBOARD_HUB,
             'default_shared' => true,
             'default_white_label' => true,
@@ -1428,31 +1428,74 @@ class Hub extends Model
         ],
         'dashboard_manage_module_invoice_settings' => [
             'label' => 'Module invoice / payment settings',
-            'description' => 'Choose who pays module invoices (network / firms / users), and optional network reseller branding (logo + text) when the network pays the platform then re-charges users. Grantable to any role via the Capabilities matrix.',
+            'description' => 'Choose who pays module invoices (network / firms / users), and optional network reseller branding when the network pays the platform then re-charges users. Saving a mode auto-enables matching card/view Capabilities.',
             'group' => self::GROUP_MODULE_PRICING,
             'default_shared' => false,
             'default_white_label' => true,
         ],
-        'dashboard_view_module_invoices' => [
-            'label' => 'View module invoices',
-            'description' => 'Open the Module invoices page. Network-level members see network-scoped invoices; firm members see their firm’s invoices; everyone sees invoices billed to themselves. Grantable to any role — Accounts Admin is only a default, not a hard rule.',
+        'dashboard_manage_network_payment_card' => [
+            'label' => 'Add network payment card',
+            'description' => 'Add/update the network card on /my-dashboard/payment-card (network tab). Used when the network pays module invoices and for advisor import charges.',
             'group' => self::GROUP_MODULE_PRICING,
             'default_shared' => false,
             'default_white_label' => true,
         ],
-        'dashboard_view_all_module_invoices' => [
-            'label' => 'View all module invoices (hub-wide)',
-            'description' => 'See every module invoice on the hub regardless of payer scope or firm. Without this, visibility follows firm membership (network-level vs own firm) plus own user-billed invoices.',
+        'dashboard_manage_firm_payment_card' => [
+            'label' => 'Add firm payment card',
+            'description' => 'Add/update the firm card on /my-dashboard/payment-card (firm tab). Active only while Module invoice settings → Firms pay own is on.',
+            'group' => self::GROUP_MODULE_PRICING,
+            'default_shared' => false,
+            'default_white_label' => true,
+        ],
+        'dashboard_view_network_module_invoices' => [
+            'label' => 'See network module invoices',
+            'description' => 'On Module invoices, see one-time and recurring invoices the network pays (payer_scope=network).',
+            'group' => self::GROUP_MODULE_PRICING,
+            'default_shared' => false,
+            'default_white_label' => true,
+        ],
+        'dashboard_view_firm_module_invoices' => [
+            'label' => 'See firm module invoices',
+            'description' => 'On Module invoices, see one-time and recurring invoices each firm pays (payer_scope=firm) for the viewer’s firm. Active only while Firms pay own is on.',
+            'group' => self::GROUP_MODULE_PRICING,
+            'default_shared' => false,
+            'default_white_label' => true,
+        ],
+        'dashboard_view_reseller_invoices' => [
+            'label' => 'See network→user reseller invoices',
+            'description' => 'When the network resells / re-charges users, see all those user-facing invoices on Reseller invoices. End users still see their own under My invoices. Active only while Network resells is on.',
             'group' => self::GROUP_MODULE_PRICING,
             'default_shared' => false,
             'default_white_label' => true,
         ],
         'dashboard_mark_module_invoices_paid' => [
             'label' => 'Mark module invoices as paid',
-            'description' => 'Record payment details and attachment for an unpaid module invoice and mark it paid. Viewers with “View module invoices” can later see the settlement details. Grantable to any role.',
+            'description' => 'Record payment details and attachment for an unpaid network/firm module invoice the viewer can see.',
             'group' => self::GROUP_MODULE_PRICING,
             'default_shared' => false,
             'default_white_label' => true,
+        ],
+        // Legacy aliases kept so old matrix cells / saves keep working until remapped.
+        'dashboard_manage_payment_card' => [
+            'label' => 'Manage payment card (legacy)',
+            'description' => 'Retired alias — use Add network payment card / Add firm payment card.',
+            'group' => self::GROUP_MODULE_PRICING,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'dashboard_view_module_invoices' => [
+            'label' => 'View module invoices (legacy)',
+            'description' => 'Retired alias — use See network / firm module invoices.',
+            'group' => self::GROUP_MODULE_PRICING,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'dashboard_view_all_module_invoices' => [
+            'label' => 'View all module invoices (legacy)',
+            'description' => 'Retired alias — use See network + firm module invoices.',
+            'group' => self::GROUP_MODULE_PRICING,
+            'default_shared' => false,
+            'default_white_label' => false,
         ],
 
         // --- 7. Admin emails ---
@@ -2994,7 +3037,33 @@ class Hub extends Model
                 'version' => (string) config('hub.version', '0.0.0'),
                 'frontend_version' => (string) config('hub.frontend_version', config('hub.version', '0.0.0')),
             ],
+            // Lightweight who-pays flags for nav gates (e.g. My payment method).
+            'module_invoice_settings' => $this->moduleInvoiceSettingsPublicSummary(),
         ];
+    }
+
+    /**
+     * @return array{users_pay_own: bool, firms_pay_own: bool, network_pays_all: bool, network_resells: bool}
+     */
+    public function moduleInvoiceSettingsPublicSummary(): array
+    {
+        try {
+            $row = app(\App\Services\ModuleInvoiceSettingsService::class)->forHub($this);
+
+            return [
+                'users_pay_own' => (bool) $row->users_pay_own,
+                'firms_pay_own' => (bool) $row->firms_pay_own,
+                'network_pays_all' => (bool) $row->network_pays_all,
+                'network_resells' => (bool) $row->network_resells,
+            ];
+        } catch (\Throwable) {
+            return [
+                'users_pay_own' => false,
+                'firms_pay_own' => false,
+                'network_pays_all' => true,
+                'network_resells' => false,
+            ];
+        }
     }
 
     /**

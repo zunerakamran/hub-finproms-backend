@@ -3,45 +3,60 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Hub;
 use App\Services\ActingHubService;
-use App\Services\AdvisorBillingService;
-use App\Services\CapabilitiesMatrixService;
-use App\Services\ModuleInvoiceSettingsService;
+use App\Services\PaymentCardService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use InvalidArgumentException;
 
 /**
- * Payment card on file — gated by Capabilities matrix
- * (`dashboard_manage_payment_card`), not a hard-coded role.
- * Available when advisor billing and/or module charging is on.
+ * Network / firm payment cards on /my-dashboard/payment-card.
+ * Personal cards use ProfilePaymentCardController (no capability).
  */
 class AdvisorPaymentCardController extends Controller
 {
     public function __construct(
-        private readonly AdvisorBillingService $billing,
-        private readonly CapabilitiesMatrixService $matrix,
+        private readonly PaymentCardService $cards,
         private readonly ActingHubService $actingHubs
     ) {}
 
     public function show(Request $request): JsonResponse
     {
         $user = $request->user();
-        $this->assertCanManagePaymentCard($user);
+        $hub = $this->actingHubs->targetHub($user);
+        $scope = $this->resolveScope($request, $hub, $user);
+        $firmId = $request->integer('firm_id') ?: null;
+
+        try {
+            $profile = $this->cards->profile($user, $hub, $scope, $firmId);
+        } catch (InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 403);
+        }
+
+        $settings = app(\App\Services\ModuleInvoiceSettingsService::class)->forHub($hub);
 
         return response()->json([
-            'payment_profile' => $this->billing->paymentProfile($user),
+            'payment_profile' => $profile,
+            'available_scopes' => $this->availableScopes($user, $hub, $settings),
+            'invoice_settings' => [
+                'firms_pay_own' => (bool) $settings->firms_pay_own,
+                'network_pays_all' => (bool) $settings->network_pays_all,
+                'network_resells' => (bool) $settings->network_resells,
+                'users_pay_own' => (bool) $settings->users_pay_own,
+            ],
         ]);
     }
 
     public function setup(Request $request): JsonResponse
     {
         $user = $request->user();
-        $this->assertCanManagePaymentCard($user);
+        $hub = $this->actingHubs->targetHub($user);
+        $scope = $this->resolveScope($request, $hub, $user);
+        $firmId = $request->integer('firm_id') ?: null;
 
         try {
-            $result = $this->billing->createCardSetupSession($user);
-        } catch (\InvalidArgumentException $e) {
+            $result = $this->cards->createSetupSession($user, $hub, $scope, $firmId);
+        } catch (InvalidArgumentException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         } catch (\Throwable $e) {
             return response()->json(['message' => $e->getMessage()], 422);
@@ -56,50 +71,65 @@ class AdvisorPaymentCardController extends Controller
     public function confirm(Request $request): JsonResponse
     {
         $user = $request->user();
-        $this->assertCanManagePaymentCard($user);
+        $hub = $this->actingHubs->targetHub($user);
 
         $validated = $request->validate([
             'session_id' => ['required', 'string'],
         ]);
 
         try {
-            $profile = $this->billing->fulfillCardSetupSession($validated['session_id'], $user);
-        } catch (\InvalidArgumentException $e) {
+            $profile = $this->cards->fulfillSetupSession($validated['session_id'], $user, $hub);
+        } catch (InvalidArgumentException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         } catch (\Throwable $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
         return response()->json([
-            'message' => $profile['has_saved_card']
-                ? 'Card saved. Future advisor imports with Stripe will charge this card.'
+            'message' => ($profile['has_saved_card'] ?? false)
+                ? 'Card saved for '.$profile['scope'].'.'
                 : 'Checkout recorded; card not saved yet.',
             'payment_profile' => $profile,
         ]);
     }
 
-    private function assertCanManagePaymentCard(?\App\Models\User $user): Hub
+    private function resolveScope(Request $request, $hub, $user): string
     {
-        if (! $user) {
-            abort(response()->json([
-                'message' => 'Authentication required.',
-            ], 403));
+        $scope = (string) $request->input('scope', '');
+        if (in_array($scope, [PaymentCardService::SCOPE_NETWORK, PaymentCardService::SCOPE_FIRM], true)) {
+            return $scope;
         }
 
-        $hub = $this->actingHubs->targetHub($user, null);
-
-        if (! $this->matrix->userCan($hub, $user, ModuleInvoiceSettingsService::PAYMENT_CARD_CAPABILITY)) {
-            abort(response()->json([
-                'message' => 'Managing the payment card is disabled for your role. Enable “Manage payment card” in Power Admin → Capabilities.',
-            ], 403));
+        $matrix = app(\App\Services\CapabilitiesMatrixService::class);
+        if ($matrix->userCan($hub, $user, 'dashboard_manage_network_payment_card')) {
+            return PaymentCardService::SCOPE_NETWORK;
+        }
+        if ($matrix->userCan($hub, $user, 'dashboard_manage_firm_payment_card')) {
+            return PaymentCardService::SCOPE_FIRM;
         }
 
-        if (! $this->billing->paymentCardEnabled($hub)) {
-            abort(response()->json([
-                'message' => 'Payment card is available when advisor billing or module charging is enabled for this hub.',
-            ], 403));
-        }
+        return PaymentCardService::SCOPE_NETWORK;
+    }
 
-        return $hub;
+    /**
+     * @return list<array{scope: string, label: string, enabled: bool}>
+     */
+    private function availableScopes($user, $hub, $settings): array
+    {
+        $matrix = app(\App\Services\CapabilitiesMatrixService::class);
+
+        return [
+            [
+                'scope' => PaymentCardService::SCOPE_NETWORK,
+                'label' => 'Network card',
+                'enabled' => $matrix->userCan($hub, $user, 'dashboard_manage_network_payment_card'),
+            ],
+            [
+                'scope' => PaymentCardService::SCOPE_FIRM,
+                'label' => 'Firm card',
+                'enabled' => (bool) $settings->firms_pay_own
+                    && $matrix->userCan($hub, $user, 'dashboard_manage_firm_payment_card'),
+            ],
+        ];
     }
 }

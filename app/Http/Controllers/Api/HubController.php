@@ -58,6 +58,7 @@ class HubController extends Controller
                     $acting = $this->actingHubs->actingHub($user);
                     $payload['acting_checklist'] = $acting->resolvedChecklist();
                     $payload['dashboard_nav'] = $acting->resolvedDashboardNav();
+                    $payload['module_invoice_settings'] = $acting->moduleInvoiceSettingsPublicSummary();
                     $payload['firm_document_rights'] = app(\App\Services\FirmDocumentAccessService::class)
                         ->effectiveRightsSummary($user, $acting);
                 } catch (\Throwable) {

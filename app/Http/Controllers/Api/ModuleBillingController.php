@@ -15,6 +15,11 @@ use RuntimeException;
 
 class ModuleBillingController extends Controller
 {
+    public const VIEW_NETWORK_CAPABILITY = 'dashboard_view_network_module_invoices';
+
+    public const VIEW_FIRM_CAPABILITY = 'dashboard_view_firm_module_invoices';
+
+    /** @deprecated */
     public const VIEW_CAPABILITY = 'dashboard_view_module_invoices';
 
     public const MARK_PAID_CAPABILITY = 'dashboard_mark_module_invoices_paid';
@@ -265,7 +270,24 @@ class ModuleBillingController extends Controller
 
     private function assertCanViewModuleInvoices(Request $request): Hub
     {
-        return $this->assertCapability($request, self::VIEW_CAPABILITY, 'Viewing module invoices is disabled for your role. Enable “View module invoices” in Power Admin → Capabilities.');
+        $hub = $this->actingHubs->targetHub(
+            $request->user(),
+            $request->integer('hub_id') ?: null
+        );
+        $user = $request->user();
+        $allowed = $user && (
+            $this->matrix->userCan($hub, $user, self::VIEW_NETWORK_CAPABILITY)
+            || $this->matrix->userCan($hub, $user, self::VIEW_FIRM_CAPABILITY)
+            || $this->matrix->userCan($hub, $user, self::VIEW_CAPABILITY)
+            || $this->matrix->userCan($hub, $user, 'dashboard_view_all_module_invoices')
+        );
+        if (! $allowed) {
+            abort(response()->json([
+                'message' => 'Enable “See network module invoices” and/or “See firm module invoices” in Power Admin → Capabilities.',
+            ], 403));
+        }
+
+        return $hub;
     }
 
     private function assertCanMarkModuleInvoicesPaid(Request $request): Hub

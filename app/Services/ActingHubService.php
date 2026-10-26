@@ -378,6 +378,7 @@ class ActingHubService
                 'compliance_status_labels' => $acting->resolvedComplianceStatusLabels(),
                 // Sidebar separators / menu labels follow the selected hub.
                 'dashboard_nav' => $acting->resolvedDashboardNav(),
+                'module_invoice_settings' => $acting->moduleInvoiceSettingsPublicSummary(),
             ],
             'is_acting_on_white_label' => $acting->isWhiteLabel(),
             'is_acting_on_shared' => $acting->isShared() && $actingRemotely,

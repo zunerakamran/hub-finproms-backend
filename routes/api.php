@@ -12,6 +12,8 @@ use App\Http\Controllers\Api\ActingHubController;
 use App\Http\Controllers\Api\AdvisorBillingController;
 use App\Http\Controllers\Api\AdvisorController;
 use App\Http\Controllers\Api\AdvisorPaymentCardController;
+use App\Http\Controllers\Api\ProfilePaymentCardController;
+use App\Http\Controllers\Api\ResellerInvoicesController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BundleController;
 use App\Http\Controllers\Api\CategoryController;
@@ -225,6 +227,11 @@ Route::middleware('auth:sanctum')->group(function () {
     // Member list pages — also reachable from General options (dashboard).
     Route::get('/my-purchases', [PurchaseController::class, 'myPurchases']);
     Route::get('/my-invoices', [InvoiceController::class, 'index']);
+
+    // Personal payment card (Profile) — no capability.
+    Route::get('/profile/payment-card', [ProfilePaymentCardController::class, 'show']);
+    Route::post('/profile/payment-card/setup', [ProfilePaymentCardController::class, 'setup']);
+    Route::post('/profile/payment-card/confirm', [ProfilePaymentCardController::class, 'confirm']);
 
     Route::get('/invoices/{invoice}', [InvoiceController::class, 'show']);
 
@@ -661,13 +668,17 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::delete('/module-packages/{modulePackage}', [PowerAdminModulePackageController::class, 'destroy']);
         });
 
-        Route::middleware('hub_can:dashboard_view_module_invoices')->group(function () {
+        Route::middleware('hub_can:dashboard_view_network_module_invoices,dashboard_view_firm_module_invoices,dashboard_view_module_invoices,dashboard_view_all_module_invoices')->group(function () {
             Route::get('/module-invoices', [ModuleBillingController::class, 'invoices']);
             Route::get('/module-invoices/{invoice}', [ModuleBillingController::class, 'show']);
         });
 
         Route::middleware('hub_can:dashboard_mark_module_invoices_paid')->group(function () {
             Route::post('/module-invoices/{invoice}/mark-paid', [ModuleBillingController::class, 'markPaid']);
+        });
+
+        Route::middleware('hub_can:dashboard_view_reseller_invoices')->group(function () {
+            Route::get('/reseller-invoices', [ResellerInvoicesController::class, 'index']);
         });
 
         Route::middleware('hub_can:dashboard_bank_transfers')->group(function () {
@@ -1068,13 +1079,17 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::delete('/module-packages/{modulePackage}', [PowerAdminModulePackageController::class, 'destroy']);
         });
 
-        Route::middleware('hub_can:dashboard_view_module_invoices')->group(function () {
+        Route::middleware('hub_can:dashboard_view_network_module_invoices,dashboard_view_firm_module_invoices,dashboard_view_module_invoices,dashboard_view_all_module_invoices')->group(function () {
             Route::get('/module-invoices', [ModuleBillingController::class, 'invoices']);
             Route::get('/module-invoices/{invoice}', [ModuleBillingController::class, 'show']);
         });
 
         Route::middleware('hub_can:dashboard_mark_module_invoices_paid')->group(function () {
             Route::post('/module-invoices/{invoice}/mark-paid', [ModuleBillingController::class, 'markPaid']);
+        });
+
+        Route::middleware('hub_can:dashboard_view_reseller_invoices')->group(function () {
+            Route::get('/reseller-invoices', [ResellerInvoicesController::class, 'index']);
         });
 
         Route::middleware('hub_can:dashboard_manage_plans')->group(function () {
