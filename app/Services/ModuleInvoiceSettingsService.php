@@ -37,12 +37,22 @@ class ModuleInvoiceSettingsService
      */
     public function serialize(HubModuleInvoiceSettings $settings): array
     {
+        $networkPaysAll = (bool) $settings->network_pays_all;
+        $firmsPayOwn = (bool) $settings->firms_pay_own;
+        $usersPayOwn = (bool) $settings->users_pay_own;
+        $networkResells = (bool) $settings->network_resells;
+
+        // Never expose an empty “who pays?” selection — Network pays all is the default.
+        if (! $networkPaysAll && ! $firmsPayOwn && ! $usersPayOwn && ! $networkResells) {
+            $networkPaysAll = true;
+        }
+
         return [
             'hub_id' => (int) $settings->hub_id,
-            'network_pays_all' => (bool) $settings->network_pays_all,
-            'firms_pay_own' => (bool) $settings->firms_pay_own,
-            'users_pay_own' => (bool) $settings->users_pay_own,
-            'network_resells' => (bool) $settings->network_resells,
+            'network_pays_all' => $networkPaysAll,
+            'firms_pay_own' => $firmsPayOwn,
+            'users_pay_own' => $usersPayOwn,
+            'network_resells' => $networkResells,
             'reseller_logo_url' => $settings->resellerLogoUrl(),
             'reseller_logo_name' => $settings->reseller_logo_name,
             'reseller_invoice_text' => $settings->reseller_invoice_text,
