@@ -273,7 +273,7 @@ class CapabilitiesMatrixService
                     || $requiresGcModule
                     || $requiresWcModule
                     || $requiresWtlModule
-                    || ($requiresModulePricing && ! $modulePricingOn)
+                    || ($requiresModulePricing && ! $modulePricingOn && $key !== 'dashboard_manage_module_invoice_settings')
                     || ($requiresFirmDocuments && ! $firmDocumentsOn)
                     || ($requiresSupportTickets && ! $stOn)
                     || ($requiresSecurityMonitoring && ! $secmonOn)
@@ -290,7 +290,7 @@ class CapabilitiesMatrixService
                     || ($requiresWcModule && ! $wcModuleOn)
                     || ($requiresWtlModule && ! $wtlModuleOn)
                     || ($requiresSmtlModule && ! $smtlModuleOn)
-                    || ($requiresModulePricing && ! $modulePricingOn)
+                    || ($requiresModulePricing && ! $modulePricingOn && $key !== 'dashboard_manage_module_invoice_settings')
                     || ($requiresFirmDocuments && ! $firmDocumentsOn);
             }
 
@@ -1452,7 +1452,10 @@ class CapabilitiesMatrixService
 
         // Modules pricing caps are inactive while both charge functionalities are off.
         // Exception: Central still manages the global module / package catalogue.
+        // Exception: invoice/payment settings stay available so who-pays can be
+        // configured before charging is turned on.
         if (Hub::isModulePricingCapability($flag)
+            && $flag !== 'dashboard_manage_module_invoice_settings'
             && ! $hub->can('charge_amount_per_module')
             && ! $hub->can('charge_recurring_per_module')
             && ! $hub->isControlPlane()

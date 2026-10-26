@@ -81,6 +81,7 @@ class DashboardNavDefaults
             '/my-dashboard/modules' => 'modules',
             '/my-dashboard/module-pricing' => 'modules',
             '/my-dashboard/module-packages' => 'modules',
+            '/my-dashboard/module-invoice-settings' => 'modules',
             '/my-dashboard/module-invoices' => 'modules',
             '/my-dashboard/advisors' => 'advisors',
             '/my-dashboard/payment-card' => 'advisors',
