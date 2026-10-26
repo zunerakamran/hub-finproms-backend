@@ -306,6 +306,78 @@ class ModulePackageTest extends TestCase
         $this->assertFalse($hub->hasSocialMediaTemplateLibraryModule());
     }
 
+    public function test_created_but_disabled_package_does_not_lock_modules(): void
+    {
+        $hub = $this->createSharedHub([
+            'checklist' => array_merge(Hub::defaultChecklist(Hub::TYPE_SHARED), [
+                'module_general_compliance' => false,
+            ]),
+        ]);
+
+        $admin = User::factory()->powerAdmin()->create(['acting_hub_id' => $hub->id]);
+        Sanctum::actingAs($admin);
+
+        app(ModulePackageService::class)->create([
+            'name' => 'GC Pack',
+            'amount' => 100,
+            'module_keys' => ['module_general_compliance'],
+        ]);
+
+        $show = $this->getJson('/api/power-admin/modules?hub_id='.$hub->id);
+        $show->assertOk();
+        $gc = collect($show->json('modules'))->firstWhere('key', 'module_general_compliance');
+        $this->assertFalse($gc['locked']);
+        $this->assertNull($gc['locked_by_package']);
+
+        $this->putJson('/api/power-admin/modules?hub_id='.$hub->id, [
+            'hub_id' => $hub->id,
+            'modules' => ['module_general_compliance' => true],
+        ])->assertOk();
+
+        $hub->refresh();
+        $this->assertTrue($hub->hasGeneralComplianceModule());
+        $this->assertSame([], $hub->enabledModulePackageIds());
+    }
+
+    public function test_disable_package_and_enable_module_separately_in_same_save(): void
+    {
+        $hub = $this->createSharedHub([
+            'checklist' => array_merge(Hub::defaultChecklist(Hub::TYPE_SHARED), [
+                'module_general_compliance' => false,
+            ]),
+        ]);
+
+        $admin = User::factory()->powerAdmin()->create(['acting_hub_id' => $hub->id]);
+        Sanctum::actingAs($admin);
+
+        $package = app(ModulePackageService::class)->create([
+            'name' => 'GC Pack',
+            'amount' => 0,
+            'module_keys' => ['module_general_compliance'],
+        ]);
+
+        $this->putJson('/api/power-admin/modules?hub_id='.$hub->id, [
+            'hub_id' => $hub->id,
+            'packages' => [['id' => $package->id, 'enabled' => true]],
+        ])->assertOk();
+
+        $response = $this->putJson('/api/power-admin/modules?hub_id='.$hub->id, [
+            'hub_id' => $hub->id,
+            'packages' => [['id' => $package->id, 'enabled' => false]],
+            'modules' => ['module_general_compliance' => true],
+        ]);
+
+        $response->assertOk();
+        $gc = collect($response->json('modules'))->firstWhere('key', 'module_general_compliance');
+        $this->assertTrue($gc['enabled']);
+        $this->assertFalse($gc['locked']);
+        $this->assertNull($gc['locked_by_package']);
+
+        $hub->refresh();
+        $this->assertSame([], $hub->enabledModulePackageIds());
+        $this->assertTrue($hub->hasGeneralComplianceModule());
+    }
+
     public function test_individually_enabling_uncovered_module_still_invoices(): void
     {
         $hub = $this->createWhiteLabelHub([

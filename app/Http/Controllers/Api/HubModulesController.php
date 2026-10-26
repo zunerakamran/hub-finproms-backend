@@ -91,7 +91,18 @@ class HubModulesController extends Controller
             $input = $this->modulePackages->filterIndividualModuleToggles($input, $afterPackageIds);
         }
 
-        $checklist = $beforeChecklist;
+        // 1) Apply package enable/disable first (force covered modules on; turn off
+        //    modules that leave a disabled package).
+        $checklist = $this->modulePackages->applyPackagesToChecklist(
+            $hub,
+            $beforeChecklist,
+            $beforePackageIds,
+            $afterPackageIds
+        );
+
+        // 2) Then apply individual toggles for modules NOT covered by a still-enabled
+        //    package. This lets a user disable a package and re-select its modules
+        //    separately in the same save.
         foreach ($hub->moduleKeysForPage() as $key) {
             if (Hub::isLockedModuleKey($key)) {
                 continue;
@@ -101,12 +112,7 @@ class HubModulesController extends Controller
             }
         }
 
-        $checklist = $this->modulePackages->applyPackagesToChecklist(
-            $hub,
-            $checklist,
-            $beforePackageIds,
-            $afterPackageIds
-        );
+        $checklist = $hub->applyModuleDependencies($checklist);
 
         $hub->checklist = $checklist;
         $hub->enabled_module_package_ids = $afterPackageIds;
