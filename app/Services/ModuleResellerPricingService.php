@@ -45,19 +45,43 @@ class ModuleResellerPricingService
     }
 
     /**
+     * @return list<string>
+     */
+    public static function perUserUnits(): array
+    {
+        return [
+            ModulePricingService::UNIT_PER_USER,
+            ModulePricingService::UNIT_PER_USER_SLOTS,
+        ];
+    }
+
+    public static function unitIsPerUser(string $unit): bool
+    {
+        return in_array(ModulePricingService::normalizeUnit($unit), self::perUserUnits(), true);
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    public function rowAllowsOneTime(array $row): bool
+    {
+        return self::unitIsPerUser((string) ($row['billing_unit'] ?? ''));
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    public function rowAllowsRecurring(array $row): bool
+    {
+        return self::unitIsPerUser((string) ($row['recurring_billing_unit'] ?? 'none'));
+    }
+
+    /**
      * @param  array<string, mixed>  $row
      */
     public function rowIsPerUserEligible(array $row): bool
     {
-        $oneTime = ModulePricingService::normalizeUnit((string) ($row['billing_unit'] ?? ''));
-        $recurring = ModulePricingService::normalizeUnit((string) ($row['recurring_billing_unit'] ?? 'none'));
-
-        $seatUnits = [
-            ModulePricingService::UNIT_PER_USER,
-            ModulePricingService::UNIT_PER_USER_SLOTS,
-        ];
-
-        return in_array($oneTime, $seatUnits, true) || in_array($recurring, $seatUnits, true);
+        return $this->rowAllowsOneTime($row) || $this->rowAllowsRecurring($row);
     }
 
     /**
@@ -99,18 +123,22 @@ class ModuleResellerPricingService
             );
         }
 
+        $allowsOneTime = $this->rowAllowsOneTime($eligible);
+        $allowsRecurring = $this->rowAllowsRecurring($eligible);
+
         $row = HubModuleResellerPricing::query()->firstOrNew([
             'hub_id' => $hub->id,
             'module_key' => $moduleKey,
         ]);
 
-        if (array_key_exists('amount', $data)) {
+        // Only persist the side(s) whose main Module prices unit is per user.
+        if ($allowsOneTime && array_key_exists('amount', $data)) {
             $row->amount = round((float) $data['amount'], 2);
         } elseif (! $row->exists) {
             $row->amount = 0;
         }
 
-        if (array_key_exists('recurring_amount', $data)) {
+        if ($allowsRecurring && array_key_exists('recurring_amount', $data)) {
             $row->recurring_amount = round((float) $data['recurring_amount'], 2);
         } elseif (! $row->exists) {
             $row->recurring_amount = 0;
@@ -139,16 +167,21 @@ class ModuleResellerPricingService
      */
     public function serialize(Hub $hub, array $catalogue, ?HubModuleResellerPricing $row): array
     {
+        $allowsOneTime = $this->rowAllowsOneTime($catalogue);
+        $allowsRecurring = $this->rowAllowsRecurring($catalogue);
+
         return [
             'id' => $row?->id,
             'hub_id' => (int) $hub->id,
             'module_key' => (string) $catalogue['module_key'],
             'label' => $catalogue['label'] ?? $catalogue['module_key'],
-            'amount' => $row ? (float) $row->amount : null,
-            'recurring_amount' => $row ? (float) $row->recurring_amount : null,
+            'amount' => ($allowsOneTime && $row) ? (float) $row->amount : null,
+            'recurring_amount' => ($allowsRecurring && $row) ? (float) $row->recurring_amount : null,
             'currency' => $row?->currency ?? ($catalogue['currency'] ?? 'gbp'),
             'is_active' => $row ? (bool) $row->is_active : true,
             'has_reseller_price' => $row !== null,
+            'allows_one_time' => $allowsOneTime,
+            'allows_recurring' => $allowsRecurring,
             'main_pricing' => [
                 'amount' => (float) ($catalogue['amount'] ?? 0),
                 'billing_unit' => (string) ($catalogue['billing_unit'] ?? ''),

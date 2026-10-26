@@ -34,7 +34,7 @@ class ResellerModulePricingController extends Controller
             'message' => $settings->network_resells
                 ? null
                 : 'Turn on Network resells under Module invoice settings to set network→user prices.',
-            'formula' => 'Only modules whose main Module prices use per user / per user (slots) appear here. Amounts here are what users pay the network. The network still pays FinProms at the main Module prices.',
+            'formula' => 'Only modules whose main Module prices use per user / per user (slots) appear here. Edit the user one-time amount only when the main one-time unit is per user; edit recurring only when the main recurring unit is per user. Amounts here are what users pay the network. The network still pays FinProms at the main Module prices.',
             'target_hub' => [
                 'id' => $hub->id,
                 'name' => $hub->name,
