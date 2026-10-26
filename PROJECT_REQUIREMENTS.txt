@@ -1794,6 +1794,10 @@ Either path designates Heads; both MUST stay in sync. Multiple admins OK:
   - `dashboard_view_firm_module_invoices` — Module invoices (firm payer)
   - `dashboard_view_reseller_invoices` — Reseller invoices page (menu when granted;
     list fills when network_resells is on)
+  - `dashboard_manage_reseller_module_pricing` — Reseller module prices (per_user /
+    per_user_slots modules only; users→network amounts; active while network_resells)
+  - `dashboard_manage_network_stripe` — Network Stripe keys for user charges
+    (active while network_resells)
   - `dashboard_mark_module_invoices_paid` — settle network/firm module invoices
   - Personal card: NO capability — My payment method (mandatory if users_pay_own OR network_resells)
 - Pages:
@@ -1802,6 +1806,11 @@ Either path designates Heads; both MUST stay in sync. Multiple admins OK:
   - `/my-dashboard/module-invoices` — network/firm one-time + recurring only
   - `/my-dashboard/my-invoices` — personal + user-billed module invoices
   - `/my-dashboard/reseller-invoices` — network→user charges (admins)
+  - `/my-dashboard/reseller-module-pricing` — amounts users pay the network
+    (only modules whose main Module prices unit is per_user / per_user_slots;
+    network still pays FinProms at main Module prices)
+  - `/my-dashboard/network-stripe` — network Stripe publishable/secret/webhook
+    for user payments under network_resells
   - `/my-dashboard/one-time-invoices` — ALL one-time invoices (who pays ignored)
   - `/my-dashboard/advisor-invoices` — label “Import users invoices”
 - Intelligent sync on save (enables only): network → network card + view;
@@ -1821,6 +1830,8 @@ Either path designates Heads; both MUST stay in sync. Multiple admins OK:
      clears `users_pay_own`. Personal card still mandatory for each user.
      Requires reseller logo + invoice text (+ format: standard / compact /
      detailed) stamped onto invoice meta for branded display.
+     Also unlocks Reseller module prices + Network Stripe (and sync-enables
+     their Capabilities for Network / Client / Accounts Admin).
 - APIs: GET/POST/PUT module-invoice-settings (multipart for logo).
 - Billing rows store `payer_scope` (network|firm|user) + optional `firm_id`.
 - Module invoices list: network rows need See network module invoices; firm rows

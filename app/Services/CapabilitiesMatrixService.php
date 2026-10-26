@@ -1015,6 +1015,8 @@ class CapabilitiesMatrixService
             'dashboard_view_network_module_invoices',
             'dashboard_view_firm_module_invoices',
             'dashboard_view_reseller_invoices',
+            'dashboard_manage_reseller_module_pricing',
+            'dashboard_manage_network_stripe',
             'dashboard_mark_module_invoices_paid',
             ActingHubService::CAPABILITY,
         ] as $key) {
@@ -1073,6 +1075,8 @@ class CapabilitiesMatrixService
                 'dashboard_view_network_module_invoices',
                 'dashboard_view_firm_module_invoices',
                 'dashboard_view_reseller_invoices',
+                'dashboard_manage_reseller_module_pricing',
+                'dashboard_manage_network_stripe',
                 'dashboard_mark_module_invoices_paid',
             ] as $key) {
                 if (isset($matrix[User::ROLE_FINPROMS_ADMIN][$key])) {
@@ -1180,6 +1184,8 @@ class CapabilitiesMatrixService
                 'dashboard_view_network_module_invoices',
                 'dashboard_view_firm_module_invoices',
                 'dashboard_view_reseller_invoices',
+                'dashboard_manage_reseller_module_pricing',
+                'dashboard_manage_network_stripe',
                 'dashboard_mark_module_invoices_paid',
                 'dashboard_view_advisor_invoices',
                 'dashboard_bank_transfers',
@@ -1197,6 +1203,8 @@ class CapabilitiesMatrixService
                 'dashboard_manage_network_payment_card',
                 'dashboard_view_network_module_invoices',
                 'dashboard_view_reseller_invoices',
+                'dashboard_manage_reseller_module_pricing',
+                'dashboard_manage_network_stripe',
                 'dashboard_manage_module_invoice_settings',
             ] as $key) {
                 if (isset($matrix[User::ROLE_NETWORK_ADMIN][$key])) {
@@ -1210,6 +1218,8 @@ class CapabilitiesMatrixService
                 'dashboard_view_network_module_invoices',
                 'dashboard_view_firm_module_invoices',
                 'dashboard_view_reseller_invoices',
+                'dashboard_manage_reseller_module_pricing',
+                'dashboard_manage_network_stripe',
                 'dashboard_manage_module_invoice_settings',
                 'dashboard_manage_network_payment_card',
             ] as $key) {
@@ -1644,6 +1654,8 @@ class CapabilitiesMatrixService
             'dashboard_view_network_module_invoices',
             'dashboard_view_firm_module_invoices',
             'dashboard_view_reseller_invoices',
+            'dashboard_manage_reseller_module_pricing',
+            'dashboard_manage_network_stripe',
             'dashboard_mark_module_invoices_paid',
             // legacy
             'dashboard_view_module_invoices',
@@ -1653,7 +1665,7 @@ class CapabilitiesMatrixService
     }
 
     /**
-     * Firm / reseller caps stay inactive while the matching invoice setting is off.
+     * Firm / reseller-admin caps stay inactive while the matching invoice setting is off.
      */
     public function moduleInvoiceSettingGatesInactive(Hub $hub, string $key): bool
     {
@@ -1670,8 +1682,14 @@ class CapabilitiesMatrixService
             return true;
         }
 
-        // Reseller invoices page follows the capability alone (menu always visible
-        // when granted). The API returns an empty list until Network resells is on.
+        // Reseller invoices list follows capability alone; pricing + network Stripe
+        // only apply while Network resells is on.
+        if (in_array($key, [
+            'dashboard_manage_reseller_module_pricing',
+            'dashboard_manage_network_stripe',
+        ], true) && ! $settings->network_resells) {
+            return true;
+        }
 
         return false;
     }

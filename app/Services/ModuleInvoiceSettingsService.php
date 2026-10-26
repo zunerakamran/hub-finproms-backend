@@ -24,6 +24,10 @@ class ModuleInvoiceSettingsService
 
     public const VIEW_RESELLER_CAPABILITY = 'dashboard_view_reseller_invoices';
 
+    public const RESELLER_PRICING_CAPABILITY = 'dashboard_manage_reseller_module_pricing';
+
+    public const NETWORK_STRIPE_CAPABILITY = 'dashboard_manage_network_stripe';
+
     public const NETWORK_CARD_CAPABILITY = 'dashboard_manage_network_payment_card';
 
     public const FIRM_CARD_CAPABILITY = 'dashboard_manage_firm_payment_card';
@@ -91,7 +95,7 @@ class ModuleInvoiceSettingsService
                 'network_pays_all' => 'Network pays all module invoices (every pricing unit, one-time and ongoing). Saving this turns on Manage payment card + View / View all module invoices for Network / Client Admin (and Accounts Admin for card + view). Power Admin can still grant any role.',
                 'firms_pay_own' => 'Each firm pays its own invoice when the unit is per firm (one invoice per firm). Other units stay with the network. Saving this turns on Manage payment card + View module invoices for Firm Admin and Accounts Admin so they can add the firm card and see firm invoices.',
                 'users_pay_own' => 'Each user pays their own invoice to the network/platform when the unit is per user / per user (slots). Personal card under My payment method is mandatory. Other units stay with the network.',
-                'network_resells' => 'Network pays the platform for all invoices, then may re-charge users (user pays the hub). Disables “users pay own”, but each user still must add a personal card under My payment method. Requires logo + invoice text for branded invoices. Also enables network card + hub-wide invoice view caps like “Network pays all”.',
+                'network_resells' => 'Network pays the platform for all invoices, then may re-charge users (user pays the hub). Disables “users pay own”, but each user still must add a personal card under My payment method. Requires logo + invoice text. Unlocks Reseller module prices (per-user modules) and Network Stripe keys, and sync-enables those Capabilities plus Reseller invoices view.',
             ],
             'capability_sync' => [
                 'network' => [
@@ -275,11 +279,20 @@ class ModuleInvoiceSettingsService
         }
 
         if ($settings->network_resells) {
-            $plan(
-                [User::ROLE_NETWORK_ADMIN, User::ROLE_CLIENT_ADMIN, User::ROLE_ACCOUNTS_ADMIN, User::ROLE_POWER_ADMIN, User::ROLE_FINPROMS_ADMIN],
+            $resellerRoles = [
+                User::ROLE_NETWORK_ADMIN,
+                User::ROLE_CLIENT_ADMIN,
+                User::ROLE_ACCOUNTS_ADMIN,
+                User::ROLE_POWER_ADMIN,
+                User::ROLE_FINPROMS_ADMIN,
+            ];
+            foreach ([
                 self::VIEW_RESELLER_CAPABILITY,
-                'network_resells'
-            );
+                self::RESELLER_PRICING_CAPABILITY,
+                self::NETWORK_STRIPE_CAPABILITY,
+            ] as $cap) {
+                $plan($resellerRoles, $cap, 'network_resells');
+            }
         }
 
         // users_pay_own / network_resells → personal My payment method (no capability) + My invoices.

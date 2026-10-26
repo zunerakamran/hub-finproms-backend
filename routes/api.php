@@ -14,6 +14,8 @@ use App\Http\Controllers\Api\AdvisorController;
 use App\Http\Controllers\Api\AdvisorPaymentCardController;
 use App\Http\Controllers\Api\ProfilePaymentCardController;
 use App\Http\Controllers\Api\ResellerInvoicesController;
+use App\Http\Controllers\Api\ResellerModulePricingController;
+use App\Http\Controllers\Api\NetworkStripeController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BundleController;
 use App\Http\Controllers\Api\CategoryController;
@@ -681,6 +683,17 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/reseller-invoices', [ResellerInvoicesController::class, 'index']);
         });
 
+        Route::middleware('hub_can:dashboard_manage_reseller_module_pricing')->group(function () {
+            Route::get('/reseller-module-pricing', [ResellerModulePricingController::class, 'index']);
+            Route::put('/reseller-module-pricing/{moduleKey}', [ResellerModulePricingController::class, 'update'])
+                ->where('moduleKey', '[A-Za-z0-9_]+');
+        });
+
+        Route::middleware('hub_can:dashboard_manage_network_stripe')->group(function () {
+            Route::get('/network-stripe', [NetworkStripeController::class, 'show']);
+            Route::put('/network-stripe', [NetworkStripeController::class, 'update']);
+        });
+
         Route::middleware('hub_can:dashboard_bank_transfers')->group(function () {
             Route::get('/bank-transfers/pending', [SubscriptionController::class, 'pendingBankTransfers']);
             Route::post('/bank-transfers/{subscription}/confirm', [SubscriptionController::class, 'confirmBankTransfer']);
@@ -1090,6 +1103,17 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::middleware('hub_can:dashboard_view_reseller_invoices')->group(function () {
             Route::get('/reseller-invoices', [ResellerInvoicesController::class, 'index']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_reseller_module_pricing')->group(function () {
+            Route::get('/reseller-module-pricing', [ResellerModulePricingController::class, 'index']);
+            Route::put('/reseller-module-pricing/{moduleKey}', [ResellerModulePricingController::class, 'update'])
+                ->where('moduleKey', '[A-Za-z0-9_]+');
+        });
+
+        Route::middleware('hub_can:dashboard_manage_network_stripe')->group(function () {
+            Route::get('/network-stripe', [NetworkStripeController::class, 'show']);
+            Route::put('/network-stripe', [NetworkStripeController::class, 'update']);
         });
 
         Route::middleware('hub_can:dashboard_manage_plans')->group(function () {
