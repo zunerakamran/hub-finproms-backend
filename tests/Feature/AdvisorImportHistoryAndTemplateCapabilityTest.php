@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Services\AdvisorImportHistoryService;
 use App\Services\AdvisorImportService;
 use App\Services\HubService;
+use App\Services\UserRolesService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\Support\ExcelUploadFactory;
@@ -225,5 +226,70 @@ class AdvisorImportHistoryAndTemplateCapabilityTest extends TestCase
 
         $this->get('/api/client-admin/advisors/import-submissions/'.$batch->id.'/download')
             ->assertForbidden();
+    }
+
+    public function test_view_submissions_via_secondary_role_lists_all_and_allows_download(): void
+    {
+        // Legacy users.role mirrors the highest-privilege role (client_admin).
+        // Capability is granted only on manager — must still work via role UNION.
+        $hub = $this->createPrivateHub([
+            'advisor_excel_import' => false,
+            'advisor_excel_template' => true,
+            'advisor_excel_submit' => true,
+            'advisor_excel_view_submissions' => true,
+        ]);
+        Firm::query()->create(['name' => 'Acme Wealth']);
+
+        $submitter = User::factory()->create(['role' => User::ROLE_MANAGER]);
+        $viewer = User::factory()->create(['role' => User::ROLE_CLIENT_ADMIN]);
+        app(UserRolesService::class)->syncRoles(
+            $viewer,
+            [User::ROLE_CLIENT_ADMIN, User::ROLE_MANAGER],
+            log: false,
+        );
+
+        $matrix = app(\App\Services\CapabilitiesMatrixService::class);
+        $roleCaps = $matrix->resolvedRoleCapabilities($hub);
+        $roleCaps[User::ROLE_CLIENT_ADMIN]['advisor_excel_import'] = false;
+        $roleCaps[User::ROLE_CLIENT_ADMIN]['advisor_excel_template'] = false;
+        $roleCaps[User::ROLE_CLIENT_ADMIN]['advisor_excel_submit'] = false;
+        $roleCaps[User::ROLE_CLIENT_ADMIN]['advisor_excel_view_submissions'] = false;
+        $roleCaps[User::ROLE_MANAGER]['advisor_excel_import'] = false;
+        $roleCaps[User::ROLE_MANAGER]['advisor_excel_template'] = false;
+        $roleCaps[User::ROLE_MANAGER]['advisor_excel_submit'] = false;
+        $roleCaps[User::ROLE_MANAGER]['advisor_excel_view_submissions'] = true;
+        $hub->role_capabilities = $roleCaps;
+        $hub->save();
+        app(HubService::class)->forgetCurrentCache();
+
+        $file = ExcelUploadFactory::make([
+            ['name', 'email', 'password', 'role', 'firm'],
+            ['Sam', 'sam-union@example.com', '', 'User', 'Acme Wealth'],
+        ]);
+        $plan = app(AdvisorImportService::class)->buildPlan($file, $hub);
+        $storedPath = 'advisor-imports/submissions/test-union-cap.xlsx';
+        \Illuminate\Support\Facades\Storage::disk('local')->put($storedPath, 'fake-xlsx');
+
+        $batch = app(AdvisorImportHistoryService::class)->recordSubmission(
+            $hub,
+            $submitter,
+            $plan,
+            $file,
+            $storedPath
+        );
+
+        Sanctum::actingAs($viewer->fresh());
+        $this->assertSame(User::ROLE_CLIENT_ADMIN, $viewer->fresh()->role);
+
+        $history = $this->getJson('/api/client-admin/advisors/import-history');
+        $history->assertOk()
+            ->assertJsonPath('meta.total', 1)
+            ->assertJsonPath('batches.0.id', $batch->id)
+            ->assertJsonPath('batches.0.can_download_submission', true)
+            ->assertJsonPath('batches.0.pending_users.0.email', 'sam-union@example.com')
+            ->assertJsonPath('capabilities.can_view_submissions', true);
+
+        $this->get('/api/client-admin/advisors/import-submissions/'.$batch->id.'/download')
+            ->assertOk();
     }
 }

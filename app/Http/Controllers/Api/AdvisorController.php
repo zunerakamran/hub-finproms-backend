@@ -72,7 +72,7 @@ class AdvisorController extends Controller
             'page' => ['sometimes', 'integer', 'min:1'],
         ]);
 
-        $canImport = $this->roleCan($request, $hub, 'advisor_excel_import');
+        $canImport = $this->userCan($request, $hub, 'advisor_excel_import');
         $canViewSubmissions = $this->canViewSubmissions($request, $hub);
         $viewerId = (int) ($request->user()?->id ?? 0);
 
@@ -110,7 +110,7 @@ class AdvisorController extends Controller
             'capabilities' => [
                 'can_import' => $canImport,
                 'can_download_template' => $this->canDownloadTemplate($request, $hub),
-                'can_submit' => $this->roleCan($request, $hub, 'advisor_excel_submit'),
+                'can_submit' => $this->userCan($request, $hub, 'advisor_excel_submit'),
                 'can_view_submissions' => $canViewSubmissions,
             ],
         ]);
@@ -509,10 +509,10 @@ class AdvisorController extends Controller
     {
         $hub = $this->assertPrivateHub($request);
 
-        if (! $this->roleCan($request, $hub, 'advisor_excel_import')
-            && ! $this->roleCan($request, $hub, 'advisor_excel_template')
-            && ! $this->roleCan($request, $hub, 'advisor_excel_submit')
-            && ! $this->roleCan($request, $hub, 'advisor_excel_view_submissions')
+        if (! $this->userCan($request, $hub, 'advisor_excel_import')
+            && ! $this->userCan($request, $hub, 'advisor_excel_template')
+            && ! $this->userCan($request, $hub, 'advisor_excel_submit')
+            && ! $this->userCan($request, $hub, 'advisor_excel_view_submissions')
         ) {
             abort(response()->json([
                 'message' => 'Advisor import tools are disabled for your role on this hub. Enable Import advisors, Download import Excel template, Submit filled Excel for import, and/or View submitted Excel imports under Power Admin → Capabilities.',
@@ -537,7 +537,7 @@ class AdvisorController extends Controller
 
     private function assertRoleCapability(Request $request, Hub $hub, string $capability, string $message): void
     {
-        if (! $this->roleCan($request, $hub, $capability)) {
+        if (! $this->userCan($request, $hub, $capability)) {
             abort(response()->json([
                 'message' => $message,
                 'capability' => $capability,
@@ -545,20 +545,24 @@ class AdvisorController extends Controller
         }
     }
 
-    private function roleCan(Request $request, Hub $hub, string $capability): bool
+    /**
+     * Capability check for the authenticated viewer — UNION of all assigned roles
+     * (same as hub_can / effective_capabilities). Do not use legacy users.role alone.
+     */
+    private function userCan(Request $request, Hub $hub, string $capability): bool
     {
         $user = $request->user();
 
         return $user
-            ? $this->matrix->roleCan($hub, (string) $user->role, $capability)
+            ? $this->matrix->userCan($hub, $user, $capability)
             : $hub->can($capability);
     }
 
     private function canDownloadTemplate(Request $request, Hub $hub): bool
     {
-        return $this->roleCan($request, $hub, 'advisor_excel_template')
-            || $this->roleCan($request, $hub, 'advisor_excel_submit')
-            || $this->roleCan($request, $hub, 'advisor_excel_import');
+        return $this->userCan($request, $hub, 'advisor_excel_template')
+            || $this->userCan($request, $hub, 'advisor_excel_submit')
+            || $this->userCan($request, $hub, 'advisor_excel_import');
     }
 
     /**
@@ -566,8 +570,8 @@ class AdvisorController extends Controller
      */
     private function canViewSubmissions(Request $request, Hub $hub): bool
     {
-        return $this->roleCan($request, $hub, 'advisor_excel_view_submissions')
-            || $this->roleCan($request, $hub, 'advisor_excel_import');
+        return $this->userCan($request, $hub, 'advisor_excel_view_submissions')
+            || $this->userCan($request, $hub, 'advisor_excel_import');
     }
 
     private function targetHub(Request $request): Hub
