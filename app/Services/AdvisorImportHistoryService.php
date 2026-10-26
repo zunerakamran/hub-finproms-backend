@@ -115,15 +115,36 @@ class AdvisorImportHistoryService
     }
 
     /**
+     * @param  array{viewer_user_id?: int|null, can_view_all_submissions?: bool}  $options
      * @return LengthAwarePaginator<int, AdvisorImportBatch>
      */
-    public function paginate(Hub $hub, int $perPage = 20, int $page = 1): LengthAwarePaginator
+    public function paginate(Hub $hub, int $perPage = 20, int $page = 1, array $options = []): LengthAwarePaginator
     {
-        return AdvisorImportBatch::query()
+        $canViewAllSubmissions = (bool) ($options['can_view_all_submissions'] ?? true);
+        $viewerUserId = isset($options['viewer_user_id']) ? (int) $options['viewer_user_id'] : 0;
+
+        $query = AdvisorImportBatch::query()
             ->where('hub_id', $hub->id)
             ->orderByDesc('created_at')
-            ->orderByDesc('id')
-            ->paginate($perPage, ['*'], 'page', $page);
+            ->orderByDesc('id');
+
+        if (! $canViewAllSubmissions) {
+            // Without View submitted Excel imports (or Import), only show
+            // completed/direct imports + the viewer's own submissions.
+            $query->where(function ($q) use ($viewerUserId) {
+                $q->where('kind', '!=', AdvisorImportBatch::KIND_SUBMISSION)
+                    ->orWhere(function ($own) use ($viewerUserId) {
+                        $own->where('kind', AdvisorImportBatch::KIND_SUBMISSION);
+                        if ($viewerUserId > 0) {
+                            $own->where('imported_by_user_id', $viewerUserId);
+                        } else {
+                            $own->whereRaw('0 = 1');
+                        }
+                    });
+            });
+        }
+
+        return $query->paginate($perPage, ['*'], 'page', $page);
     }
 
     /**

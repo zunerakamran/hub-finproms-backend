@@ -612,6 +612,11 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/advisors/submit', [AdvisorController::class, 'submit'])->middleware('throttle:imports');
         });
 
+        Route::middleware('hub_can:advisor_excel_view_submissions,advisor_excel_import')->group(function () {
+            Route::get('/advisors/import-submissions/{batch}/download', [AdvisorController::class, 'downloadSubmission'])
+                ->whereNumber('batch');
+        });
+
         Route::middleware('hub_can:advisor_excel_import')->group(function () {
             Route::post('/advisors/import', [AdvisorController::class, 'import'])->middleware('throttle:imports');
             Route::get('/advisors/import/{jobId}', [AdvisorController::class, 'importStatus'])->whereUuid('jobId');
@@ -1033,6 +1038,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::middleware('hub_can:advisor_excel_submit')->group(function () {
             Route::post('/advisors/submit', [AdvisorController::class, 'submit'])->middleware('throttle:imports');
+        });
+
+        Route::middleware('hub_can:advisor_excel_view_submissions,advisor_excel_import')->group(function () {
+            Route::get('/advisors/import-submissions/{batch}/download', [AdvisorController::class, 'downloadSubmission'])
+                ->whereNumber('batch');
         });
 
         Route::middleware('hub_can:advisor_excel_import')->group(function () {

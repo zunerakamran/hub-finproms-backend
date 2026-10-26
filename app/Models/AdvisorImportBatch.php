@@ -72,23 +72,33 @@ class AdvisorImportBatch extends Model
     }
 
     /**
+     * @param  array{include_details?: bool, can_download?: bool, can_import?: bool}  $options
      * @return array<string, mixed>
      */
-    public function toApiArray(): array
+    public function toApiArray(array $options = []): array
     {
-        $pendingUsers = $this->pendingUserRows();
+        $includeDetails = array_key_exists('include_details', $options)
+            ? (bool) $options['include_details']
+            : true;
+        $canDownload = (bool) ($options['can_download'] ?? false);
+        $canImport = (bool) ($options['can_import'] ?? false);
+
+        $pendingUsers = $includeDetails ? $this->pendingUserRows() : [];
         $userCount = $this->isPendingSubmission()
-            ? (int) ($this->submitted_user_count ?: count($pendingUsers))
+            ? (int) ($this->submitted_user_count ?: count($this->pendingUserRows()))
             : ((int) $this->created_count + (int) $this->updated_count + (int) $this->reactivated_count);
+
+        $hasStoredFile = filled($this->stored_path);
 
         return [
             'id' => $this->id,
             'status' => $this->status,
             'kind' => $this->kind ?: self::KIND_IMPORT,
             'original_filename' => $this->original_filename,
-            'message' => $this->message,
-            'has_stored_file' => filled($this->stored_path),
-            'can_import_submission' => $this->isPendingSubmission() && filled($this->stored_path),
+            'message' => $includeDetails ? $this->message : null,
+            'has_stored_file' => $hasStoredFile,
+            'can_download_submission' => $canDownload && $hasStoredFile,
+            'can_import_submission' => $canImport && $this->isPendingSubmission() && $hasStoredFile,
             'imported_by' => [
                 'id' => $this->imported_by_user_id,
                 'name' => $this->imported_by_name,
@@ -108,11 +118,12 @@ class AdvisorImportBatch extends Model
                 'skipped' => $this->skipped_count,
                 'users' => $userCount,
             ],
-            'created' => $this->sanitizeUserRows($this->created_users ?? []),
-            'updated' => $this->sanitizeUserRows($this->updated_users ?? []),
-            'reactivated' => $this->sanitizeUserRows($this->reactivated_users ?? []),
+            'created' => $includeDetails ? $this->sanitizeUserRows($this->created_users ?? []) : [],
+            'updated' => $includeDetails ? $this->sanitizeUserRows($this->updated_users ?? []) : [],
+            'reactivated' => $includeDetails ? $this->sanitizeUserRows($this->reactivated_users ?? []) : [],
             'pending_users' => $pendingUsers,
-            'skipped' => $this->skipped_rows ?? [],
+            'skipped' => $includeDetails ? ($this->skipped_rows ?? []) : [],
+            'details_available' => $includeDetails,
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
         ];

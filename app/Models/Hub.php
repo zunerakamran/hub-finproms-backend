@@ -822,6 +822,7 @@ class Hub extends Model
         'advisor_excel_import',
         'advisor_excel_template',
         'advisor_excel_submit',
+        'advisor_excel_view_submissions',
         'advisor_discontinue',
         'dashboard_view_advisor_invoices',
         'dashboard_manage_advisor_pricing',
@@ -1261,6 +1262,13 @@ class Hub extends Model
             'default_shared' => false,
             'default_white_label' => true,
         ],
+        'advisor_excel_view_submissions' => [
+            'label' => 'View submitted Excel imports',
+            'description' => 'See all submitted filled Excel sheets in Import Users history (who sent them, when, user list / details) and download the submitted file. Importers (`Import advisors`) also retain this access so they can process Pending sheets.',
+            'group' => self::GROUP_DASHBOARD_ADVISORS,
+            'default_shared' => false,
+            'default_white_label' => true,
+        ],
         'advisor_discontinue' => [
             'label' => 'Discontinue users',
             'description' => 'Permanently end a user’s access on this hub (any role, until re-imported). Shown on Hub → Users. Discontinued users are excluded from recurring seat counts. Separate from Excel import.',
@@ -1498,14 +1506,14 @@ class Hub extends Model
         ],
         'dashboard_manage_reseller_module_pricing' => [
             'label' => 'Set reseller module prices',
-            'description' => 'Set one-time / recurring amounts users pay the network when Network resells is on. Only modules whose main Module prices use per user / per user (slots) appear. Network still pays FinProms at main Module prices. Active only while Network resells is on.',
+            'description' => 'Opens Modules → Reseller module prices. Set one-time / recurring amounts users pay the network. Only modules whose main Module prices use per user / per user (slots) appear. Network still pays FinProms at main Module prices. Turn on Network resells to edit.',
             'group' => self::GROUP_MODULE_PRICING,
             'default_shared' => false,
             'default_white_label' => true,
         ],
         'dashboard_manage_network_stripe' => [
             'label' => 'Manage network Stripe keys',
-            'description' => 'Add the network Stripe publishable key / secret / webhook so users pay the network account when Network resells is on. Active only while Network resells is on.',
+            'description' => 'Opens Modules → Network Stripe. Add the network Stripe publishable key / secret / webhook so users pay the network account. Turn on Network resells to save keys.',
             'group' => self::GROUP_MODULE_PRICING,
             'default_shared' => false,
             'default_white_label' => true,

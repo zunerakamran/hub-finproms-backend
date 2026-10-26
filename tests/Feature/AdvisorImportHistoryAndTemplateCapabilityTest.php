@@ -106,6 +106,7 @@ class AdvisorImportHistoryAndTemplateCapabilityTest extends TestCase
         $admin = $this->grant($hub, User::ROLE_CLIENT_ADMIN, [
             'advisor_excel_import' => true,
             'advisor_excel_template' => true,
+            'advisor_excel_view_submissions' => true,
         ]);
 
         $file = ExcelUploadFactory::make([
@@ -126,6 +127,103 @@ class AdvisorImportHistoryAndTemplateCapabilityTest extends TestCase
             ->assertJsonPath('meta.total', 1)
             ->assertJsonPath('batches.0.original_filename', 'users.xlsx')
             ->assertJsonPath('batches.0.summary.created', 1)
-            ->assertJsonPath('batches.0.created.0.email', 'pat@example.com');
+            ->assertJsonPath('batches.0.created.0.email', 'pat@example.com')
+            ->assertJsonPath('capabilities.can_view_submissions', true);
+    }
+
+    public function test_view_submissions_capability_lists_all_and_allows_download(): void
+    {
+        $hub = $this->createPrivateHub([
+            'advisor_excel_import' => false,
+            'advisor_excel_template' => true,
+            'advisor_excel_submit' => true,
+            'advisor_excel_view_submissions' => true,
+        ]);
+        Firm::query()->create(['name' => 'Acme Wealth']);
+
+        $submitter = User::factory()->create(['role' => User::ROLE_MANAGER]);
+        $viewer = $this->grant($hub, User::ROLE_CLIENT_ADMIN, [
+            'advisor_excel_import' => false,
+            'advisor_excel_template' => false,
+            'advisor_excel_submit' => false,
+            'advisor_excel_view_submissions' => true,
+        ]);
+
+        $file = ExcelUploadFactory::make([
+            ['name', 'email', 'password', 'role', 'firm'],
+            ['Sam', 'sam@example.com', '', 'User', 'Acme Wealth'],
+        ]);
+        $plan = app(AdvisorImportService::class)->buildPlan($file, $hub);
+        $storedPath = 'advisor-imports/submissions/test-view-cap.xlsx';
+        \Illuminate\Support\Facades\Storage::disk('local')->put($storedPath, 'fake-xlsx');
+
+        $batch = app(AdvisorImportHistoryService::class)->recordSubmission(
+            $hub,
+            $submitter,
+            $plan,
+            $file,
+            $storedPath
+        );
+
+        Sanctum::actingAs($viewer);
+        $history = $this->getJson('/api/client-admin/advisors/import-history');
+        $history->assertOk()
+            ->assertJsonPath('meta.total', 1)
+            ->assertJsonPath('batches.0.id', $batch->id)
+            ->assertJsonPath('batches.0.can_download_submission', true)
+            ->assertJsonPath('batches.0.pending_users.0.email', 'sam@example.com')
+            ->assertJsonPath('capabilities.can_view_submissions', true);
+
+        $download = $this->get('/api/client-admin/advisors/import-submissions/'.$batch->id.'/download');
+        $download->assertOk();
+        $disposition = (string) $download->headers->get('content-disposition');
+        $this->assertTrue(
+            str_contains($disposition, 'import.xlsx') || str_contains($disposition, 'test-view-cap.xlsx'),
+            'Expected download Content-Disposition to name the Excel file, got: '.$disposition
+        );
+    }
+
+    public function test_submit_only_role_cannot_see_others_submissions_or_download(): void
+    {
+        $hub = $this->createPrivateHub([
+            'advisor_excel_import' => false,
+            'advisor_excel_template' => true,
+            'advisor_excel_submit' => true,
+            'advisor_excel_view_submissions' => false,
+        ]);
+        Firm::query()->create(['name' => 'Acme Wealth']);
+
+        $other = User::factory()->create(['role' => User::ROLE_MANAGER]);
+        $submitter = $this->grant($hub, User::ROLE_MANAGER, [
+            'advisor_excel_import' => false,
+            'advisor_excel_template' => true,
+            'advisor_excel_submit' => true,
+            'advisor_excel_view_submissions' => false,
+        ]);
+
+        $file = ExcelUploadFactory::make([
+            ['name', 'email', 'password', 'role', 'firm'],
+            ['Other', 'other@example.com', '', 'User', 'Acme Wealth'],
+        ]);
+        $plan = app(AdvisorImportService::class)->buildPlan($file, $hub);
+        $storedPath = 'advisor-imports/submissions/other-only.xlsx';
+        \Illuminate\Support\Facades\Storage::disk('local')->put($storedPath, 'fake-xlsx');
+
+        $batch = app(AdvisorImportHistoryService::class)->recordSubmission(
+            $hub,
+            $other,
+            $plan,
+            $file,
+            $storedPath
+        );
+
+        Sanctum::actingAs($submitter);
+        $this->getJson('/api/client-admin/advisors/import-history')
+            ->assertOk()
+            ->assertJsonPath('meta.total', 0)
+            ->assertJsonPath('capabilities.can_view_submissions', false);
+
+        $this->get('/api/client-admin/advisors/import-submissions/'.$batch->id.'/download')
+            ->assertForbidden();
     }
 }

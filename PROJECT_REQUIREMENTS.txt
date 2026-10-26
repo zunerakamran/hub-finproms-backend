@@ -1527,6 +1527,10 @@ Either path designates Heads; both MUST stay in sync. Multiple admins OK:
     Pending in import history with the user count, waiting for an importer.
   - Users with `advisor_excel_import` can import immediately or process a Pending
     submission from history.
+  - Users with `advisor_excel_view_submissions` (or Import) can see ALL submitted
+    Excel sheets in history with full details and download the stored filled file
+    while it remains on disk (Pending until imported / pruned). Roles with only
+    Submit see their own submissions; other people’s submissions are hidden.
   - History lists prior imports and pending submissions (who sent, when, file,
     user count / created / updated / skipped).
 - When Power Admin switches a hub from private → public (Functionalities):
@@ -1794,10 +1798,10 @@ Either path designates Heads; both MUST stay in sync. Multiple admins OK:
   - `dashboard_view_firm_module_invoices` — Module invoices (firm payer)
   - `dashboard_view_reseller_invoices` — Reseller invoices page (menu when granted;
     list fills when network_resells is on)
-  - `dashboard_manage_reseller_module_pricing` — Reseller module prices (per_user /
-    per_user_slots modules only; users→network amounts; active while network_resells)
-  - `dashboard_manage_network_stripe` — Network Stripe keys for user charges
-    (active while network_resells)
+  - `dashboard_manage_reseller_module_pricing` — Reseller module prices page
+    (per_user / per_user_slots only; edit when network_resells)
+  - `dashboard_manage_network_stripe` — Network Stripe keys page
+    (save when network_resells)
   - `dashboard_mark_module_invoices_paid` — settle network/firm module invoices
   - Personal card: NO capability — My payment method (mandatory if users_pay_own OR network_resells)
 - Pages:
@@ -1978,6 +1982,9 @@ Either path designates Heads; both MUST stay in sync. Multiple admins OK:
     blank sheet (role / firm / modules dropdowns) so staff can fill it
   - Submit filled Excel for import (`advisor_excel_submit`) — upload a filled
     sheet to queue it as Pending for an importer (does not create users)
+  - View submitted Excel imports (`advisor_excel_view_submissions`) — see all
+    submitted sheets in Import Users history with details and download the
+    stored filled Excel file; Import advisors also retains this access
   - Discontinue users — separate capability; permanently end a hub user’s
     access — action lives on Hub → Users (`/my-dashboard/hub-users`), not on
     Import Users

@@ -72,13 +72,33 @@ class AdvisorController extends Controller
             'page' => ['sometimes', 'integer', 'min:1'],
         ]);
 
+        $canImport = $this->roleCan($request, $hub, 'advisor_excel_import');
+        $canViewSubmissions = $this->canViewSubmissions($request, $hub);
+        $viewerId = (int) ($request->user()?->id ?? 0);
+
         $perPage = (int) ($validated['per_page'] ?? 20);
         $page = max(1, (int) ($validated['page'] ?? 1));
-        $paginator = $this->importHistory->paginate($hub, $perPage, $page);
+        $paginator = $this->importHistory->paginate($hub, $perPage, $page, [
+            'viewer_user_id' => $viewerId,
+            'can_view_all_submissions' => $canViewSubmissions,
+        ]);
 
         return response()->json([
             'batches' => $paginator->getCollection()
-                ->map(fn (AdvisorImportBatch $batch) => $batch->toApiArray())
+                ->map(function (AdvisorImportBatch $batch) use ($canImport, $canViewSubmissions, $viewerId) {
+                    $isOwnSubmission = $batch->kind === AdvisorImportBatch::KIND_SUBMISSION
+                        && $viewerId > 0
+                        && (int) $batch->imported_by_user_id === $viewerId;
+                    $includeDetails = $canViewSubmissions
+                        || $batch->kind !== AdvisorImportBatch::KIND_SUBMISSION
+                        || $isOwnSubmission;
+
+                    return $batch->toApiArray([
+                        'include_details' => $includeDetails,
+                        'can_download' => $canViewSubmissions,
+                        'can_import' => $canImport,
+                    ]);
+                })
                 ->values(),
             'meta' => [
                 'current_page' => $paginator->currentPage(),
@@ -88,10 +108,50 @@ class AdvisorController extends Controller
             ],
             'target_hub' => $this->hubPayload($hub),
             'capabilities' => [
-                'can_import' => $this->roleCan($request, $hub, 'advisor_excel_import'),
+                'can_import' => $canImport,
                 'can_download_template' => $this->canDownloadTemplate($request, $hub),
                 'can_submit' => $this->roleCan($request, $hub, 'advisor_excel_submit'),
+                'can_view_submissions' => $canViewSubmissions,
             ],
+        ]);
+    }
+
+    /**
+     * Download the stored filled Excel sheet for a submission (or any batch that still has a file).
+     */
+    public function downloadSubmission(Request $request, int $batch): StreamedResponse|JsonResponse
+    {
+        $hub = $this->assertViewSubmissionsEnabled($request);
+
+        $model = AdvisorImportBatch::query()
+            ->where('hub_id', $hub->id)
+            ->where('id', $batch)
+            ->first();
+
+        if (! $model) {
+            return response()->json(['message' => 'Import submission not found.'], 404);
+        }
+
+        if (! filled($model->stored_path)) {
+            return response()->json([
+                'message' => 'No submitted Excel file is stored for this row (it may already have been imported or pruned).',
+            ], 404);
+        }
+
+        $disk = \Illuminate\Support\Facades\Storage::disk('local');
+        if (! $disk->exists($model->stored_path)) {
+            return response()->json([
+                'message' => 'The submitted Excel file is missing from storage.',
+            ], 404);
+        }
+
+        $downloadName = $model->original_filename ?: basename($model->stored_path);
+        if (! str_ends_with(strtolower($downloadName), '.xlsx') && ! str_ends_with(strtolower($downloadName), '.xls')) {
+            $downloadName .= '.xlsx';
+        }
+
+        return $disk->download($model->stored_path, $downloadName, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         ]);
     }
 
@@ -431,6 +491,20 @@ class AdvisorController extends Controller
         return $hub;
     }
 
+    private function assertViewSubmissionsEnabled(Request $request): Hub
+    {
+        $hub = $this->assertPrivateHub($request);
+
+        if (! $this->canViewSubmissions($request, $hub)) {
+            abort(response()->json([
+                'message' => 'Viewing / downloading submitted Excel imports is disabled for your role on this hub. Enable “View submitted Excel imports” or “Import advisors” under Power Admin → Capabilities.',
+                'capability' => 'advisor_excel_view_submissions',
+            ], 403));
+        }
+
+        return $hub;
+    }
+
     private function assertCanAccessAdvisors(Request $request): Hub
     {
         $hub = $this->assertPrivateHub($request);
@@ -438,9 +512,10 @@ class AdvisorController extends Controller
         if (! $this->roleCan($request, $hub, 'advisor_excel_import')
             && ! $this->roleCan($request, $hub, 'advisor_excel_template')
             && ! $this->roleCan($request, $hub, 'advisor_excel_submit')
+            && ! $this->roleCan($request, $hub, 'advisor_excel_view_submissions')
         ) {
             abort(response()->json([
-                'message' => 'Advisor import tools are disabled for your role on this hub. Enable Import advisors, Download import Excel template, and/or Submit filled Excel for import under Power Admin → Capabilities.',
+                'message' => 'Advisor import tools are disabled for your role on this hub. Enable Import advisors, Download import Excel template, Submit filled Excel for import, and/or View submitted Excel imports under Power Admin → Capabilities.',
             ], 403));
         }
 
@@ -483,6 +558,15 @@ class AdvisorController extends Controller
     {
         return $this->roleCan($request, $hub, 'advisor_excel_template')
             || $this->roleCan($request, $hub, 'advisor_excel_submit')
+            || $this->roleCan($request, $hub, 'advisor_excel_import');
+    }
+
+    /**
+     * View-all submissions + download stored sheets: dedicated capability or Import advisors.
+     */
+    private function canViewSubmissions(Request $request, Hub $hub): bool
+    {
+        return $this->roleCan($request, $hub, 'advisor_excel_view_submissions')
             || $this->roleCan($request, $hub, 'advisor_excel_import');
     }
 

@@ -1682,14 +1682,9 @@ class CapabilitiesMatrixService
             return true;
         }
 
-        // Reseller invoices list follows capability alone; pricing + network Stripe
-        // only apply while Network resells is on.
-        if (in_array($key, [
-            'dashboard_manage_reseller_module_pricing',
-            'dashboard_manage_network_stripe',
-        ], true) && ! $settings->network_resells) {
-            return true;
-        }
+        // Reseller invoices / reseller prices / network Stripe follow the capability
+        // alone (menu visible when granted). Pages/APIs still require Network resells
+        // to edit data or collect payments.
 
         return false;
     }

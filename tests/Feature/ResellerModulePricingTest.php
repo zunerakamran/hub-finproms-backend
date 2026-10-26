@@ -109,8 +109,12 @@ class ResellerModulePricingTest extends TestCase
         $admin = User::factory()->create(['role' => User::ROLE_NETWORK_ADMIN]);
         Sanctum::actingAs($admin);
 
-        // Cap is inactive while network_resells is off.
-        $this->getJson('/api/admin/network-stripe')->assertStatus(403);
+        // Menu/API readable with capability alone; saving still needs network_resells.
+        $blocked = $this->putJson('/api/admin/network-stripe', [
+            'hub_stripe_key' => 'pk_test_reseller',
+            'hub_stripe_currency' => 'gbp',
+        ]);
+        $blocked->assertStatus(422);
 
         HubModuleInvoiceSettings::query()->updateOrCreate(
             ['hub_id' => $hub->id],
