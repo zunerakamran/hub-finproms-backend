@@ -3,25 +3,31 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Hub;
+use App\Services\ActingHubService;
 use App\Services\AdvisorBillingService;
+use App\Services\CapabilitiesMatrixService;
+use App\Services\ModuleInvoiceSettingsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 /**
- * Client admin card on file — white-labelled hub payer tool only.
- * Not part of the Power Admin capabilities matrix; power/finproms staff
- * charge the client admin card during import checkout instead.
+ * Payment card on file — gated by Capabilities matrix
+ * (`dashboard_manage_payment_card`), not a hard-coded role.
+ * Available when advisor billing and/or module charging is on.
  */
 class AdvisorPaymentCardController extends Controller
 {
     public function __construct(
-        private readonly AdvisorBillingService $billing
+        private readonly AdvisorBillingService $billing,
+        private readonly CapabilitiesMatrixService $matrix,
+        private readonly ActingHubService $actingHubs
     ) {}
 
     public function show(Request $request): JsonResponse
     {
         $user = $request->user();
-        $this->assertClientAdminPayer($user);
+        $this->assertCanManagePaymentCard($user);
 
         return response()->json([
             'payment_profile' => $this->billing->paymentProfile($user),
@@ -31,7 +37,7 @@ class AdvisorPaymentCardController extends Controller
     public function setup(Request $request): JsonResponse
     {
         $user = $request->user();
-        $this->assertClientAdminPayer($user);
+        $this->assertCanManagePaymentCard($user);
 
         try {
             $result = $this->billing->createCardSetupSession($user);
@@ -50,7 +56,7 @@ class AdvisorPaymentCardController extends Controller
     public function confirm(Request $request): JsonResponse
     {
         $user = $request->user();
-        $this->assertClientAdminPayer($user);
+        $this->assertCanManagePaymentCard($user);
 
         $validated = $request->validate([
             'session_id' => ['required', 'string'],
@@ -72,20 +78,28 @@ class AdvisorPaymentCardController extends Controller
         ]);
     }
 
-    private function assertClientAdminPayer(?\App\Models\User $user): void
+    private function assertCanManagePaymentCard(?\App\Models\User $user): Hub
     {
-        // Payment card: white-labelled client admin or Accounts Admin.
-        // Do not use isClientAdmin() — that includes finproms_admin / manager.
-        if (! $user || (! $user->isWhiteLabelClientAdmin() && ! $user->isAccountsAdmin())) {
+        if (! $user) {
             abort(response()->json([
-                'message' => 'Only the client admin or Accounts Admin can manage the payment card for this hub.',
+                'message' => 'Authentication required.',
             ], 403));
         }
 
-        if (! $this->billing->billingEnabled()) {
+        $hub = $this->actingHubs->targetHub($user, null);
+
+        if (! $this->matrix->userCan($hub, $user, ModuleInvoiceSettingsService::PAYMENT_CARD_CAPABILITY)) {
             abort(response()->json([
-                'message' => 'Advisor billing is not enabled for this hub.',
+                'message' => 'Managing the payment card is disabled for your role. Enable “Manage payment card” in Power Admin → Capabilities.',
             ], 403));
         }
+
+        if (! $this->billing->paymentCardEnabled($hub)) {
+            abort(response()->json([
+                'message' => 'Payment card is available when advisor billing or module charging is enabled for this hub.',
+            ], 403));
+        }
+
+        return $hub;
     }
 }

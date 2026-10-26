@@ -730,6 +730,7 @@ class Hub extends Model
         'dashboard_manage_module_packages',
         'dashboard_manage_module_invoice_settings',
         'dashboard_view_module_invoices',
+        'dashboard_view_all_module_invoices',
         'dashboard_mark_module_invoices_paid',
     ];
 
@@ -1253,6 +1254,13 @@ class Hub extends Model
             'default_shared' => false,
             'default_white_label' => true,
         ],
+        'dashboard_manage_payment_card' => [
+            'label' => 'Manage payment card',
+            'description' => 'Add or update the card on file used for advisor billing and for module invoices when the network / firm pays. Any role with this capability may manage the card — not limited to Network Admin or Accounts Admin.',
+            'group' => self::GROUP_DASHBOARD_ADVISORS,
+            'default_shared' => false,
+            'default_white_label' => true,
+        ],
         'dashboard_manage_subscriber_credits' => [
             'label' => 'Set subscriber credits (white-labelled hub)',
             'description' => 'Set unlimited or a fixed credit allotment for Excel-imported white-labelled hub subscribers (applied on import and autorenew). White-labelled hub only — inactive while the hub is shared.',
@@ -1420,21 +1428,28 @@ class Hub extends Model
         ],
         'dashboard_manage_module_invoice_settings' => [
             'label' => 'Module invoice / payment settings',
-            'description' => 'Choose who pays module invoices (network / firms / users), and optional network reseller branding (logo + text) when the network pays the platform then re-charges users.',
+            'description' => 'Choose who pays module invoices (network / firms / users), and optional network reseller branding (logo + text) when the network pays the platform then re-charges users. Grantable to any role via the Capabilities matrix.',
             'group' => self::GROUP_MODULE_PRICING,
             'default_shared' => false,
             'default_white_label' => true,
         ],
         'dashboard_view_module_invoices' => [
             'label' => 'View module invoices',
-            'description' => 'See one-time and recurring invoices generated for modules on this hub.',
+            'description' => 'Open the Module invoices page. Network-level members see network-scoped invoices; firm members see their firm’s invoices; everyone sees invoices billed to themselves. Grantable to any role — Accounts Admin is only a default, not a hard rule.',
+            'group' => self::GROUP_MODULE_PRICING,
+            'default_shared' => false,
+            'default_white_label' => true,
+        ],
+        'dashboard_view_all_module_invoices' => [
+            'label' => 'View all module invoices (hub-wide)',
+            'description' => 'See every module invoice on the hub regardless of payer scope or firm. Without this, visibility follows firm membership (network-level vs own firm) plus own user-billed invoices.',
             'group' => self::GROUP_MODULE_PRICING,
             'default_shared' => false,
             'default_white_label' => true,
         ],
         'dashboard_mark_module_invoices_paid' => [
             'label' => 'Mark module invoices as paid',
-            'description' => 'Record payment details and attachment for an unpaid module invoice and mark it paid. Viewers with “View module invoices” can later see the settlement details.',
+            'description' => 'Record payment details and attachment for an unpaid module invoice and mark it paid. Viewers with “View module invoices” can later see the settlement details. Grantable to any role.',
             'group' => self::GROUP_MODULE_PRICING,
             'default_shared' => false,
             'default_white_label' => true,

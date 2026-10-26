@@ -90,7 +90,7 @@ class ModuleBillingController extends Controller
         $slice = $invoices->forPage($page, $perPage)->values();
 
         $canMarkPaid = $actor
-            ? $this->matrix->roleCan($hub, (string) $actor->role, self::MARK_PAID_CAPABILITY)
+            ? $this->matrix->userCan($hub, $actor, self::MARK_PAID_CAPABILITY)
             : false;
 
         $payload = [
@@ -174,7 +174,7 @@ class ModuleBillingController extends Controller
         }
 
         $canMarkPaid = $actor
-            ? $this->matrix->roleCan($hub, (string) $actor->role, self::MARK_PAID_CAPABILITY)
+            ? $this->matrix->userCan($hub, $actor, self::MARK_PAID_CAPABILITY)
             : false;
 
         $payment = $invoice->type === Invoice::TYPE_MODULE_RECURRING
@@ -282,7 +282,7 @@ class ModuleBillingController extends Controller
         $user = $request->user();
 
         $allowed = $user
-            ? $this->matrix->roleCan($hub, (string) $user->role, $capability)
+            ? $this->matrix->userCan($hub, $user, $capability)
             : false;
 
         if (! $allowed) {

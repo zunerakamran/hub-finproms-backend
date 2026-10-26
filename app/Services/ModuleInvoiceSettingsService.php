@@ -18,6 +18,17 @@ class ModuleInvoiceSettingsService
 
     public const PAYER_USER = 'user';
 
+    public const VIEW_ALL_CAPABILITY = 'dashboard_view_all_module_invoices';
+
+    public const PAYMENT_CARD_CAPABILITY = 'dashboard_manage_payment_card';
+
+    /** @var list<array{role: string, capability: string, reason: string}> */
+    private array $lastCapabilitiesSynced = [];
+
+    public function __construct(
+        private readonly CapabilitiesMatrixService $matrix
+    ) {}
+
     public function forHub(Hub $hub): HubModuleInvoiceSettings
     {
         return HubModuleInvoiceSettings::query()->firstOrCreate(
@@ -65,10 +76,34 @@ class ModuleInvoiceSettingsService
                 'users_only_non_user_units_paid_by_network' => true,
             ],
             'explanations' => [
-                'network_pays_all' => 'Network pays all module invoices (every pricing unit, one-time and ongoing). Network admin adds the card; network Accounts Admin can see the invoices.',
-                'firms_pay_own' => 'Each firm pays its own invoice when the unit is per firm (one invoice per firm). Other units are still paid by the network.',
-                'users_pay_own' => 'Each user pays their own invoice when the unit is per user / per user (slots). Other units are still paid by the network.',
-                'network_resells' => 'Network pays the platform for all invoices, then may re-charge users with its own pricing. Disables “users pay own”. Requires logo + invoice text for branded invoices.',
+                'network_pays_all' => 'Network pays all module invoices (every pricing unit, one-time and ongoing). Saving this turns on Manage payment card + View / View all module invoices for Network / Client Admin (and Accounts Admin for card + view). Power Admin can still grant any role.',
+                'firms_pay_own' => 'Each firm pays its own invoice when the unit is per firm (one invoice per firm). Other units stay with the network. Saving this turns on Manage payment card + View module invoices for Firm Admin and Accounts Admin so they can add the firm card and see firm invoices.',
+                'users_pay_own' => 'Each user pays their own invoice when the unit is per user / per user (slots). Other units stay with the network. Saving this turns on View module invoices (+ Manage payment card) for User / Advisor / Admin-staff so they can see and pay their own invoices.',
+                'network_resells' => 'Network pays the platform for all invoices, then may re-charge users with its own pricing. Disables “users pay own”. Requires logo + invoice text for branded invoices. Also enables network card + hub-wide invoice view caps like “Network pays all”.',
+            ],
+            'capability_sync' => [
+                'network' => [
+                    'capabilities' => [
+                        'dashboard_manage_payment_card',
+                        'dashboard_view_module_invoices',
+                        'dashboard_view_all_module_invoices',
+                    ],
+                    'roles' => ['network_admin', 'client_admin', 'accounts_admin'],
+                ],
+                'firm' => [
+                    'capabilities' => [
+                        'dashboard_manage_payment_card',
+                        'dashboard_view_module_invoices',
+                    ],
+                    'roles' => ['firm_admin', 'accounts_admin'],
+                ],
+                'user' => [
+                    'capabilities' => [
+                        'dashboard_manage_payment_card',
+                        'dashboard_view_module_invoices',
+                    ],
+                    'roles' => ['user', 'advisor', 'admin_staff'],
+                ],
             ],
         ];
     }
@@ -163,8 +198,106 @@ class ModuleInvoiceSettingsService
         }
 
         $settings->save();
+        $settings = $settings->fresh() ?? $settings;
 
-        return $settings->fresh();
+        // Auto-enable related Capabilities for the payer mode(s) just saved.
+        $this->lastCapabilitiesSynced = $this->syncRelatedCapabilities($hub, $settings);
+
+        return $settings;
+    }
+
+    /**
+     * @return list<array{role: string, capability: string, reason: string}>
+     */
+    public function lastCapabilitiesSynced(): array
+    {
+        return $this->lastCapabilitiesSynced;
+    }
+
+    /**
+     * When a payer mode is ON, turn on the Capabilities that role needs
+     * (card + who sees those invoices). Never turns capabilities OFF.
+     *
+     * @return list<array{role: string, capability: string, reason: string}>
+     */
+    public function syncRelatedCapabilities(Hub $hub, HubModuleInvoiceSettings $settings): array
+    {
+        /** @var list<array{role: string, capability: string, reason: string}> $planned */
+        $planned = [];
+
+        $plan = function (array $roles, string $capability, string $reason) use (&$planned): void {
+            foreach ($roles as $role) {
+                $planned[] = [
+                    'role' => $role,
+                    'capability' => $capability,
+                    'reason' => $reason,
+                ];
+            }
+        };
+
+        // Network always pays residual units when firm/user modes are partial,
+        // and pays everything when network_pays_all / network_resells.
+        $networkPays = $settings->network_pays_all
+            || $settings->network_resells
+            || $settings->firms_pay_own
+            || $settings->users_pay_own;
+
+        if ($networkPays) {
+            $reason = 'network_payer';
+            $plan(
+                [User::ROLE_NETWORK_ADMIN, User::ROLE_CLIENT_ADMIN, User::ROLE_ACCOUNTS_ADMIN],
+                self::PAYMENT_CARD_CAPABILITY,
+                $reason
+            );
+            $plan(
+                [User::ROLE_NETWORK_ADMIN, User::ROLE_CLIENT_ADMIN, User::ROLE_ACCOUNTS_ADMIN],
+                'dashboard_view_module_invoices',
+                $reason
+            );
+            $plan(
+                [User::ROLE_NETWORK_ADMIN, User::ROLE_CLIENT_ADMIN, User::ROLE_POWER_ADMIN, User::ROLE_FINPROMS_ADMIN],
+                self::VIEW_ALL_CAPABILITY,
+                $reason
+            );
+        }
+
+        if ($settings->firms_pay_own) {
+            $reason = 'firms_pay_own';
+            foreach ([self::PAYMENT_CARD_CAPABILITY, 'dashboard_view_module_invoices'] as $cap) {
+                $plan([User::ROLE_FIRM_ADMIN, User::ROLE_ACCOUNTS_ADMIN], $cap, $reason);
+            }
+        }
+
+        if ($settings->users_pay_own) {
+            $reason = 'users_pay_own';
+            foreach ([self::PAYMENT_CARD_CAPABILITY, 'dashboard_view_module_invoices'] as $cap) {
+                $plan([User::ROLE_USER, User::ROLE_ADVISOR, User::ROLE_ADMIN_STAFF], $cap, $reason);
+            }
+        }
+
+        $newlyEnabled = $this->matrix->enableCapabilityGrants($hub, $planned);
+        if ($newlyEnabled === []) {
+            return [];
+        }
+
+        // Re-attach reason from the plan (first matching reason wins).
+        $reasonByKey = [];
+        foreach ($planned as $row) {
+            $key = $row['role'].'|'.$row['capability'];
+            if (! isset($reasonByKey[$key])) {
+                $reasonByKey[$key] = $row['reason'];
+            }
+        }
+
+        return array_map(function (array $row) use ($reasonByKey) {
+            $key = $row['role'].'|'.$row['capability'];
+
+            return [
+                'role' => $row['role'],
+                'capability' => $row['capability'],
+                'reason' => $reasonByKey[$key] ?? 'payer_settings',
+            ];
+        }, $newlyEnabled);
     }
 
     private function deleteLogo(HubModuleInvoiceSettings $settings): void
@@ -204,28 +337,36 @@ class ModuleInvoiceSettingsService
     }
 
     /**
-     * Network payer of record: network admin with card preferred, else client admin, else actor.
+     * Network payer of record: prefer anyone with Manage payment card + saved card,
+     * then card-capable users without a card, then legacy client-admin fallbacks.
      */
     public function resolveNetworkPayer(Hub $hub, ?User $actor = null): User
     {
+        $candidates = User::query()
+            ->where('is_suspended', false)
+            ->where('is_discontinued', false)
+            ->orderBy('id')
+            ->get()
+            ->filter(fn (User $u) => $this->matrix->userCan($hub, $u, self::PAYMENT_CARD_CAPABILITY))
+            ->values();
+
+        $withCard = $candidates->first(fn (User $u) => filled($u->stripe_payment_method_id));
+        if ($withCard) {
+            return $withCard;
+        }
+
+        if ($actor && $this->matrix->userCan($hub, $actor, self::PAYMENT_CARD_CAPABILITY)) {
+            return $actor;
+        }
+
+        if ($candidates->isNotEmpty()) {
+            return $candidates->first();
+        }
+
         $query = User::query()
             ->where('is_suspended', false)
             ->where('is_discontinued', false)
             ->orderBy('id');
-
-        $networkAdmin = (clone $query)
-            ->where('role', User::ROLE_NETWORK_ADMIN)
-            ->whereNotNull('stripe_payment_method_id')
-            ->first()
-            ?: (clone $query)->where('role', User::ROLE_NETWORK_ADMIN)->first();
-
-        if ($networkAdmin) {
-            return $networkAdmin;
-        }
-
-        if ($actor && in_array($actor->role, [User::ROLE_CLIENT_ADMIN, 'admin', User::ROLE_NETWORK_ADMIN], true)) {
-            return $actor;
-        }
 
         $clientAdmin = (clone $query)
             ->whereIn('role', [User::ROLE_CLIENT_ADMIN, 'admin'])
@@ -237,7 +378,7 @@ class ModuleInvoiceSettingsService
     }
 
     /**
-     * Firm payer: firm admin with card, else firm accounts admin, else firm head, else network.
+     * Firm payer: prefer firm members with Manage payment card (+ card), else firm head, else network.
      */
     public function resolveFirmPayer(Hub $hub, int $firmId, ?User $actor = null): User
     {
@@ -248,21 +389,17 @@ class ModuleInvoiceSettingsService
             ->orderBy('id')
             ->get();
 
-        $firmAdminWithCard = $users->first(
-            fn (User $u) => $u->hasRole(User::ROLE_FIRM_ADMIN) && filled($u->stripe_payment_method_id)
-        );
-        if ($firmAdminWithCard) {
-            return $firmAdminWithCard;
+        $capable = $users
+            ->filter(fn (User $u) => $this->matrix->userCan($hub, $u, self::PAYMENT_CARD_CAPABILITY))
+            ->values();
+
+        $withCard = $capable->first(fn (User $u) => filled($u->stripe_payment_method_id));
+        if ($withCard) {
+            return $withCard;
         }
 
-        $firmAdmin = $users->first(fn (User $u) => $u->hasRole(User::ROLE_FIRM_ADMIN));
-        if ($firmAdmin) {
-            return $firmAdmin;
-        }
-
-        $accounts = $users->first(fn (User $u) => $u->hasRole(User::ROLE_ACCOUNTS_ADMIN));
-        if ($accounts) {
-            return $accounts;
+        if ($capable->isNotEmpty()) {
+            return $capable->first();
         }
 
         $firm = Firm::query()->find($firmId);
@@ -297,7 +434,8 @@ class ModuleInvoiceSettingsService
     }
 
     /**
-     * Whether an accounts / firm / network viewer may see this billing row.
+     * Whether a viewer with “View module invoices” may see this billing row.
+     * Scope is capability + firm membership — not hard-coded role names.
      */
     public function viewerCanSeeBilling(
         User $viewer,
@@ -306,41 +444,31 @@ class ModuleInvoiceSettingsService
         ?int $firmId,
         ?int $billedUserId
     ): bool {
-        // Hub-wide managers see everything.
+        if ($this->matrix->userCan($hub, $viewer, self::VIEW_ALL_CAPABILITY)) {
+            return true;
+        }
+
+        // Always allow the billed user to see their own user-scoped invoice.
         if (
-            $viewer->hasRole(User::ROLE_POWER_ADMIN)
-            || $viewer->hasRole(User::ROLE_FINPROMS_ADMIN)
-            || $viewer->hasRole(User::ROLE_CLIENT_ADMIN)
-            || $viewer->hasRole(User::ROLE_NETWORK_ADMIN)
-            || $viewer->hasRole('admin')
+            $payerScope === self::PAYER_USER
+            && $billedUserId
+            && (int) $billedUserId === (int) $viewer->id
         ) {
             return true;
         }
 
-        if ($viewer->hasRole(User::ROLE_ACCOUNTS_ADMIN)) {
-            // Network accounts admin (no firm / central firm) → network-scoped invoices.
-            $viewerFirmId = $viewer->firm_id ? (int) $viewer->firm_id : null;
-            $viewerFirm = $viewerFirmId ? Firm::query()->find($viewerFirmId) : null;
-            $isNetworkAccounts = ! $viewerFirmId || ($viewerFirm && $viewerFirm->isCentral());
+        $viewerFirmId = $viewer->firm_id ? (int) $viewer->firm_id : null;
+        $viewerFirm = $viewerFirmId ? Firm::query()->find($viewerFirmId) : null;
+        $isNetworkLevel = ! $viewerFirmId || ($viewerFirm && $viewerFirm->isCentral());
 
-            if ($isNetworkAccounts) {
-                return $payerScope === self::PAYER_NETWORK
-                    || $payerScope === self::PAYER_USER; // network may still oversee user invoices
-            }
-
-            // Firm accounts admin → that firm’s invoices only.
-            return $payerScope === self::PAYER_FIRM && $firmId && (int) $firmId === $viewerFirmId;
+        if ($isNetworkLevel) {
+            // Network-level members oversee network invoices (+ user invoices).
+            return $payerScope === self::PAYER_NETWORK || $payerScope === self::PAYER_USER;
         }
 
-        if ($viewer->hasRole(User::ROLE_FIRM_ADMIN)) {
-            $viewerFirmId = $viewer->firm_id ? (int) $viewer->firm_id : null;
-
-            return $payerScope === self::PAYER_FIRM && $firmId && $viewerFirmId === (int) $firmId;
-        }
-
-        // End users see their own user-scoped invoices.
-        return $payerScope === self::PAYER_USER
-            && $billedUserId
-            && (int) $billedUserId === (int) $viewer->id;
+        // Firm members see that firm’s firm-scoped invoices.
+        return $payerScope === self::PAYER_FIRM
+            && $firmId
+            && (int) $firmId === $viewerFirmId;
     }
 }

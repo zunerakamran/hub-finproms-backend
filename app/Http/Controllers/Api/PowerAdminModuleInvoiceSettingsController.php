@@ -64,9 +64,16 @@ class PowerAdminModuleInvoiceSettingsController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
+        $synced = $this->settings->lastCapabilitiesSynced();
+        $message = 'Module invoice settings updated.';
+        if ($synced !== []) {
+            $message .= ' Related Capabilities were turned on for the selected payer mode(s) — see Capabilities matrix to refine.';
+        }
+
         return response()->json([
-            'message' => 'Module invoice settings updated.',
+            'message' => $message,
             'settings' => $this->settings->serialize($row),
+            'capabilities_synced' => $synced,
         ]);
     }
 }

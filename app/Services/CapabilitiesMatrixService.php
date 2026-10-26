@@ -273,7 +273,7 @@ class CapabilitiesMatrixService
                     || $requiresGcModule
                     || $requiresWcModule
                     || $requiresWtlModule
-                    || ($requiresModulePricing && ! $modulePricingOn && $key !== 'dashboard_manage_module_invoice_settings')
+                    || ($requiresModulePricing && ! $modulePricingOn && ! $this->modulePricingCapActiveWithoutCharges($key))
                     || ($requiresFirmDocuments && ! $firmDocumentsOn)
                     || ($requiresSupportTickets && ! $stOn)
                     || ($requiresSecurityMonitoring && ! $secmonOn)
@@ -290,7 +290,7 @@ class CapabilitiesMatrixService
                     || ($requiresWcModule && ! $wcModuleOn)
                     || ($requiresWtlModule && ! $wtlModuleOn)
                     || ($requiresSmtlModule && ! $smtlModuleOn)
-                    || ($requiresModulePricing && ! $modulePricingOn && $key !== 'dashboard_manage_module_invoice_settings')
+                    || ($requiresModulePricing && ! $modulePricingOn && ! $this->modulePricingCapActiveWithoutCharges($key))
                     || ($requiresFirmDocuments && ! $firmDocumentsOn);
             }
 
@@ -864,6 +864,65 @@ class CapabilitiesMatrixService
     }
 
     /**
+     * Turn ON capability cells (never turns OFF).
+     * Used when module invoice payer settings imply who needs card / invoice access.
+     *
+     * @param  list<array{role: string, capability: string}>  $grants
+     * @return list<array{role: string, capability: string}>  newly enabled cells only
+     */
+    public function enableCapabilityGrants(Hub $hub, array $grants): array
+    {
+        if ($grants === []) {
+            return [];
+        }
+
+        $roleCaps = $this->resolvedRoleCapabilities($hub);
+        $enabled = [];
+        $touchedCaps = [];
+
+        foreach ($grants as $grant) {
+            $role = (string) ($grant['role'] ?? '');
+            $capability = (string) ($grant['capability'] ?? '');
+            if ($role === '' || $capability === '' || ! Hub::isCapabilityKey($capability)) {
+                continue;
+            }
+            if ($role === 'admin') {
+                $role = User::ROLE_CLIENT_ADMIN;
+            }
+            if (! in_array($role, $this->rolesForCapability($capability), true)) {
+                continue;
+            }
+            if (! is_array($roleCaps[$role] ?? null)) {
+                $roleCaps[$role] = [];
+            }
+            if (! empty($roleCaps[$role][$capability])) {
+                continue;
+            }
+            $roleCaps[$role][$capability] = true;
+            $enabled[] = [
+                'role' => $role,
+                'capability' => $capability,
+            ];
+            $touchedCaps[$capability] = true;
+        }
+
+        if ($enabled === []) {
+            return [];
+        }
+
+        $hub->role_capabilities = $roleCaps;
+        $checklist = $hub->resolvedChecklist();
+        foreach (array_keys($touchedCaps) as $capability) {
+            $checklist[$capability] = true;
+        }
+        $hub->checklist = $checklist;
+        $hub->save();
+        $this->forgetResolvedCaches();
+
+        return $enabled;
+    }
+
+    /**
      * Default role capabilities for a hub type, seeded from checklist defaults.
      *
      * @return array<string, array<string, bool>>
@@ -947,7 +1006,9 @@ class CapabilitiesMatrixService
             'dashboard_manage_modules',
             'dashboard_manage_module_pricing',
             'dashboard_manage_module_packages',
+            'dashboard_manage_module_invoice_settings',
             'dashboard_view_module_invoices',
+            'dashboard_view_all_module_invoices',
             'dashboard_mark_module_invoices_paid',
             ActingHubService::CAPABILITY,
         ] as $key) {
@@ -1001,6 +1062,16 @@ class CapabilitiesMatrixService
         if (isset($matrix[User::ROLE_FINPROMS_ADMIN])) {
             $matrix[User::ROLE_FINPROMS_ADMIN]['dashboard_manage_subscriber_credits'] =
                 $hubType === Hub::TYPE_WHITE_LABEL;
+            foreach ([
+                'dashboard_manage_module_invoice_settings',
+                'dashboard_view_module_invoices',
+                'dashboard_view_all_module_invoices',
+                'dashboard_mark_module_invoices_paid',
+            ] as $key) {
+                if (isset($matrix[User::ROLE_FINPROMS_ADMIN][$key])) {
+                    $matrix[User::ROLE_FINPROMS_ADMIN][$key] = true;
+                }
+            }
         }
 
         // Remaining roles (network/firm/website admin, top management / accounts /
@@ -1095,8 +1166,8 @@ class CapabilitiesMatrixService
             }
         }
 
-        // Accounts Admin — invoices, bank transfers, billing renew ON by default.
-        // Payment card (WL) is also allowed for this role in code (not a matrix key).
+        // Accounts Admin — invoices, bank transfers, billing renew, payment card ON by default.
+        // These are defaults only; Power Admin may grant the same caps to any other role.
         if (isset($matrix[User::ROLE_ACCOUNTS_ADMIN])) {
             foreach ([
                 'dashboard_view_one_time_invoices',
@@ -1105,9 +1176,52 @@ class CapabilitiesMatrixService
                 'dashboard_view_advisor_invoices',
                 'dashboard_bank_transfers',
                 'dashboard_manage_advisor_renewal',
+                'dashboard_manage_payment_card',
                 'general_show_invoices',
             ] as $key) {
                 $matrix[User::ROLE_ACCOUNTS_ADMIN][$key] = true;
+            }
+        }
+
+        // Network Admin — payment card + hub-wide module invoice visibility ON by default
+        // (example “network pays” path). Not a hard role lock-in.
+        if (isset($matrix[User::ROLE_NETWORK_ADMIN])) {
+            foreach ([
+                'dashboard_manage_payment_card',
+                'dashboard_view_module_invoices',
+                'dashboard_view_all_module_invoices',
+                'dashboard_manage_module_invoice_settings',
+            ] as $key) {
+                if (isset($matrix[User::ROLE_NETWORK_ADMIN][$key])) {
+                    $matrix[User::ROLE_NETWORK_ADMIN][$key] = true;
+                }
+            }
+        }
+
+        // Client Admin — hub-wide module invoice view + payment card (WL default already
+        // seeds payment_card true; ensure view_all for module invoice oversight).
+        if (isset($matrix[User::ROLE_CLIENT_ADMIN])) {
+            foreach ([
+                'dashboard_view_module_invoices',
+                'dashboard_view_all_module_invoices',
+                'dashboard_manage_module_invoice_settings',
+                'dashboard_manage_payment_card',
+            ] as $key) {
+                if (isset($matrix[User::ROLE_CLIENT_ADMIN][$key])) {
+                    $matrix[User::ROLE_CLIENT_ADMIN][$key] = true;
+                }
+            }
+        }
+
+        // Firm Admin — firm payment card + firm-scoped module invoices (no view_all).
+        if (isset($matrix[User::ROLE_FIRM_ADMIN])) {
+            foreach ([
+                'dashboard_manage_payment_card',
+                'dashboard_view_module_invoices',
+            ] as $key) {
+                if (isset($matrix[User::ROLE_FIRM_ADMIN][$key])) {
+                    $matrix[User::ROLE_FIRM_ADMIN][$key] = true;
+                }
             }
         }
 
@@ -1189,6 +1303,7 @@ class CapabilitiesMatrixService
         foreach (Hub::CHECKLIST_DEFINITIONS as $key => $meta) {
             $group = $meta['group'] ?? null;
             if (! Hub::isDashboardCapabilityGroup($group)
+                && $group !== Hub::GROUP_MODULE_PRICING
                 && $group !== Hub::GROUP_SOCIAL_MEDIA_COMPLIANCE
                 && $group !== Hub::GROUP_GENERAL_COMPLIANCE
                 && $group !== Hub::GROUP_SUPPORT_TICKETS
@@ -1452,10 +1567,10 @@ class CapabilitiesMatrixService
 
         // Modules pricing caps are inactive while both charge functionalities are off.
         // Exception: Central still manages the global module / package catalogue.
-        // Exception: invoice/payment settings stay available so who-pays can be
-        // configured before charging is turned on.
+        // Exception: invoice settings / view / mark-paid stay available so who-pays
+        // and invoice visibility can be configured before charging is turned on.
         if (Hub::isModulePricingCapability($flag)
-            && $flag !== 'dashboard_manage_module_invoice_settings'
+            && ! $this->modulePricingCapActiveWithoutCharges($flag)
             && ! $hub->can('charge_amount_per_module')
             && ! $hub->can('charge_recurring_per_module')
             && ! $hub->isControlPlane()
@@ -1505,5 +1620,19 @@ class CapabilitiesMatrixService
         $roleCaps = $this->resolvedRoleCapabilities($hub);
 
         return (bool) ($roleCaps[$role][$flag] ?? false);
+    }
+
+    /**
+     * Module-pricing caps that remain editable / enforceable while both charge
+     * functionalities are off (who-pays + invoice visibility / settlement).
+     */
+    private function modulePricingCapActiveWithoutCharges(string $key): bool
+    {
+        return in_array($key, [
+            'dashboard_manage_module_invoice_settings',
+            'dashboard_view_module_invoices',
+            'dashboard_view_all_module_invoices',
+            'dashboard_mark_module_invoices_paid',
+        ], true);
     }
 }

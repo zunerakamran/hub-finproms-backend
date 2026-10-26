@@ -924,8 +924,8 @@ Route::middleware('auth:sanctum')->group(function () {
             });
         });
 
-        // Card settings — client_admin payer only when advisor billing is on
-        // (not gated by the capabilities matrix; controller enforces role).
+        // Card settings — capability dashboard_manage_payment_card when advisor
+        // billing and/or module charging is on (any granted role).
         Route::get('/payment-card', [AdvisorPaymentCardController::class, 'show']);
         Route::post('/payment-card/setup', [AdvisorPaymentCardController::class, 'setup']);
         Route::post('/payment-card/confirm', [AdvisorPaymentCardController::class, 'confirm']);

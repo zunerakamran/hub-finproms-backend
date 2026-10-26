@@ -42,6 +42,18 @@ class AdvisorBillingService
     }
 
     /**
+     * Payment-card UI/API is available for advisor billing and/or module charging.
+     */
+    public function paymentCardEnabled(?Hub $hub = null): bool
+    {
+        $hub ??= $this->hubs->current();
+
+        return $this->billingEnabled($hub)
+            || $hub->can('charge_amount_per_module')
+            || $hub->can('charge_recurring_per_module');
+    }
+
+    /**
      * Prefer the importer when they are the white-labelled client admin;
      * otherwise the first client_admin (payer of record for this deployment).
      */
@@ -84,6 +96,7 @@ class AdvisorBillingService
 
         return [
             'billing_enabled' => $this->billingEnabled($hub),
+            'payment_card_enabled' => $this->paymentCardEnabled($hub),
             'has_saved_card' => $this->payerHasSavedCard($user),
             'card' => $card,
             'stripe_available' => (bool) ($stripe['available'] ?? false),
@@ -94,14 +107,16 @@ class AdvisorBillingService
     }
 
     /**
-     * Stripe Checkout (setup mode) so client admin can enter/update their card.
+     * Stripe Checkout (setup mode) so a capable role can enter/update their card.
      *
      * @return array<string, mixed>
      */
     public function createCardSetupSession(User $user): array
     {
-        if (! $this->billingEnabled()) {
-            throw new InvalidArgumentException('Advisor billing is not enabled for this hub.');
+        if (! $this->paymentCardEnabled()) {
+            throw new InvalidArgumentException(
+                'Payment card is available when advisor billing or module charging is enabled for this hub.'
+            );
         }
 
         $methods = collect($this->paymentSettings->publicMethods(

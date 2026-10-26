@@ -1784,13 +1784,31 @@ Either path designates Heads; both MUST stay in sync. Multiple admins OK:
 5.1B2 Module invoice / payment settings (who pays)
 - Page `/my-dashboard/module-invoice-settings` gated by capability
   `dashboard_manage_module_invoice_settings` (Modules pricing group).
+- Related Capabilities (all grantable to ANY role; defaults are examples only):
+  - `dashboard_manage_module_invoice_settings` — who-pays + reseller branding
+  - `dashboard_manage_payment_card` — add/update card on file (advisor billing
+    and/or module charging). Defaults ON for client_admin, network_admin,
+    firm_admin, accounts_admin — not a hard role lock-in.
+  - `dashboard_view_module_invoices` — open Module invoices; scoped by firm
+    membership (network-level → network invoices; firm → that firm’s invoices;
+    always own user-billed). Defaults ON for accounts_admin (+ network/client).
+  - `dashboard_view_all_module_invoices` — hub-wide list (every payer scope).
+    Defaults ON for power_admin, finproms_admin, client_admin, network_admin.
+  - `dashboard_mark_module_invoices_paid` — settle unpaid module invoices.
+- Intelligent sync on save (enables only; never disables):
+  - Network pays / resells / residual network units → enable payment card +
+    view (+ view-all for network/client/PA/FinProms) for network-level roles.
+  - `firms_pay_own` → enable payment card + view module invoices for
+    Firm Admin + Accounts Admin (firm card + firm invoices).
+  - `users_pay_own` → enable payment card + view for User / Advisor /
+    Admin-staff (own invoices).
+  - API returns `capabilities_synced` listing newly enabled cells.
 - Per-hub settings (`hub_module_invoice_settings`):
   1) `network_pays_all` — Network pays ALL module invoices (every pricing unit,
      one-time + ongoing). Checking this clears firm + user options.
-     Network Admin adds card details; network Accounts Admin can see invoices.
   2) `firms_pay_own` — Each firm pays its own invoice when the unit is
-     `per_firm` (one invoice created per firm, billed to Firm Admin / firm
-     Accounts Admin). Other units remain paid by the network.
+     `per_firm` (one invoice created per firm). Other units remain paid by
+     the network.
   3) `users_pay_own` — Each user pays their own invoice when the unit is
      `per_user` (fixed) or `per_user_slots` (slot rate). One invoice per user.
      Other units remain paid by the network.
@@ -1800,8 +1818,8 @@ Either path designates Heads; both MUST stay in sync. Multiple admins OK:
      detailed) stamped onto invoice meta for branded display.
 - APIs: GET/POST/PUT module-invoice-settings (multipart for logo).
 - Billing rows store `payer_scope` (network|firm|user) + optional `firm_id`.
-- Module invoices list is filtered by viewer role (firm Accounts Admin sees
-  their firm’s invoices; network managers see all; users see own user-scope).
+- Module invoices list filtered by capability + firm membership (not hardcoded
+  role names). Payer of record prefers users with Manage payment card + card.
 
 5.1C Module packages (bundled product modules)
 - Separate page `/my-dashboard/module-packages` gated by capability
@@ -1995,7 +2013,9 @@ Either path designates Heads; both MUST stay in sync. Multiple admins OK:
     `dashboard_view_compliance_audit_trail`, `wc_view_activity_logs`
   - Accounts Admin defaults ON: one-time / module / advisor invoices, mark
     module invoices paid, bank transfers, billing renew+grace,
-    `general_show_invoices`; WL Payment card allowed in code for this role
+    `general_show_invoices`, `dashboard_manage_payment_card` (matrix — any
+    role may be granted the same; Network Admin also defaults payment card +
+    view/view-all module invoices; Firm Admin defaults payment card + view)
   - AI content generation / control hubs remotely — same roles
     (typically Power Admin on Central Hub; Shared-only where appropriate)
   - Any other admin dashboard screens/actions
