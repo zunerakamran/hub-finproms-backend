@@ -112,6 +112,88 @@ class PowerAdminAdvisorImportSubmissionsTest extends TestCase
             ->assertJsonPath('capabilities.can_view_submissions', false);
     }
 
+    public function test_power_admin_on_content_hub_sees_client_admin_pending_submission(): void
+    {
+        // Same /my-dashboard/advisors page on a content hub deploy (not Central).
+        // Client admin submits; power_admin with View (+ Import) must see Pending.
+        config([
+            'hub.current_slug' => 'shared',
+            'hub.type' => 'shared',
+            'hub.is_control_plane' => false,
+        ]);
+
+        $matrix = app(CapabilitiesMatrixService::class);
+
+        $hub = Hub::query()->create([
+            'name' => 'Private Shared',
+            'slug' => 'shared',
+            'type' => Hub::TYPE_SHARED,
+            'is_active' => true,
+            'checklist' => array_merge(Hub::defaultChecklist(Hub::TYPE_SHARED), [
+                'private_invite_only' => true,
+                'public_subscribe' => false,
+            ]),
+        ]);
+
+        $roleCaps = $matrix->resolvedRoleCapabilities($hub);
+        $roleCaps[User::ROLE_CLIENT_ADMIN]['advisor_excel_import'] = false;
+        $roleCaps[User::ROLE_CLIENT_ADMIN]['advisor_excel_template'] = true;
+        $roleCaps[User::ROLE_CLIENT_ADMIN]['advisor_excel_submit'] = true;
+        $roleCaps[User::ROLE_CLIENT_ADMIN]['advisor_excel_view_submissions'] = false;
+        $roleCaps[User::ROLE_POWER_ADMIN]['advisor_excel_import'] = true;
+        $roleCaps[User::ROLE_POWER_ADMIN]['advisor_excel_template'] = true;
+        $roleCaps[User::ROLE_POWER_ADMIN]['advisor_excel_submit'] = false;
+        $roleCaps[User::ROLE_POWER_ADMIN]['advisor_excel_view_submissions'] = true;
+        $hub->role_capabilities = $roleCaps;
+        $hub->save();
+        $matrix->forgetResolvedCaches();
+        app(HubService::class)->forgetCurrentCache();
+
+        Firm::query()->create(['name' => 'Acme Wealth']);
+
+        $clientAdmin = User::factory()->create(['role' => User::ROLE_CLIENT_ADMIN]);
+        $powerAdmin = User::factory()->powerAdmin()->create();
+
+        $file = ExcelUploadFactory::make([
+            ['name', 'email', 'password', 'role', 'firm'],
+            ['Pat', 'pat-pending@example.com', '', 'User', 'Acme Wealth'],
+        ]);
+        $plan = app(AdvisorImportService::class)->buildPlan($file, $hub);
+        $storedPath = 'advisor-imports/submissions/ca-pending.xlsx';
+        \Illuminate\Support\Facades\Storage::disk('local')->put($storedPath, 'fake-xlsx');
+        $batch = app(AdvisorImportHistoryService::class)->recordSubmission(
+            $hub,
+            $clientAdmin,
+            $plan,
+            $file,
+            $storedPath
+        );
+
+        Sanctum::actingAs($clientAdmin);
+        $this->getJson('/api/client-admin/advisors/import-history')
+            ->assertOk()
+            ->assertJsonPath('meta.total', 1)
+            ->assertJsonPath('batches.0.id', $batch->id)
+            ->assertJsonPath('batches.0.status', 'pending');
+
+        Sanctum::actingAs($powerAdmin);
+
+        // Must work on content hub via /api/power-admin (not blocked by control_plane).
+        $this->getJson('/api/power-admin/advisors/import-history')
+            ->assertOk()
+            ->assertJsonPath('meta.total', 1)
+            ->assertJsonPath('batches.0.id', $batch->id)
+            ->assertJsonPath('batches.0.status', 'pending')
+            ->assertJsonPath('batches.0.pending_users.0.email', 'pat-pending@example.com')
+            ->assertJsonPath('batches.0.can_download_submission', true)
+            ->assertJsonPath('batches.0.can_import_submission', true)
+            ->assertJsonPath('capabilities.can_view_submissions', true)
+            ->assertJsonPath('capabilities.can_import', true);
+
+        $this->get('/api/power-admin/advisors/import-submissions/'.$batch->id.'/download')
+            ->assertOk();
+    }
+
     public function test_power_admin_acting_on_wired_white_label_sees_remote_pending_submissions(): void
     {
         $matrix = app(CapabilitiesMatrixService::class);

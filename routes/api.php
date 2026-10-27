@@ -963,6 +963,57 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware(EnsureUserIsClientAdmin::class)->prefix('client-admin')->group($clientAdminRoutes);
     Route::middleware(EnsureUserIsClientAdmin::class)->prefix('admin')->group($clientAdminRoutes);
 
+    // power_admin — hub-scoped advisor / billing tools work on Central AND on
+    // content hubs (same /my-dashboard/advisors page as client admin). Platform
+    // registry tools below still require the Central control-plane deploy.
+    Route::middleware([EnsureUserIsPowerAdmin::class])->prefix('power-admin')->group(function () {
+        // Advisor import / billing when enabled for power_admin on the current hub
+        Route::get('/advisors', [AdvisorController::class, 'index']);
+        Route::get('/advisors/import-history', [AdvisorController::class, 'importHistory']);
+
+        Route::middleware('hub_can:advisor_excel_template,advisor_excel_import,advisor_excel_submit')->group(function () {
+            Route::get('/advisors/template', [AdvisorController::class, 'template']);
+        });
+
+        Route::middleware('hub_can:advisor_excel_submit')->group(function () {
+            Route::post('/advisors/submit', [AdvisorController::class, 'submit'])->middleware('throttle:imports');
+        });
+
+        Route::middleware('hub_can:advisor_excel_view_submissions,advisor_excel_import')->group(function () {
+            Route::get('/advisors/import-submissions/{batch}/download', [AdvisorController::class, 'downloadSubmission'])
+                ->whereNumber('batch');
+        });
+
+        Route::middleware('hub_can:advisor_excel_import')->group(function () {
+            Route::post('/advisors/import', [AdvisorController::class, 'import'])->middleware('throttle:imports');
+            Route::get('/advisors/import/{jobId}', [AdvisorController::class, 'importStatus'])->whereUuid('jobId');
+            Route::post('/advisors/import-submissions/{batch}/import', [AdvisorController::class, 'importSubmission'])
+                ->whereNumber('batch')
+                ->middleware('throttle:imports');
+            Route::get('/advisor-billings/{billing}', [AdvisorBillingController::class, 'show']);
+            Route::post('/advisor-billings/{billing}/checkout', [AdvisorBillingController::class, 'checkout']);
+            Route::post('/advisor-billings/confirm', [AdvisorBillingController::class, 'confirm']);
+            Route::post('/advisor-billings/{billing}/confirm-bank-transfer', [AdvisorBillingController::class, 'confirmBankTransfer']);
+        });
+
+        Route::middleware('hub_can:advisor_discontinue')->group(function () {
+            Route::post('/advisors/{advisor}/discontinue', [AdvisorController::class, 'discontinue']);
+        });
+
+        Route::middleware('hub_can:dashboard_view_advisor_invoices')->group(function () {
+            Route::get('/advisor-invoices', [AdvisorBillingController::class, 'invoices']);
+        });
+
+        Route::middleware('hub_can:dashboard_manage_advisor_renewal')->group(function () {
+            Route::get('/advisor-billing-renewal', [AdvisorBillingController::class, 'renewalSettings']);
+            Route::put('/advisor-billing-renewal', [AdvisorBillingController::class, 'updateRenewalSettings']);
+        });
+
+        // Capability is checked in the controller against hub_id (may differ from current hub).
+        Route::get('/subscriber-credits', [SubscriberCreditsController::class, 'show']);
+        Route::put('/subscriber-credits', [SubscriberCreditsController::class, 'update']);
+    });
+
     // power_admin control plane — Central Hub Controller only
     Route::middleware([EnsureUserIsPowerAdmin::class, 'control_plane'])->prefix('power-admin')->group(function () {
         Route::get('/ping', fn () => response()->json([
@@ -1027,52 +1078,6 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/hubs/{hub}/backups/{backup}/restore', [PowerAdminHubBackupController::class, 'restore']);
             Route::delete('/hubs/{hub}/backups/{backup}', [PowerAdminHubBackupController::class, 'destroy']);
         });
-
-        // Advisor import / billing when enabled for power_admin on the current hub
-        Route::get('/advisors', [AdvisorController::class, 'index']);
-        Route::get('/advisors/import-history', [AdvisorController::class, 'importHistory']);
-
-        Route::middleware('hub_can:advisor_excel_template,advisor_excel_import,advisor_excel_submit')->group(function () {
-            Route::get('/advisors/template', [AdvisorController::class, 'template']);
-        });
-
-        Route::middleware('hub_can:advisor_excel_submit')->group(function () {
-            Route::post('/advisors/submit', [AdvisorController::class, 'submit'])->middleware('throttle:imports');
-        });
-
-        Route::middleware('hub_can:advisor_excel_view_submissions,advisor_excel_import')->group(function () {
-            Route::get('/advisors/import-submissions/{batch}/download', [AdvisorController::class, 'downloadSubmission'])
-                ->whereNumber('batch');
-        });
-
-        Route::middleware('hub_can:advisor_excel_import')->group(function () {
-            Route::post('/advisors/import', [AdvisorController::class, 'import'])->middleware('throttle:imports');
-            Route::get('/advisors/import/{jobId}', [AdvisorController::class, 'importStatus'])->whereUuid('jobId');
-            Route::post('/advisors/import-submissions/{batch}/import', [AdvisorController::class, 'importSubmission'])
-                ->whereNumber('batch')
-                ->middleware('throttle:imports');
-            Route::get('/advisor-billings/{billing}', [AdvisorBillingController::class, 'show']);
-            Route::post('/advisor-billings/{billing}/checkout', [AdvisorBillingController::class, 'checkout']);
-            Route::post('/advisor-billings/confirm', [AdvisorBillingController::class, 'confirm']);
-            Route::post('/advisor-billings/{billing}/confirm-bank-transfer', [AdvisorBillingController::class, 'confirmBankTransfer']);
-        });
-
-        Route::middleware('hub_can:advisor_discontinue')->group(function () {
-            Route::post('/advisors/{advisor}/discontinue', [AdvisorController::class, 'discontinue']);
-        });
-
-        Route::middleware('hub_can:dashboard_view_advisor_invoices')->group(function () {
-            Route::get('/advisor-invoices', [AdvisorBillingController::class, 'invoices']);
-        });
-
-        Route::middleware('hub_can:dashboard_manage_advisor_renewal')->group(function () {
-            Route::get('/advisor-billing-renewal', [AdvisorBillingController::class, 'renewalSettings']);
-            Route::put('/advisor-billing-renewal', [AdvisorBillingController::class, 'updateRenewalSettings']);
-        });
-
-        // Capability is checked in the controller against hub_id (may differ from current hub).
-        Route::get('/subscriber-credits', [SubscriberCreditsController::class, 'show']);
-        Route::put('/subscriber-credits', [SubscriberCreditsController::class, 'update']);
 
         Route::middleware('hub_can:dashboard_manage_advisor_pricing')->group(function () {
             Route::get('/advisor-pricing', [PowerAdminAdvisorPricingController::class, 'index']);

@@ -617,8 +617,10 @@ class AdvisorController extends Controller
     {
         $user = $request->user();
 
+        // Shared and White-label content hubs both use remote DBs when Central
+        // is acting on them — pending Excel submissions live on that hub DB.
         return $user
-            && $hub->isWhiteLabel()
+            && $hub->isContentHub()
             && $this->actingHubs->isActingRemotely($user)
             && $hub->hasRemoteDatabaseConfigured();
     }
