@@ -87,17 +87,34 @@ class ProcessAdvisorImportJob implements ShouldQueue
 
             if (empty($payload['awaiting_payment'])) {
                 try {
-                    $batch = $history->record(
-                        $hub,
-                        $actor,
-                        $payload,
-                        $this->originalName,
-                        AdvisorImportBatch::STATUS_COMPLETED
-                    );
-                    $payload['import_batch_id'] = $batch->id;
+                    $connection = $this->useRemote
+                        ? app(\App\Services\WhiteLabelDatabaseService::class)->connect($hub)
+                        : null;
+                    try {
+                        $batch = $history->record(
+                            $hub,
+                            $actor,
+                            $payload,
+                            $this->originalName,
+                            AdvisorImportBatch::STATUS_COMPLETED,
+                            $connection
+                        );
+                        $payload['import_batch_id'] = $batch->id;
 
-                    if ($submissionBatchId > 0) {
-                        $this->finalizeSubmission($history, $submissionBatchId, $hub->id, $actor, $payload);
+                        if ($submissionBatchId > 0) {
+                            $this->finalizeSubmission(
+                                $history,
+                                $submissionBatchId,
+                                $hub,
+                                $actor,
+                                $payload,
+                                $connection
+                            );
+                        }
+                    } finally {
+                        if ($connection) {
+                            app(\App\Services\WhiteLabelDatabaseService::class)->disconnect($hub);
+                        }
                     }
                 } catch (Throwable $e) {
                     report($e);
@@ -150,14 +167,12 @@ class ProcessAdvisorImportJob implements ShouldQueue
     private function finalizeSubmission(
         AdvisorImportHistoryService $history,
         int $submissionBatchId,
-        int $hubId,
+        Hub $hub,
         User $actor,
-        array $payload
+        array $payload,
+        ?string $connection = null
     ): void {
-        $submission = AdvisorImportBatch::query()
-            ->where('hub_id', $hubId)
-            ->where('id', $submissionBatchId)
-            ->first();
+        $submission = $history->findOnHub($hub, $submissionBatchId, $connection);
 
         if (! $submission || ! $submission->isPendingSubmission()) {
             return;
@@ -188,13 +203,32 @@ class ProcessAdvisorImportJob implements ShouldQueue
             return;
         }
 
-        $submission = AdvisorImportBatch::query()->find($submissionBatchId);
-        if (! $submission || ! $submission->isPendingSubmission()) {
-            return;
-        }
+        $hub = Hub::query()->find($this->hubId);
+        $connection = null;
+        $remote = app(\App\Services\WhiteLabelDatabaseService::class);
 
-        $submission->message = 'Import of submitted sheet failed: '.$reason.' Sheet remains pending — try again.';
-        $submission->save();
+        try {
+            if ($this->useRemote && $hub) {
+                $connection = $remote->connect($hub);
+            }
+
+            $submission = $hub
+                ? app(AdvisorImportHistoryService::class)->findOnHub($hub, $submissionBatchId, $connection)
+                : AdvisorImportBatch::query()->find($submissionBatchId);
+
+            if (! $submission || ! $submission->isPendingSubmission()) {
+                return;
+            }
+
+            $submission->message = 'Import of submitted sheet failed: '.$reason.' Sheet remains pending — try again.';
+            $submission->save();
+        } catch (Throwable) {
+            // leave pending row as-is if remote is unavailable
+        } finally {
+            if ($connection && $hub) {
+                $remote->disconnect($hub);
+            }
+        }
     }
 
     public static function cacheKey(string $jobId): string

@@ -74,21 +74,36 @@ class AdvisorController extends Controller
 
         $canImport = $this->userCan($request, $hub, 'advisor_excel_import');
         $canViewSubmissions = $this->canViewSubmissions($request, $hub);
-        $viewerId = (int) ($request->user()?->id ?? 0);
+        $viewer = $request->user();
+        $viewerId = (int) ($viewer?->id ?? 0);
+        $viewerEmail = strtolower(trim((string) ($viewer?->email ?? '')));
 
         $perPage = (int) ($validated['per_page'] ?? 20);
         $page = max(1, (int) ($validated['page'] ?? 1));
-        $paginator = $this->importHistory->paginate($hub, $perPage, $page, [
-            'viewer_user_id' => $viewerId,
-            'can_view_all_submissions' => $canViewSubmissions,
-        ]);
+
+        $paginate = function (?string $connection) use ($hub, $perPage, $page, $viewerId, $viewerEmail, $canViewSubmissions) {
+            return $this->importHistory->paginate($hub, $perPage, $page, [
+                'viewer_user_id' => $viewerId,
+                'viewer_email' => $viewerEmail,
+                'can_view_all_submissions' => $canViewSubmissions,
+                'connection' => $connection,
+            ]);
+        };
+
+        if ($this->shouldUseRemote($request, $hub)) {
+            $paginator = $this->remoteDb->run($hub, fn (string $connection) => $paginate($connection));
+        } else {
+            $paginator = $paginate(null);
+        }
 
         return response()->json([
             'batches' => $paginator->getCollection()
-                ->map(function (AdvisorImportBatch $batch) use ($canImport, $canViewSubmissions, $viewerId) {
+                ->map(function (AdvisorImportBatch $batch) use ($canImport, $canViewSubmissions, $viewerId, $viewerEmail) {
                     $isOwnSubmission = $batch->kind === AdvisorImportBatch::KIND_SUBMISSION
-                        && $viewerId > 0
-                        && (int) $batch->imported_by_user_id === $viewerId;
+                        && (
+                            ($viewerId > 0 && (int) $batch->imported_by_user_id === $viewerId)
+                            || ($viewerEmail !== '' && strtolower(trim((string) $batch->imported_by_email)) === $viewerEmail)
+                        );
                     $includeDetails = $canViewSubmissions
                         || $batch->kind !== AdvisorImportBatch::KIND_SUBMISSION
                         || $isOwnSubmission;
@@ -123,10 +138,7 @@ class AdvisorController extends Controller
     {
         $hub = $this->assertViewSubmissionsEnabled($request);
 
-        $model = AdvisorImportBatch::query()
-            ->where('hub_id', $hub->id)
-            ->where('id', $batch)
-            ->first();
+        $model = $this->findImportBatch($request, $hub, $batch);
 
         if (! $model) {
             return response()->json(['message' => 'Import submission not found.'], 404);
@@ -344,13 +356,26 @@ class AdvisorController extends Controller
             'local'
         );
 
-        $batch = $this->importHistory->recordSubmission(
-            $hub,
-            $request->user(),
-            $plan,
-            $file,
-            $storedPath
-        );
+        if ($this->shouldUseRemote($request, $hub)) {
+            $batch = $this->remoteDb->run($hub, function (string $connection) use ($hub, $request, $plan, $file, $storedPath) {
+                return $this->importHistory->recordSubmission(
+                    $hub,
+                    $request->user(),
+                    $plan,
+                    $file,
+                    $storedPath,
+                    $connection
+                );
+            });
+        } else {
+            $batch = $this->importHistory->recordSubmission(
+                $hub,
+                $request->user(),
+                $plan,
+                $file,
+                $storedPath
+            );
+        }
 
         return response()->json([
             'message' => sprintf(
@@ -370,10 +395,7 @@ class AdvisorController extends Controller
     {
         $hub = $this->assertImportEnabled($request);
 
-        $model = AdvisorImportBatch::query()
-            ->where('hub_id', $hub->id)
-            ->where('id', $batch)
-            ->first();
+        $model = $this->findImportBatch($request, $hub, $batch);
 
         if (! $model) {
             return response()->json(['message' => 'Import submission not found.'], 404);
@@ -436,6 +458,18 @@ class AdvisorController extends Controller
             'submission_batch_id' => $model->id,
             'target_hub' => $this->hubPayload($hub),
         ], 202);
+    }
+
+    private function findImportBatch(Request $request, Hub $hub, int $batch): ?AdvisorImportBatch
+    {
+        if ($this->shouldUseRemote($request, $hub)) {
+            return $this->remoteDb->run(
+                $hub,
+                fn (string $connection) => $this->importHistory->findOnHub($hub, $batch, $connection)
+            );
+        }
+
+        return $this->importHistory->findOnHub($hub, $batch);
     }
 
     private function assertImportEnabled(Request $request): Hub
