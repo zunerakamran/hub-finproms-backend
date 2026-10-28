@@ -238,7 +238,7 @@ class DashboardNavDefaults
                 '/my-dashboard/support-tickets/new' => 'New ticket',
                 '/my-dashboard/support-tickets/queue' => 'All tickets',
                 '/my-dashboard/live-chat' => 'Live Chat',
-                '/my-dashboard/live-chat/access' => 'Live Chat access',
+                '/my-dashboard/live-chat/access' => 'Central contacts',
                 '/my-dashboard/website-compliance/request-site' => 'Request a site',
                 '/my-dashboard/website-compliance/my-sites' => 'My sites',
                 '/my-dashboard/website-compliance/go-live' => 'Request go-live',

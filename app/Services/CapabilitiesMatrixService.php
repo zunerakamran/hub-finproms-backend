@@ -280,6 +280,7 @@ class CapabilitiesMatrixService
                     || ($requiresFirmDocuments && ! $firmDocumentsOn)
                     || ($requiresSupportTickets && ! $stOn)
                     || ($requiresLiveChat && ! $lcOn)
+                    || ($requiresLiveChat && $key === 'lc_manage_access') // content hubs only
                     || ($requiresSecurityMonitoring && ! $secmonOn)
                 ) {
                     $inactive = true;
@@ -322,6 +323,8 @@ class CapabilitiesMatrixService
                     $inactiveReason = 'module_general_compliance_off';
                 } elseif ($requiresSupportTickets && ! $stOn) {
                     $inactiveReason = 'support_tickets_off';
+                } elseif ($requiresLiveChat && $key === 'lc_manage_access' && $isCentralHub) {
+                    $inactiveReason = 'content_hubs_only';
                 } elseif ($requiresLiveChat && ! $lcOn) {
                     $inactiveReason = 'live_chat_off';
                 } elseif ($requiresSecurityMonitoring && ! $secmonOn) {
@@ -1585,6 +1588,11 @@ class CapabilitiesMatrixService
 
         // Live Chat caps are inactive while Functionalities → Live Chat is off.
         if (Hub::isLiveChatCapability($flag) && ! $hub->hasLiveChatFunctionality()) {
+            return false;
+        }
+
+        // Choose Central contacts is Shared / White-label only.
+        if ($flag === 'lc_manage_access' && ($hub->isCentral() || ! $hub->isContentHub())) {
             return false;
         }
 

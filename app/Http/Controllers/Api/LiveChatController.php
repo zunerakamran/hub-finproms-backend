@@ -39,7 +39,6 @@ class LiveChatController extends Controller
         return response()->json([
             'agents' => $this->chat->availableAgents($hub),
             'is_central_agent' => $this->chat->isCentralAgentContext($hub, $user),
-            'live_chat_access' => $this->chat->userHasLiveChatAccess($user),
             'statuses' => ['open', 'closed'],
         ]);
     }
@@ -160,11 +159,11 @@ class LiveChatController extends Controller
     {
         /** @var User $user */
         $user = $request->user();
-        $hub = $this->hubs->current();
+        $hub = $this->actingHubs->capabilityHub($user, 'lc_manage_access');
         $this->chat->assertCanManageAccess($hub, $user);
 
         return response()->json([
-            'data' => $this->chat->accessPickerUsers(),
+            'data' => $this->chat->accessPickerUsers($hub),
             'agents' => $this->chat->availableAgents($hub),
         ]);
     }
@@ -173,7 +172,7 @@ class LiveChatController extends Controller
     {
         /** @var User $user */
         $user = $request->user();
-        $hub = $this->hubs->current();
+        $hub = $this->actingHubs->capabilityHub($user, 'lc_manage_access');
         $this->chat->assertCanManageAccess($hub, $user);
 
         $validated = $request->validate([
@@ -184,8 +183,8 @@ class LiveChatController extends Controller
         $agents = $this->chat->saveAccess($hub, $user, $validated['user_ids'] ?? []);
 
         return response()->json([
-            'message' => 'Live Chat access updated. Enabled Central users are now available to hub members.',
-            'data' => $this->chat->accessPickerUsers(),
+            'message' => 'Central contacts updated. Checked Central Hub users are available for Live Chat on this hub.',
+            'data' => $this->chat->accessPickerUsers($hub),
             'agents' => $agents,
         ]);
     }

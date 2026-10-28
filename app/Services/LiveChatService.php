@@ -6,7 +6,9 @@ use App\Models\Hub;
 use App\Models\LiveChatConversation;
 use App\Models\LiveChatMessage;
 use App\Models\User;
+use App\Support\HubInternalAuth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use Throwable;
@@ -38,20 +40,14 @@ class LiveChatService
                 'capability' => 'You do not have permission to use Live Chat.',
             ]);
         }
-
-        // Central agents must also be checked in the access picker.
-        if ($this->isCentralAgentContext($hub, $user) && ! $this->userHasLiveChatAccess($user)) {
-            throw ValidationException::withMessages([
-                'live_chat_access' => 'Your Central Hub account is not enabled for Live Chat. Ask an admin to check you under Live Chat access.',
-            ]);
-        }
     }
 
     public function assertCanManageAccess(Hub $hub, User $user): void
     {
-        if (! $hub->isCentral() && ! (bool) config('hub.is_control_plane', false)) {
+        // Contact picker lives on Shared / White-label hubs only (not Central).
+        if ($hub->isCentral() || ! $hub->isContentHub()) {
             throw ValidationException::withMessages([
-                'live_chat' => 'Live Chat access is managed only on the Central Hub.',
+                'live_chat' => 'Choose Central contacts on each Shared or White-label hub — not on Central Hub.',
             ]);
         }
 
@@ -62,42 +58,33 @@ class LiveChatService
             || $user->isPowerAdmin();
         if (! $can) {
             throw ValidationException::withMessages([
-                'capability' => 'You do not have permission to manage Live Chat access.',
+                'capability' => 'You do not have permission to choose Live Chat Central contacts.',
             ]);
         }
     }
 
     /**
      * Whether this request is from a Central Hub agent (not a content-hub member).
+     * Content hubs (and Central while acting remotely on them) use the hub-user side.
      */
     public function isCentralAgentContext(Hub $hub, User $user): bool
     {
-        if ($hub->isCentral() || (bool) config('hub.is_control_plane', false)) {
-            // On Central, everyone with access is an agent talking to content-hub users.
-            return true;
-        }
-
-        return false;
-    }
-
-    public function userHasLiveChatAccess(User $user): bool
-    {
-        if (! Schema::hasColumn('users', 'live_chat_access')) {
+        if ($hub->isContentHub()) {
             return false;
         }
 
-        return (bool) $user->live_chat_access || $user->isPowerAdmin();
+        return $hub->isCentral() || (bool) config('hub.is_control_plane', false);
     }
 
     /**
-     * Agents hub users may start a chat with (synced onto content hubs).
+     * Central contacts this content hub may message (from hubs.live_chat_agents).
      *
      * @return list<array{id:int,name:string,email:string}>
      */
     public function availableAgents(Hub $hub): array
     {
-        if ($hub->isCentral() || (bool) config('hub.is_control_plane', false)) {
-            return $this->centralAgentsFromLocalUsers();
+        if ($hub->isCentral() || $hub->isControlPlane()) {
+            return [];
         }
 
         $agents = is_array($hub->live_chat_agents) ? $hub->live_chat_agents : [];
@@ -121,30 +108,39 @@ class LiveChatService
     }
 
     /**
-     * @return list<array{id:int,name:string,email:string,live_chat_access:bool,role:?string}>
+     * Checkbox list for Shared / White-label: all Central Hub users, with
+     * which ones are selected as contacts for this hub.
+     *
+     * @return list<array{id:int,name:string,email:string,role:?string,role_label:?string,selected:bool}>
      */
-    public function accessPickerUsers(): array
+    public function accessPickerUsers(Hub $hub): array
     {
-        if (! Schema::hasColumn('users', 'live_chat_access')) {
-            return [];
-        }
+        $directory = $this->listCentralDirectoryUsers($hub);
+        $selectedIds = collect($this->availableAgents($hub))
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
 
-        return User::query()
-            ->orderBy('name')
-            ->get(['id', 'name', 'email', 'role', 'live_chat_access'])
-            ->map(fn (User $u) => [
-                'id' => $u->id,
-                'name' => $u->name,
-                'email' => $u->email,
-                'role' => $u->role,
-                'role_label' => $u->role_label ?? null,
-                'live_chat_access' => (bool) $u->live_chat_access,
-            ])
+        return collect($directory)
+            ->map(function (array $row) use ($selectedIds) {
+                $id = (int) ($row['id'] ?? 0);
+
+                return [
+                    'id' => $id,
+                    'name' => (string) ($row['name'] ?? ''),
+                    'email' => (string) ($row['email'] ?? ''),
+                    'role' => $row['role'] ?? null,
+                    'role_label' => $row['role_label'] ?? null,
+                    'selected' => in_array($id, $selectedIds, true),
+                ];
+            })
             ->values()
             ->all();
     }
 
     /**
+     * Save which Central users this content hub may contact.
+     *
      * @param  list<int>  $enabledUserIds
      * @return list<array{id:int,name:string,email:string}>
      */
@@ -152,26 +148,38 @@ class LiveChatService
     {
         $this->assertCanManageAccess($hub, $actor);
 
-        if (! Schema::hasColumn('users', 'live_chat_access')) {
-            throw ValidationException::withMessages([
-                'live_chat_access' => 'Live Chat access column is missing. Run migrations.',
-            ]);
-        }
-
         $ids = array_values(array_unique(array_map('intval', $enabledUserIds)));
         $ids = array_values(array_filter($ids, fn (int $id) => $id > 0));
+        $idSet = array_fill_keys($ids, true);
 
-        User::query()->update(['live_chat_access' => false]);
-        if ($ids !== []) {
-            User::query()->whereIn('id', $ids)->update(['live_chat_access' => true]);
+        $directory = $this->listCentralDirectoryUsers($hub);
+        $agents = [];
+        foreach ($directory as $row) {
+            $id = (int) ($row['id'] ?? 0);
+            if ($id < 1 || ! isset($idSet[$id])) {
+                continue;
+            }
+            $agents[] = [
+                'id' => $id,
+                'name' => (string) ($row['name'] ?? 'Central user'),
+                'email' => (string) ($row['email'] ?? ''),
+            ];
         }
 
-        $agents = $this->centralAgentsFromLocalUsers();
-        $this->syncAgentsToContentHubs($agents);
+        if (Schema::hasColumn('hubs', 'live_chat_agents')) {
+            $hub->live_chat_agents = $agents;
+            $hub->save();
+        }
+
+        // When Power Admin saves from Central while acting on this hub, also
+        // push the agent list onto the content hub database.
+        if (config('hub.is_control_plane') && $hub->hasRemoteDatabaseConfigured()) {
+            $this->pushAgentsToRemoteHub($hub, $agents);
+        }
 
         $this->activity->log([
             'action' => 'live_chat.access_updated',
-            'description' => 'Updated Live Chat Central access ('.count($agents).' agents)',
+            'description' => 'Updated Live Chat Central contacts ('.count($agents).' selected)',
             'user' => $actor,
             'hub' => $hub,
             'status_code' => 200,
@@ -182,6 +190,22 @@ class LiveChatService
         ]);
 
         return $agents;
+    }
+
+    /**
+     * Full Central user directory for the contact picker.
+     *
+     * @return list<array{id:int,name:string,email:string,role:?string,role_label:?string}>
+     */
+    public function listCentralDirectoryUsers(Hub $hub): array
+    {
+        // Central deploy (including hub switcher acting on Shared/WL): local users.
+        if (config('hub.is_control_plane')) {
+            return $this->centralDirectoryFromLocalDb();
+        }
+
+        // Content hub deploy: ask Central over CENTRAL_API_URL.
+        return $this->centralDirectoryFromCentralApi($hub);
     }
 
     /**
@@ -459,74 +483,126 @@ class LiveChatService
     }
 
     /**
-     * @return list<array{id:int,name:string,email:string}>
+     * @return list<array{id:int,name:string,email:string,role:?string,role_label:?string}>
      */
-    private function centralAgentsFromLocalUsers(): array
+    private function centralDirectoryFromLocalDb(): array
     {
-        if (! Schema::hasColumn('users', 'live_chat_access')) {
-            return [];
-        }
-
         return User::query()
-            ->where('live_chat_access', true)
             ->where(function ($q) {
-                $q->where('is_discontinued', false)->orWhereNull('is_discontinued');
+                if (Schema::hasColumn('users', 'is_discontinued')) {
+                    $q->where('is_discontinued', false)->orWhereNull('is_discontinued');
+                }
             })
             ->orderBy('name')
-            ->get(['id', 'name', 'email'])
+            ->get(['id', 'name', 'email', 'role'])
             ->map(fn (User $u) => [
                 'id' => $u->id,
                 'name' => (string) $u->name,
                 'email' => (string) $u->email,
+                'role' => $u->role,
+                'role_label' => $u->role_label ?? null,
             ])
             ->values()
             ->all();
     }
 
     /**
+     * @return list<array{id:int,name:string,email:string,role:?string,role_label:?string}>
+     */
+    private function centralDirectoryFromCentralApi(Hub $hub): array
+    {
+        $base = rtrim((string) config('services.hub_backup.central_api_url', ''), '/');
+        if ($base === '') {
+            throw ValidationException::withMessages([
+                'live_chat' => 'CENTRAL_API_URL is not configured on this hub, so Central users cannot be listed. Ask Power Admin to complete deploy wiring.',
+            ]);
+        }
+
+        $token = (string) ($hub->backup_token ?: config('services.hub_backup.secret', ''));
+        if ($token === '') {
+            throw ValidationException::withMessages([
+                'live_chat' => 'This hub has no backup/identity token to call Central. Ask Power Admin to sync deploy wiring.',
+            ]);
+        }
+
+        try {
+            $response = Http::timeout(20)
+                ->acceptJson()
+                ->withHeaders([
+                    HubInternalAuth::HEADER_BACKUP => $token,
+                    'X-Hub-Slug' => (string) $hub->slug,
+                ])
+                ->get($base.'/internal/live-chat/central-users', [
+                    'hub_slug' => (string) $hub->slug,
+                ]);
+        } catch (Throwable $e) {
+            report($e);
+            throw ValidationException::withMessages([
+                'live_chat' => 'Could not reach Central Hub to load users: '.$e->getMessage(),
+            ]);
+        }
+
+        if (! $response->successful()) {
+            throw ValidationException::withMessages([
+                'live_chat' => 'Central Hub refused the Live Chat user directory request (HTTP '.$response->status().').',
+            ]);
+        }
+
+        $rows = $response->json('data');
+        if (! is_array($rows)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $id = (int) ($row['id'] ?? 0);
+            if ($id < 1) {
+                continue;
+            }
+            $out[] = [
+                'id' => $id,
+                'name' => (string) ($row['name'] ?? ''),
+                'email' => (string) ($row['email'] ?? ''),
+                'role' => $row['role'] ?? null,
+                'role_label' => $row['role_label'] ?? null,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
      * @param  list<array{id:int,name:string,email:string}>  $agents
      */
-    private function syncAgentsToContentHubs(array $agents): void
+    private function pushAgentsToRemoteHub(Hub $hub, array $agents): void
     {
         $payload = json_encode(array_values($agents));
 
-        // Update Central registry rows for content hubs.
-        Hub::query()
-            ->whereIn('type', [Hub::TYPE_SHARED, Hub::TYPE_WHITE_LABEL])
-            ->orderBy('id')
-            ->each(function (Hub $hub) use ($agents, $payload) {
-                if (Schema::hasColumn('hubs', 'live_chat_agents')) {
-                    $hub->live_chat_agents = $agents;
-                    $hub->save();
-                }
-
-                if (! $hub->hasRemoteDatabaseConfigured()) {
+        try {
+            $this->remoteDb->run($hub, function (string $connection) use ($hub, $payload) {
+                $schema = DB::connection($connection)->getSchemaBuilder();
+                if (! $schema->hasTable('hubs') || ! $schema->hasColumn('hubs', 'live_chat_agents')) {
                     return;
                 }
 
-                try {
-                    $this->remoteDb->run($hub, function (string $connection) use ($hub, $payload) {
-                        $schema = DB::connection($connection)->getSchemaBuilder();
-                        if (! $schema->hasTable('hubs') || ! $schema->hasColumn('hubs', 'live_chat_agents')) {
-                            return;
+                DB::connection($connection)->table('hubs')
+                    ->where(function ($q) use ($hub, $schema) {
+                        $q->where('slug', $hub->slug);
+                        if ($schema->hasColumn('hubs', 'type')) {
+                            $q->orWhereIn('type', [Hub::TYPE_SHARED, Hub::TYPE_WHITE_LABEL]);
                         }
-
-                        DB::connection($connection)->table('hubs')
-                            ->where(function ($q) use ($hub, $schema) {
-                                $q->where('slug', $hub->slug);
-                                if ($schema->hasColumn('hubs', 'type')) {
-                                    $q->orWhereIn('type', [Hub::TYPE_SHARED, Hub::TYPE_WHITE_LABEL]);
-                                }
-                            })
-                            ->update([
-                                'live_chat_agents' => $payload,
-                                'updated_at' => now(),
-                            ]);
-                    });
-                } catch (Throwable $e) {
-                    report($e);
-                }
+                    })
+                    ->update([
+                        'live_chat_agents' => $payload,
+                        'updated_at' => now(),
+                    ]);
             });
+        } catch (Throwable $e) {
+            report($e);
+        }
     }
 
     /**

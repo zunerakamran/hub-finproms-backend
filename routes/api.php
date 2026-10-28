@@ -29,6 +29,7 @@ use App\Http\Controllers\Api\GeneralComplianceController;
 use App\Http\Controllers\Api\GeneralComplianceContentTypeController;
 use App\Http\Controllers\Api\SupportTicketController;
 use App\Http\Controllers\Api\LiveChatController;
+use App\Http\Controllers\Api\InternalLiveChatController;
 use App\Http\Controllers\Api\SecurityMonitoringController;
 use App\Http\Controllers\Api\SecurityNavigationController;
 use App\Http\Controllers\Api\TaxonomyAddRequestController;
@@ -163,6 +164,9 @@ Route::middleware('throttle:internal-hub')->group(function () {
         ->where('kind', 'backend|frontend');
 
     Route::post('/internal/deploy-env/apply', [\App\Http\Controllers\Api\InternalDeployEnvController::class, 'apply']);
+
+    // Content hubs → Central: directory of Central users for Live Chat contact picker.
+    Route::get('/internal/live-chat/central-users', [InternalLiveChatController::class, 'centralUsers']);
 });
 
 // Hub iframe preview of live advisor sites (bypasses X-Frame-Options on cPanel).
