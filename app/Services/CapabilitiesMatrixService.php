@@ -129,13 +129,14 @@ class CapabilitiesMatrixService
             || $group === Hub::GROUP_SOCIAL_MEDIA_COMPLIANCE
             || $group === Hub::GROUP_GENERAL_COMPLIANCE
             || $group === Hub::GROUP_SUPPORT_TICKETS
+            || $group === Hub::GROUP_LIVE_CHAT
             || $group === Hub::GROUP_SECURITY_MONITORING
             || $group === Hub::GROUP_WEBSITE_TEMPLATE_LIBRARY
             || $group === Hub::GROUP_WEBSITE_COMPLIANCE
             || $group === Hub::GROUP_MODULE_PRICING
         ) {
-            // User-facing / compliance / support / security caps apply to every role column so
-            // Power Admin can enable them for staff and users alike (no hard role lock-in).
+            // User-facing / compliance / support / live chat / security caps apply to every
+            // role column so Power Admin can enable them for staff and users alike.
             return $this->allMatrixRoles();
         }
 
@@ -222,6 +223,7 @@ class CapabilitiesMatrixService
         $smcModuleOn = $hub->hasSocialMediaComplianceModule();
         $gcModuleOn = $hub->hasGeneralComplianceModule();
         $stOn = $hub->hasSupportTicketsFunctionality();
+        $lcOn = $hub->hasLiveChatFunctionality();
         $secmonOn = $hub->hasSecurityMonitoringFunctionality();
         $wcModuleOn = $hub->hasWebsiteComplianceModule();
         $wtlModuleOn = $hub->hasWebsiteTemplateLibraryModule();
@@ -253,6 +255,7 @@ class CapabilitiesMatrixService
             $requiresSmcModule = Hub::isSocialMediaComplianceCapability($key);
             $requiresGcModule = Hub::isGeneralComplianceCapability($key);
             $requiresSupportTickets = Hub::isSupportTicketsCapability($key);
+            $requiresLiveChat = Hub::isLiveChatCapability($key);
             $requiresSecurityMonitoring = Hub::isSecurityMonitoringCapability($key);
             $requiresWcModule = Hub::isWebsiteComplianceCapability($key);
             $requiresWtlModule = Hub::isWebsiteTemplateLibraryCapability($key);
@@ -276,6 +279,7 @@ class CapabilitiesMatrixService
                     || ($requiresModulePricing && ! $modulePricingOn && ! $this->modulePricingCapActiveWithoutCharges($key))
                     || ($requiresFirmDocuments && ! $firmDocumentsOn)
                     || ($requiresSupportTickets && ! $stOn)
+                    || ($requiresLiveChat && ! $lcOn)
                     || ($requiresSecurityMonitoring && ! $secmonOn)
                 ) {
                     $inactive = true;
@@ -286,6 +290,7 @@ class CapabilitiesMatrixService
                     || ($requiresSmcModule && ! $smcModuleOn)
                     || ($requiresGcModule && ! $gcModuleOn)
                     || ($requiresSupportTickets && ! $stOn)
+                    || ($requiresLiveChat && ! $lcOn)
                     || ($requiresSecurityMonitoring && ! $secmonOn)
                     || ($requiresWcModule && ! $wcModuleOn)
                     || ($requiresWtlModule && ! $wtlModuleOn)
@@ -317,6 +322,8 @@ class CapabilitiesMatrixService
                     $inactiveReason = 'module_general_compliance_off';
                 } elseif ($requiresSupportTickets && ! $stOn) {
                     $inactiveReason = 'support_tickets_off';
+                } elseif ($requiresLiveChat && ! $lcOn) {
+                    $inactiveReason = 'live_chat_off';
                 } elseif ($requiresSecurityMonitoring && ! $secmonOn) {
                     $inactiveReason = 'security_monitoring_off';
                 } elseif ($requiresWtlModule && ! $wtlModuleOn) {
@@ -378,6 +385,8 @@ class CapabilitiesMatrixService
                 $requiresModule = 'module_general_compliance';
             } elseif ($requiresSupportTickets) {
                 $requiresModule = 'support_tickets';
+            } elseif ($requiresLiveChat) {
+                $requiresModule = 'live_chat';
             } elseif ($requiresSecurityMonitoring) {
                 $requiresModule = 'security_monitoring';
             } elseif ($requiresWtlModule) {
@@ -1154,6 +1163,15 @@ class CapabilitiesMatrixService
             }
         }
 
+        // Live Chat caps default OFF for every role until Power Admin enables them.
+        foreach ($this->allMatrixRoles() as $role) {
+            foreach (Hub::LIVE_CHAT_CAPABILITY_KEYS as $key) {
+                if (isset($matrix[$role])) {
+                    $matrix[$role][$key] = false;
+                }
+            }
+        }
+
         // Top Management — all report types ON by default (firm-scoped unless
         // Central / Network firm membership → hub-wide via visibility service).
         if (isset($matrix[User::ROLE_TOP_MANAGEMENT])) {
@@ -1562,6 +1580,11 @@ class CapabilitiesMatrixService
 
         // Support Tickets caps are inactive while Functionalities → Support Tickets is off.
         if (Hub::isSupportTicketsCapability($flag) && ! $hub->hasSupportTicketsFunctionality()) {
+            return false;
+        }
+
+        // Live Chat caps are inactive while Functionalities → Live Chat is off.
+        if (Hub::isLiveChatCapability($flag) && ! $hub->hasLiveChatFunctionality()) {
             return false;
         }
 

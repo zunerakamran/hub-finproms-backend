@@ -160,6 +160,7 @@ class User extends Authenticatable
         'mfa_enabled',
         'mfa_secret',
         'mfa_confirmed_at',
+        'live_chat_access',
         'avatar_path',
     ];
 
@@ -201,6 +202,7 @@ class User extends Authenticatable
             'mfa_enabled' => 'boolean',
             'mfa_secret' => 'encrypted',
             'mfa_confirmed_at' => 'datetime',
+            'live_chat_access' => 'boolean',
         ];
     }
 

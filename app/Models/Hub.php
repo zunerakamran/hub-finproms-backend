@@ -53,6 +53,8 @@ class Hub extends Model
 
     public const GROUP_SUPPORT_TICKETS = 'support_tickets';
 
+    public const GROUP_LIVE_CHAT = 'live_chat';
+
     public const GROUP_SECURITY_MONITORING = 'security_monitoring';
 
     public const GROUP_WEBSITE_COMPLIANCE = 'website_compliance';
@@ -98,6 +100,7 @@ class Hub extends Model
         self::GROUP_SOCIAL_MEDIA_COMPLIANCE => 'Social Media Pre Approval',
         self::GROUP_GENERAL_COMPLIANCE => 'Generic Content Pre Approval',
         self::GROUP_SUPPORT_TICKETS => 'Support Tickets',
+        self::GROUP_LIVE_CHAT => 'Live Chat',
         self::GROUP_SECURITY_MONITORING => 'Security Monitoring',
         self::GROUP_WEBSITE_TEMPLATE_LIBRARY => 'Website Template Library',
         self::GROUP_WEBSITE_COMPLIANCE => 'Website Content Pre Approval',
@@ -120,6 +123,7 @@ class Hub extends Model
         self::GROUP_SOCIAL_MEDIA_COMPLIANCE,
         self::GROUP_GENERAL_COMPLIANCE,
         self::GROUP_SUPPORT_TICKETS,
+        self::GROUP_LIVE_CHAT,
         self::GROUP_SECURITY_MONITORING,
         self::GROUP_WEBSITE_TEMPLATE_LIBRARY,
         self::GROUP_WEBSITE_COMPLIANCE,
@@ -165,6 +169,7 @@ class Hub extends Model
         self::GROUP_SOCIAL_MEDIA_COMPLIANCE,
         self::GROUP_GENERAL_COMPLIANCE,
         self::GROUP_SUPPORT_TICKETS,
+        self::GROUP_LIVE_CHAT,
         self::GROUP_SECURITY_MONITORING,
         self::GROUP_WEBSITE_TEMPLATE_LIBRARY,
         self::GROUP_WEBSITE_COMPLIANCE,
@@ -701,6 +706,16 @@ class Hub extends Model
     ];
 
     /**
+     * Live Chat capabilities — inactive while Functionalities → live_chat is off.
+     *
+     * @var list<string>
+     */
+    public const LIVE_CHAT_CAPABILITY_KEYS = [
+        'lc_use_chat',
+        'lc_manage_access',
+    ];
+
+    /**
      * Security Monitoring capabilities — inactive while Functionalities → security_monitoring is off.
      *
      * @var list<string>
@@ -938,6 +953,13 @@ class Hub extends Model
         'support_tickets' => [
             'label' => 'Support Tickets',
             'description' => 'When on, Support Tickets capabilities become available on the matrix so users can report system errors (module area, description, screenshots) and capable roles can manage the queue / change status. Available on Shared, White-label, and Central Hub.',
+            'group' => self::GROUP_BEHAVIOUR,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'live_chat' => [
+            'label' => 'Live Chat',
+            'description' => 'When on, Live Chat capabilities become available so content-hub users can message selected Central Hub users in real time (polling). On Central Hub, admins pick which Central users have access via the Live Chat access checkboxes. Not a Modules-page billable packaging module.',
             'group' => self::GROUP_BEHAVIOUR,
             'default_shared' => false,
             'default_white_label' => false,
@@ -1717,6 +1739,22 @@ class Hub extends Model
             'default_white_label' => false,
         ],
 
+        // --- Live Chat (blurred while Functionalities → live_chat is off) ---
+        'lc_use_chat' => [
+            'label' => 'Use Live Chat',
+            'description' => 'Open Live Chat, start or continue conversations, and send messages. On content hubs this talks to checked Central Hub agents; on Central Hub this is for agents who also have Live Chat access checked.',
+            'group' => self::GROUP_LIVE_CHAT,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'lc_manage_access' => [
+            'label' => 'Manage Live Chat access',
+            'description' => 'On Central Hub only: choose which Central Hub users appear as Live Chat contacts for Shared / White-label hub users (checkbox picker). Synced to content hubs with Live Chat enabled.',
+            'group' => self::GROUP_LIVE_CHAT,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+
         // --- Security Monitoring (blurred while Functionalities → security_monitoring is off) ---
         'secmon_view_events' => [
             'label' => 'View security events',
@@ -1940,6 +1978,7 @@ class Hub extends Model
         'db_ssl_mode',
         'db_ssl_ca',
         'checklist',
+        'live_chat_agents',
         'enabled_module_package_ids',
         'role_capabilities',
         'role_display_names',
@@ -2001,6 +2040,7 @@ class Hub extends Model
         return [
             'is_active' => 'boolean',
             'checklist' => 'array',
+            'live_chat_agents' => 'array',
             'enabled_module_package_ids' => 'array',
             'role_capabilities' => 'array',
             'role_display_names' => 'array',
@@ -2228,6 +2268,12 @@ class Hub extends Model
             || ((self::CHECKLIST_DEFINITIONS[$key]['group'] ?? null) === self::GROUP_SUPPORT_TICKETS);
     }
 
+    public static function isLiveChatCapability(string $key): bool
+    {
+        return in_array($key, self::LIVE_CHAT_CAPABILITY_KEYS, true)
+            || ((self::CHECKLIST_DEFINITIONS[$key]['group'] ?? null) === self::GROUP_LIVE_CHAT);
+    }
+
     public static function isSecurityMonitoringCapability(string $key): bool
     {
         return in_array($key, self::SECURITY_MONITORING_CAPABILITY_KEYS, true)
@@ -2318,6 +2364,11 @@ class Hub extends Model
         return (bool) ($this->resolvedChecklist()['support_tickets'] ?? false);
     }
 
+    public function hasLiveChatFunctionality(): bool
+    {
+        return (bool) ($this->resolvedChecklist()['live_chat'] ?? false);
+    }
+
     public function hasSecurityMonitoringFunctionality(): bool
     {
         return (bool) ($this->resolvedChecklist()['security_monitoring'] ?? false);
@@ -2403,6 +2454,7 @@ class Hub extends Model
             $defaults['module_website_compliance'] = false;
             $defaults['module_general_compliance'] = false;
             $defaults['support_tickets'] = false;
+            $defaults['live_chat'] = false;
             $defaults['security_monitoring'] = false;
             $defaults['charge_amount_per_module'] = false;
             $defaults['charge_recurring_per_module'] = false;

@@ -77,6 +77,7 @@ class WhiteLabelHubSyncService
                     'session_lifetime_minutes' => $hub->session_lifetime_minutes,
                     'frontend_url' => $hub->frontend_url,
                     'checklist' => json_encode($hub->resolvedChecklist()),
+                    'live_chat_agents' => json_encode(is_array($hub->live_chat_agents) ? $hub->live_chat_agents : []),
                     'role_capabilities' => json_encode($roleCaps),
                     'role_display_names' => json_encode($hub->role_display_names),
                     'compliance_status_display_names' => json_encode($hub->compliance_status_display_names),

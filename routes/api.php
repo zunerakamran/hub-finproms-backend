@@ -28,6 +28,7 @@ use App\Http\Controllers\Api\SocialMediaComplianceController;
 use App\Http\Controllers\Api\GeneralComplianceController;
 use App\Http\Controllers\Api\GeneralComplianceContentTypeController;
 use App\Http\Controllers\Api\SupportTicketController;
+use App\Http\Controllers\Api\LiveChatController;
 use App\Http\Controllers\Api\SecurityMonitoringController;
 use App\Http\Controllers\Api\SecurityNavigationController;
 use App\Http\Controllers\Api\TaxonomyAddRequestController;
@@ -301,6 +302,27 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/support-tickets/{supportTicket}', [SupportTicketController::class, 'show']);
         Route::middleware('hub_can:st_comment_on_tickets')->group(function () {
             Route::post('/support-tickets/{supportTicket}/comments', [SupportTicketController::class, 'comment']);
+        });
+    });
+
+    // Live Chat — hub users ↔ selected Central Hub agents (lc_* capabilities).
+    Route::middleware('acting_wl_wc_db')->group(function () {
+        Route::middleware('hub_can:lc_use_chat')->group(function () {
+            Route::get('/live-chat/options', [LiveChatController::class, 'options']);
+            Route::get('/live-chat/unread', [LiveChatController::class, 'unread']);
+            Route::get('/live-chat/conversations', [LiveChatController::class, 'index']);
+            Route::post('/live-chat/conversations', [LiveChatController::class, 'store']);
+            Route::get('/live-chat/conversations/{conversation}', [LiveChatController::class, 'show'])
+                ->whereNumber('conversation');
+            Route::post('/live-chat/conversations/{conversation}/messages', [LiveChatController::class, 'sendMessage'])
+                ->whereNumber('conversation');
+            Route::post('/live-chat/conversations/{conversation}/close', [LiveChatController::class, 'close'])
+                ->whereNumber('conversation');
+        });
+
+        Route::middleware('hub_can:lc_manage_access')->group(function () {
+            Route::get('/live-chat/access', [LiveChatController::class, 'accessIndex']);
+            Route::put('/live-chat/access', [LiveChatController::class, 'accessUpdate']);
         });
     });
 

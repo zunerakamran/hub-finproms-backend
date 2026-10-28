@@ -24,7 +24,7 @@ class PowerAdminCapabilitiesService
         ],
         'pa_manage_hub_checklists' => [
             'label' => 'Manage hub checklists',
-            'description' => 'Edit per-hub Functionalities and Modules (access, credits, distribution, Social Media / Website / General Compliance modules, Support Tickets functionality).',
+            'description' => 'Edit per-hub Functionalities and Modules (access, credits, distribution, Social Media / Website / General Compliance modules, Support Tickets / Live Chat functionalities).',
             'default' => true,
         ],
         'pa_manage_payment_methods' => [

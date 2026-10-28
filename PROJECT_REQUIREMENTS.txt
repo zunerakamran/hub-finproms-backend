@@ -1,8 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-25 (wc_request_go_live capability; Website Admin role +
-  Network/Firm Admin multi-assign; Delegated compliance access picker filter)
+Last updated: 2026-10-28 (Live Chat module — hub users ↔ selected Central agents)
 
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
@@ -1023,6 +1022,41 @@ IMPLEMENTATION: UserCapabilitiesService; wired in CapabilitiesMatrixService
   Authenticated `/api/gc/file/{id}` remains only as a fallback for any rows
   left from that experiment (`is_encrypted=true`).
 
+3.3d2 Live Chat (hub users ↔ Central Hub agents)
+- Power Admin enables **Live Chat** as a hub Functionalities flag (`live_chat`)
+  — NOT a Modules-page billable packaging module. Available on Shared,
+  White-label, and Central Hub.
+- Purpose: users on content hubs (Shared / White-label — subsets registered
+  under Central) can message selected Central Hub users in near-real time
+  (client polling ~4s; no websocket dependency).
+- Central access picker (REQUIRED):
+  - On Central Hub, capable admins open `/my-dashboard/live-chat/access`
+  - Checkbox list of ALL Central Hub users; checked users:
+      1) may use the Live Chat module on Central (when `lc_use_chat` is also on)
+      2) appear as available contacts for content-hub users
+  - Stored as `users.live_chat_access` (boolean) on the Central DB
+  - On save, the enabled agent directory is synced to content hubs as
+    `hubs.live_chat_agents` JSON (via remote DB when wiring is ready)
+- Conversation storage: tables `live_chat_conversations` + `live_chat_messages`
+  live on each content hub DB (hub user is local). Central agents read/write
+  those rows over the existing remote DB connection (same pattern as other
+  Central → hub tools). Each conversation is 1 hub user ↔ 1 Central agent.
+- Capabilities (`lc_*`, blurred while Functionalities → live_chat is off):
+  - `lc_use_chat` — open Live Chat, start/continue conversations, send messages
+  - `lc_manage_access` — Central only: manage the access checkbox picker
+- APIs:
+  - GET  /api/live-chat/options
+  - GET  /api/live-chat/unread
+  - GET  /api/live-chat/conversations
+  - POST /api/live-chat/conversations          { central_user_id, message? }
+  - GET  /api/live-chat/conversations/{id}     (?source_hub_slug= for Central)
+  - POST /api/live-chat/conversations/{id}/messages  { body, source_hub_slug? }
+  - POST /api/live-chat/conversations/{id}/close     { source_hub_slug? }
+  - GET/PUT /api/live-chat/access              { user_ids: int[] } (Central)
+- Activity logs: `live_chat.start` / `live_chat.message` / `live_chat.access_updated`
+- Frontend: `/my-dashboard/live-chat` (inbox + thread) and
+  `/my-dashboard/live-chat/access` (Central checkbox picker)
+
 3.3e Support Tickets (error / bug reporting)
 - Power Admin enables **Support Tickets** as a hub Functionalities flag
   (`support_tickets`) — NOT a Modules-page product module (the 6 product
@@ -1690,6 +1724,10 @@ Either path designates Heads; both MUST stay in sync. Multiple admins OK:
   - Support Tickets — `support_tickets` (default OFF). When on, Support Tickets
     capabilities (`st_*`) become available on the matrix (section 3.3e). Not a
     Modules-page product module.
+  - Live Chat — `live_chat` (default OFF). When on, Live Chat capabilities
+    (`lc_*`) become available on the matrix (section 3.3d2). Hub users message
+    Central agents selected via the Central access checkbox picker. Not a
+    Modules-page product module.
   - Security Monitoring — `security_monitoring` (default OFF). When on, Security
     Monitoring capabilities (`secmon_*`) become available on the matrix
     (sections 3.3f / 6F). Separate feature module for regular security
@@ -2081,6 +2119,13 @@ Either path designates Heads; both MUST stay in sync. Multiple admins OK:
   - st_comment_on_tickets — follow-up comments on tickets the user can view
   - All roles available in the matrix; defaults OFF until Power Admin enables
     (managers default ON for view-all + change-status)
+
+  Live Chat (blurred while Functionalities → live_chat is off):
+  - lc_use_chat — open Live Chat, start/continue conversations, send messages
+  - lc_manage_access — Central Hub only: checkbox which Central users have
+    Live Chat access and appear as contacts for content-hub users
+  - All roles available in the matrix; defaults OFF until Power Admin enables
+  - Central agents also require `users.live_chat_access` (access picker)
 
   Hub-admin dashboard also includes:
   - Manage hub modules (`dashboard_manage_modules`) — who may enable/disable
@@ -3170,6 +3215,11 @@ STEP 1 — Shared hub core (content hub)
     own firm; hub-wide caps unchanged (§3.4.2 / 3.4.4)
 [x] Frontend: multi-role assign shows Network Admin / Firm Admin; Firms /
     Head UI reflects synced roles; Document Repository nav labels as needed
+[x] Live Chat functionality (`live_chat`) + APIs (hub ↔ Central agents,
+    Central access checkbox picker `users.live_chat_access`, agent sync
+    `hubs.live_chat_agents`, remote-DB inbox for Central agents) — §3.3d2
+[x] Frontend: Live Chat nav + pages (`/my-dashboard/live-chat`,
+    `/my-dashboard/live-chat/access`) gated by `lc_use_chat` / `lc_manage_access`
 [x] Support Tickets functionality (`support_tickets`) + APIs (submit with
     module/screenshots, queue, change status, comments) + `st_*` capabilities
 [x] Frontend: Support Tickets nav (My tickets / New ticket / All tickets) + pages
