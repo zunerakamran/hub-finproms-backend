@@ -113,7 +113,7 @@ class SupportTicketService
         $screenshots = $this->filesFromData($data, 'screenshots');
         $this->assertAttachmentLimits($screenshots);
 
-        $ticket = DB::transaction(function () use ($subjectUser, $user, $subject, $description, $moduleArea, $category, $priority, $data, $screenshots) {
+        $ticket = $this->onTicketConnection(function () use ($subjectUser, $user, $subject, $description, $moduleArea, $category, $priority, $data, $screenshots) {
             $ticket = SupportTicket::query()->create([
                 'user_id' => $subjectUser->id,
                 'subject' => $subject,
@@ -255,7 +255,7 @@ class SupportTicketService
 
         $from = $ticket->status ?: SupportTicket::STATUS_OPEN;
 
-        $ticket = DB::transaction(function () use ($ticket, $user, $status, $comment, $from, $screenshots) {
+        $ticket = $this->onTicketConnection(function () use ($ticket, $user, $status, $comment, $from, $screenshots) {
             $ticket->status = $status;
             $ticket->status_note = $comment !== '' ? $comment : $ticket->status_note;
             $ticket->status_changed_by = $user->id;
@@ -340,7 +340,7 @@ class SupportTicketService
         $screenshots = $this->filesFromData($data, 'screenshots');
         $this->assertAttachmentLimits($screenshots);
 
-        DB::transaction(function () use ($ticket, $user, $body, $screenshots) {
+        $this->onTicketConnection(function () use ($ticket, $user, $body, $screenshots) {
             SupportTicketComment::query()->create([
                 'ticket_id' => $ticket->id,
                 'user_id' => $user->id,
@@ -485,5 +485,21 @@ class SupportTicketService
         }
 
         return mb_substr($text, 0, $max);
+    }
+
+    /**
+     * Run a write unit on the same connection SupportTicket models are remounted onto
+     * (acting Shared / WL DB), not the default Central connection.
+     *
+     * @template T
+     * @param  callable(): T  $callback
+     * @return T
+     */
+    private function onTicketConnection(callable $callback): mixed
+    {
+        $connection = (new SupportTicket)->getConnectionName()
+            ?: (string) config('database.default');
+
+        return DB::connection($connection)->transaction($callback);
     }
 }

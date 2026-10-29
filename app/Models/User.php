@@ -119,11 +119,18 @@ class User extends Authenticatable
     ];
 
     /**
-     * While WC is remounted onto an acting white-labelled DB, resolve advisors /
-     * editors for wc_* relations from that same database.
+     * Related hub users (advisors / ticket submitters / WC editors) follow the
+     * acting remount via WcDatabaseContext when this model has no pinned
+     * connection. The authenticated control-plane user is pinned to Central
+     * (see UseActingWhiteLabelWcDatabase) so role / capability checks never
+     * collide with content-hub user_roles rows that share the same numeric id.
      */
     public function getConnectionName(): ?string
     {
+        if ($this->connection !== null && $this->connection !== '') {
+            return $this->connection;
+        }
+
         if (WcDatabaseContext::active()) {
             return WcDatabaseContext::connection();
         }

@@ -19,6 +19,12 @@ class SupportTicketsTest extends TestCase
 
     private function createHubWithSupportTickets(): Hub
     {
+        config([
+            'hub.current_slug' => 'shared-st',
+            'hub.type' => Hub::TYPE_SHARED,
+            'hub.is_control_plane' => false,
+        ]);
+
         $hub = Hub::query()->create([
             'name' => 'Shared Hub',
             'slug' => 'shared-st',
@@ -131,6 +137,12 @@ class SupportTicketsTest extends TestCase
 
     public function test_submit_blocked_when_functionality_off(): void
     {
+        config([
+            'hub.current_slug' => 'shared-st-off',
+            'hub.type' => Hub::TYPE_SHARED,
+            'hub.is_control_plane' => false,
+        ]);
+
         Hub::query()->create([
             'name' => 'Shared Hub Off',
             'slug' => 'shared-st-off',

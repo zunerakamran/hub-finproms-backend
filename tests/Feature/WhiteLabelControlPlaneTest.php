@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Models\Hub;
 use App\Models\User;
+use App\Services\CapabilitiesMatrixService;
+use App\Services\HubService;
 use App\Services\WhiteLabelDatabaseService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -17,6 +19,16 @@ class WhiteLabelControlPlaneTest extends TestCase
     use RefreshDatabase;
 
     private ?string $remoteSqlitePath = null;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        config([
+            'hub.current_slug' => 'central',
+            'hub.type' => 'central',
+            'hub.is_control_plane' => true,
+        ]);
+    }
 
     protected function tearDown(): void
     {
@@ -32,10 +44,10 @@ class WhiteLabelControlPlaneTest extends TestCase
         [$admin, $hub] = $this->actingPowerAdminOnWiredHub();
 
         $response = $this->postJson('/api/power-admin/users', [
-            'name' => 'WL Manager',
+            'name' => 'WL Advisor',
             'email' => 'wl-manager@example.com',
             'password' => 'password12',
-            'role' => User::ROLE_MANAGER,
+            'role' => User::ROLE_ADVISOR,
         ]);
 
         $response->assertCreated()
@@ -611,6 +623,20 @@ class WhiteLabelControlPlaneTest extends TestCase
                 $table->timestamps();
             });
 
+            Schema::connection($connection)->create('social_media_compliance_request_attachments', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('version_id');
+                $table->string('original_name');
+                $table->string('file_path', 500);
+                $table->string('file_url', 500)->nullable();
+                $table->string('mime_type', 120)->nullable();
+                $table->unsignedBigInteger('size_bytes')->default(0);
+                $table->unsignedSmallInteger('sort_order')->default(0);
+                $table->timestamps();
+            });
+
+            $this->createRemoteComplianceAuditEventsTable($connection);
+
             $requestId = DB::connection($connection)->table('social_media_compliance_requests')->insertGetId([
                 'user_id' => 1,
                 'post_id' => null,
@@ -699,6 +725,8 @@ class WhiteLabelControlPlaneTest extends TestCase
                 $table->timestamps();
             });
 
+            $this->createRemoteComplianceAuditEventsTable($connection);
+
             $requestId = DB::connection($connection)->table('general_compliance_requests')->insertGetId([
                 'user_id' => 1,
                 'name' => 'WL GC Advisor',
@@ -733,6 +761,18 @@ class WhiteLabelControlPlaneTest extends TestCase
 
     private function actingPowerAdminOnWiredHub(): array
     {
+        $matrix = app(CapabilitiesMatrixService::class);
+        Hub::query()->create([
+            'name' => 'Central Hub Controller',
+            'slug' => 'central',
+            'type' => Hub::TYPE_CENTRAL,
+            'is_active' => true,
+            'checklist' => array_merge(Hub::defaultChecklist(Hub::TYPE_CENTRAL), [
+                'dashboard_control_white_label_hubs' => true,
+            ]),
+            'role_capabilities' => $matrix->defaultRoleCapabilities(Hub::TYPE_CENTRAL),
+        ]);
+
         Hub::query()->create([
             'name' => 'Shared Hub',
             'slug' => 'shared',
@@ -740,6 +780,8 @@ class WhiteLabelControlPlaneTest extends TestCase
             'is_active' => true,
             'checklist' => Hub::defaultChecklist(Hub::TYPE_SHARED),
         ]);
+
+        app(HubService::class)->forgetCurrentCache();
 
         $hub = $this->makeWiredWhiteLabelHub();
 
@@ -749,6 +791,32 @@ class WhiteLabelControlPlaneTest extends TestCase
         Sanctum::actingAs($admin);
 
         return [$admin, $hub];
+    }
+
+    private function createRemoteComplianceAuditEventsTable(string $connection): void
+    {
+        Schema::connection($connection)->create('compliance_audit_events', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('hub_id')->nullable();
+            $table->string('module', 16);
+            $table->string('subject_type');
+            $table->unsignedBigInteger('subject_id');
+            $table->string('event_type', 64);
+            $table->text('description')->nullable();
+            $table->string('from_status', 64)->nullable();
+            $table->string('to_status', 64)->nullable();
+            $table->unsignedInteger('version_number')->nullable();
+            $table->unsignedBigInteger('actor_user_id')->nullable();
+            $table->string('actor_name')->nullable();
+            $table->string('actor_email')->nullable();
+            $table->string('actor_role', 64)->nullable();
+            $table->unsignedBigInteger('related_user_id')->nullable();
+            $table->string('related_user_name')->nullable();
+            $table->string('related_user_email')->nullable();
+            $table->string('related_user_role', 64)->nullable();
+            $table->json('metadata')->nullable();
+            $table->timestamp('created_at')->useCurrent();
+        });
     }
 
     private function makeWiredWhiteLabelHub(): Hub

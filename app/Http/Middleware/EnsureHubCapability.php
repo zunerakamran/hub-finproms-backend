@@ -78,7 +78,7 @@ class EnsureHubCapability
                 }
             }
 
-            if ($this->controlPlaneRemoteWebsiteComplianceAllows($user, $hubForCap, $capability)) {
+            if ($this->controlPlaneRemoteActingAllows($user, $hubForCap, $capability)) {
                 return $next($request);
             }
 
@@ -107,9 +107,11 @@ class EnsureHubCapability
 
     /**
      * Power Admin / FinProms Admin are control-plane only. While the switcher is on a
-     * remote content hub with Website Compliance enabled, allow WC route caps remotely.
+     * remote content hub, allow remounted-module route caps using the in-memory
+     * control-plane role (not remounted user_roles). Module / functionality must
+     * still be enabled on the selected hub.
      */
-    private function controlPlaneRemoteWebsiteComplianceAllows(User $user, Hub $hubForCap, string $capability): bool
+    private function controlPlaneRemoteActingAllows(User $user, Hub $hubForCap, string $capability): bool
     {
         if (! ActingHubService::isControlPlaneRole((string) $user->role)) {
             return false;
@@ -119,21 +121,64 @@ class EnsureHubCapability
             return false;
         }
 
-        if (! Hub::isWebsiteComplianceCapability($capability)
-            && ! Hub::isWebsiteTemplateLibraryCapability($capability)
-            && $capability !== 'module_website_compliance'
-            && $capability !== 'module_website_template_library'
-        ) {
-            return false;
-        }
-
         if (Hub::isWebsiteTemplateLibraryCapability($capability)
             || $capability === 'module_website_template_library'
         ) {
             return $hubForCap->hasWebsiteTemplateLibraryModule();
         }
 
-        return $hubForCap->hasWebsiteComplianceModule();
+        if (Hub::isWebsiteComplianceCapability($capability)
+            || $capability === 'module_website_compliance'
+        ) {
+            return $hubForCap->hasWebsiteComplianceModule();
+        }
+
+        if (Hub::isSocialMediaComplianceCapability($capability)
+            || $capability === 'module_social_media_compliance'
+        ) {
+            return $hubForCap->hasSocialMediaComplianceModule();
+        }
+
+        if (Hub::isSocialMediaTemplateLibraryCapability($capability)
+            || $capability === 'module_social_media_template_library'
+            || Hub::isSocialMediaTemplateLibraryFunctionality($capability)
+        ) {
+            return $hubForCap->hasSocialMediaTemplateLibraryModule();
+        }
+
+        if (Hub::isGeneralComplianceCapability($capability)
+            || $capability === 'module_general_compliance'
+        ) {
+            return $hubForCap->hasGeneralComplianceModule();
+        }
+
+        if (Hub::isSupportTicketsCapability($capability)
+            || $capability === 'support_tickets'
+        ) {
+            return $hubForCap->hasSupportTicketsFunctionality();
+        }
+
+        if (Hub::isLiveChatCapability($capability)
+            || $capability === 'live_chat'
+        ) {
+            return $hubForCap->hasLiveChatFunctionality();
+        }
+
+        if (Hub::isSecurityMonitoringCapability($capability)
+            || $capability === 'security_monitoring'
+        ) {
+            return $hubForCap->hasSecurityMonitoringFunctionality();
+        }
+
+        if (in_array($capability, ['taxonomy_request_add', 'taxonomy_request_manage'], true)) {
+            return true;
+        }
+
+        if ($capability === 'dashboard_view_compliance_audit_trail') {
+            return true;
+        }
+
+        return false;
     }
 
     /**
