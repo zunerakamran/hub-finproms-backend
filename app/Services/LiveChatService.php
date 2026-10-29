@@ -7,6 +7,7 @@ use App\Models\LiveChatConversation;
 use App\Models\LiveChatMessage;
 use App\Models\User;
 use App\Support\HubInternalAuth;
+use App\Support\WebsiteCompliance\WcDatabaseContext;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
@@ -83,11 +84,17 @@ class LiveChatService
      */
     public function availableAgents(Hub $hub): array
     {
-        if ($hub->isCentral() || $hub->isControlPlane()) {
+        if (! $hub->isContentHub()) {
             return [];
         }
 
-        $agents = is_array($hub->live_chat_agents) ? $hub->live_chat_agents : [];
+        // Prefer the content hub DB copy when already remounted (hub switcher),
+        // else the Central registry column on $hub.
+        $agents = $this->readAgentsFromActingContext($hub);
+        if ($agents === null) {
+            $agents = is_array($hub->live_chat_agents) ? $hub->live_chat_agents : [];
+        }
+
         $out = [];
         foreach ($agents as $row) {
             if (! is_array($row)) {
@@ -105,6 +112,58 @@ class LiveChatService
         }
 
         return $out;
+    }
+
+    /**
+     * When acting_wl_wc_db has remounted onto the content hub, read
+     * live_chat_agents from that hubs row (avoids nested remote DB connect).
+     *
+     * @return list<array<string, mixed>>|null
+     */
+    private function readAgentsFromActingContext(Hub $hub): ?array
+    {
+        if (! WcDatabaseContext::active()) {
+            return null;
+        }
+        if (WcDatabaseContext::hubId() !== null && (int) WcDatabaseContext::hubId() !== (int) $hub->id) {
+            return null;
+        }
+
+        $connection = WcDatabaseContext::connection();
+        if (! is_string($connection) || $connection === '') {
+            return null;
+        }
+
+        try {
+            $schema = DB::connection($connection)->getSchemaBuilder();
+            if (! $schema->hasTable('hubs') || ! $schema->hasColumn('hubs', 'live_chat_agents')) {
+                return null;
+            }
+
+            $row = DB::connection($connection)->table('hubs')
+                ->where('slug', $hub->slug)
+                ->value('live_chat_agents');
+
+            if ($row === null && $schema->hasColumn('hubs', 'type')) {
+                $row = DB::connection($connection)->table('hubs')
+                    ->whereIn('type', [Hub::TYPE_SHARED, Hub::TYPE_WHITE_LABEL])
+                    ->value('live_chat_agents');
+            }
+
+            if ($row === null || $row === '') {
+                return [];
+            }
+            if (is_array($row)) {
+                return $row;
+            }
+            $decoded = json_decode((string) $row, true);
+
+            return is_array($decoded) ? $decoded : [];
+        } catch (Throwable $e) {
+            report($e);
+
+            return null;
+        }
     }
 
     /**
@@ -483,27 +542,40 @@ class LiveChatService
     }
 
     /**
+     * Central Hub users from the control-plane database.
+     *
+     * IMPORTANT: while Power Admin uses the hub switcher, `acting_wl_wc_db`
+     * remounts User onto the remote Shared/WL DB. We must clear that context
+     * so this directory is always Central users — never the acting hub’s users.
+     *
      * @return list<array{id:int,name:string,email:string,role:?string,role_label:?string}>
      */
     private function centralDirectoryFromLocalDb(): array
     {
-        return User::query()
-            ->where(function ($q) {
-                if (Schema::hasColumn('users', 'is_discontinued')) {
+        // Clear acting remote DB context so User does not remount onto Shared/WL.
+        return WcDatabaseContext::using(null, function () {
+            $connection = (string) config('database.default', 'mysql');
+
+            $query = User::on($connection);
+            if (Schema::connection($connection)->hasColumn('users', 'is_discontinued')) {
+                $query->where(function ($q) {
                     $q->where('is_discontinued', false)->orWhereNull('is_discontinued');
-                }
-            })
-            ->orderBy('name')
-            ->get(['id', 'name', 'email', 'role'])
-            ->map(fn (User $u) => [
-                'id' => $u->id,
-                'name' => (string) $u->name,
-                'email' => (string) $u->email,
-                'role' => $u->role,
-                'role_label' => $u->role_label ?? null,
-            ])
-            ->values()
-            ->all();
+                });
+            }
+
+            return $query
+                ->orderBy('name')
+                ->get(['id', 'name', 'email', 'role'])
+                ->map(fn (User $u) => [
+                    'id' => $u->id,
+                    'name' => (string) $u->name,
+                    'email' => (string) $u->email,
+                    'role' => $u->role,
+                    'role_label' => $u->role_label ?? null,
+                ])
+                ->values()
+                ->all();
+        });
     }
 
     /**

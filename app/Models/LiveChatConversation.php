@@ -2,12 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\WebsiteCompliance\UsesWcDatabaseContext;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class LiveChatConversation extends Model
 {
+    use UsesWcDatabaseContext;
+
     protected $table = 'live_chat_conversations';
 
     public const STATUS_OPEN = 'open';
