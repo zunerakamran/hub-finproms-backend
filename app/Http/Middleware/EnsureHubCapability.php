@@ -178,6 +178,19 @@ class EnsureHubCapability
             return true;
         }
 
+        // Import Users / private advisor tools — honor the selected hub matrix cell
+        // via roleCan (uses $user->role, not remounted user_roles).
+        if (in_array($capability, [
+            'advisor_excel_import',
+            'advisor_excel_template',
+            'advisor_excel_submit',
+            'advisor_excel_view_submissions',
+            'advisor_discontinue',
+            'dashboard_view_advisor_invoices',
+        ], true)) {
+            return $this->matrix->roleCan($hubForCap, (string) $user->role, $capability);
+        }
+
         return false;
     }
 

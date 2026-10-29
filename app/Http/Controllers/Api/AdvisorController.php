@@ -619,10 +619,26 @@ class AdvisorController extends Controller
 
         // Shared and White-label content hubs both use remote DBs when Central
         // is acting on them — pending Excel submissions live on that hub DB.
-        return $user
-            && $hub->isContentHub()
-            && $this->actingHubs->isActingRemotely($user)
-            && $hub->hasRemoteDatabaseConfigured();
+        if (! $user
+            || ! $hub->isContentHub()
+            || ! $this->actingHubs->isActingRemotely($user)
+        ) {
+            return false;
+        }
+
+        // Never fall back to the Central DB while a content hub is selected —
+        // that returns an empty Import Users history even when view-submissions
+        // is granted. Require remote credentials instead.
+        if (! $hub->hasRemoteDatabaseConfigured()) {
+            abort(response()->json([
+                'message' => 'This hub has no remote database wired in the Central registry. Add DB credentials under Power Admin → Hubs so Import Users can read submissions from "'.$hub->name.'".',
+                'hub_id' => $hub->id,
+                'hub_slug' => $hub->slug,
+                'requires_remote_database' => true,
+            ], 422));
+        }
+
+        return true;
     }
 
     /**
