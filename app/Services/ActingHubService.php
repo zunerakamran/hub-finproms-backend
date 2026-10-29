@@ -357,6 +357,11 @@ class ActingHubService
         $current = $this->hubs->current();
         $acting = $this->actingHub($user);
         $actingRemotely = $this->isActingRemotely($user);
+        $roleLabels = $acting->resolvedRoleLabels();
+        $complianceLabels = $acting->resolvedComplianceStatusLabels();
+        $dashboardNav = $acting->resolvedDashboardNav();
+        $moduleInvoiceSettings = $acting->moduleInvoiceSettingsPublicSummary();
+        $actingChecklist = $acting->resolvedChecklist();
 
         return [
             'enabled' => true,
@@ -374,11 +379,11 @@ class ActingHubService
                 'api_url' => $acting->apiBaseUrl(),
                 'media_base_url' => $acting->publicMediaBaseUrl(),
                 'branding' => $acting->brandingPayload(),
-                'role_labels' => $acting->resolvedRoleLabels(),
-                'compliance_status_labels' => $acting->resolvedComplianceStatusLabels(),
+                'role_labels' => $roleLabels,
+                'compliance_status_labels' => $complianceLabels,
                 // Sidebar separators / menu labels follow the selected hub.
-                'dashboard_nav' => $acting->resolvedDashboardNav(),
-                'module_invoice_settings' => $acting->moduleInvoiceSettingsPublicSummary(),
+                'dashboard_nav' => $dashboardNav,
+                'module_invoice_settings' => $moduleInvoiceSettings,
             ],
             'is_acting_on_white_label' => $acting->isWhiteLabel(),
             'is_acting_on_shared' => $acting->isShared() && $actingRemotely,
@@ -396,9 +401,12 @@ class ActingHubService
                 'slug' => $current->slug,
             ],
             'effective_capabilities' => $this->effectiveCapabilities($user),
-            'role_labels' => $acting->resolvedRoleLabels(),
-            'compliance_status_labels' => $acting->resolvedComplianceStatusLabels(),
-            'dashboard_nav' => $acting->resolvedDashboardNav(),
+            'role_labels' => $roleLabels,
+            'compliance_status_labels' => $complianceLabels,
+            'dashboard_nav' => $dashboardNav,
+            // Soft hub-switch: frontend can apply checklist without a second GET /hub.
+            'acting_checklist' => $actingChecklist,
+            'module_invoice_settings' => $moduleInvoiceSettings,
         ];
     }
 

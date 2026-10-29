@@ -589,6 +589,13 @@ class FirmDocumentAccessService
             return $fromRole;
         }
 
+        // Control-plane operators (Power Admin / FinProms Admin) use matrix caps for
+        // remote hubs — never open a tenant DB just to resolve Head of Firm during
+        // hub switcher / GET /hub (that RTT dominated switch latency).
+        if (ActingHubService::isControlPlaneRole((string) $user->role)) {
+            return null;
+        }
+
         if ($hub->isContentHub() && $hub->hasRemoteDatabaseConfigured()) {
             try {
                 return app(WhiteLabelDatabaseService::class)->run($hub, function (string $connection) use ($user) {
