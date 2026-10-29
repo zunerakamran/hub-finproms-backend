@@ -1039,14 +1039,17 @@ IMPLEMENTATION: UserCapabilitiesService; wired in CapabilitiesMatrixService
   - Checked users are stored per content hub as `hubs.live_chat_agents` JSON
     (id, name, email). Hub members may only start chats with those contacts.
 - Conversation storage: `live_chat_conversations` + `live_chat_messages` on
-  each content hub DB. Central agents with `lc_use_chat` read/write those
-  rows over remote DB (Central → hub). 1 hub user ↔ 1 Central agent.
+  each content hub DB. Central agents read/write those rows over remote DB
+  (Central → hub) when listed on that hub’s Central contacts. 1 hub user ↔
+  1 Central agent.
 - Capabilities (`lc_*`, blurred while Functionalities → live_chat is off):
-  - `lc_use_chat` — open Live Chat and send/receive messages (hub users and
-    Central agents). This is NOT the contact picker.
+  - `lc_use_chat` — Shared / White-label only: open Live Chat and message
+    the Central contacts for that hub. **Inactive on Central Hub** — Central
+    staff unlock Live Chat by being checked on a content hub’s Central
+    contacts page (not a Central matrix tick).
   - `lc_manage_access` — “Choose Central contacts”: open the checkbox page
-    on Shared / White-label only (inactive on Central matrix). Distinct job
-    from `lc_use_chat`.
+    on Shared / White-label only (inactive on Central matrix). That list is
+    also what grants Central users the Live Chat inbox.
 - APIs:
   - GET  /api/live-chat/options
   - GET  /api/live-chat/unread
@@ -2126,11 +2129,15 @@ Either path designates Heads; both MUST stay in sync. Multiple admins OK:
     (managers default ON for view-all + change-status)
 
   Live Chat (blurred while Functionalities → live_chat is off):
-  - lc_use_chat — open Live Chat and send/receive messages
+  - lc_use_chat — Shared / White-label only: open Live Chat / send messages
+    (inactive on Central — Central agents unlock via Central contacts)
   - lc_manage_access — “Choose Central contacts” (Shared / White-label only;
-    inactive on Central). Checkbox which Central Hub users this hub may message
-  - All roles available in the matrix; defaults OFF until Power Admin enables
-  - These are different jobs: use chat vs configure the Central contact list
+    inactive on Central). Checkbox which Central Hub users this hub may message;
+    checked users get the Central Live Chat inbox automatically
+  - All roles available in the matrix on content hubs; defaults OFF until
+    Power Admin enables
+  - Different jobs on content hubs: use chat vs configure the contact list;
+    Central has no Use Live Chat capability row
 
   Hub-admin dashboard also includes:
   - Manage hub modules (`dashboard_manage_modules`) — who may enable/disable

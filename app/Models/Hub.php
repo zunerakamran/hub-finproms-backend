@@ -959,7 +959,7 @@ class Hub extends Model
         ],
         'live_chat' => [
             'label' => 'Live Chat',
-            'description' => 'When on, Live Chat capabilities become available. Shared / White-label hubs choose which Central Hub users their members may message (Central contacts page). Central Hub staff with Use Live Chat can reply. Not a Modules-page billable packaging module.',
+            'description' => 'When on (Shared / White-label), Live Chat capabilities become available so hub members can message the Central contacts chosen on that hub. Central Hub does not use a separate “Use Live Chat” capability — staff appear in Live Chat only when a content hub checks them on Central contacts. Not a Modules-page billable packaging module.',
             'group' => self::GROUP_BEHAVIOUR,
             'default_shared' => false,
             'default_white_label' => false,
@@ -1742,14 +1742,14 @@ class Hub extends Model
         // --- Live Chat (blurred while Functionalities → live_chat is off) ---
         'lc_use_chat' => [
             'label' => 'Use Live Chat',
-            'description' => 'Open Live Chat and send/receive messages. On Shared / White-label hubs this chats with the Central contacts chosen for that hub. On Central Hub this lets staff reply to messages from content-hub users.',
+            'description' => 'Shared / White-label only: open Live Chat and send/receive messages with the Central contacts chosen for this hub. Inactive on Central Hub — Central staff get Live Chat when they are checked on a content hub’s Central contacts page (no separate Central capability).',
             'group' => self::GROUP_LIVE_CHAT,
             'default_shared' => false,
             'default_white_label' => false,
         ],
         'lc_manage_access' => [
             'label' => 'Choose Central contacts',
-            'description' => 'Shared / White-label only: open the checkbox page that selects which Central Hub users this hub may message. Not used on Central Hub itself (inactive there). Distinct from Use Live Chat — this only configures the contact list.',
+            'description' => 'Shared / White-label only: open the checkbox page that selects which Central Hub users this hub may message. That list is also what unlocks Live Chat for those Central users (no Use Live Chat tick on Central). Inactive on Central Hub.',
             'group' => self::GROUP_LIVE_CHAT,
             'default_shared' => false,
             'default_white_label' => false,

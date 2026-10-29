@@ -33,6 +33,17 @@ class LiveChatService
 
     public function assertCanUse(Hub $hub, User $user): void
     {
+        // Central inbox: unlocked by content-hub Central contacts (not a Central matrix tick).
+        if ($this->isCentralAgentContext($hub, $user)) {
+            if (! $this->centralUserMayUseChat($user)) {
+                throw ValidationException::withMessages([
+                    'capability' => 'You are not listed as a Live Chat Central contact on any Shared or White-label hub.',
+                ]);
+            }
+
+            return;
+        }
+
         $this->assertModuleEnabled($hub);
 
         $role = $this->matrix->effectiveRoleFor($user);
@@ -41,6 +52,53 @@ class LiveChatService
                 'capability' => 'You do not have permission to use Live Chat.',
             ]);
         }
+    }
+
+    /**
+     * Whether a Central Hub user may open Live Chat / reply.
+     * True when Power Admin, or when any content hub with Live Chat enabled
+     * lists this user in hubs.live_chat_agents (Central contacts page).
+     */
+    public function centralUserMayUseChat(User $user): bool
+    {
+        if ($user->isPowerAdmin()) {
+            return true;
+        }
+
+        return $this->isListedAsCentralAgent($user);
+    }
+
+    /**
+     * True when this Central user id appears in live_chat_agents on a content
+     * hub that has Functionalities → Live Chat enabled.
+     */
+    public function isListedAsCentralAgent(User $user): bool
+    {
+        $id = (int) $user->id;
+        if ($id < 1) {
+            return false;
+        }
+
+        $hubs = Hub::query()
+            ->whereIn('type', [Hub::TYPE_SHARED, Hub::TYPE_WHITE_LABEL])
+            ->get(['id', 'type', 'checklist', 'live_chat_agents']);
+
+        foreach ($hubs as $hub) {
+            if (! $hub->hasLiveChatFunctionality()) {
+                continue;
+            }
+            $agents = is_array($hub->live_chat_agents) ? $hub->live_chat_agents : [];
+            foreach ($agents as $row) {
+                if (! is_array($row)) {
+                    continue;
+                }
+                if ((int) ($row['id'] ?? 0) === $id) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     public function assertCanManageAccess(Hub $hub, User $user): void

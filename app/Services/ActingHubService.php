@@ -309,7 +309,42 @@ class ActingHubService
             }
         }
 
-        return $this->mergeFirmDocumentEffectiveCapabilities($user, $effective, $acting);
+        return $this->mergeLiveChatEffectiveCapabilities(
+            $user,
+            $this->mergeFirmDocumentEffectiveCapabilities($user, $effective, $acting),
+            $acting
+        );
+    }
+
+    /**
+     * Central agents unlock Live Chat from content-hub Central contacts lists
+     * (no Central Hub “Use Live Chat” matrix tick).
+     *
+     * @param  array<string, bool>  $effective
+     * @return array<string, bool>
+     */
+    public function mergeLiveChatEffectiveCapabilities(User $user, array $effective, ?Hub $hub = null): array
+    {
+        $hub = $hub ?? $this->hubs->current();
+        if ($hub->isContentHub()) {
+            return $effective;
+        }
+        if (! $hub->isCentral() && ! $hub->isControlPlane()) {
+            return $effective;
+        }
+
+        try {
+            $may = app(LiveChatService::class)->centralUserMayUseChat($user);
+        } catch (\Throwable) {
+            return $effective;
+        }
+
+        if ($may) {
+            $effective['live_chat'] = true;
+            $effective['lc_use_chat'] = true;
+        }
+
+        return $effective;
     }
 
     /**

@@ -280,7 +280,9 @@ class CapabilitiesMatrixService
                     || ($requiresFirmDocuments && ! $firmDocumentsOn)
                     || ($requiresSupportTickets && ! $stOn)
                     || ($requiresLiveChat && ! $lcOn)
-                    || ($requiresLiveChat && $key === 'lc_manage_access') // content hubs only
+                    // Live Chat role caps are Shared / White-label only — Central
+                    // agents are chosen on each content hub’s Central contacts page.
+                    || ($requiresLiveChat && in_array($key, ['lc_use_chat', 'lc_manage_access'], true))
                     || ($requiresSecurityMonitoring && ! $secmonOn)
                 ) {
                     $inactive = true;
@@ -323,7 +325,7 @@ class CapabilitiesMatrixService
                     $inactiveReason = 'module_general_compliance_off';
                 } elseif ($requiresSupportTickets && ! $stOn) {
                     $inactiveReason = 'support_tickets_off';
-                } elseif ($requiresLiveChat && $key === 'lc_manage_access' && $isCentralHub) {
+                } elseif ($requiresLiveChat && in_array($key, ['lc_use_chat', 'lc_manage_access'], true) && $isCentralHub) {
                     $inactiveReason = 'content_hubs_only';
                 } elseif ($requiresLiveChat && ! $lcOn) {
                     $inactiveReason = 'live_chat_off';
@@ -1442,6 +1444,14 @@ class CapabilitiesMatrixService
      */
     public function userCan(Hub $hub, User $user, string $flag): bool
     {
+        // Central Hub: Live Chat is not a role-matrix tick. Staff unlock when a
+        // Shared / White-label hub checks them on Central contacts.
+        if (in_array($flag, ['lc_use_chat', 'live_chat'], true)
+            && ($hub->isCentral() || ($hub->isControlPlane() && ! $hub->isContentHub()))
+        ) {
+            return app(LiveChatService::class)->centralUserMayUseChat($user);
+        }
+
         $acting = app(ActingAdvisorService::class);
         if ($acting->canActOnBehalf($user) && $acting->actingAdvisor($user)) {
             if (! $this->roleCan($hub, User::ROLE_ADVISOR, $flag)) {
@@ -1591,8 +1601,11 @@ class CapabilitiesMatrixService
             return false;
         }
 
-        // Choose Central contacts is Shared / White-label only.
-        if ($flag === 'lc_manage_access' && ($hub->isCentral() || ! $hub->isContentHub())) {
+        // Live Chat role caps are Shared / White-label only. On Central, Use Live
+        // Chat is granted via content-hub Central contacts (see userCan / merge).
+        if (in_array($flag, ['lc_use_chat', 'lc_manage_access'], true)
+            && ($hub->isCentral() || ! $hub->isContentHub())
+        ) {
             return false;
         }
 

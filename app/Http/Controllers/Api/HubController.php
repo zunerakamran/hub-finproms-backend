@@ -90,7 +90,11 @@ class HubController extends Controller
                     }
                 }
                 $payload['effective_capabilities'] = $this->actingHubs
-                    ->mergeFirmDocumentEffectiveCapabilities($user, $effective, $hub);
+                    ->mergeLiveChatEffectiveCapabilities(
+                        $user,
+                        $this->actingHubs->mergeFirmDocumentEffectiveCapabilities($user, $effective, $hub),
+                        $hub
+                    );
                 try {
                     $payload['firm_document_rights'] = app(\App\Services\FirmDocumentAccessService::class)
                         ->effectiveRightsSummary($user, $hub);

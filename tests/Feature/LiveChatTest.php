@@ -113,4 +113,62 @@ class LiveChatTest extends TestCase
             'message' => 'Hello',
         ])->assertStatus(422);
     }
+
+    public function test_central_use_live_chat_capability_is_inactive_and_agents_unlock_via_contacts(): void
+    {
+        config(['hub.is_control_plane' => true, 'hub.type' => Hub::TYPE_CENTRAL]);
+
+        $matrix = app(CapabilitiesMatrixService::class);
+        $central = Hub::query()->updateOrCreate(
+            ['slug' => 'central'],
+            [
+                'name' => 'Central Hub',
+                'type' => Hub::TYPE_CENTRAL,
+                'is_active' => true,
+                'checklist' => Hub::defaultChecklist(Hub::TYPE_CENTRAL),
+                'role_capabilities' => $matrix->defaultRoleCapabilities(Hub::TYPE_CENTRAL),
+            ]
+        );
+        app(HubService::class)->forgetCurrentCache();
+
+        $rows = collect($matrix->matrix($central)['rows'] ?? []);
+        $useChat = $rows->firstWhere('key', 'lc_use_chat');
+        $this->assertNotNull($useChat);
+        $this->assertTrue((bool) ($useChat['inactive'] ?? false));
+        $this->assertSame('content_hubs_only', $useChat['inactive_reason'] ?? null);
+
+        $shared = Hub::query()->updateOrCreate(
+            ['slug' => 'shared-lc'],
+            [
+                'name' => 'Shared LC',
+                'type' => Hub::TYPE_SHARED,
+                'is_active' => true,
+                'checklist' => array_merge(Hub::defaultChecklist(Hub::TYPE_SHARED), [
+                    'live_chat' => true,
+                ]),
+            ]
+        );
+
+        $agent = User::factory()->create([
+            'role' => User::ROLE_USER,
+            'name' => 'Central Agent',
+            'email' => 'agent-lc@central.test',
+        ]);
+        $outsider = User::factory()->create([
+            'role' => User::ROLE_USER,
+            'name' => 'Not An Agent',
+            'email' => 'outsider-lc@central.test',
+        ]);
+
+        $shared->live_chat_agents = [
+            ['id' => $agent->id, 'name' => $agent->name, 'email' => $agent->email],
+        ];
+        $shared->save();
+
+        $chat = app(\App\Services\LiveChatService::class);
+        $this->assertTrue($chat->centralUserMayUseChat($agent));
+        $this->assertFalse($chat->centralUserMayUseChat($outsider));
+        $this->assertTrue($matrix->userCan($central, $agent, 'lc_use_chat'));
+        $this->assertFalse($matrix->userCan($central, $outsider, 'lc_use_chat'));
+    }
 }
