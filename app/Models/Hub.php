@@ -1979,6 +1979,7 @@ class Hub extends Model
         'db_ssl_ca',
         'checklist',
         'live_chat_agents',
+        'live_chat_support_email',
         'enabled_module_package_ids',
         'role_capabilities',
         'role_display_names',

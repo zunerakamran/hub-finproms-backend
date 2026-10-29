@@ -1038,6 +1038,9 @@ IMPLEMENTATION: UserCapabilitiesService; wired in CapabilitiesMatrixService
     directory is read from the Central DB locally.
   - Checked users are stored per content hub as `hubs.live_chat_agents` JSON
     (id, name, email). Hub members may only start chats with those contacts.
+  - Same access page sets `hubs.live_chat_support_email` (default
+    `support@fin-proms.com`). Shared / White-label Live Chat shows a notice
+    at the top: “If you have any queries… drop us an email at {email}.”
 - Conversation storage: `live_chat_conversations` + `live_chat_messages` on
   each content hub DB. Central agents read/write those rows over remote DB
   (Central → hub) when listed on that hub’s Central contacts. 1 hub user ↔
@@ -1057,7 +1060,7 @@ IMPLEMENTATION: UserCapabilitiesService; wired in CapabilitiesMatrixService
   - POST /api/live-chat/conversations          { central_user_id, message? }
   - GET  /api/live-chat/conversations/{id}     (?source_hub_slug= for Central)
   - POST /api/live-chat/conversations/{id}/messages  { body, source_hub_slug? }
-  - GET/PUT /api/live-chat/access              { user_ids: int[] }
+  - GET/PUT /api/live-chat/access              { user_ids: int[], support_email? }
     (Shared / White-label only)
   - GET  /api/internal/live-chat/central-users (Central; hub-authenticated)
 - Activity logs: `live_chat.start` / `live_chat.message` / `live_chat.access_updated`

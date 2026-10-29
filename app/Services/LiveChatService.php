@@ -16,6 +16,8 @@ use Throwable;
 
 class LiveChatService
 {
+    public const DEFAULT_SUPPORT_EMAIL = 'support@fin-proms.com';
+
     public function __construct(
         private readonly CapabilitiesMatrixService $matrix,
         private readonly WhiteLabelDatabaseService $remoteDb,
@@ -173,6 +175,68 @@ class LiveChatService
     }
 
     /**
+     * Support email shown at the top of Live Chat on Shared / White-label hubs.
+     * Configured on the Central contacts (/access) page.
+     */
+    public function supportEmail(Hub $hub): string
+    {
+        if (! $hub->isContentHub()) {
+            return '';
+        }
+
+        $email = $this->readSupportEmailFromActingContext($hub);
+        if ($email === null) {
+            $email = is_string($hub->live_chat_support_email)
+                ? trim($hub->live_chat_support_email)
+                : '';
+        }
+
+        if ($email === '' || ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return self::DEFAULT_SUPPORT_EMAIL;
+        }
+
+        return $email;
+    }
+
+    private function readSupportEmailFromActingContext(Hub $hub): ?string
+    {
+        if (! WcDatabaseContext::active()) {
+            return null;
+        }
+        if (WcDatabaseContext::hubId() !== null && (int) WcDatabaseContext::hubId() !== (int) $hub->id) {
+            return null;
+        }
+
+        $connection = WcDatabaseContext::connection();
+        if (! is_string($connection) || $connection === '') {
+            return null;
+        }
+
+        try {
+            $schema = DB::connection($connection)->getSchemaBuilder();
+            if (! $schema->hasTable('hubs') || ! $schema->hasColumn('hubs', 'live_chat_support_email')) {
+                return null;
+            }
+
+            $raw = DB::connection($connection)->table('hubs')
+                ->where('slug', $hub->slug)
+                ->value('live_chat_support_email');
+
+            if (($raw === null || $raw === '') && $schema->hasColumn('hubs', 'type')) {
+                $raw = DB::connection($connection)->table('hubs')
+                    ->whereIn('type', [Hub::TYPE_SHARED, Hub::TYPE_WHITE_LABEL])
+                    ->value('live_chat_support_email');
+            }
+
+            return is_string($raw) ? trim($raw) : null;
+        } catch (Throwable $e) {
+            report($e);
+
+            return null;
+        }
+    }
+
+    /**
      * When acting_wl_wc_db has remounted onto the content hub, read
      * live_chat_agents from that hubs row (avoids nested remote DB connect).
      *
@@ -256,13 +320,17 @@ class LiveChatService
     }
 
     /**
-     * Save which Central users this content hub may contact.
+     * Save which Central users this content hub may contact (+ support email notice).
      *
      * @param  list<int>  $enabledUserIds
      * @return list<array{id:int,name:string,email:string}>
      */
-    public function saveAccess(Hub $hub, User $actor, array $enabledUserIds): array
-    {
+    public function saveAccess(
+        Hub $hub,
+        User $actor,
+        array $enabledUserIds,
+        ?string $supportEmail = null
+    ): array {
         $this->assertCanManageAccess($hub, $actor);
 
         $ids = array_values(array_unique(array_map('intval', $enabledUserIds)));
@@ -283,15 +351,20 @@ class LiveChatService
             ];
         }
 
+        $normalizedEmail = $this->normalizeSupportEmail($supportEmail);
+
         if (Schema::hasColumn('hubs', 'live_chat_agents')) {
             $hub->live_chat_agents = $agents;
-            $hub->save();
         }
+        if (Schema::hasColumn('hubs', 'live_chat_support_email')) {
+            $hub->live_chat_support_email = $normalizedEmail;
+        }
+        $hub->save();
 
         // When Power Admin saves from Central while acting on this hub, also
         // push the agent list onto the content hub database.
         if (config('hub.is_control_plane') && $hub->hasRemoteDatabaseConfigured()) {
-            $this->pushAgentsToRemoteHub($hub, $agents);
+            $this->pushAgentsToRemoteHub($hub, $agents, $normalizedEmail);
         }
 
         $this->activity->log([
@@ -303,10 +376,26 @@ class LiveChatService
             'properties' => [
                 'enabled_user_ids' => $ids,
                 'agent_count' => count($agents),
+                'support_email' => $normalizedEmail,
             ],
         ]);
 
         return $agents;
+    }
+
+    private function normalizeSupportEmail(?string $email): string
+    {
+        $trimmed = is_string($email) ? trim($email) : '';
+        if ($trimmed === '') {
+            return self::DEFAULT_SUPPORT_EMAIL;
+        }
+        if (! filter_var($trimmed, FILTER_VALIDATE_EMAIL)) {
+            throw ValidationException::withMessages([
+                'support_email' => 'Enter a valid support email address.',
+            ]);
+        }
+
+        return mb_strtolower($trimmed);
     }
 
     /**
@@ -679,15 +768,24 @@ class LiveChatService
     /**
      * @param  list<array{id:int,name:string,email:string}>  $agents
      */
-    private function pushAgentsToRemoteHub(Hub $hub, array $agents): void
+    private function pushAgentsToRemoteHub(Hub $hub, array $agents, ?string $supportEmail = null): void
     {
         $payload = json_encode(array_values($agents));
+        $email = $this->normalizeSupportEmail($supportEmail);
 
         try {
-            $this->remoteDb->run($hub, function (string $connection) use ($hub, $payload) {
+            $this->remoteDb->run($hub, function (string $connection) use ($hub, $payload, $email) {
                 $schema = DB::connection($connection)->getSchemaBuilder();
                 if (! $schema->hasTable('hubs') || ! $schema->hasColumn('hubs', 'live_chat_agents')) {
                     return;
+                }
+
+                $update = [
+                    'live_chat_agents' => $payload,
+                    'updated_at' => now(),
+                ];
+                if ($schema->hasColumn('hubs', 'live_chat_support_email')) {
+                    $update['live_chat_support_email'] = $email;
                 }
 
                 DB::connection($connection)->table('hubs')
@@ -697,10 +795,7 @@ class LiveChatService
                             $q->orWhereIn('type', [Hub::TYPE_SHARED, Hub::TYPE_WHITE_LABEL]);
                         }
                     })
-                    ->update([
-                        'live_chat_agents' => $payload,
-                        'updated_at' => now(),
-                    ]);
+                    ->update($update);
             });
         } catch (Throwable $e) {
             report($e);

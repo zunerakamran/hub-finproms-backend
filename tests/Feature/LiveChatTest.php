@@ -114,6 +114,20 @@ class LiveChatTest extends TestCase
         ])->assertStatus(422);
     }
 
+    public function test_options_include_default_support_email_on_content_hub(): void
+    {
+        $this->createHubWithLiveChat();
+        $user = User::factory()->create(['role' => User::ROLE_USER]);
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/live-chat/options')
+            ->assertOk()
+            ->assertJsonPath(
+                'support_email',
+                \App\Services\LiveChatService::DEFAULT_SUPPORT_EMAIL
+            );
+    }
+
     public function test_central_use_live_chat_capability_is_inactive_and_agents_unlock_via_contacts(): void
     {
         config(['hub.is_control_plane' => true, 'hub.type' => Hub::TYPE_CENTRAL]);

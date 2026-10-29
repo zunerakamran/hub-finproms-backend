@@ -39,6 +39,7 @@ class LiveChatController extends Controller
         return response()->json([
             'agents' => $this->chat->availableAgents($hub),
             'is_central_agent' => $this->chat->isCentralAgentContext($hub, $user),
+            'support_email' => $this->chat->supportEmail($hub),
         ]);
     }
 
@@ -141,6 +142,7 @@ class LiveChatController extends Controller
         return response()->json([
             'data' => $this->chat->accessPickerUsers($hub),
             'agents' => $this->chat->availableAgents($hub),
+            'support_email' => $this->chat->supportEmail($hub),
         ]);
     }
 
@@ -154,14 +156,22 @@ class LiveChatController extends Controller
         $validated = $request->validate([
             'user_ids' => ['present', 'array'],
             'user_ids.*' => ['integer', 'min:1'],
+            'support_email' => ['nullable', 'string', 'max:255'],
         ]);
+        $validated = InputSanitizer::plainKeys($validated, ['support_email']);
 
-        $agents = $this->chat->saveAccess($hub, $user, $validated['user_ids'] ?? []);
+        $agents = $this->chat->saveAccess(
+            $hub,
+            $user,
+            $validated['user_ids'] ?? [],
+            $validated['support_email'] ?? null
+        );
 
         return response()->json([
             'message' => 'Central contacts updated. Checked Central Hub users are available for Live Chat on this hub.',
             'data' => $this->chat->accessPickerUsers($hub),
             'agents' => $agents,
+            'support_email' => $this->chat->supportEmail($hub),
         ]);
     }
 }
