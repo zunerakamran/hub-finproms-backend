@@ -320,8 +320,6 @@ Route::middleware('auth:sanctum')->group(function () {
                 ->whereNumber('conversation');
             Route::post('/live-chat/conversations/{conversation}/messages', [LiveChatController::class, 'sendMessage'])
                 ->whereNumber('conversation');
-            Route::post('/live-chat/conversations/{conversation}/close', [LiveChatController::class, 'close'])
-                ->whereNumber('conversation');
         });
 
         Route::middleware('hub_can:lc_manage_access')->group(function () {

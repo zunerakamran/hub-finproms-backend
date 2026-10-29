@@ -1041,7 +1041,7 @@ IMPLEMENTATION: UserCapabilitiesService; wired in CapabilitiesMatrixService
 - Conversation storage: `live_chat_conversations` + `live_chat_messages` on
   each content hub DB. Central agents read/write those rows over remote DB
   (Central → hub) when listed on that hub’s Central contacts. 1 hub user ↔
-  1 Central agent.
+  1 Central agent. Conversations stay open — no “end chat” / close action.
 - Capabilities (`lc_*`, blurred while Functionalities → live_chat is off):
   - `lc_use_chat` — Shared / White-label only: open Live Chat and message
     the Central contacts for that hub. **Inactive on Central Hub** — Central
@@ -1057,7 +1057,6 @@ IMPLEMENTATION: UserCapabilitiesService; wired in CapabilitiesMatrixService
   - POST /api/live-chat/conversations          { central_user_id, message? }
   - GET  /api/live-chat/conversations/{id}     (?source_hub_slug= for Central)
   - POST /api/live-chat/conversations/{id}/messages  { body, source_hub_slug? }
-  - POST /api/live-chat/conversations/{id}/close     { source_hub_slug? }
   - GET/PUT /api/live-chat/access              { user_ids: int[] }
     (Shared / White-label only)
   - GET  /api/internal/live-chat/central-users (Central; hub-authenticated)

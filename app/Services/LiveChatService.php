@@ -471,10 +471,8 @@ class LiveChatService
             ->whereKey($conversationId)
             ->firstOrFail();
 
-        if ($conversation->status === LiveChatConversation::STATUS_CLOSED) {
-            $conversation->status = LiveChatConversation::STATUS_OPEN;
-            $conversation->save();
-        }
+        $conversation->status = LiveChatConversation::STATUS_OPEN;
+        $conversation->save();
 
         $message = $this->postHubMessage($conversation, $user, $body);
         $conversation->load(['messages' => fn ($q) => $q->orderBy('id')]);
@@ -493,32 +491,6 @@ class LiveChatService
         ]);
 
         return $conversation->toApiArray(includeMessages: true);
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    public function closeConversation(
-        Hub $hub,
-        User $user,
-        int $conversationId,
-        ?string $sourceHubSlug = null
-    ): array {
-        $this->assertCanUse($hub, $user);
-
-        if ($this->isCentralAgentContext($hub, $user)) {
-            return $this->closeCentralAgentConversation($user, $conversationId, $sourceHubSlug);
-        }
-
-        $conversation = LiveChatConversation::query()
-            ->where('hub_user_id', $user->id)
-            ->whereKey($conversationId)
-            ->firstOrFail();
-
-        $conversation->status = LiveChatConversation::STATUS_CLOSED;
-        $conversation->save();
-
-        return $conversation->toApiArray();
     }
 
     /**
@@ -927,41 +899,6 @@ class LiveChatService
                 $this->mapRemoteConversation((array) $fresh, $hub),
                 ['messages' => $messages]
             );
-        });
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function closeCentralAgentConversation(User $user, int $conversationId, ?string $sourceHubSlug): array
-    {
-        $hub = $this->resolveSourceHub($sourceHubSlug);
-        if (! $hub) {
-            throw ValidationException::withMessages([
-                'source_hub_slug' => 'source_hub_slug is required for Central Live Chat conversations.',
-            ]);
-        }
-
-        return $this->remoteDb->run($hub, function (string $connection) use ($hub, $user, $conversationId) {
-            $updated = DB::connection($connection)->table('live_chat_conversations')
-                ->where('id', $conversationId)
-                ->where('central_user_id', $user->id)
-                ->update([
-                    'status' => LiveChatConversation::STATUS_CLOSED,
-                    'updated_at' => now(),
-                ]);
-
-            if (! $updated) {
-                throw ValidationException::withMessages([
-                    'conversation' => 'Conversation not found.',
-                ]);
-            }
-
-            $row = DB::connection($connection)->table('live_chat_conversations')
-                ->where('id', $conversationId)
-                ->first();
-
-            return $this->mapRemoteConversation((array) $row, $hub);
         });
     }
 

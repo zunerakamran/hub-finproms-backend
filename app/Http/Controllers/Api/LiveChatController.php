@@ -39,7 +39,6 @@ class LiveChatController extends Controller
         return response()->json([
             'agents' => $this->chat->availableAgents($hub),
             'is_central_agent' => $this->chat->isCentralAgentContext($hub, $user),
-            'statuses' => ['open', 'closed'],
         ]);
     }
 
@@ -130,29 +129,6 @@ class LiveChatController extends Controller
             'message' => 'Message sent.',
             'data' => $data,
         ], 201);
-    }
-
-    public function close(Request $request, int $conversation): JsonResponse
-    {
-        /** @var User $user */
-        $user = $request->user();
-        $hub = $this->chatHub($user);
-
-        $validated = $request->validate([
-            'source_hub_slug' => ['nullable', 'string', 'max:100'],
-        ]);
-
-        $data = $this->chat->closeConversation(
-            $hub,
-            $user,
-            $conversation,
-            $validated['source_hub_slug'] ?? null
-        );
-
-        return response()->json([
-            'message' => 'Conversation closed.',
-            'data' => $data,
-        ]);
     }
 
     public function accessIndex(Request $request): JsonResponse
