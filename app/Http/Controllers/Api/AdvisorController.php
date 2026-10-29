@@ -90,10 +90,14 @@ class AdvisorController extends Controller
             ]);
         };
 
-        if ($this->shouldUseRemote($request, $hub)) {
-            $paginator = $this->remoteDb->run($hub, fn (string $connection) => $paginate($connection));
-        } else {
-            $paginator = $paginate(null);
+        try {
+            if ($this->shouldUseRemote($request, $hub)) {
+                $paginator = $this->remoteDb->run($hub, fn (string $connection) => $paginate($connection));
+            } else {
+                $paginator = $paginate(null);
+            }
+        } catch (InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
         }
 
         return response()->json([
@@ -582,14 +586,25 @@ class AdvisorController extends Controller
     /**
      * Capability check for the authenticated viewer — UNION of all assigned roles
      * (same as hub_can / effective_capabilities). Do not use legacy users.role alone.
+     *
+     * Control-plane roles acting remotely use roleCan on the selected hub so
+     * Import Users caps follow that hub's matrix via the in-memory role column
+     * (never remounted content-hub user_roles).
      */
     private function userCan(Request $request, Hub $hub, string $capability): bool
     {
         $user = $request->user();
+        if (! $user) {
+            return $hub->can($capability);
+        }
 
-        return $user
-            ? $this->matrix->userCan($hub, $user, $capability)
-            : $hub->can($capability);
+        if (ActingHubService::isControlPlaneRole((string) $user->role)
+            && $this->actingHubs->isActingRemotely($user)
+        ) {
+            return $this->matrix->roleCan($hub, (string) $user->role, $capability);
+        }
+
+        return $this->matrix->userCan($hub, $user, $capability);
     }
 
     private function canDownloadTemplate(Request $request, Hub $hub): bool

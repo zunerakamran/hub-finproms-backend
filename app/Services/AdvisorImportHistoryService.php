@@ -7,8 +7,10 @@ use App\Models\Hub;
 use App\Models\User;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use InvalidArgumentException;
 
 class AdvisorImportHistoryService
 {
@@ -122,16 +124,24 @@ class AdvisorImportHistoryService
      */
     public function findOnHub(Hub $hub, int $batchId, ?string $connection = null): ?AdvisorImportBatch
     {
-        $hubId = $this->hubIdOnConnection($hub, $connection);
+        $query = $this->query($connection)->where('id', $batchId);
 
-        return $this->query($connection)
-            ->where('hub_id', $hubId)
-            ->where('id', $batchId)
-            ->first();
+        if ($connection) {
+            // Tenant DB: resolve local hub id when possible, otherwise match by id only
+            // (WL DBs are single-tenant — Central registry ids must never be used).
+            $hubId = $this->resolveRemoteHubId($hub, $connection);
+            if ($hubId !== null) {
+                $query->where('hub_id', $hubId);
+            }
+        } else {
+            $query->where('hub_id', (int) $hub->id);
+        }
+
+        return $query->first();
     }
 
     /**
-     * @param  array{viewer_user_id?: int|null, can_view_all_submissions?: bool, connection?: string|null}  $options
+     * @param  array{viewer_user_id?: int|null, viewer_email?: string|null, can_view_all_submissions?: bool, connection?: string|null}  $options
      * @return LengthAwarePaginator<int, AdvisorImportBatch>
      */
     public function paginate(Hub $hub, int $perPage = 20, int $page = 1, array $options = []): LengthAwarePaginator
@@ -143,15 +153,23 @@ class AdvisorImportHistoryService
             : null;
 
         if ($connection && ! $this->batchesTableExists($connection)) {
-            return new \Illuminate\Pagination\LengthAwarePaginator([], 0, $perPage, $page);
+            throw new InvalidArgumentException(
+                'Import history table is missing on the remote database for hub "'.$hub->name
+                .'". Run migrations on that hub, then try again.'
+            );
         }
 
-        $hubId = $this->hubIdOnConnection($hub, $connection);
+        $query = $this->query($connection)->orderByDesc('created_at')->orderByDesc('id');
 
-        $query = $this->query($connection)
-            ->where('hub_id', $hubId)
-            ->orderByDesc('created_at')
-            ->orderByDesc('id');
+        if (! $connection) {
+            // Local deploy DB may hold history for this hub only via registry id.
+            $query->where('hub_id', (int) $hub->id);
+        }
+        // Remote content-hub DB is tenant-scoped (one Shared / WL = one hub).
+        // Never filter by Central registry hubs.id — client_admin submissions store
+        // the WL deploy's local hubs.id, which usually differs from the Central
+        // registry id even when the slug matches. That mismatch made Import Users
+        // history look empty for Power Admin on Central.
 
         if (! $canViewAllSubmissions) {
             // Without View submitted Excel imports (or Import), only show
@@ -186,7 +204,9 @@ class AdvisorImportHistoryService
     }
 
     /**
-     * Hub id to store/filter on this connection (remote DBs use their local hubs.id).
+     * Hub id to store on this connection (remote DBs use their local hubs.id).
+     *
+     * @throws InvalidArgumentException when a remote connection cannot be mapped
      */
     public function hubIdOnConnection(Hub $hub, ?string $connection): int
     {
@@ -194,16 +214,52 @@ class AdvisorImportHistoryService
             return (int) $hub->id;
         }
 
+        $remoteId = $this->resolveRemoteHubId($hub, $connection);
+        if ($remoteId !== null) {
+            return $remoteId;
+        }
+
+        throw new InvalidArgumentException(
+            'Could not resolve local hub id on the remote database for "'.$hub->slug
+            .'". Ensure the hubs row on that database uses the same slug as the Central registry.'
+        );
+    }
+
+    /**
+     * Resolve the content hub's local id on a remoted connection.
+     * Never returns the Central registry id.
+     */
+    public function resolveRemoteHubId(Hub $hub, string $connection): ?int
+    {
         try {
-            $remoteId = Hub::on($connection)->where('slug', $hub->slug)->value('id');
-            if ($remoteId) {
-                return (int) $remoteId;
+            if (Schema::connection($connection)->hasTable('hubs')) {
+                $bySlug = DB::connection($connection)->table('hubs')
+                    ->where('slug', $hub->slug)
+                    ->value('id');
+                if ($bySlug) {
+                    return (int) $bySlug;
+                }
+
+                // Single-tenant content DB: only one hubs row.
+                $ids = DB::connection($connection)->table('hubs')->orderBy('id')->limit(2)->pluck('id');
+                if ($ids->count() === 1) {
+                    return (int) $ids->first();
+                }
             }
         } catch (\Throwable) {
             // fall through
         }
 
-        return (int) $hub->id;
+        try {
+            $bySlug = Hub::on($connection)->where('slug', $hub->slug)->value('id');
+            if ($bySlug) {
+                return (int) $bySlug;
+            }
+        } catch (\Throwable) {
+            // fall through
+        }
+
+        return null;
     }
 
     /**

@@ -224,6 +224,101 @@ class PowerAdminAdvisorImportSubmissionsTest extends TestCase
             ->assertOk();
     }
 
+    public function test_power_admin_sees_wl_submission_even_when_central_hub_id_differs_from_remote(): void
+    {
+        // Reproduce production: Central registry hubs.id=2+, WL deploy hubs.id=1,
+        // client_admin submission stored with local hub_id=1. Old code fell back to
+        // Central registry id when slug lookup failed / mismatched → empty history.
+        $matrix = app(CapabilitiesMatrixService::class);
+
+        Hub::query()->create([
+            'name' => 'Central',
+            'slug' => 'central',
+            'type' => Hub::TYPE_CENTRAL,
+            'is_active' => true,
+            'checklist' => Hub::defaultChecklist(Hub::TYPE_CENTRAL),
+            'role_capabilities' => $matrix->defaultRoleCapabilities(Hub::TYPE_CENTRAL),
+        ]);
+
+        // Extra registry row so the WL hub is not id=1 on Central.
+        Hub::query()->create([
+            'name' => 'Other Shared',
+            'slug' => 'other-shared',
+            'type' => Hub::TYPE_SHARED,
+            'is_active' => true,
+            'checklist' => Hub::defaultChecklist(Hub::TYPE_SHARED),
+        ]);
+
+        $hub = $this->makeWiredPrivateWhiteLabelHub();
+        $this->assertGreaterThan(1, (int) $hub->id, 'Central registry WL id must differ from typical remote hubs.id=1');
+
+        $roleCaps = $matrix->resolvedRoleCapabilities($hub);
+        $roleCaps[User::ROLE_POWER_ADMIN]['advisor_excel_import'] = false;
+        $roleCaps[User::ROLE_POWER_ADMIN]['advisor_excel_template'] = false;
+        $roleCaps[User::ROLE_POWER_ADMIN]['advisor_excel_submit'] = false;
+        $roleCaps[User::ROLE_POWER_ADMIN]['advisor_excel_view_submissions'] = true;
+        $hub->role_capabilities = $roleCaps;
+        $hub->save();
+        $matrix->forgetResolvedCaches();
+        app(HubService::class)->forgetCurrentCache();
+
+        $admin = User::factory()->powerAdmin()->create([
+            'acting_hub_id' => $hub->id,
+        ]);
+
+        $remote = app(WhiteLabelDatabaseService::class);
+        $connection = $remote->connect($hub);
+        try {
+            // Break slug mapping so old hubIdOnConnection fell back to Central registry id.
+            DB::connection($connection)->table('hubs')->where('slug', 'myhub')->update([
+                'slug' => 'legacy-local-slug',
+            ]);
+
+            // Simulate client_admin submit on WL: local hubs.id (1), not Central registry id.
+            $batchId = DB::connection($connection)->table('advisor_import_batches')->insertGetId([
+                'hub_id' => 1,
+                'imported_by_user_id' => 42,
+                'imported_by_name' => 'WL Client Admin',
+                'imported_by_email' => 'clientadmin@myhub.test',
+                'original_filename' => 'team.xlsx',
+                'stored_path' => 'advisor-imports/submissions/team.xlsx',
+                'status' => AdvisorImportBatch::STATUS_PENDING,
+                'kind' => AdvisorImportBatch::KIND_SUBMISSION,
+                'created_count' => 2,
+                'updated_count' => 0,
+                'reactivated_count' => 0,
+                'skipped_count' => 0,
+                'submitted_user_count' => 2,
+                'created_users' => json_encode([
+                    ['name' => 'A', 'email' => 'a@example.com', 'role' => 'User', 'firm' => 'Acme'],
+                    ['name' => 'B', 'email' => 'b@example.com', 'role' => 'User', 'firm' => 'Acme'],
+                ]),
+                'updated_users' => json_encode([]),
+                'reactivated_users' => json_encode([]),
+                'skipped_rows' => json_encode([]),
+                'message' => 'Excel sheet sent for import (2 users pending).',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        } finally {
+            $remote->disconnect($hub);
+        }
+
+        $this->assertSame(0, AdvisorImportBatch::query()->count());
+
+        Sanctum::actingAs($admin);
+
+        $this->getJson('/api/power-admin/advisors/import-history')
+            ->assertOk()
+            ->assertJsonPath('meta.total', 1)
+            ->assertJsonPath('batches.0.id', $batchId)
+            ->assertJsonPath('batches.0.status', 'pending')
+            ->assertJsonPath('batches.0.submitted_by.email', 'clientadmin@myhub.test')
+            ->assertJsonPath('batches.0.pending_users.0.email', 'a@example.com')
+            ->assertJsonPath('capabilities.can_view_submissions', true)
+            ->assertJsonPath('target_hub.slug', 'myhub');
+    }
+
     public function test_power_admin_acting_on_wired_white_label_sees_remote_pending_submissions(): void
     {
         $matrix = app(CapabilitiesMatrixService::class);
