@@ -42,6 +42,9 @@ class CapabilitiesMatrixService
     /** @var array<string, array<string, array<string, bool>>> */
     private static array $resolvedRoleCapabilitiesCache = [];
 
+    /** @var array<string, list<string>> */
+    private static array $rolesForCapabilityCache = [];
+
     public function __construct(
         private readonly PowerAdminCapabilitiesService $powerCapabilities
     ) {}
@@ -87,8 +90,12 @@ class CapabilitiesMatrixService
      */
     public function rolesForCapability(string $key): array
     {
+        if (isset(self::$rolesForCapabilityCache[$key])) {
+            return self::$rolesForCapabilityCache[$key];
+        }
+
         if (str_starts_with($key, 'pa_')) {
-            return [User::ROLE_POWER_ADMIN];
+            return self::$rolesForCapabilityCache[$key] = [User::ROLE_POWER_ADMIN];
         }
 
         $meta = Hub::CHECKLIST_DEFINITIONS[$key] ?? null;
@@ -97,7 +104,7 @@ class CapabilitiesMatrixService
         if (Hub::isDashboardCapabilityGroup($group) || $group === Hub::GROUP_ADMIN_EMAILS) {
             // Auto-renew date stays limited to Power Admin + FinProms admin.
             if ($key === 'dashboard_manage_advisor_renewal') {
-                return [
+                return self::$rolesForCapabilityCache[$key] = [
                     User::ROLE_POWER_ADMIN,
                     User::ROLE_FINPROMS_ADMIN,
                 ];
@@ -105,7 +112,7 @@ class CapabilitiesMatrixService
 
             // Shared-hub control plane only — who may use the hub switcher.
             if ($key === ActingHubService::CAPABILITY) {
-                return [
+                return self::$rolesForCapabilityCache[$key] = [
                     User::ROLE_POWER_ADMIN,
                     User::ROLE_FINPROMS_ADMIN,
                 ];
@@ -113,7 +120,7 @@ class CapabilitiesMatrixService
 
             // Central content library — Central Hub Controller roles only.
             if ($key === 'dashboard_central_content_library') {
-                return [
+                return self::$rolesForCapabilityCache[$key] = [
                     User::ROLE_POWER_ADMIN,
                     User::ROLE_FINPROMS_ADMIN,
                 ];
@@ -121,7 +128,7 @@ class CapabilitiesMatrixService
 
             // Hub-admin dashboard / admin-email tools apply to every role column so
             // Power Admin can grant them to staff and remaining roles.
-            return $this->allMatrixRoles();
+            return self::$rolesForCapabilityCache[$key] = $this->allMatrixRoles();
         }
 
         if ($group === Hub::GROUP_MEMBER
@@ -137,11 +144,11 @@ class CapabilitiesMatrixService
         ) {
             // User-facing / compliance / support / live chat / security caps apply to every
             // role column so Power Admin can enable them for staff and users alike.
-            return $this->allMatrixRoles();
+            return self::$rolesForCapabilityCache[$key] = $this->allMatrixRoles();
         }
 
         // Behaviour / Modules / Functionalities are hub-level, not per-role.
-        return [];
+        return self::$rolesForCapabilityCache[$key] = [];
     }
 
     /**
@@ -348,10 +355,10 @@ class CapabilitiesMatrixService
                 }
             }
 
-            $applicableRoles = $this->rolesForCapability($key);
+            $applicableRoles = array_fill_keys($this->rolesForCapability($key), true);
             $cells = [];
             foreach ($visibleRoles as $role) {
-                $applicable = in_array($role, $applicableRoles, true);
+                $applicable = isset($applicableRoles[$role]);
                 $enabled = false;
                 if ($applicable) {
                     // Hub switcher + Central content library + Website chrome
@@ -620,9 +627,15 @@ class CapabilitiesMatrixService
             if ($switcherInput !== []) {
                 $this->applyRoleMatrix($controlPlane, $switcherInput, ActingHubService::CONTROL_PLANE_ROLES);
             }
+            $tenantTouched = $controlPlaneInput !== [] || $tenantInput !== [];
             $this->applyRoleMatrix($tenantHub, $controlPlaneInput, ActingHubService::CONTROL_PLANE_ROLES);
             $this->applyRoleMatrix($tenantHub, $tenantInput, $this->tenantRoles());
-            if ($tenantHub->isContentHub() && $tenantHub->hasRemoteDatabaseConfigured()) {
+            // Only push when this hub's matrix actually changed — remote sync is slow
+            // and switcher-only / Power Admin-only saves do not touch the tenant row.
+            if ($tenantTouched
+                && $tenantHub->isContentHub()
+                && $tenantHub->hasRemoteDatabaseConfigured()
+            ) {
                 try {
                     app(WhiteLabelHubSyncService::class)->pushSettings($tenantHub->fresh());
                 } catch (\Throwable $e) {
@@ -1442,10 +1455,19 @@ class CapabilitiesMatrixService
 
     private function resolvedRoleCapabilitiesCacheKey(Hub $hub): string
     {
-        $stored = $hub->role_capabilities;
-        $sig = is_array($stored) ? md5((string) json_encode($stored)) : 'empty';
+        // Do NOT hash the full role×capability JSON here. After a matrix save the
+        // blob is tens of KB (every role × every cap), and this key is computed on
+        // every roleCan/userCan lookup — json_encode+md5 made page reloads crawl.
+        // forgetResolvedCaches() clears the static map after writes; updated_at
+        // keeps Octane workers correct when the hub row is reloaded from the DB.
+        $updated = $hub->getAttributes()['updated_at'] ?? null;
+        if ($updated instanceof \DateTimeInterface) {
+            $updated = (string) $updated->getTimestamp();
+        } elseif ($updated === null && $hub->updated_at instanceof \DateTimeInterface) {
+            $updated = (string) $hub->updated_at->getTimestamp();
+        }
 
-        return (string) $hub->id.'|'.(string) $hub->type.'|'.$sig;
+        return (string) $hub->id.'|'.(string) $hub->type.'|'.(string) $updated;
     }
 
     /**
@@ -1734,16 +1756,22 @@ class CapabilitiesMatrixService
      */
     public function moduleInvoiceSettingGatesInactive(Hub $hub, string $key): bool
     {
+        // Cheap key filter first — this runs on every roleCan/userCan and must not
+        // hit the DB for unrelated capabilities (that made page reloads crawl).
+        if (! in_array($key, [
+            'dashboard_manage_firm_payment_card',
+            'dashboard_view_firm_module_invoices',
+        ], true)) {
+            return false;
+        }
+
         try {
             $settings = app(ModuleInvoiceSettingsService::class)->forHub($hub);
         } catch (\Throwable) {
             return false;
         }
 
-        if (in_array($key, [
-            'dashboard_manage_firm_payment_card',
-            'dashboard_view_firm_module_invoices',
-        ], true) && ! $settings->firms_pay_own) {
+        if (! $settings->firms_pay_own) {
             return true;
         }
 
