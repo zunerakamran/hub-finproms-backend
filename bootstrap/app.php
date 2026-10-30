@@ -103,4 +103,22 @@ return Application::configure(basePath: dirname(__DIR__))
                 // Never break rate-limit responses for monitoring.
             }
         });
+
+        // Automatic system error feed (Support Tickets → System errors).
+        // Captures unhandled backend exceptions even when no user filed a ticket.
+        $exceptions->reportable(function (\Throwable $e): void {
+            try {
+                $request = request();
+                $hub = null;
+                try {
+                    $hub = app(\App\Services\HubService::class)->current();
+                } catch (\Throwable) {
+                    $hub = null;
+                }
+                app(\App\Services\SystemErrorReportService::class)
+                    ->recordThrowable($hub, $e, $request instanceof \Illuminate\Http\Request ? $request : null);
+            } catch (\Throwable) {
+                // Never break exception reporting.
+            }
+        });
     })->create();

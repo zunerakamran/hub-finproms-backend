@@ -1297,9 +1297,22 @@ class CapabilitiesMatrixService
             'wc_view_all_change_requests',
             'st_reply_to_tickets',
             'st_view_all_tickets',
+            'st_view_system_errors',
         ] as $key) {
             if (isset($matrix[User::ROLE_MANAGER][$key])) {
                 $matrix[User::ROLE_MANAGER][$key] = true;
+            }
+        }
+
+        // System errors feed — staff roles that triage tickets (and Top Management).
+        foreach ([
+            User::ROLE_CLIENT_ADMIN,
+            User::ROLE_POWER_ADMIN,
+            User::ROLE_FINPROMS_ADMIN,
+            User::ROLE_TOP_MANAGEMENT,
+        ] as $role) {
+            if (isset($matrix[$role]['st_view_system_errors'])) {
+                $matrix[$role]['st_view_system_errors'] = true;
             }
         }
 

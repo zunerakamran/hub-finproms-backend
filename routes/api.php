@@ -28,6 +28,7 @@ use App\Http\Controllers\Api\SocialMediaComplianceController;
 use App\Http\Controllers\Api\GeneralComplianceController;
 use App\Http\Controllers\Api\GeneralComplianceContentTypeController;
 use App\Http\Controllers\Api\SupportTicketController;
+use App\Http\Controllers\Api\SystemErrorReportController;
 use App\Http\Controllers\Api\LiveChatController;
 use App\Http\Controllers\Api\InternalLiveChatController;
 use App\Http\Controllers\Api\SecurityMonitoringController;
@@ -313,6 +314,19 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/support-tickets/charts/firm-comparison', [SupportTicketController::class, 'firmComparison']);
             Route::get('/support-tickets/charts/raised-over-time', [SupportTicketController::class, 'raisedOverTime']);
         });
+
+        // Automatic system errors (unreported bugs) — any authenticated user may beacon;
+        // staff with st_view_system_errors may list / triage.
+        Route::post('/system-errors', [SystemErrorReportController::class, 'store'])
+            ->middleware('throttle:30,1');
+        Route::middleware('hub_can:st_view_system_errors')->group(function () {
+            Route::get('/system-errors', [SystemErrorReportController::class, 'index']);
+            Route::get('/system-errors/{systemErrorReport}', [SystemErrorReportController::class, 'show'])
+                ->whereNumber('systemErrorReport');
+            Route::post('/system-errors/{systemErrorReport}/status', [SystemErrorReportController::class, 'updateStatus'])
+                ->whereNumber('systemErrorReport');
+        });
+
         Route::get('/support-tickets/{supportTicket}', [SupportTicketController::class, 'show']);
         // Member follow-up on own tickets (service enforces ownership; staff use /reply).
         Route::post('/support-tickets/{supportTicket}/comments', [SupportTicketController::class, 'comment']);

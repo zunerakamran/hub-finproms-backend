@@ -703,6 +703,7 @@ class Hub extends Model
         'st_view_all_tickets',
         'st_reply_to_tickets',
         'st_view_reports',
+        'st_view_system_errors',
     ];
 
     /**
@@ -1744,6 +1745,13 @@ class Hub extends Model
         'st_view_reports' => [
             'label' => 'View support tickets report',
             'description' => 'Open the Support Tickets report: period stats (raised / resolved / pending), firm and network comparisons, pie charts and graphs, CSV export, and detail rows with the same filters as other module reports.',
+            'group' => self::GROUP_SUPPORT_TICKETS,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'st_view_system_errors' => [
+            'label' => 'View automatic system errors',
+            'description' => 'See the System errors feed: frontend crashes and backend exceptions the app captured automatically (even when no user filed a Support Ticket). Acknowledge, resolve, or ignore entries.',
             'group' => self::GROUP_SUPPORT_TICKETS,
             'default_shared' => false,
             'default_white_label' => false,
