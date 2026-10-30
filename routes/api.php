@@ -890,14 +890,15 @@ Route::middleware('auth:sanctum')->group(function () {
             });
         });
 
-        // Support Tickets — queue / change status
+        // Support Tickets — queue / reply / change status
         Route::middleware('acting_wl_wc_db')->group(function () {
-            Route::middleware('hub_can:st_view_all_tickets,st_change_ticket_status')->group(function () {
+            Route::middleware('hub_can:st_view_all_tickets,st_change_ticket_status,st_reply_to_tickets')->group(function () {
                 Route::get('/support-tickets', [SupportTicketController::class, 'index']);
                 Route::get('/support-tickets/options', [SupportTicketController::class, 'options']);
                 Route::get('/support-tickets/{supportTicket}', [SupportTicketController::class, 'show']);
             });
-            Route::middleware('hub_can:st_change_ticket_status')->group(function () {
+            Route::middleware('hub_can:st_reply_to_tickets,st_change_ticket_status')->group(function () {
+                Route::post('/support-tickets/{supportTicket}/reply', [SupportTicketController::class, 'reply']);
                 Route::post('/support-tickets/{supportTicket}/change-status', [SupportTicketController::class, 'changeStatus']);
             });
             Route::middleware('hub_can:st_comment_on_tickets')->group(function () {
@@ -1428,14 +1429,15 @@ Route::middleware('auth:sanctum')->group(function () {
             });
         });
 
-        // Support Tickets — queue / change status
+        // Support Tickets — queue / reply / change status
         Route::middleware('acting_wl_wc_db')->group(function () {
-            Route::middleware('hub_can:st_view_all_tickets,st_change_ticket_status')->group(function () {
+            Route::middleware('hub_can:st_view_all_tickets,st_change_ticket_status,st_reply_to_tickets')->group(function () {
                 Route::get('/support-tickets', [SupportTicketController::class, 'index']);
                 Route::get('/support-tickets/options', [SupportTicketController::class, 'options']);
                 Route::get('/support-tickets/{supportTicket}', [SupportTicketController::class, 'show']);
             });
-            Route::middleware('hub_can:st_change_ticket_status')->group(function () {
+            Route::middleware('hub_can:st_reply_to_tickets,st_change_ticket_status')->group(function () {
+                Route::post('/support-tickets/{supportTicket}/reply', [SupportTicketController::class, 'reply']);
                 Route::post('/support-tickets/{supportTicket}/change-status', [SupportTicketController::class, 'changeStatus']);
             });
             Route::middleware('hub_can:st_comment_on_tickets')->group(function () {

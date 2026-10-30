@@ -138,6 +138,7 @@ class SupportTicket extends Model
         'status_note',
         'status_changed_by',
         'status_changed_at',
+        'estimated_resolve_at',
         'resolved_at',
         'closed_at',
     ];
@@ -146,6 +147,7 @@ class SupportTicket extends Model
     {
         return [
             'status_changed_at' => 'datetime',
+            'estimated_resolve_at' => 'datetime',
             'resolved_at' => 'datetime',
             'closed_at' => 'datetime',
         ];
@@ -203,9 +205,10 @@ class SupportTicket extends Model
     }
 
     /**
+     * @param  array<string, mixed>|null  $submitterOverride  Full submitter profile (queue/detail for st_view_all_tickets).
      * @return array<string, mixed>
      */
-    public function toApiArray(bool $includeDetails = false): array
+    public function toApiArray(bool $includeDetails = false, ?array $submitterOverride = null): array
     {
         try {
             $this->loadMissing([
@@ -222,6 +225,14 @@ class SupportTicket extends Model
             }
             $this->unsetRelation('statusChangedByUser');
         }
+
+        $basicSubmitter = $this->user ? [
+            'id' => $this->user->id,
+            'name' => $this->user->name,
+            'email' => $this->user->email,
+            'role' => $this->user->role,
+            'profile_detailed' => false,
+        ] : null;
 
         $payload = [
             'id' => $this->id,
@@ -240,6 +251,7 @@ class SupportTicket extends Model
             'status_note' => $this->status_note,
             'status_changed_by' => $this->status_changed_by,
             'status_changed_at' => optional($this->status_changed_at)?->toIso8601String(),
+            'estimated_resolve_at' => optional($this->estimated_resolve_at)?->toIso8601String(),
             'resolved_at' => optional($this->resolved_at)?->toIso8601String(),
             'closed_at' => optional($this->closed_at)?->toIso8601String(),
             'attachment_count' => $this->relationLoaded('attachments')
@@ -249,12 +261,7 @@ class SupportTicket extends Model
                 ->map(fn (SupportTicketAttachment $a) => $a->toApiArray())
                 ->values()
                 ->all(),
-            'submitter' => $this->user ? [
-                'id' => $this->user->id,
-                'name' => $this->user->name,
-                'email' => $this->user->email,
-                'role' => $this->user->role,
-            ] : null,
+            'submitter' => $submitterOverride ?? $basicSubmitter,
             'status_changed_by_user' => $this->statusChangedByUser ? [
                 'id' => $this->statusChangedByUser->id,
                 'name' => $this->statusChangedByUser->name,
@@ -266,7 +273,7 @@ class SupportTicket extends Model
         ];
 
         if ($includeDetails) {
-            $this->loadMissing(['comments']);
+            $this->loadMissing(['comments.attachments']);
             $payload['comments'] = $this->comments
                 ->map(fn (SupportTicketComment $c) => $c->toApiArray())
                 ->values()

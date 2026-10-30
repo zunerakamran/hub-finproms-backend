@@ -51,7 +51,7 @@ class SupportTicketController extends Controller
 
         return response()->json([
             'data' => collect($paginator->items())->map(
-                fn (SupportTicket $row) => $row->toApiArray()
+                fn (SupportTicket $row) => $this->tickets->toApiArray($row, $hub, $user)
             )->values(),
             'meta' => [
                 'current_page' => $paginator->currentPage(),
@@ -72,10 +72,18 @@ class SupportTicketController extends Controller
         $filters = $this->listFilters($request);
 
         $paginator = $this->tickets->listAll($hub, $user, $filters);
+        $items = $paginator->items();
+        $lastLogins = $this->tickets->lastLoginMapForTickets($items);
 
         return response()->json([
-            'data' => collect($paginator->items())->map(
-                fn (SupportTicket $row) => $row->toApiArray()
+            'data' => collect($items)->map(
+                fn (SupportTicket $row) => $this->tickets->toApiArray(
+                    $row,
+                    $hub,
+                    $user,
+                    false,
+                    $lastLogins
+                )
             )->values(),
             'meta' => [
                 'current_page' => $paginator->currentPage(),
@@ -96,7 +104,7 @@ class SupportTicketController extends Controller
         $ticket = $this->tickets->show($hub, $user, $supportTicket);
 
         return response()->json([
-            'data' => $ticket->toApiArray(includeDetails: true),
+            'data' => $this->tickets->toApiArray($ticket, $hub, $user, includeDetails: true),
         ]);
     }
 
@@ -140,8 +148,53 @@ class SupportTicketController extends Controller
 
         return response()->json([
             'message' => 'Support ticket submitted.',
-            'data' => $ticket->toApiArray(includeDetails: true),
+            'data' => $this->tickets->toApiArray($ticket, $hub, $user, includeDetails: true),
         ], 201);
+    }
+
+    public function reply(Request $request, SupportTicket $supportTicket): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $hub = $this->ticketHub($user);
+
+        $validated = $request->validate([
+            'status' => ['required', 'string', Rule::in(SupportTicket::STATUSES)],
+            'remarks' => ['required', 'string', 'max:10000'],
+            'estimated_resolve_at' => ['nullable', 'date'],
+            'estimated_hours' => ['nullable', 'numeric', 'min:0.25', 'max:'.(24 * 90)],
+            'clear_estimated_resolve_at' => ['sometimes', 'boolean'],
+            'attachments' => ['nullable', 'array', 'max:'.SupportTicketService::MAX_ATTACHMENTS],
+            'attachments.*' => [
+                'file',
+                'mimes:'.SupportTicketService::REPLY_ATTACHMENT_MIMES,
+                'max:'.SupportTicketService::MAX_VIDEO_ATTACHMENT_KB,
+            ],
+            // Legacy alias — same as attachments.
+            'screenshots' => ['nullable', 'array', 'max:'.SupportTicketService::MAX_ATTACHMENTS],
+            'screenshots.*' => [
+                'file',
+                'mimes:'.SupportTicketService::REPLY_ATTACHMENT_MIMES,
+                'max:'.SupportTicketService::MAX_VIDEO_ATTACHMENT_KB,
+            ],
+        ]);
+
+        $validated = InputSanitizer::richHtmlKeys($validated, ['remarks']);
+
+        $ticket = $this->tickets->reply($hub, $user, $supportTicket, [
+            'status' => $validated['status'],
+            'remarks' => $validated['remarks'],
+            'estimated_resolve_at' => $validated['estimated_resolve_at'] ?? null,
+            'estimated_hours' => $validated['estimated_hours'] ?? null,
+            'clear_estimated_resolve_at' => (bool) ($validated['clear_estimated_resolve_at'] ?? false),
+            'attachments' => $this->attachmentFiles($request, 'attachments'),
+            'screenshots' => $this->attachmentFiles($request, 'screenshots'),
+        ], $request);
+
+        return response()->json([
+            'message' => 'Reply posted.',
+            'data' => $this->tickets->toApiArray($ticket, $hub, $user, includeDetails: true),
+        ]);
     }
 
     public function changeStatus(Request $request, SupportTicket $supportTicket): JsonResponse
@@ -171,7 +224,7 @@ class SupportTicketController extends Controller
 
         return response()->json([
             'message' => 'Ticket status updated.',
-            'data' => $ticket->toApiArray(includeDetails: true),
+            'data' => $this->tickets->toApiArray($ticket, $hub, $user, includeDetails: true),
         ]);
     }
 
@@ -200,7 +253,7 @@ class SupportTicketController extends Controller
 
         return response()->json([
             'message' => 'Comment added.',
-            'data' => $ticket->toApiArray(includeDetails: true),
+            'data' => $this->tickets->toApiArray($ticket, $hub, $user, includeDetails: true),
         ], 201);
     }
 
@@ -209,7 +262,15 @@ class SupportTicketController extends Controller
      */
     private function screenshotFiles(Request $request): array
     {
-        $files = $request->file('screenshots', []);
+        return $this->attachmentFiles($request, 'screenshots');
+    }
+
+    /**
+     * @return list<UploadedFile>
+     */
+    private function attachmentFiles(Request $request, string $key): array
+    {
+        $files = $request->file($key, []);
         if ($files instanceof UploadedFile) {
             return [$files];
         }

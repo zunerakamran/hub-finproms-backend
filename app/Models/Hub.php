@@ -702,6 +702,7 @@ class Hub extends Model
         'st_view_own_tickets',
         'st_view_all_tickets',
         'st_change_ticket_status',
+        'st_reply_to_tickets',
         'st_comment_on_tickets',
     ];
 
@@ -1726,7 +1727,14 @@ class Hub extends Model
         ],
         'st_change_ticket_status' => [
             'label' => 'Change support ticket status',
-            'description' => 'Update ticket status (Open / In Progress / Waiting on User / Resolved / Closed) and leave a resolution note.',
+            'description' => 'Update ticket status (Open / In Progress / Waiting on User / Resolved / Closed) and leave a resolution note. Prefer “Reply to support tickets” for the full staff reply (status + ETA + remarks + media).',
+            'group' => self::GROUP_SUPPORT_TICKETS,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'st_reply_to_tickets' => [
+            'label' => 'Reply to support tickets',
+            'description' => 'Staff reply on the queue: set current status, estimated time to resolve, remarks, and attach screenshots or a short video to guide the end user.',
             'group' => self::GROUP_SUPPORT_TICKETS,
             'default_shared' => false,
             'default_white_label' => false,

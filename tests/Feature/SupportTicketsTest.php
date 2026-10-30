@@ -48,6 +48,9 @@ class SupportTicketsTest extends TestCase
         $caps[User::ROLE_USER]['st_submit_ticket'] = true;
         $caps[User::ROLE_USER]['st_view_own_tickets'] = true;
         $caps[User::ROLE_USER]['st_comment_on_tickets'] = true;
+        // Reply is a separate staff capability (also mirrored from change-status).
+        $caps[User::ROLE_FINPROMS_ADMIN]['st_reply_to_tickets'] = true;
+        $caps[User::ROLE_MANAGER]['st_reply_to_tickets'] = true;
 
         $hub->role_capabilities = $caps;
         $hub->save();
@@ -59,8 +62,10 @@ class SupportTicketsTest extends TestCase
     public function test_capability_keys_are_registered(): void
     {
         $this->assertContains('st_submit_ticket', Hub::SUPPORT_TICKETS_CAPABILITY_KEYS);
+        $this->assertContains('st_reply_to_tickets', Hub::SUPPORT_TICKETS_CAPABILITY_KEYS);
         $this->assertNotContains('module_support_tickets', Hub::MODULE_KEYS);
         $this->assertArrayHasKey('st_change_ticket_status', Hub::CHECKLIST_DEFINITIONS);
+        $this->assertArrayHasKey('st_reply_to_tickets', Hub::CHECKLIST_DEFINITIONS);
         $this->assertArrayHasKey('support_tickets', Hub::CHECKLIST_DEFINITIONS);
         $this->assertSame(Hub::GROUP_BEHAVIOUR, Hub::CHECKLIST_DEFINITIONS['support_tickets']['group']);
     }
@@ -132,7 +137,93 @@ class SupportTicketsTest extends TestCase
 
         $this->getJson('/api/client-admin/support-tickets')
             ->assertOk()
-            ->assertJsonFragment(['id' => $ticket->id]);
+            ->assertJsonFragment(['id' => $ticket->id])
+            ->assertJsonPath('data.0.submitter.profile_detailed', true)
+            ->assertJsonPath('data.0.submitter.email', $user->email);
+
+        $this->getJson('/api/client-admin/support-tickets/'.$ticket->id)
+            ->assertOk()
+            ->assertJsonPath('data.submitter.profile_detailed', true)
+            ->assertJsonPath('data.submitter.name', $user->name)
+            ->assertJsonStructure([
+                'data' => [
+                    'submitter' => [
+                        'id',
+                        'name',
+                        'email',
+                        'roles',
+                        'role_labels',
+                        'modules',
+                        'firm',
+                        'last_login_at',
+                        'profile_detailed',
+                    ],
+                ],
+            ]);
+    }
+
+    public function test_admin_can_reply_with_status_eta_and_remarks(): void
+    {
+        Storage::fake('public');
+        $this->createHubWithSupportTickets();
+
+        $user = User::factory()->create(['role' => User::ROLE_USER]);
+        $admin = User::factory()->create(['role' => User::ROLE_FINPROMS_ADMIN]);
+
+        $ticket = SupportTicket::query()->create([
+            'user_id' => $user->id,
+            'subject' => 'Broken download',
+            'module_area' => 'content_catalog',
+            'category' => 'bug',
+            'priority' => 'high',
+            'description' => 'Download button fails.',
+            'status' => SupportTicket::STATUS_OPEN,
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        $response = $this->post('/api/client-admin/support-tickets/'.$ticket->id.'/reply', [
+            'status' => SupportTicket::STATUS_WAITING_ON_USER,
+            'remarks' => '<p>Please clear cache and try again.</p>',
+            'estimated_hours' => 4,
+            'attachments' => [
+                UploadedFile::fake()->create('guide.pdf', 100, 'application/pdf'),
+            ],
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('data.status', SupportTicket::STATUS_WAITING_ON_USER)
+            ->assertJsonPath('data.status_note', '<p>Please clear cache and try again.</p>');
+
+        $this->assertNotNull($response->json('data.estimated_resolve_at'));
+        $this->assertNotEmpty($response->json('data.comments'));
+        $latest = collect($response->json('data.comments'))->last();
+        $this->assertSame(SupportTicket::STATUS_WAITING_ON_USER, $latest['to_status'] ?? null);
+        $this->assertNotEmpty($latest['attachments'] ?? []);
+    }
+
+    public function test_own_ticket_view_keeps_basic_submitter_without_profile(): void
+    {
+        $this->createHubWithSupportTickets();
+
+        $user = User::factory()->create(['role' => User::ROLE_USER]);
+        Sanctum::actingAs($user);
+
+        $ticket = SupportTicket::query()->create([
+            'user_id' => $user->id,
+            'subject' => 'My own issue',
+            'module_area' => 'dashboard',
+            'category' => 'bug',
+            'priority' => 'low',
+            'description' => 'Something broke for me.',
+            'status' => SupportTicket::STATUS_OPEN,
+        ]);
+
+        $this->getJson('/api/support-tickets/'.$ticket->id)
+            ->assertOk()
+            ->assertJsonPath('data.submitter.profile_detailed', false)
+            ->assertJsonPath('data.submitter.email', $user->email)
+            ->assertJsonMissingPath('data.submitter.modules');
     }
 
     public function test_submit_blocked_when_functionality_off(): void

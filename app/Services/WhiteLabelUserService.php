@@ -320,7 +320,7 @@ class WhiteLabelUserService
     }
 
     /**
-     * @return array{id: int, name: string}|null
+     * @return array{id: int, name: string, is_central: bool, kind: string}|null
      */
     private function serializeFirm(User $user): ?array
     {
@@ -333,9 +333,14 @@ class WhiteLabelUserService
             return null;
         }
 
+        $isCentral = (bool) ($firm->is_central ?? false);
+
         return [
             'id' => (int) $firm->id,
             'name' => (string) $firm->name,
+            'is_central' => $isCentral,
+            // Central firm = Network; otherwise member firm.
+            'kind' => $isCentral ? 'network' : 'firm',
         ];
     }
 

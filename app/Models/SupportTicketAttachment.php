@@ -15,6 +15,7 @@ class SupportTicketAttachment extends Model
 
     protected $fillable = [
         'ticket_id',
+        'comment_id',
         'original_name',
         'file_path',
         'file_url',
@@ -31,6 +32,7 @@ class SupportTicketAttachment extends Model
             'size_bytes' => 'integer',
             'sort_order' => 'integer',
             'uploaded_by_user_id' => 'integer',
+            'comment_id' => 'integer',
         ];
     }
 
@@ -39,9 +41,26 @@ class SupportTicketAttachment extends Model
         return $this->belongsTo(SupportTicket::class, 'ticket_id');
     }
 
+    public function comment(): BelongsTo
+    {
+        return $this->belongsTo(SupportTicketComment::class, 'comment_id');
+    }
+
     public function uploader(): BelongsTo
     {
         return $this->belongsTo(User::class, 'uploaded_by_user_id');
+    }
+
+    public function isVideo(): bool
+    {
+        $mime = strtolower((string) $this->mime_type);
+        if (str_starts_with($mime, 'video/')) {
+            return true;
+        }
+
+        $name = strtolower((string) $this->original_name);
+
+        return (bool) preg_match('/\.(mp4|webm|mov|m4v)$/', $name);
     }
 
     public function resolvedFileUrl(): ?string
@@ -71,12 +90,14 @@ class SupportTicketAttachment extends Model
         return [
             'id' => $this->id,
             'ticket_id' => $this->ticket_id,
+            'comment_id' => $this->comment_id ? (int) $this->comment_id : null,
             'original_name' => $this->original_name,
             'file_path' => $this->file_path,
             'file_url' => $this->resolvedFileUrl(),
             'mime_type' => $this->mime_type,
             'size_bytes' => $this->size_bytes,
             'sort_order' => $this->sort_order,
+            'is_video' => $this->isVideo(),
             'uploaded_by_user_id' => $this->uploaded_by_user_id ? (int) $this->uploaded_by_user_id : null,
             'uploaded_by_name' => $this->uploaded_by_name,
             'created_at' => optional($this->created_at)?->toIso8601String(),
