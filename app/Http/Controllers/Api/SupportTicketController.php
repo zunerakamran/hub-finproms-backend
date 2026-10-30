@@ -129,8 +129,8 @@ class SupportTicketController extends Controller
             'screenshots' => ['nullable', 'array', 'max:'.SupportTicketService::MAX_ATTACHMENTS],
             'screenshots.*' => [
                 'file',
-                'mimes:'.SupportTicketService::ATTACHMENT_MIMES,
-                'max:'.SupportTicketService::MAX_ATTACHMENT_KB,
+                'mimes:'.SupportTicketService::SUBMIT_ATTACHMENT_MIMES,
+                'max:'.SupportTicketService::MAX_VIDEO_ATTACHMENT_KB,
             ],
         ]);
 

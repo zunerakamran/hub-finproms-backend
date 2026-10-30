@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-30 (Support Tickets report — st_view_reports)
+Last updated: 2026-10-30 (Support Tickets submit — urgency + in-app capture)
 
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
@@ -1072,10 +1072,13 @@ IMPLEMENTATION: UserCapabilitiesService; wired in CapabilitiesMatrixService
   (`support_tickets`) — NOT a Modules-page product module (the 6 product
   modules stay unchanged). Available on Shared, White-label, and Central Hub.
 - Users with `st_submit_ticket` can report system errors:
-  - Required: subject, module area (dropdown of product areas), description
-  - Optional: category (bug / UI / performance / data / access / feature / other),
-    priority (low / medium / high / critical), page URL, browser info,
-    screenshots (`screenshots[]` — images or PDF, max 8 × 5 MB)
+  - Required: subject, module, type of issue (category), urgency
+    (Normal=`medium` / High=`high`), remarks (description)
+  - Optional: page URL, browser info, attachments (`screenshots[]` — images /
+    PDF ≤ 5 MB or short video mp4/webm/mov/m4v ≤ 25 MB; max 8)
+  - Frontend also offers in-app **Capture screenshot** and **Record screen**
+    (browser `getDisplayMedia` / MediaRecorder; HTTPS; auto-stop ~45s)
+  - Legacy priorities low/critical remain valid on existing tickets / reports
 - Statuses: Open → In Progress → Waiting on User → Resolved → Closed
 - Capabilities (`st_*`, blurred while Functionalities → Support Tickets is off):
   - `st_submit_ticket` — submit tickets

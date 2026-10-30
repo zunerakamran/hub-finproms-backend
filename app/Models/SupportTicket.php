@@ -57,9 +57,20 @@ class SupportTicket extends Model
      */
     public const PRIORITY_LABELS = [
         self::PRIORITY_LOW => 'Low',
-        self::PRIORITY_MEDIUM => 'Medium',
+        self::PRIORITY_MEDIUM => 'Normal',
         self::PRIORITY_HIGH => 'High',
         self::PRIORITY_CRITICAL => 'Critical',
+    ];
+
+    /**
+     * Urgency choices on the New Ticket form (Normal / High).
+     * Legacy low/critical remain valid on existing tickets and in reports.
+     *
+     * @var list<string>
+     */
+    public const SUBMIT_PRIORITIES = [
+        self::PRIORITY_MEDIUM,
+        self::PRIORITY_HIGH,
     ];
 
     public const CATEGORY_BUG = 'bug';

@@ -19,8 +19,11 @@ class SupportTicketService
 {
     public const ATTACHMENT_MIMES = 'jpg,jpeg,png,gif,webp,pdf';
 
-    /** Image/PDF + short guidance clips for staff replies. */
+    /** Image/PDF + short clips — ticket submit and staff replies. */
     public const REPLY_ATTACHMENT_MIMES = 'jpg,jpeg,png,gif,webp,pdf,mp4,webm,mov,m4v';
+
+    /** Same media set as replies: screenshots / PDF / short error video clips. */
+    public const SUBMIT_ATTACHMENT_MIMES = self::REPLY_ATTACHMENT_MIMES;
 
     public const MAX_ATTACHMENTS = 8;
 
@@ -73,6 +76,13 @@ class SupportTicketService
                 ->map(fn (string $label, string $key) => ['key' => $key, 'label' => $label])
                 ->values()
                 ->all(),
+            'submit_priorities' => collect(SupportTicket::SUBMIT_PRIORITIES)
+                ->map(fn (string $key) => [
+                    'key' => $key,
+                    'label' => SupportTicket::PRIORITY_LABELS[$key] ?? $key,
+                ])
+                ->values()
+                ->all(),
             'statuses' => SupportTicket::STATUSES,
             'eta_presets' => [
                 ['key' => '1h', 'label' => 'About 1 hour', 'hours' => 1],
@@ -81,6 +91,7 @@ class SupportTicketService
                 ['key' => '2d', 'label' => 'About 2 days', 'hours' => 48],
                 ['key' => '1w', 'label' => 'About 1 week', 'hours' => 168],
             ],
+            'submit_attachment_mimes' => self::SUBMIT_ATTACHMENT_MIMES,
             'reply_attachment_mimes' => self::REPLY_ATTACHMENT_MIMES,
             'max_attachments' => self::MAX_ATTACHMENTS,
             'max_attachment_kb' => self::MAX_ATTACHMENT_KB,
@@ -135,7 +146,7 @@ class SupportTicketService
         }
 
         $screenshots = $this->filesFromData($data, 'screenshots');
-        $this->assertAttachmentLimits($screenshots);
+        $this->assertSubmitAttachmentLimits($screenshots);
 
         $ticket = $this->onTicketConnection(function () use ($subjectUser, $user, $subject, $description, $moduleArea, $category, $priority, $data, $screenshots) {
             $ticket = SupportTicket::query()->create([
@@ -1365,13 +1376,31 @@ class SupportTicketService
     }
 
     /**
+     * Submit attachments: images/PDF ≤ 5 MB; short video clips ≤ 25 MB.
+     *
+     * @param  list<UploadedFile>  $files
+     */
+    private function assertSubmitAttachmentLimits(array $files): void
+    {
+        $this->assertMediaAttachmentLimits($files, 'screenshots');
+    }
+
+    /**
      * @param  list<UploadedFile>  $files
      */
     private function assertReplyAttachmentLimits(array $files): void
     {
+        $this->assertMediaAttachmentLimits($files, 'attachments');
+    }
+
+    /**
+     * @param  list<UploadedFile>  $files
+     */
+    private function assertMediaAttachmentLimits(array $files, string $field): void
+    {
         if (count($files) > self::MAX_ATTACHMENTS) {
             throw ValidationException::withMessages([
-                'attachments' => 'You may attach at most '.self::MAX_ATTACHMENTS.' files.',
+                $field => 'You may attach at most '.self::MAX_ATTACHMENTS.' files.',
             ]);
         }
 
@@ -1383,9 +1412,9 @@ class SupportTicketService
             $maxKb = $isVideo ? self::MAX_VIDEO_ATTACHMENT_KB : self::MAX_ATTACHMENT_KB;
             $sizeKb = (int) ceil(((int) $file->getSize()) / 1024);
             if ($sizeKb > $maxKb) {
-                $label = $isVideo ? 'video clips' : 'screenshots';
+                $label = $isVideo ? 'video clips' : 'images / PDFs';
                 throw ValidationException::withMessages([
-                    "attachments.{$index}" => 'Each '.$label.' must be at most '
+                    "{$field}.{$index}" => 'Each '.$label.' must be at most '
                         .round($maxKb / 1024, 1).' MB.',
                 ]);
             }
