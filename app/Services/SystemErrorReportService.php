@@ -64,12 +64,13 @@ class SystemErrorReportService
             $table->string('browser_info', 500)->nullable();
             $table->string('environment', 40)->nullable();
             $table->unsignedInteger('occurrence_count')->default(1);
-            $table->timestamp('first_seen_at');
-            $table->timestamp('last_seen_at');
+            // dateTime — avoids MySQL 1067 Invalid default value for NOT NULL timestamp.
+            $table->dateTime('first_seen_at');
+            $table->dateTime('last_seen_at');
             $table->string('status', 40)->default('open');
             $table->unsignedBigInteger('resolved_by_user_id')->nullable();
             $table->string('resolved_by_name')->nullable();
-            $table->timestamp('resolved_at')->nullable();
+            $table->dateTime('resolved_at')->nullable();
             $table->text('staff_note')->nullable();
             $table->json('properties')->nullable();
             $table->timestamps();
