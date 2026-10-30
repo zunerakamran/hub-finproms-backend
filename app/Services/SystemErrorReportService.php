@@ -230,7 +230,14 @@ class SystemErrorReportService
      */
     public function list(Hub $hub, array $filters = []): LengthAwarePaginator
     {
-        $this->assertModuleEnabled($hub);
+        // Prefer empty feed over a hard failure when Support Tickets is off —
+        // the FE already hides the page when the functionality is disabled.
+        if (! $hub->hasSupportTicketsFunctionality()) {
+            return SystemErrorReport::query()->whereRaw('1 = 0')->paginate(
+                max(1, min(100, (int) ($filters['per_page'] ?? 50)))
+            );
+        }
+
         $this->ensureSchema();
 
         $q = SystemErrorReport::query()->orderByDesc('last_seen_at')->orderByDesc('id');

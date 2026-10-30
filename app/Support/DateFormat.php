@@ -26,6 +26,16 @@ final class DateFormat
         return $carbon ? $carbon->format(self::DATETIME) : $fallback;
     }
 
+    /**
+     * ISO-8601 string for API payloads (null-safe).
+     */
+    public static function iso(null|DateTimeInterface|CarbonInterface|string $value): ?string
+    {
+        $carbon = self::parse($value);
+
+        return $carbon ? $carbon->toIso8601String() : null;
+    }
+
     private static function parse(null|DateTimeInterface|CarbonInterface|string $value): ?CarbonInterface
     {
         if ($value === null || $value === '') {
