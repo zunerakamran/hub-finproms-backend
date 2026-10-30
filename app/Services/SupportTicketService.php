@@ -231,10 +231,7 @@ class SupportTicketService
         $this->assertModuleEnabled($hub);
 
         $role = $this->matrix->effectiveRoleFor($user);
-        $canAll = $this->matrix->roleCan($hub, $role, 'st_view_all_tickets')
-            || $this->matrix->roleCan($hub, $role, 'st_change_ticket_status')
-            || $this->matrix->roleCan($hub, $role, 'st_reply_to_tickets');
-        if (! $canAll) {
+        if (! $this->viewerCanAccessQueue($hub, $user)) {
             throw ValidationException::withMessages([
                 'capability' => 'You do not have permission to view all support tickets.',
             ]);
@@ -281,21 +278,30 @@ class SupportTicketService
     /**
      * Whether this viewer may receive the enriched submitter profile on tickets.
      */
-    public function viewerCanSeeSubmitterProfile(Hub $hub, User $viewer): bool
+    /**
+     * Queue / admin detail: view-all (read-only) or reply staff.
+     */
+    public function viewerCanAccessQueue(Hub $hub, User $viewer): bool
     {
         $role = $this->matrix->effectiveRoleFor($viewer);
 
         return $this->matrix->roleCan($hub, $role, 'st_view_all_tickets')
-            || $this->matrix->roleCan($hub, $role, 'st_change_ticket_status')
             || $this->matrix->roleCan($hub, $role, 'st_reply_to_tickets');
     }
 
+    public function viewerCanSeeSubmitterProfile(Hub $hub, User $viewer): bool
+    {
+        return $this->viewerCanAccessQueue($hub, $viewer);
+    }
+
+    /**
+     * Staff reply (status + ETA + remarks + media) — st_reply_to_tickets only.
+     */
     public function viewerCanReply(Hub $hub, User $viewer): bool
     {
         $role = $this->matrix->effectiveRoleFor($viewer);
 
-        return $this->matrix->roleCan($hub, $role, 'st_reply_to_tickets')
-            || $this->matrix->roleCan($hub, $role, 'st_change_ticket_status');
+        return $this->matrix->roleCan($hub, $role, 'st_reply_to_tickets');
     }
 
     /**
@@ -531,9 +537,10 @@ class SupportTicketService
     {
         $this->assertModuleEnabled($hub);
 
+        // Legacy endpoint — same gate as reply (status change alone was retired).
         if (! $this->viewerCanReply($hub, $user)) {
             throw ValidationException::withMessages([
-                'capability' => 'You do not have permission to change support ticket status.',
+                'capability' => 'You do not have permission to reply to support tickets.',
             ]);
         }
 
@@ -608,10 +615,16 @@ class SupportTicketService
         $this->assertModuleEnabled($hub);
         $this->assertCanView($hub, $user, $ticket);
 
-        $role = $this->matrix->effectiveRoleFor($user);
-        if (! $this->matrix->roleCan($hub, $role, 'st_comment_on_tickets')) {
+        // Staff should use Reply. Members may comment on their own tickets.
+        if ($this->viewerCanReply($hub, $user)) {
             throw ValidationException::withMessages([
-                'capability' => 'You do not have permission to comment on support tickets.',
+                'capability' => 'Use Reply to post status, ETA, remarks, and media on this ticket.',
+            ]);
+        }
+
+        if (! $this->viewerIsTicketOwner($hub, $user, $ticket)) {
+            throw ValidationException::withMessages([
+                'capability' => 'You can only comment on your own support tickets.',
             ]);
         }
 
@@ -662,23 +675,26 @@ class SupportTicketService
     public function assertCanView(Hub $hub, User $user, SupportTicket $ticket): void
     {
         $role = $this->matrix->effectiveRoleFor($user);
-        $subject = $this->actingAdvisors->subjectOrNull($user);
-        $isOwner = (int) $ticket->user_id === (int) $user->id
-            || ($subject && (int) $ticket->user_id === (int) $subject->id);
+        $isOwner = $this->viewerIsTicketOwner($hub, $user, $ticket);
 
         $canOwn = $this->matrix->roleCan($hub, $role, 'st_view_own_tickets')
             || $this->matrix->roleCan($hub, $role, 'st_submit_ticket');
-        $canAll = $this->matrix->roleCan($hub, $role, 'st_view_all_tickets')
-            || $this->matrix->roleCan($hub, $role, 'st_change_ticket_status')
-            || $this->matrix->roleCan($hub, $role, 'st_reply_to_tickets');
 
-        if (($isOwner && $canOwn) || $canAll) {
+        if (($isOwner && $canOwn) || $this->viewerCanAccessQueue($hub, $user)) {
             return;
         }
 
         abort(response()->json([
             'message' => 'You do not have permission to view this support ticket.',
         ], 403));
+    }
+
+    public function viewerIsTicketOwner(Hub $hub, User $user, SupportTicket $ticket): bool
+    {
+        $subject = $this->actingAdvisors->subjectOrNull($user);
+
+        return (int) $ticket->user_id === (int) $user->id
+            || ($subject && (int) $ticket->user_id === (int) $subject->id);
     }
 
     /**

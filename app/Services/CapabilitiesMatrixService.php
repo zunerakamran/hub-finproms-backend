@@ -1281,7 +1281,6 @@ class CapabilitiesMatrixService
             'wc_review_change_requests',
             'wc_assign_change_requests',
             'wc_view_all_change_requests',
-            'st_change_ticket_status',
             'st_reply_to_tickets',
             'st_view_all_tickets',
         ] as $key) {

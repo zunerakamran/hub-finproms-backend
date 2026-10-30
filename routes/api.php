@@ -304,9 +304,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::get('/support-tickets/mine', [SupportTicketController::class, 'mine']);
         Route::get('/support-tickets/{supportTicket}', [SupportTicketController::class, 'show']);
-        Route::middleware('hub_can:st_comment_on_tickets')->group(function () {
-            Route::post('/support-tickets/{supportTicket}/comments', [SupportTicketController::class, 'comment']);
-        });
+        // Member follow-up on own tickets (service enforces ownership; staff use /reply).
+        Route::post('/support-tickets/{supportTicket}/comments', [SupportTicketController::class, 'comment']);
     });
 
     // Live Chat — hub users ↔ selected Central Hub agents (lc_* capabilities).
@@ -890,19 +889,16 @@ Route::middleware('auth:sanctum')->group(function () {
             });
         });
 
-        // Support Tickets — queue / reply / change status
+        // Support Tickets — queue (view-all or reply) / reply (reply only)
         Route::middleware('acting_wl_wc_db')->group(function () {
-            Route::middleware('hub_can:st_view_all_tickets,st_change_ticket_status,st_reply_to_tickets')->group(function () {
+            Route::middleware('hub_can:st_view_all_tickets,st_reply_to_tickets')->group(function () {
                 Route::get('/support-tickets', [SupportTicketController::class, 'index']);
                 Route::get('/support-tickets/options', [SupportTicketController::class, 'options']);
                 Route::get('/support-tickets/{supportTicket}', [SupportTicketController::class, 'show']);
             });
-            Route::middleware('hub_can:st_reply_to_tickets,st_change_ticket_status')->group(function () {
+            Route::middleware('hub_can:st_reply_to_tickets')->group(function () {
                 Route::post('/support-tickets/{supportTicket}/reply', [SupportTicketController::class, 'reply']);
                 Route::post('/support-tickets/{supportTicket}/change-status', [SupportTicketController::class, 'changeStatus']);
-            });
-            Route::middleware('hub_can:st_comment_on_tickets')->group(function () {
-                Route::post('/support-tickets/{supportTicket}/comments', [SupportTicketController::class, 'comment']);
             });
         });
 
@@ -1429,19 +1425,16 @@ Route::middleware('auth:sanctum')->group(function () {
             });
         });
 
-        // Support Tickets — queue / reply / change status
+        // Support Tickets — queue (view-all or reply) / reply (reply only)
         Route::middleware('acting_wl_wc_db')->group(function () {
-            Route::middleware('hub_can:st_view_all_tickets,st_change_ticket_status,st_reply_to_tickets')->group(function () {
+            Route::middleware('hub_can:st_view_all_tickets,st_reply_to_tickets')->group(function () {
                 Route::get('/support-tickets', [SupportTicketController::class, 'index']);
                 Route::get('/support-tickets/options', [SupportTicketController::class, 'options']);
                 Route::get('/support-tickets/{supportTicket}', [SupportTicketController::class, 'show']);
             });
-            Route::middleware('hub_can:st_reply_to_tickets,st_change_ticket_status')->group(function () {
+            Route::middleware('hub_can:st_reply_to_tickets')->group(function () {
                 Route::post('/support-tickets/{supportTicket}/reply', [SupportTicketController::class, 'reply']);
                 Route::post('/support-tickets/{supportTicket}/change-status', [SupportTicketController::class, 'changeStatus']);
-            });
-            Route::middleware('hub_can:st_comment_on_tickets')->group(function () {
-                Route::post('/support-tickets/{supportTicket}/comments', [SupportTicketController::class, 'comment']);
             });
         });
 

@@ -47,8 +47,6 @@ class SupportTicketsTest extends TestCase
 
         $caps[User::ROLE_USER]['st_submit_ticket'] = true;
         $caps[User::ROLE_USER]['st_view_own_tickets'] = true;
-        $caps[User::ROLE_USER]['st_comment_on_tickets'] = true;
-        // Reply is a separate staff capability (also mirrored from change-status).
         $caps[User::ROLE_FINPROMS_ADMIN]['st_reply_to_tickets'] = true;
         $caps[User::ROLE_MANAGER]['st_reply_to_tickets'] = true;
 
@@ -63,11 +61,49 @@ class SupportTicketsTest extends TestCase
     {
         $this->assertContains('st_submit_ticket', Hub::SUPPORT_TICKETS_CAPABILITY_KEYS);
         $this->assertContains('st_reply_to_tickets', Hub::SUPPORT_TICKETS_CAPABILITY_KEYS);
+        $this->assertContains('st_view_all_tickets', Hub::SUPPORT_TICKETS_CAPABILITY_KEYS);
+        $this->assertNotContains('st_change_ticket_status', Hub::SUPPORT_TICKETS_CAPABILITY_KEYS);
+        $this->assertNotContains('st_comment_on_tickets', Hub::SUPPORT_TICKETS_CAPABILITY_KEYS);
         $this->assertNotContains('module_support_tickets', Hub::MODULE_KEYS);
-        $this->assertArrayHasKey('st_change_ticket_status', Hub::CHECKLIST_DEFINITIONS);
+        $this->assertArrayNotHasKey('st_change_ticket_status', Hub::CHECKLIST_DEFINITIONS);
+        $this->assertArrayNotHasKey('st_comment_on_tickets', Hub::CHECKLIST_DEFINITIONS);
         $this->assertArrayHasKey('st_reply_to_tickets', Hub::CHECKLIST_DEFINITIONS);
         $this->assertArrayHasKey('support_tickets', Hub::CHECKLIST_DEFINITIONS);
         $this->assertSame(Hub::GROUP_BEHAVIOUR, Hub::CHECKLIST_DEFINITIONS['support_tickets']['group']);
+    }
+
+    public function test_view_all_alone_cannot_reply(): void
+    {
+        $hub = $this->createHubWithSupportTickets();
+        $caps = $hub->role_capabilities;
+        $caps[User::ROLE_MANAGER]['st_reply_to_tickets'] = false;
+        $caps[User::ROLE_MANAGER]['st_view_all_tickets'] = true;
+        $hub->role_capabilities = $caps;
+        $hub->save();
+        app(HubService::class)->forgetCurrentCache();
+
+        $user = User::factory()->create(['role' => User::ROLE_USER]);
+        $viewer = User::factory()->create(['role' => User::ROLE_MANAGER]);
+        $ticket = SupportTicket::query()->create([
+            'user_id' => $user->id,
+            'subject' => 'View only',
+            'module_area' => 'dashboard',
+            'category' => 'bug',
+            'priority' => 'low',
+            'description' => 'Read-only viewer test.',
+            'status' => SupportTicket::STATUS_OPEN,
+        ]);
+
+        Sanctum::actingAs($viewer);
+
+        $this->getJson('/api/client-admin/support-tickets')
+            ->assertOk()
+            ->assertJsonFragment(['id' => $ticket->id]);
+
+        $this->post('/api/client-admin/support-tickets/'.$ticket->id.'/reply', [
+            'status' => SupportTicket::STATUS_IN_PROGRESS,
+            'remarks' => '<p>Should be forbidden.</p>',
+        ])->assertStatus(403);
     }
 
     public function test_user_can_submit_and_view_own_ticket(): void

@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-30 (Support Tickets — staff reply: status, ETA, remarks, media)
+Last updated: 2026-10-30 (Support Tickets — single st_reply_to_tickets capability)
 
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
@@ -1079,23 +1079,23 @@ IMPLEMENTATION: UserCapabilitiesService; wired in CapabilitiesMatrixService
 - Statuses: Open → In Progress → Waiting on User → Resolved → Closed
 - Capabilities (`st_*`, blurred while Functionalities → Support Tickets is off):
   - `st_submit_ticket` — submit tickets
-  - `st_view_own_tickets` — own ticket history & detail
-  - `st_view_all_tickets` — full hub queue (developer inbox)
-  - `st_change_ticket_status` — change status + resolution note (legacy;
-    prefer reply)
-  - `st_reply_to_tickets` — staff reply: set status, estimated resolve time,
-    remarks, and attach screenshots or a short video for the end user
-  - `st_comment_on_tickets` — member follow-up comments / screenshots
-- Staff reply (`st_reply_to_tickets` or legacy `st_change_ticket_status`):
+  - `st_view_own_tickets` — own ticket history & detail; owners may add
+    follow-up comments on their own tickets
+  - `st_view_all_tickets` — full hub queue + ticket detail (read-only; does
+    NOT allow reply / status change)
+  - `st_reply_to_tickets` — sole staff action: set status, estimated resolve
+    time, remarks, and attach screenshots or a short video; also opens queue
+  - Retired (merged into `st_reply_to_tickets`): `st_change_ticket_status`,
+    `st_comment_on_tickets`
+- Staff reply (`st_reply_to_tickets` only):
   - Required: current status, remarks (guidance for the end user)
   - Optional: estimated resolve time (`estimated_hours` preset or absolute
     `estimated_resolve_at`; or clear ETA), multiple attachments
     (images/PDF ≤ 5 MB; mp4/webm/mov/m4v ≤ 25 MB; max 8)
   - Stored on ticket (`status`, `status_note`, `estimated_resolve_at`) and as
     an activity comment (with linked attachments via `comment_id`)
-- Submitter profile (queue + detail) for viewers with `st_view_all_tickets`,
-  `st_change_ticket_status`, or `st_reply_to_tickets` — own-ticket viewers get
-  basic name/email:
+- Submitter profile (queue + detail) for viewers with `st_view_all_tickets`
+  or `st_reply_to_tickets` — own-ticket viewers get basic name/email:
   - name, email, roles (+ labels), firm/network name (`firm.kind` =
     network when Central firm, else firm), modules (effective labels /
     unrestricted), last login (from personal access tokens), account
@@ -2145,13 +2145,11 @@ Either path designates Heads; both MUST stay in sync. Multiple admins OK:
 
   Support Tickets (blurred while Functionalities → support_tickets is off):
   - st_submit_ticket — submit error reports (module + description + screenshots)
-  - st_view_own_tickets — own ticket history & detail
-  - st_view_all_tickets — full hub queue (developer inbox)
-  - st_change_ticket_status — update status + resolution note (legacy)
-  - st_reply_to_tickets — staff reply (status + ETA + remarks + media)
-  - st_comment_on_tickets — follow-up comments on tickets the user can view
+  - st_view_own_tickets — own ticket history & detail (+ own follow-up comments)
+  - st_view_all_tickets — full hub queue / detail (read-only)
+  - st_reply_to_tickets — sole staff reply (status + ETA + remarks + media)
   - All roles available in the matrix; defaults OFF until Power Admin enables
-    (managers default ON for view-all + change-status)
+    (managers default ON for view-all + reply)
 
   Live Chat (blurred while Functionalities → live_chat is off):
   - lc_use_chat — Shared / White-label only: open Live Chat / send messages
