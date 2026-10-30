@@ -1105,9 +1105,11 @@ IMPLEMENTATION: UserCapabilitiesService; wired in CapabilitiesMatrixService
   - GET /api/support-tickets/options
   - POST /api/support-tickets
   - GET /api/support-tickets/mine
+  - GET /api/support-tickets/queue — full hub queue (`st_view_all_tickets` OR
+    `st_reply_to_tickets`; no client-admin shell required)
   - GET /api/support-tickets/{id}
   - POST /api/support-tickets/{id}/comments
-  - GET …/support-tickets (admin list)
+  - GET …/support-tickets (admin list; same gate as queue)
   - POST …/support-tickets/{id}/reply
   - POST …/support-tickets/{id}/change-status
 - Activity logs: `st.submit` / `st.reply` / `st.change_status` / `st.comment`

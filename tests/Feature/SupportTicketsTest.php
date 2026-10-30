@@ -100,9 +100,62 @@ class SupportTicketsTest extends TestCase
             ->assertOk()
             ->assertJsonFragment(['id' => $ticket->id]);
 
+        $this->getJson('/api/support-tickets/queue')
+            ->assertOk()
+            ->assertJsonFragment(['id' => $ticket->id]);
+
+        $this->getJson('/api/support-tickets/'.$ticket->id)
+            ->assertOk()
+            ->assertJsonPath('data.id', $ticket->id)
+            ->assertJsonPath('data.submitter.profile_detailed', true);
+
         $this->post('/api/client-admin/support-tickets/'.$ticket->id.'/reply', [
             'status' => SupportTicket::STATUS_IN_PROGRESS,
             'remarks' => '<p>Should be forbidden.</p>',
+        ])->assertStatus(403);
+    }
+
+    public function test_view_all_alone_works_for_non_hub_admin_role(): void
+    {
+        $hub = $this->createHubWithSupportTickets();
+        $caps = $hub->role_capabilities;
+        foreach ([User::ROLE_APPROVER, User::ROLE_USER, User::ROLE_ADVISOR] as $role) {
+            $caps[$role]['st_view_all_tickets'] = false;
+            $caps[$role]['st_reply_to_tickets'] = false;
+            $caps[$role]['st_submit_ticket'] = false;
+            $caps[$role]['st_view_own_tickets'] = false;
+        }
+        $caps[User::ROLE_APPROVER]['st_view_all_tickets'] = true;
+        $hub->role_capabilities = $caps;
+        $hub->save();
+        app(CapabilitiesMatrixService::class)->forgetResolvedCaches();
+        app(HubService::class)->forgetCurrentCache();
+
+        $owner = User::factory()->create(['role' => User::ROLE_USER]);
+        $viewer = User::factory()->create(['role' => User::ROLE_APPROVER]);
+        $ticket = SupportTicket::query()->create([
+            'user_id' => $owner->id,
+            'subject' => 'Approver view-all only',
+            'module_area' => 'dashboard',
+            'category' => 'bug',
+            'priority' => 'medium',
+            'description' => 'Non hub-admin role with only view-all.',
+            'status' => SupportTicket::STATUS_OPEN,
+        ]);
+
+        Sanctum::actingAs($viewer);
+
+        $this->getJson('/api/support-tickets/queue')
+            ->assertOk()
+            ->assertJsonFragment(['id' => $ticket->id]);
+
+        $this->getJson('/api/client-admin/support-tickets')
+            ->assertOk()
+            ->assertJsonFragment(['id' => $ticket->id]);
+
+        $this->post('/api/client-admin/support-tickets/'.$ticket->id.'/reply', [
+            'status' => SupportTicket::STATUS_IN_PROGRESS,
+            'remarks' => '<p>No reply capability.</p>',
         ])->assertStatus(403);
     }
 

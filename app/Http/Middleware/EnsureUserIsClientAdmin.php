@@ -2,8 +2,8 @@
 
 namespace App\Http\Middleware;
 
+use App\Services\ActingHubService;
 use App\Services\CapabilitiesMatrixService;
-use App\Services\HubService;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -11,8 +11,8 @@ use Symfony\Component\HttpFoundation\Response;
 class EnsureUserIsClientAdmin
 {
     public function __construct(
-        private readonly HubService $hubs,
-        private readonly CapabilitiesMatrixService $matrix
+        private readonly CapabilitiesMatrixService $matrix,
+        private readonly ActingHubService $actingHubs
     ) {}
 
     /**
@@ -29,8 +29,10 @@ class EnsureUserIsClientAdmin
             ], 403);
         }
 
-        $hub = $this->hubs->current();
-        if (! $this->matrix->roleHasHubDashboardAccess($hub, (string) $user->role)) {
+        // Capability-gated tools (Support Tickets, SMC, …) follow the acting hub
+        // while the switcher is on a content hub; otherwise use this deploy.
+        $hub = $this->actingHubs->targetHub($user);
+        if (! $this->matrix->userHasHubDashboardAccess($hub, $user)) {
             return response()->json([
                 'message' => 'Hub admin access required.',
             ], 403);

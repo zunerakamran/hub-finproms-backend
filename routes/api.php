@@ -303,6 +303,10 @@ Route::middleware('auth:sanctum')->group(function () {
         });
 
         Route::get('/support-tickets/mine', [SupportTicketController::class, 'mine']);
+        // Full hub queue for view-all (read-only) or reply — no client-admin shell required.
+        Route::middleware('hub_can:st_view_all_tickets,st_reply_to_tickets')->group(function () {
+            Route::get('/support-tickets/queue', [SupportTicketController::class, 'index']);
+        });
         Route::get('/support-tickets/{supportTicket}', [SupportTicketController::class, 'show']);
         // Member follow-up on own tickets (service enforces ownership; staff use /reply).
         Route::post('/support-tickets/{supportTicket}/comments', [SupportTicketController::class, 'comment']);

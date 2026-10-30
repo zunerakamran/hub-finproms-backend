@@ -1360,6 +1360,26 @@ class CapabilitiesMatrixService
     }
 
     /**
+     * Whether this user may open the hub-admin dashboard shell (multi-role UNION).
+     */
+    public function userHasHubDashboardAccess(Hub $hub, User $user): bool
+    {
+        foreach ($user->roleKeys() as $role) {
+            if ($this->roleHasHubDashboardAccess($hub, $role)) {
+                return true;
+            }
+        }
+
+        // Effective role alone (Admin-staff → advisor) when roleKeys still list admin_staff.
+        $effective = $this->effectiveRoleFor($user);
+        if ($effective !== '' && $this->roleHasHubDashboardAccess($hub, $effective)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
      * @return array<string, array<string, bool>>
      */
     public function resolvedRoleCapabilities(Hub $hub): array

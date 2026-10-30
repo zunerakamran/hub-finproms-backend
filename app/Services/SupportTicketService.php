@@ -104,8 +104,7 @@ class SupportTicketService
     {
         $this->assertModuleEnabled($hub);
 
-        $role = $this->matrix->effectiveRoleFor($user);
-        if (! $this->matrix->roleCan($hub, $role, 'st_submit_ticket')) {
+        if (! $this->matrix->userCan($hub, $user, 'st_submit_ticket')) {
             throw ValidationException::withMessages([
                 'capability' => 'You do not have permission to submit support tickets.',
             ]);
@@ -198,9 +197,8 @@ class SupportTicketService
     {
         $this->assertModuleEnabled($hub);
 
-        $role = $this->matrix->effectiveRoleFor($user);
-        $canOwn = $this->matrix->roleCan($hub, $role, 'st_view_own_tickets')
-            || $this->matrix->roleCan($hub, $role, 'st_submit_ticket');
+        $canOwn = $this->matrix->userCan($hub, $user, 'st_view_own_tickets')
+            || $this->matrix->userCan($hub, $user, 'st_submit_ticket');
         if (! $canOwn) {
             throw ValidationException::withMessages([
                 'capability' => 'You do not have permission to view your support tickets.',
@@ -230,7 +228,6 @@ class SupportTicketService
     {
         $this->assertModuleEnabled($hub);
 
-        $role = $this->matrix->effectiveRoleFor($user);
         if (! $this->viewerCanAccessQueue($hub, $user)) {
             throw ValidationException::withMessages([
                 'capability' => 'You do not have permission to view all support tickets.',
@@ -276,19 +273,18 @@ class SupportTicketService
     }
 
     /**
-     * Whether this viewer may receive the enriched submitter profile on tickets.
-     */
-    /**
      * Queue / admin detail: view-all (read-only) or reply staff.
+     * Uses userCan (role UNION + overrides) so multi-role matches middleware / FE.
      */
     public function viewerCanAccessQueue(Hub $hub, User $viewer): bool
     {
-        $role = $this->matrix->effectiveRoleFor($viewer);
-
-        return $this->matrix->roleCan($hub, $role, 'st_view_all_tickets')
-            || $this->matrix->roleCan($hub, $role, 'st_reply_to_tickets');
+        return $this->matrix->userCan($hub, $viewer, 'st_view_all_tickets')
+            || $this->matrix->userCan($hub, $viewer, 'st_reply_to_tickets');
     }
 
+    /**
+     * Whether this viewer may receive the enriched submitter profile on tickets.
+     */
     public function viewerCanSeeSubmitterProfile(Hub $hub, User $viewer): bool
     {
         return $this->viewerCanAccessQueue($hub, $viewer);
@@ -299,9 +295,7 @@ class SupportTicketService
      */
     public function viewerCanReply(Hub $hub, User $viewer): bool
     {
-        $role = $this->matrix->effectiveRoleFor($viewer);
-
-        return $this->matrix->roleCan($hub, $role, 'st_reply_to_tickets');
+        return $this->matrix->userCan($hub, $viewer, 'st_reply_to_tickets');
     }
 
     /**
@@ -674,11 +668,10 @@ class SupportTicketService
 
     public function assertCanView(Hub $hub, User $user, SupportTicket $ticket): void
     {
-        $role = $this->matrix->effectiveRoleFor($user);
         $isOwner = $this->viewerIsTicketOwner($hub, $user, $ticket);
 
-        $canOwn = $this->matrix->roleCan($hub, $role, 'st_view_own_tickets')
-            || $this->matrix->roleCan($hub, $role, 'st_submit_ticket');
+        $canOwn = $this->matrix->userCan($hub, $user, 'st_view_own_tickets')
+            || $this->matrix->userCan($hub, $user, 'st_submit_ticket');
 
         if (($isOwner && $canOwn) || $this->viewerCanAccessQueue($hub, $user)) {
             return;
