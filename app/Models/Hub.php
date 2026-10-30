@@ -702,6 +702,7 @@ class Hub extends Model
         'st_view_own_tickets',
         'st_view_all_tickets',
         'st_reply_to_tickets',
+        'st_view_reports',
     ];
 
     /**
@@ -1736,6 +1737,13 @@ class Hub extends Model
         'st_reply_to_tickets' => [
             'label' => 'Reply to support tickets',
             'description' => 'Staff reply on tickets: set current status, estimated time to resolve, remarks, and attach screenshots or a short video to guide the end user. Also opens the queue so staff can find tickets to reply to.',
+            'group' => self::GROUP_SUPPORT_TICKETS,
+            'default_shared' => false,
+            'default_white_label' => false,
+        ],
+        'st_view_reports' => [
+            'label' => 'View support tickets report',
+            'description' => 'Open the Support Tickets report: period stats (raised / resolved / pending), firm and network comparisons, pie charts and graphs, CSV export, and detail rows with the same filters as other module reports.',
             'group' => self::GROUP_SUPPORT_TICKETS,
             'default_shared' => false,
             'default_white_label' => false,

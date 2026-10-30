@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Firm;
 use App\Models\Hub;
 use App\Models\SupportTicket;
 use App\Models\User;
@@ -62,12 +63,14 @@ class SupportTicketsTest extends TestCase
         $this->assertContains('st_submit_ticket', Hub::SUPPORT_TICKETS_CAPABILITY_KEYS);
         $this->assertContains('st_reply_to_tickets', Hub::SUPPORT_TICKETS_CAPABILITY_KEYS);
         $this->assertContains('st_view_all_tickets', Hub::SUPPORT_TICKETS_CAPABILITY_KEYS);
+        $this->assertContains('st_view_reports', Hub::SUPPORT_TICKETS_CAPABILITY_KEYS);
         $this->assertNotContains('st_change_ticket_status', Hub::SUPPORT_TICKETS_CAPABILITY_KEYS);
         $this->assertNotContains('st_comment_on_tickets', Hub::SUPPORT_TICKETS_CAPABILITY_KEYS);
         $this->assertNotContains('module_support_tickets', Hub::MODULE_KEYS);
         $this->assertArrayNotHasKey('st_change_ticket_status', Hub::CHECKLIST_DEFINITIONS);
         $this->assertArrayNotHasKey('st_comment_on_tickets', Hub::CHECKLIST_DEFINITIONS);
         $this->assertArrayHasKey('st_reply_to_tickets', Hub::CHECKLIST_DEFINITIONS);
+        $this->assertArrayHasKey('st_view_reports', Hub::CHECKLIST_DEFINITIONS);
         $this->assertArrayHasKey('support_tickets', Hub::CHECKLIST_DEFINITIONS);
         $this->assertSame(Hub::GROUP_BEHAVIOUR, Hub::CHECKLIST_DEFINITIONS['support_tickets']['group']);
     }
@@ -342,5 +345,129 @@ class SupportTicketsTest extends TestCase
             'module_area' => 'dashboard',
             'description' => 'Nope',
         ])->assertStatus(403);
+    }
+
+    public function test_report_requires_st_view_reports_capability(): void
+    {
+        $hub = $this->createHubWithSupportTickets();
+        $caps = $hub->role_capabilities;
+        $caps[User::ROLE_USER]['st_view_reports'] = false;
+        $hub->role_capabilities = $caps;
+        $hub->save();
+        app(CapabilitiesMatrixService::class)->forgetResolvedCaches();
+        app(HubService::class)->forgetCurrentCache();
+
+        $user = User::factory()->create(['role' => User::ROLE_USER]);
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/support-tickets/reports')->assertStatus(403);
+        $this->getJson('/api/client-admin/support-tickets/reports')->assertStatus(403);
+    }
+
+    public function test_report_returns_stats_charts_and_firm_comparison(): void
+    {
+        $hub = $this->createHubWithSupportTickets();
+        $caps = $hub->role_capabilities;
+        $caps[User::ROLE_TOP_MANAGEMENT]['st_view_reports'] = true;
+        $hub->role_capabilities = $caps;
+        $hub->save();
+        app(CapabilitiesMatrixService::class)->forgetResolvedCaches();
+        app(HubService::class)->forgetCurrentCache();
+
+        $firm = Firm::query()->create(['name' => 'Acme Advisers', 'is_central' => false]);
+        $network = Firm::query()->create(['name' => 'Central Network', 'is_central' => true]);
+
+        $firmUser = User::factory()->create([
+            'role' => User::ROLE_USER,
+            'firm_id' => $firm->id,
+        ]);
+        $networkUser = User::factory()->create([
+            'role' => User::ROLE_USER,
+            'firm_id' => $network->id,
+        ]);
+        $viewer = User::factory()->create(['role' => User::ROLE_TOP_MANAGEMENT]);
+
+        SupportTicket::query()->create([
+            'user_id' => $firmUser->id,
+            'subject' => 'Firm ticket open',
+            'module_area' => 'dashboard',
+            'category' => 'bug',
+            'priority' => 'high',
+            'description' => 'From firm user.',
+            'status' => SupportTicket::STATUS_OPEN,
+        ]);
+        SupportTicket::query()->create([
+            'user_id' => $networkUser->id,
+            'subject' => 'Network ticket resolved',
+            'module_area' => 'authentication',
+            'category' => 'access',
+            'priority' => 'medium',
+            'description' => 'From network user.',
+            'status' => SupportTicket::STATUS_RESOLVED,
+            'resolved_at' => now(),
+        ]);
+
+        Sanctum::actingAs($viewer);
+
+        $response = $this->getJson('/api/support-tickets/reports?period=month')
+            ->assertOk()
+            ->assertJsonPath('report.summary.total', 2)
+            ->assertJsonPath('report.summary.pending', 1)
+            ->assertJsonPath('report.summary.resolved', 1)
+            ->assertJsonStructure([
+                'report' => [
+                    'summary' => [
+                        'raised_this_week',
+                        'raised_this_month',
+                        'resolved_this_week',
+                        'resolved_this_month',
+                        'by_status',
+                        'by_priority',
+                        'by_category',
+                        'by_module',
+                    ],
+                    'period_comparison' => [
+                        'current',
+                        'previous',
+                        'delta',
+                        'chart',
+                    ],
+                    'charts' => [
+                        'by_status',
+                        'by_priority',
+                        'by_category',
+                        'by_module',
+                        'by_firm',
+                        'by_network',
+                        'by_firm_kind',
+                        'raised_over_time',
+                        'resolved_over_time',
+                    ],
+                    'rows',
+                ],
+                'filter_options',
+            ]);
+
+        $this->assertGreaterThanOrEqual(1, (int) $response->json('report.summary.raised_this_month'));
+        $firmLabels = $response->json('report.charts.by_firm.labels') ?? [];
+        $this->assertTrue(
+            in_array('Acme Advisers', $firmLabels, true)
+            || in_array('Central Network', $firmLabels, true)
+        );
+
+        $this->getJson('/api/support-tickets/charts/firm-comparison')
+            ->assertOk()
+            ->assertJsonStructure(['title', 'chart' => ['labels', 'datasets']]);
+
+        $this->getJson('/api/support-tickets/charts/raised-over-time?period=week')
+            ->assertOk()
+            ->assertJsonStructure(['title', 'chart' => ['labels', 'datasets']]);
+
+        $this->getJson('/api/client-admin/support-tickets/reports?status=Open')
+            ->assertOk()
+            ->assertJsonPath('report.summary.total', 1);
+
+        $export = $this->get('/api/support-tickets/reports/export')->assertOk();
+        $this->assertStringContainsString('text/csv', (string) $export->headers->get('content-type'));
     }
 }

@@ -307,6 +307,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('hub_can:st_view_all_tickets,st_reply_to_tickets')->group(function () {
             Route::get('/support-tickets/queue', [SupportTicketController::class, 'index']);
         });
+        Route::middleware('hub_can:st_view_reports')->group(function () {
+            Route::get('/support-tickets/reports', [SupportTicketController::class, 'report']);
+            Route::get('/support-tickets/reports/export', [SupportTicketController::class, 'export']);
+            Route::get('/support-tickets/charts/firm-comparison', [SupportTicketController::class, 'firmComparison']);
+            Route::get('/support-tickets/charts/raised-over-time', [SupportTicketController::class, 'raisedOverTime']);
+        });
         Route::get('/support-tickets/{supportTicket}', [SupportTicketController::class, 'show']);
         // Member follow-up on own tickets (service enforces ownership; staff use /reply).
         Route::post('/support-tickets/{supportTicket}/comments', [SupportTicketController::class, 'comment']);
@@ -893,8 +899,14 @@ Route::middleware('auth:sanctum')->group(function () {
             });
         });
 
-        // Support Tickets — queue (view-all or reply) / reply (reply only)
+        // Support Tickets — queue (view-all or reply) / reports / reply (reply only)
         Route::middleware('acting_wl_wc_db')->group(function () {
+            Route::middleware('hub_can:st_view_reports')->group(function () {
+                Route::get('/support-tickets/reports', [SupportTicketController::class, 'report']);
+                Route::get('/support-tickets/reports/export', [SupportTicketController::class, 'export']);
+                Route::get('/support-tickets/charts/firm-comparison', [SupportTicketController::class, 'firmComparison']);
+                Route::get('/support-tickets/charts/raised-over-time', [SupportTicketController::class, 'raisedOverTime']);
+            });
             Route::middleware('hub_can:st_view_all_tickets,st_reply_to_tickets')->group(function () {
                 Route::get('/support-tickets', [SupportTicketController::class, 'index']);
                 Route::get('/support-tickets/options', [SupportTicketController::class, 'options']);
@@ -1429,8 +1441,14 @@ Route::middleware('auth:sanctum')->group(function () {
             });
         });
 
-        // Support Tickets — queue (view-all or reply) / reply (reply only)
+        // Support Tickets — queue (view-all or reply) / reports / reply (reply only)
         Route::middleware('acting_wl_wc_db')->group(function () {
+            Route::middleware('hub_can:st_view_reports')->group(function () {
+                Route::get('/support-tickets/reports', [SupportTicketController::class, 'report']);
+                Route::get('/support-tickets/reports/export', [SupportTicketController::class, 'export']);
+                Route::get('/support-tickets/charts/firm-comparison', [SupportTicketController::class, 'firmComparison']);
+                Route::get('/support-tickets/charts/raised-over-time', [SupportTicketController::class, 'raisedOverTime']);
+            });
             Route::middleware('hub_can:st_view_all_tickets,st_reply_to_tickets')->group(function () {
                 Route::get('/support-tickets', [SupportTicketController::class, 'index']);
                 Route::get('/support-tickets/options', [SupportTicketController::class, 'options']);

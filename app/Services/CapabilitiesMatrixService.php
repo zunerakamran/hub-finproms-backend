@@ -1184,6 +1184,7 @@ class CapabilitiesMatrixService
                 'smc_view_reports',
                 'gc_view_reports',
                 'wc_view_platform_report',
+                'st_view_reports',
             ] as $key) {
                 $matrix[User::ROLE_TOP_MANAGEMENT][$key] = true;
             }
