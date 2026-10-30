@@ -453,7 +453,7 @@ class FunctionalMailService
         );
     }
 
-    public function passwordChangedByAdmin(User $user, ?Hub $hub = null): void
+    public function passwordChangedByAdmin(User $user, ?Hub $hub = null, ?string $temporaryPassword = null): void
     {
         $hub ??= $this->hubs->current();
         $branding = $this->mail->branding($hub);
@@ -461,7 +461,13 @@ class FunctionalMailService
             'user_name' => $user->name ?: 'there',
             'site_name' => $branding['site_name'],
             'support_email' => $branding['support_email'],
+            'temporary_password' => $temporaryPassword ?? '',
         ]);
+
+        $fields = [];
+        if ($temporaryPassword) {
+            $fields[] = ['label' => 'New temporary password', 'value' => $temporaryPassword];
+        }
 
         $this->mail->sendToUser(
             $user,
@@ -469,6 +475,7 @@ class FunctionalMailService
             eyebrow: $copy['eyebrow'],
             heading: $copy['heading'],
             intro: $copy['intro'],
+            fields: $fields,
             cta: ['label' => $copy['cta_label'] ?: 'Log in', 'url' => $branding['login_url']],
             closing: $copy['closing'],
             hub: $hub,

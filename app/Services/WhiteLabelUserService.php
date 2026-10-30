@@ -156,6 +156,7 @@ class WhiteLabelUserService
 
             if (! empty($payload['password'])) {
                 $fill['password'] = $payload['password'];
+                $fill['password_changed_at'] = now();
             }
 
             if ($roleSet !== null) {
@@ -273,6 +274,14 @@ class WhiteLabelUserService
             'id' => $user->id,
             'name' => $user->name,
             'email' => $user->email,
+            'avatar_url' => $user->avatar_url,
+            'email_verified' => $user->hasVerifiedEmail(),
+            'email_verified_at' => $user->email_verified_at?->toIso8601String(),
+            'otp_enabled' => (bool) $user->two_factor_enabled,
+            'mfa_enabled' => $user->hasMfaEnabled(),
+            'mfa_pending' => $user->hasMfaPending(),
+            'training_attended' => (bool) ($user->training_attended ?? false),
+            'password_changed_at' => $user->password_changed_at?->toIso8601String(),
             'role' => $legacyRole,
             'role_label' => $roleLabel,
             'roles' => $roles,
@@ -283,13 +292,29 @@ class WhiteLabelUserService
             'has_unlimited_credits' => $unlimited,
             'is_suspended' => (bool) $user->is_suspended,
             'is_discontinued' => (bool) $user->is_discontinued,
+            'status_remarks' => $user->status_remarks,
+            'status' => $this->statusKey($user),
             'gdpr_erased_at' => $user->gdpr_erased_at?->toIso8601String(),
             'firm_id' => $user->firm_id ? (int) $user->firm_id : null,
             'firm' => $this->serializeFirm($user),
             'modules' => $this->serializeModules($user, $hub),
+            'signup_at' => $user->created_at?->toIso8601String(),
             'created_at' => $user->created_at?->toIso8601String(),
             'updated_at' => $user->updated_at?->toIso8601String(),
+            'discontinued_at' => $user->discontinued_at?->toIso8601String(),
         ];
+    }
+
+    private function statusKey(User $user): string
+    {
+        if ($user->isDiscontinued()) {
+            return 'inactive';
+        }
+        if ($user->isSuspended()) {
+            return 'inactive';
+        }
+
+        return 'active';
     }
 
     /**

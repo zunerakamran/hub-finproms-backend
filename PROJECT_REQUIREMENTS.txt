@@ -1,7 +1,7 @@
 ================================================================================
 HUB FINPROMS — PROJECT REQUIREMENTS
 ================================================================================
-Last updated: 2026-10-30 (Support Tickets — automatic system error feed)
+Last updated: 2026-10-30 (Hub → Users grid + per-action capabilities)
 
 Location: PROJECT_REQUIREMENTS.txt (project root)
 IMPORTANT: Refer to this document before and after every code change.
@@ -2118,9 +2118,26 @@ Either path designates Heads; both MUST stay in sync. Multiple admins OK:
     user (ends all of their API sessions on this hub), and set the hub idle
     session timeout — same roles
   - View hub users (`dashboard_view_hub_users`) — list all users on the current
-    hub with full details (role, firm, credits, modules, status, timestamps);
-    sidebar label “Users” at `/my-dashboard/hub-users` (distinct from Platform
-    “Users & roles”) — same roles
+    hub at `/my-dashboard/hub-users` (distinct from Platform “Users & roles”).
+    Grid columns: avatar + name, email + verified flag, OTP yes/no (click for
+    activation log), MS Authenticator yes/no (click for log), signup date
+    (welcome email create date), training attended / not yet, password last
+    changed, roles (bullets), network/firm, availed modules (bullets), login
+    details link (IP, device/PC, OS, browser, date/time, success/failure),
+    status (active / inactive) + remarks when deactivated.
+    Action icons are EACH a separate capability (only matching icons show):
+      - Suspend / discontinue / archive / inactivate — same action
+        (`advisor_discontinue`); optional status remarks
+      - Change password (`hub_users_change_password`) — auto-generate + email
+        temporary password to verified email only
+      - Edit roles (`hub_users_edit_roles`)
+      - Edit modules (`hub_users_edit_modules`)
+      - Change registered email (`hub_users_change_email`) — clears verified
+      - OTP toggle (`hub_users_toggle_otp`) — logged
+      - MS Authenticator toggle (`hub_users_toggle_authenticator`) — logged;
+        enable requests user to finish setup on Update profile
+      - Update training (`hub_users_edit_training`)
+    APIs under `/api/client-admin|power-admin/hub-users…` (list + per-action).
   - View compliance audit trail (`dashboard_view_compliance_audit_trail`) —
     hub-wide compliance lifecycle history with top tabs for Social Media
     Compliance (SMC), General Compliance (GC), and Website Content Pre
@@ -3116,6 +3133,11 @@ STEP 1 — Shared hub core (content hub)
 [x] Discontinue individual advisor (client/power admin; permanent end until re-import)
 [x] Capability: advisor_discontinue — who can end imported advisors (Capabilities matrix)
 [x] Discontinue action on Hub → Users (not Import Users); gated by advisor_discontinue
+[x] Hub → Users grid enrichment — avatar+name, email verified flag, OTP/MFA +
+    toggle logs, signup date, training, password_changed_at, roles/modules
+    bullets, login history, status remarks; per-action capabilities
+    (hub_users_change_password / edit_roles / edit_modules / change_email /
+    toggle_otp / toggle_authenticator / edit_training); suspend = discontinue
 [x] Capability: advisor_excel_template — download blank import Excel without upload rights
 [x] Capability: advisor_excel_submit — send filled Excel for import (Pending + user count in history)
 [x] Import Users page: template download, submit-for-import form, import history of past batches

@@ -193,6 +193,7 @@ class AuthController extends Controller
             function (User $user, string $password) {
                 $user->forceFill([
                     'password' => $password,
+                    'password_changed_at' => now(),
                 ])->save();
                 $user->tokens()->delete();
             }

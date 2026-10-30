@@ -346,6 +346,7 @@ class PowerAdminUserController extends Controller
 
         if (! empty($validated['password'])) {
             $payload['password'] = $validated['password'];
+            $payload['password_changed_at'] = now();
         }
 
         if ($roleSet !== null) {

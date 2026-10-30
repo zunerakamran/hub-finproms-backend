@@ -823,6 +823,43 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::middleware('hub_can:dashboard_view_hub_users')->group(function () {
             Route::get('/hub-users', [HubUsersController::class, 'index']);
+            Route::get('/hub-users/{userId}/login-history', [HubUsersController::class, 'loginHistory'])
+                ->whereNumber('userId');
+            Route::get('/hub-users/{userId}/security-toggle-logs', [HubUsersController::class, 'securityToggleLogs'])
+                ->whereNumber('userId');
+        });
+
+        Route::middleware('hub_can:advisor_discontinue')->group(function () {
+            Route::post('/hub-users/{userId}/suspend', [HubUsersController::class, 'suspend'])
+                ->whereNumber('userId');
+        });
+        Route::middleware('hub_can:hub_users_change_password')->group(function () {
+            Route::post('/hub-users/{userId}/change-password', [HubUsersController::class, 'changePassword'])
+                ->whereNumber('userId');
+        });
+        Route::middleware('hub_can:hub_users_edit_roles')->group(function () {
+            Route::put('/hub-users/{userId}/roles', [HubUsersController::class, 'updateRoles'])
+                ->whereNumber('userId');
+        });
+        Route::middleware('hub_can:hub_users_edit_modules')->group(function () {
+            Route::put('/hub-users/{userId}/modules', [HubUsersController::class, 'updateModules'])
+                ->whereNumber('userId');
+        });
+        Route::middleware('hub_can:hub_users_change_email')->group(function () {
+            Route::put('/hub-users/{userId}/email', [HubUsersController::class, 'changeEmail'])
+                ->whereNumber('userId');
+        });
+        Route::middleware('hub_can:hub_users_toggle_otp')->group(function () {
+            Route::put('/hub-users/{userId}/otp', [HubUsersController::class, 'toggleOtp'])
+                ->whereNumber('userId');
+        });
+        Route::middleware('hub_can:hub_users_toggle_authenticator')->group(function () {
+            Route::put('/hub-users/{userId}/authenticator', [HubUsersController::class, 'toggleAuthenticator'])
+                ->whereNumber('userId');
+        });
+        Route::middleware('hub_can:hub_users_edit_training')->group(function () {
+            Route::put('/hub-users/{userId}/training', [HubUsersController::class, 'updateTraining'])
+                ->whereNumber('userId');
         });
 
         Route::middleware('hub_can:dashboard_manage_user_capabilities')->group(function () {
@@ -1368,6 +1405,43 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::middleware('hub_can:dashboard_view_hub_users')->group(function () {
             Route::get('/hub-users', [HubUsersController::class, 'index']);
+            Route::get('/hub-users/{userId}/login-history', [HubUsersController::class, 'loginHistory'])
+                ->whereNumber('userId');
+            Route::get('/hub-users/{userId}/security-toggle-logs', [HubUsersController::class, 'securityToggleLogs'])
+                ->whereNumber('userId');
+        });
+
+        Route::middleware('hub_can:advisor_discontinue')->group(function () {
+            Route::post('/hub-users/{userId}/suspend', [HubUsersController::class, 'suspend'])
+                ->whereNumber('userId');
+        });
+        Route::middleware('hub_can:hub_users_change_password')->group(function () {
+            Route::post('/hub-users/{userId}/change-password', [HubUsersController::class, 'changePassword'])
+                ->whereNumber('userId');
+        });
+        Route::middleware('hub_can:hub_users_edit_roles')->group(function () {
+            Route::put('/hub-users/{userId}/roles', [HubUsersController::class, 'updateRoles'])
+                ->whereNumber('userId');
+        });
+        Route::middleware('hub_can:hub_users_edit_modules')->group(function () {
+            Route::put('/hub-users/{userId}/modules', [HubUsersController::class, 'updateModules'])
+                ->whereNumber('userId');
+        });
+        Route::middleware('hub_can:hub_users_change_email')->group(function () {
+            Route::put('/hub-users/{userId}/email', [HubUsersController::class, 'changeEmail'])
+                ->whereNumber('userId');
+        });
+        Route::middleware('hub_can:hub_users_toggle_otp')->group(function () {
+            Route::put('/hub-users/{userId}/otp', [HubUsersController::class, 'toggleOtp'])
+                ->whereNumber('userId');
+        });
+        Route::middleware('hub_can:hub_users_toggle_authenticator')->group(function () {
+            Route::put('/hub-users/{userId}/authenticator', [HubUsersController::class, 'toggleAuthenticator'])
+                ->whereNumber('userId');
+        });
+        Route::middleware('hub_can:hub_users_edit_training')->group(function () {
+            Route::put('/hub-users/{userId}/training', [HubUsersController::class, 'updateTraining'])
+                ->whereNumber('userId');
         });
 
         Route::middleware('hub_can:dashboard_manage_user_capabilities')->group(function () {

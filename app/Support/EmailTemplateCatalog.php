@@ -463,7 +463,7 @@ class EmailTemplateCatalog
 
             'password_changed_by_admin' => [
                 'label' => 'Password changed by admin',
-                'description' => 'Security notice when an administrator changes a user’s password.',
+                'description' => 'Security notice when an administrator changes a user’s password (optionally includes a temporary password).',
                 'group' => 'Accounts',
                 'requires_any' => null,
                 'requires_module' => null,
@@ -474,13 +474,14 @@ class EmailTemplateCatalog
                     ['key' => 'user_name', 'label' => 'User name'],
                     ['key' => 'site_name', 'label' => 'Hub / site name'],
                     ['key' => 'support_email', 'label' => 'Support email'],
+                    ['key' => 'temporary_password', 'label' => 'Temporary password (when auto-generated)'],
                 ],
                 'defaults' => [
                     self::AUDIENCE_USER => [
                         'subject' => '[{{site_name}}] Your password was changed',
                         'eyebrow' => 'Security',
                         'heading' => 'Password updated',
-                        'intro' => "Hi {{user_name}},\n\nAn administrator updated the password for your {{site_name}} account. If you did not expect this, contact support immediately.",
+                        'intro' => "Hi {{user_name}},\n\nAn administrator updated the password for your {{site_name}} account. Use the temporary password below (when provided) to sign in, then change it. If you did not expect this, contact support immediately.",
                         'closing' => 'Support: {{support_email}}',
                         'cta_label' => 'Log in',
                     ],
