@@ -2793,7 +2793,8 @@ class Hub extends Model
             return rtrim($configured, '/');
         }
 
-        return rtrim((string) config('app.url'), '/').'/storage';
+        // Prefer /api/media (PublicStorageController) over /storage symlink.
+        return rtrim((string) config('app.url'), '/').'/api/media';
     }
 
     /**

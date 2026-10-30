@@ -274,7 +274,7 @@ class WhiteLabelUserService
             'id' => $user->id,
             'name' => $user->name,
             'email' => $user->email,
-            'avatar_url' => $user->avatar_url,
+            'avatar_url' => $this->serializeAvatarUrl($user, $hub),
             'email_verified' => $user->hasVerifiedEmail(),
             'email_verified_at' => $user->email_verified_at?->toIso8601String(),
             'otp_enabled' => (bool) $user->two_factor_enabled,
@@ -315,6 +315,23 @@ class WhiteLabelUserService
         }
 
         return 'active';
+    }
+
+    private function serializeAvatarUrl(User $user, ?Hub $hub): ?string
+    {
+        $path = $user->avatar_path;
+        if (! is_string($path) || trim($path) === '') {
+            return null;
+        }
+
+        if ($hub) {
+            $resolved = $hub->resolvePublicMediaUrl($path);
+            if (is_string($resolved) && $resolved !== '') {
+                return $resolved;
+            }
+        }
+
+        return $user->avatar_url;
     }
 
     /**

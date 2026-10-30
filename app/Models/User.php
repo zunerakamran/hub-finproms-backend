@@ -329,11 +329,31 @@ class User extends Authenticatable
     public function getAvatarUrlAttribute(): ?string
     {
         $path = $this->avatar_path;
-        if (! is_string($path) || $path === '') {
+        if (! is_string($path) || trim($path) === '') {
             return null;
         }
 
-        $path = ltrim(str_replace('\\', '/', $path), '/');
+        $path = trim(str_replace('\\', '/', $path));
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            return $path;
+        }
+
+        $path = ltrim($path, '/');
+        foreach (['storage/', 'api/media/', 'media/'] as $prefix) {
+            if (str_starts_with(strtolower($path), $prefix)) {
+                $path = substr($path, strlen($prefix));
+                break;
+            }
+        }
+        $path = ltrim($path, '/');
+        if ($path === '') {
+            return null;
+        }
+
+        $configured = (string) config('filesystems.disks.public.url', '');
+        if ($configured !== '') {
+            return rtrim($configured, '/').'/'.$path;
+        }
 
         return rtrim((string) config('app.url'), '/').'/api/media/'.$path;
     }
