@@ -583,7 +583,15 @@ class GeneralComplianceService
                 'assigned_by' => $actor->id,
             ]);
 
-            $this->mail->notifyApproverAssigned($compliance->fresh(), $approver, $actor);
+            // Self-pick does not need a mail; for manager→approver assigns, send after the
+            // HTTP response so Pick/Assign is not blocked by SMTP latency.
+            if ((int) $approver->id !== (int) $actor->id) {
+                $mail = $this->mail;
+                $notifyRequest = $compliance->fresh();
+                dispatch(function () use ($mail, $notifyRequest, $approver, $actor) {
+                    $mail->notifyApproverAssigned($notifyRequest, $approver, $actor);
+                })->afterResponse();
+            }
 
             $eventDescription = 'Assigned general compliance request #'.$compliance->id.' to '.$approver->name;
 
@@ -661,7 +669,10 @@ class GeneralComplianceService
         return $compliance->fresh([
             'currentVersionRow.attachments',
             'currentVersionRow.supportingFiles',
+            'versions.attachments',
+            'versions.supportingFiles',
             'assignee',
+            'assigner',
             'user',
         ]);
     }

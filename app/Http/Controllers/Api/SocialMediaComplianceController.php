@@ -287,7 +287,8 @@ class SocialMediaComplianceController extends Controller
 
         return response()->json([
             'message' => $assignTo ? 'Request assigned.' : 'Request unassigned.',
-            'data' => $compliance->toApiArray(),
+            // Match show/review (and WC assign): detail UIs replace the row with this payload.
+            'data' => $compliance->toApiArray(includeVersions: true),
         ]);
     }
 

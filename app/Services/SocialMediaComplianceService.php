@@ -477,7 +477,15 @@ class SocialMediaComplianceService
                 'assigned_by' => $actor->id,
             ]);
 
-            $this->mail->notifyApproverAssigned($compliance->fresh(), $approver, $actor);
+            // Self-pick does not need a mail; for manager→approver assigns, send after the
+            // HTTP response so Pick/Assign is not blocked by SMTP latency.
+            if ((int) $approver->id !== (int) $actor->id) {
+                $mail = $this->mail;
+                $notifyRequest = $compliance->fresh();
+                dispatch(function () use ($mail, $notifyRequest, $approver, $actor) {
+                    $mail->notifyApproverAssigned($notifyRequest, $approver, $actor);
+                })->afterResponse();
+            }
 
             $description = 'Assigned social media compliance request #'.$compliance->id.' to '.$approver->name;
 
@@ -552,7 +560,14 @@ class SocialMediaComplianceService
             ]);
         }
 
-        return $compliance->fresh(['currentVersionRow.supportingFiles', 'assignee', 'post', 'user']);
+        return $compliance->fresh([
+            'currentVersionRow.supportingFiles',
+            'versions.supportingFiles',
+            'assignee',
+            'assigner',
+            'post',
+            'user',
+        ]);
     }
 
     /**
