@@ -207,7 +207,11 @@ class HubService
         }
         $clean = Hub::applyModuleDependencyRules($clean, $type);
 
-        return $this->applyExclusivity($clean, array_keys($input));
+        return Hub::normalizeAccessMode(
+            $this->applyExclusivity($clean, array_keys($input)),
+            $type,
+            array_keys($input)
+        );
     }
 
     /**
@@ -231,7 +235,11 @@ class HubService
 
         $current = $hub->applyModuleDependencies($current);
 
-        return $this->applyExclusivity($current, array_keys($partial));
+        return Hub::normalizeAccessMode(
+            $this->applyExclusivity($current, array_keys($partial)),
+            (string) $hub->type,
+            array_keys($partial)
+        );
     }
 
     /**

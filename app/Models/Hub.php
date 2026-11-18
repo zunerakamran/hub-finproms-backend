@@ -829,6 +829,16 @@ class Hub extends Model
      *
      * @var array<string, string>
      */
+    /**
+     * Public vs private site access. Exactly one stays on for Shared and White-label hubs.
+     *
+     * @var list<string>
+     */
+    public const ACCESS_MODE_KEYS = [
+        'public_subscribe',
+        'private_invite_only',
+    ];
+
     public const CHECKLIST_OPPOSITES = [
         'public_subscribe' => 'private_invite_only',
         'private_invite_only' => 'public_subscribe',
@@ -876,15 +886,15 @@ class Hub extends Model
     public const CHECKLIST_DEFINITIONS = [
         // --- Functionalities (hub checklist) ---
         'public_subscribe' => [
-            'label' => 'Shared subscribe / self-registration',
-            'description' => 'Anyone can register and subscribe on this shared hub.',
+            'label' => 'Public access',
+            'description' => 'Home page is visible before login, and anyone can register from the register page. Checking this turns Private access off. Default for shared hubs. A white-labelled hub can be public too.',
             'group' => self::GROUP_BEHAVIOUR,
             'default_shared' => true,
             'default_white_label' => false,
         ],
         'private_invite_only' => [
-            'label' => 'White-labelled invite-only access',
-            'description' => 'Only invited advisors (e.g. Excel import) can access this white-labelled hub.',
+            'label' => 'Private access',
+            'description' => 'Home page stays hidden until login, and the register page is hidden. Only existing users can sign in. Checking this turns Public access off. Default for white-labelled hubs. A shared hub can be private too.',
             'group' => self::GROUP_BEHAVIOUR,
             'default_shared' => false,
             'default_white_label' => true,
@@ -2308,6 +2318,71 @@ class Hub extends Model
             && ! (bool) ($checklist['private_invite_only'] ?? false);
     }
 
+    /**
+     * Public access: home before login and open registration.
+     * Central is never a public member site via these flags.
+     */
+    public function hasPublicAccess(): bool
+    {
+        return $this->isContentHub() && $this->isPublicSubscribe();
+    }
+
+    /**
+     * Private access: home only after login, register page hidden.
+     */
+    public function hasPrivateAccess(): bool
+    {
+        return $this->isContentHub() && ! $this->isPublicSubscribe();
+    }
+
+    /**
+     * Shared and White-label hubs always have exactly one of Public / Private access.
+     * Unchecking one turns the other on. Central is left unchanged.
+     *
+     * @param  array<string, bool>  $checklist
+     * @param  list<int|string>  $preferredKeys
+     * @return array<string, bool>
+     */
+    public static function normalizeAccessMode(array $checklist, string $type, array $preferredKeys = []): array
+    {
+        if (! in_array($type, [self::TYPE_SHARED, self::TYPE_WHITE_LABEL], true)) {
+            return $checklist;
+        }
+
+        $public = ! empty($checklist['public_subscribe']);
+        $private = ! empty($checklist['private_invite_only']);
+        $preferred = array_values(array_filter(
+            array_map('strval', $preferredKeys),
+            fn (string $key) => in_array($key, self::ACCESS_MODE_KEYS, true)
+        ));
+        $last = $preferred === [] ? null : $preferred[array_key_last($preferred)];
+
+        if ($public && $private) {
+            if ($last === 'private_invite_only') {
+                $public = false;
+            } elseif ($last === null && $type === self::TYPE_WHITE_LABEL) {
+                $public = false;
+            } else {
+                $private = false;
+            }
+        } elseif (! $public && ! $private) {
+            if ($last === 'public_subscribe') {
+                $private = true;
+            } elseif ($last === 'private_invite_only') {
+                $public = true;
+            } elseif ($type === self::TYPE_WHITE_LABEL) {
+                $private = true;
+            } else {
+                $public = true;
+            }
+        }
+
+        $checklist['public_subscribe'] = $public;
+        $checklist['private_invite_only'] = $private;
+
+        return $checklist;
+    }
+
     public static function isPrivateCapability(string $key): bool
     {
         return in_array($key, self::PRIVATE_CAPABILITY_KEYS, true);
@@ -2687,6 +2762,7 @@ class Hub extends Model
                 'group_label' => self::CHECKLIST_GROUPS[$group] ?? $group,
                 'enabled' => $inactive ? false : (bool) ($resolved[$key] ?? false),
                 'exclusive_with' => self::CHECKLIST_OPPOSITES[$key] ?? null,
+                'keep_one_enabled' => in_array($key, self::ACCESS_MODE_KEYS, true),
                 'requires_module' => $requiresModule,
                 'inactive' => $inactive,
                 'locked' => $locked,
@@ -3170,8 +3246,8 @@ class Hub extends Model
     public function toPublicArray(): array
     {
         $checklist = $this->resolvedChecklist();
-        $registrationEnabled = (bool) ($checklist['public_subscribe'] ?? false)
-            && ! (bool) ($checklist['private_invite_only'] ?? false);
+        $publicAccess = $this->hasPublicAccess();
+        $privateAccess = $this->hasPrivateAccess();
 
         return [
             'id' => $this->id,
@@ -3191,10 +3267,14 @@ class Hub extends Model
             'role_labels' => $this->resolvedRoleLabels(),
             // Compliance status wording (Pending / Approved / …) for SMC, GC, and WC.
             'compliance_status_labels' => $this->resolvedComplianceStatusLabels(),
-            // Frontend should hide Sign up when registration_enabled is false.
+            // Public access: home before login + register page.
+            // Private access: hide home until login and hide the register page.
             'auth' => [
-                'registration_enabled' => $registrationEnabled,
-                'invite_only' => (bool) ($checklist['private_invite_only'] ?? false),
+                'registration_enabled' => $publicAccess,
+                'invite_only' => $privateAccess,
+                'public_access' => $publicAccess,
+                'private_access' => $privateAccess,
+                'home_before_login' => $publicAccess,
                 // Kept as false for older frontends; OTP is per-user via profile.
                 'login_otp_required' => false,
                 'login_otp_per_user' => true,

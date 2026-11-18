@@ -196,8 +196,16 @@ Packaging tips:
 - Every content item has type + category + tags. Do NOT treat category as type.
 
 2.2 Content browsing & listing UX
-- Hub catalog / main member pages require login. Unauthenticated visitors are
-  sent to the login screen and must not see the hub main/catalog UI.
+- Public vs private access is a Functionalities choice (not only the hub type).
+  Public access (`public_subscribe`): home page is visible before login, and
+  the register page is available. Private access (`private_invite_only`): home
+  page is hidden until login, and the register page is hidden so only existing
+  users can sign in. Defaults: Shared public, white-label private. A shared
+  hub can be switched to private (and a white-label hub to public). Exactly
+  one of the two stays checked.
+- Hub catalog / main member pages (posts, reels, bundles) require login.
+  Unauthenticated visitors are sent to the login screen and must not see the
+  catalog UI. On a private hub they also do not see the home page.
 - Users browse posts, reels, and other types.
 - Listing page uses a 3-column grid (2 columns on tablet, 1 on mobile).
 - For REELS: admin can upload a video when type is Reel.
@@ -1607,8 +1615,10 @@ Either path designates Heads; both MUST stay in sync. Multiple admins OK:
   hub's own database.
 
 4.2 Private Access (White-labelled)
-- White-labelled hubs are PRIVATE.
-- Public users cannot subscribe.
+- White-labelled hubs default to PRIVATE access: home page only after login,
+  register page hidden. They can be switched to public access.
+- Shared hubs default to public access and can also be set to private.
+- Public users cannot subscribe while private access is on.
 - Client provides an Excel sheet of advisors.
 - Advisors from that sheet are added into the application.
 - Power Admin (on Central Hub) sets subscriber credits for the hub
@@ -1783,7 +1793,11 @@ Either path designates Heads; both MUST stay in sync. Multiple admins OK:
 
 5.1 Hub Functionalities checklist (Power Admin → Functionalities)
 - Formerly "hub behaviour". Controls how the hub works for that tenant, e.g.:
-  - Public subscribe / self-registration vs private invite-only
+  - Public access vs Private access (`public_subscribe` / `private_invite_only`).
+    Public: home before login and an open register page. Private: home only
+    after login, register page hidden. Defaults: Shared public, white-label
+    private. A shared hub can be private. Checking one turns the other on
+    so exactly one stays selected.
   - Paid credits vs unlimited credits
   - One-off purchase for non-subscribers
   - Receive content from Central Hub (legacy name may still say "from shared")

@@ -610,6 +610,7 @@ class PowerAdminHubController extends Controller
                 'default_shared' => $meta['default_shared'],
                 'default_white_label' => $meta['default_white_label'],
                 'exclusive_with' => Hub::CHECKLIST_OPPOSITES[$key] ?? null,
+                'keep_one_enabled' => in_array($key, Hub::ACCESS_MODE_KEYS, true),
             ];
         }
 
